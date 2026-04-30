@@ -1,0 +1,20 @@
+# Go
+bin/
+*.exe
+*.test
+*.out
+
+# Frontend (web/)
+web/node_modules/
+web/dist/
+web/.vite/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# Env / secrets
+.env
+.env.*
+!.env.example
