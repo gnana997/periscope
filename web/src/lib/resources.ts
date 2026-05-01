@@ -53,7 +53,7 @@ export const RESOURCES: ResourceMeta[] = [
   { id: "rolebindings",        label: "RoleBindings",        group: "Access",   ready: true  },
   { id: "clusterrolebindings", label: "ClusterRoleBindings", group: "Access",   ready: true  },
   { id: "serviceaccounts",     label: "ServiceAccounts",     group: "Access",   ready: true  },
-  { id: "crds",                label: "Custom Resources",     group: "Extensions", ready: true  },
+  { id: "crds",                label: "All CRDs",             group: "Extensions", ready: true  },
 ];
 
 export const RESOURCE_GROUPS: ResourceGroup[] = [

@@ -4,7 +4,6 @@ import { useQuery } from "@tanstack/react-query";
 import {
   useCRDs,
   useCustomResources,
-  useCustomResourceDetail,
 } from "../hooks/useResource";
 import { api } from "../lib/api";
 import { ageFrom, nameMatches } from "../lib/format";
@@ -27,7 +26,17 @@ import {
   DetailLoading,
 } from "../components/detail/states";
 import { NamespacePicker } from "../components/shell/NamespacePicker";
+import { CustomResourceDescribe } from "../components/detail/describe/CustomResourceDescribe";
 import type { CRD, CustomResource } from "../lib/types";
+
+interface CRDetailRefProps {
+  cluster: string;
+  group: string;
+  version: string;
+  plural: string;
+  namespace: string | null;
+  name: string;
+}
 
 /**
  * CustomResourcesPage — generic list+detail view for any CRD.
@@ -293,215 +302,6 @@ export function CustomResourcesPage({ cluster }: { cluster: string }) {
   );
 }
 
-// ---------------------------------------------------------------------
-// Describe tab — generic structured rendering of an unstructured CR
-// ---------------------------------------------------------------------
-
-interface CRDetailRefProps {
-  cluster: string;
-  group: string;
-  version: string;
-  plural: string;
-  namespace: string | null;
-  name: string;
-}
-
-function CustomResourceDescribe(props: CRDetailRefProps) {
-  const { cluster, group, version, plural, namespace, name } = props;
-  const { data, isLoading, isError, error } = useCustomResourceDetail(
-    cluster,
-    group,
-    version,
-    plural,
-    namespace,
-    name,
-  );
-  if (isLoading) return <DetailLoading label="loading…" />;
-  if (isError)
-    return <DetailError message={(error as Error)?.message ?? "unknown"} />;
-  if (!data) return null;
-
-  const obj = data.object as Record<string, unknown>;
-  const meta = (obj.metadata ?? {}) as Record<string, unknown>;
-  const spec = (obj.spec ?? {}) as Record<string, unknown>;
-  const status = (obj.status ?? {}) as Record<string, unknown>;
-  const labels = (meta.labels ?? {}) as Record<string, string>;
-  const annotations = (meta.annotations ?? {}) as Record<string, string>;
-  const conditions = Array.isArray(status.conditions)
-    ? (status.conditions as Array<Record<string, unknown>>)
-    : [];
-
-  return (
-    <div className="px-5 py-4 font-mono text-[12px]">
-      <Section title="metadata">
-        <KV k="kind" v={`${data.apiVersion}/${data.kind}`} />
-        {data.namespace && <KV k="namespace" v={data.namespace} />}
-        <KV k="age" v={ageFrom(data.createdAt)} />
-        {meta.uid ? <KV k="uid" v={String(meta.uid)} /> : null}
-      </Section>
-
-      {Object.keys(labels).length > 0 && (
-        <Section title="labels">
-          <Pills items={labels} />
-        </Section>
-      )}
-      {Object.keys(annotations).length > 0 && (
-        <Section title="annotations">
-          <Pills items={annotations} />
-        </Section>
-      )}
-
-      {conditions.length > 0 && (
-        <Section title="conditions">
-          <ConditionsList conditions={conditions} />
-        </Section>
-      )}
-
-      {Object.keys(spec).length > 0 && (
-        <Section title="spec">
-          <KeyTree obj={spec} />
-        </Section>
-      )}
-
-      {Object.keys(status).filter((k) => k !== "conditions").length > 0 && (
-        <Section title="status">
-          <KeyTree obj={omitKey(status, "conditions")} />
-        </Section>
-      )}
-    </div>
-  );
-}
-
-function Section({
-  title,
-  children,
-}: {
-  title: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <section className="mb-4">
-      <h3 className="mb-2 text-[10px] font-medium uppercase tracking-[0.08em] text-ink-faint">
-        {title}
-      </h3>
-      <div>{children}</div>
-    </section>
-  );
-}
-
-function KV({ k, v }: { k: string; v: string }) {
-  return (
-    <div className="grid grid-cols-[110px_1fr] gap-3 py-0.5">
-      <span className="text-ink-faint">{k}</span>
-      <span className="break-all text-ink">{v}</span>
-    </div>
-  );
-}
-
-function Pills({ items }: { items: Record<string, string> }) {
-  return (
-    <div className="grid grid-cols-1 gap-1.5 md:grid-cols-2">
-      {Object.entries(items).map(([k, v]) => (
-        <div
-          key={k}
-          className="flex min-w-0 items-center gap-1 rounded-md border border-border bg-surface-2/40 px-2 py-0.5 text-[11px]"
-        >
-          <span className="shrink-0 text-ink-muted">{k}</span>
-          <span className="shrink-0 text-ink-faint">=</span>
-          <span className="min-w-0 truncate text-ink" title={v}>
-            {v}
-          </span>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function ConditionsList({
-  conditions,
-}: {
-  conditions: Array<Record<string, unknown>>;
-}) {
-  return (
-    <ul className="space-y-1.5">
-      {conditions.map((c, i) => {
-        const status = String(c.status ?? "");
-        const ok = status === "True";
-        const tone = ok ? "text-green" : status === "False" ? "text-yellow" : "text-ink-muted";
-        const dot = ok ? "bg-green" : status === "False" ? "bg-yellow" : "bg-ink-faint";
-        return (
-          <li key={i}>
-            <div className="flex items-baseline gap-2 text-[12px]">
-              <span className={cn("mt-[3px] block size-1.5 shrink-0 self-center rounded-full", dot)} />
-              <span className="text-ink">{String(c.type ?? "")}</span>
-              {c.reason ? (
-                <span className="text-ink-muted">· {String(c.reason)}</span>
-              ) : null}
-              <span className={cn("ml-auto", tone)}>{status}</span>
-            </div>
-            {c.message ? (
-              <div className="ml-3.5 mt-0.5 break-words text-[11.5px] text-ink-muted">
-                {String(c.message)}
-              </div>
-            ) : null}
-          </li>
-        );
-      })}
-    </ul>
-  );
-}
-
-/** Tiny one-level tree renderer for spec/status. Scalars print
- *  inline; objects/arrays show count + a yaml-tab nudge. Keeps the
- *  describe view from becoming an unbounded JSON dump. */
-function KeyTree({ obj }: { obj: Record<string, unknown> }) {
-  const entries = Object.entries(obj);
-  return (
-    <ul className="space-y-0.5">
-      {entries.map(([k, v]) => (
-        <li
-          key={k}
-          className="grid grid-cols-[140px_1fr] gap-3 py-0.5 text-[12px]"
-        >
-          <span className="text-ink-faint">{k}</span>
-          <span className="min-w-0 truncate text-ink" title={typeof v === "string" ? v : undefined}>
-            {renderScalarOrSummary(v)}
-          </span>
-        </li>
-      ))}
-    </ul>
-  );
-}
-
-function renderScalarOrSummary(v: unknown): React.ReactNode {
-  if (v === null || v === undefined) return <span className="text-ink-faint">—</span>;
-  if (typeof v === "string") return v;
-  if (typeof v === "number" || typeof v === "boolean") return String(v);
-  if (Array.isArray(v)) {
-    return (
-      <span className="text-ink-muted">
-        [{v.length} {v.length === 1 ? "item" : "items"}] ·{" "}
-        <span className="text-ink-faint">see yaml</span>
-      </span>
-    );
-  }
-  // Object
-  const keys = Object.keys(v as object);
-  return (
-    <span className="text-ink-muted">
-      {`{${keys.length} ${keys.length === 1 ? "field" : "fields"}}`} ·{" "}
-      <span className="text-ink-faint">see yaml</span>
-    </span>
-  );
-}
-
-function omitKey<K extends string>(
-  obj: Record<string, unknown>,
-  key: K,
-): Record<string, unknown> {
-  const { [key]: _omit, ...rest } = obj;
-  return rest;
-}
 
 // ---------------------------------------------------------------------
 // YAML tab — minimal renderer for CR YAML

@@ -3,6 +3,7 @@ import { NavLink, useLocation, useParams } from "react-router-dom";
 import { cn } from "../../lib/cn";
 import { RESOURCE_GROUPS, resourcesByGroup } from "../../lib/resources";
 import type { ResourceGroup } from "../../lib/resources";
+import { CRDSubTree } from "./CRDSubTree";
 
 const STORAGE_KEY = "periscope.sidebar.openGroups";
 const DEFAULT_OPEN: ResourceGroup[] = ["Cluster"];
@@ -153,6 +154,13 @@ export function ResourceNav() {
                   );
                 })}
               </ul>
+              {/* Extensions group gets a dynamic sub-tree of every
+                  installed CRD, grouped by API group. Lives inside
+                  the same collapsible container so it inherits the
+                  group's open/closed state. */}
+              {group === "Extensions" && cluster && (
+                <CRDSubTree cluster={cluster} />
+              )}
             </div>
           </div>
         );
