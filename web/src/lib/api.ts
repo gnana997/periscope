@@ -2,6 +2,8 @@ import type {
   ClusterEventList,
   ClusterRoleBindingDetail,
   ClusterSummary,
+  SearchKind,
+  SearchResultList,
   ClusterRoleBindingList,
   ClusterRoleDetail,
   ClusterRoleList,
@@ -155,6 +157,23 @@ export const api = {
 
   getClusterSummary: (cluster: string, signal?: AbortSignal) =>
     getJSON<ClusterSummary>(`/api/clusters/${enc(cluster)}/dashboard`, signal),
+
+  search: (
+    cluster: string,
+    query: string,
+    opts?: { kinds?: SearchKind[]; limit?: number },
+    signal?: AbortSignal,
+  ) => {
+    const params = new URLSearchParams({ q: query });
+    if (opts?.kinds && opts.kinds.length > 0) {
+      params.set("kinds", opts.kinds.join(","));
+    }
+    if (opts?.limit) params.set("limit", String(opts.limit));
+    return getJSON<SearchResultList>(
+      `/api/clusters/${enc(cluster)}/search?${params.toString()}`,
+      signal,
+    );
+  },
 
   clusters: (signal?: AbortSignal) =>
     getJSON<ClustersResponse>("/api/clusters", signal),

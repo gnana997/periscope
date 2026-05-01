@@ -696,6 +696,58 @@ export interface ServiceAccountDetail extends ServiceAccount {
 
 // --- Cluster Overview ---
 
+export interface WorkloadCount {
+  total: number;
+  healthy: number;
+}
+
+export interface WorkloadCounts {
+  deployments: WorkloadCount;
+  statefulSets: WorkloadCount;
+  daemonSets: WorkloadCount;
+  jobs: WorkloadCount;
+  cronJobs: WorkloadCount;
+}
+
+export interface PodPhaseCounts {
+  running: number;
+  pending: number;
+  succeeded: number;
+  failed: number;
+  unknown: number;
+  /** Synthesized bucket for pods reporting CrashLoopBackOff /
+   *  ImagePullBackOff / OOMKilled / etc. — kubectl shows these
+   *  separately even when the K8s phase enum is still Pending or
+   *  Running. */
+  stuck: number;
+}
+
+export interface FailingPod {
+  name: string;
+  namespace: string;
+  reason: string;
+  container?: string;
+  message?: string;
+  restartCount?: number;
+  phase: string;
+}
+
+export interface TopPod {
+  name: string;
+  namespace: string;
+  usage: string;
+  percent?: number;
+  /** true → percent is "% of pod limit"; false → "% of cluster allocatable". */
+  ofLimit: boolean;
+}
+
+export interface StorageInfo {
+  pvCount: number;
+  pvcBound: number;
+  pvcPending: number;
+  totalProvisioned?: string;
+}
+
 export interface ClusterSummary {
   kubernetesVersion: string;
   provider: string;
@@ -710,6 +762,37 @@ export interface ClusterSummary {
   memoryUsed?: string;
   cpuPercent?: number;
   memoryPercent?: number;
+
+  // PR1 (Overview redesign) additions
+  workloads: WorkloadCounts;
+  podPhases: PodPhaseCounts;
+  needsAttention: FailingPod[];
+  topByCpu?: TopPod[];
+  topByMemory?: TopPod[];
+  storage: StorageInfo;
+}
+
+// --- Search (Cmd+K palette) ---
+
+export type SearchKind =
+  | "pods"
+  | "deployments"
+  | "statefulsets"
+  | "daemonsets"
+  | "services"
+  | "configmaps"
+  | "secrets"
+  | "namespaces";
+
+export interface SearchResult {
+  kind: SearchKind;
+  name: string;
+  namespace?: string;
+  score: number;
+}
+
+export interface SearchResultList {
+  results: SearchResult[];
 }
 
 // --- Resource catalog ---

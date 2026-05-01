@@ -77,11 +77,11 @@ type NamespaceDetail struct {
 // --- Pod ---
 
 type Pod struct {
-	Name      string    `json:"name"`
-	Namespace string    `json:"namespace"`
-	Phase     string    `json:"phase"`
-	NodeName  string    `json:"nodeName,omitempty"`
-	PodIP     string    `json:"podIP,omitempty"`
+	Name      string `json:"name"`
+	Namespace string `json:"namespace"`
+	Phase     string `json:"phase"`
+	NodeName  string `json:"nodeName,omitempty"`
+	PodIP     string `json:"podIP,omitempty"`
 	// Ready is the kubectl-style "ready/total" container count, e.g. "2/3".
 	Ready     string    `json:"ready"`
 	Restarts  int32     `json:"restarts"`
@@ -138,8 +138,8 @@ type ContainerMetrics struct {
 	Name            string  `json:"name"`
 	CPUUsage        string  `json:"cpuUsage,omitempty"`
 	MemoryUsage     string  `json:"memoryUsage,omitempty"`
-	CPULimitPercent float64 `json:"cpuLimitPercent"`  // usage/limit*100; -1 = no limit set
-	MemLimitPercent float64 `json:"memLimitPercent"`  // usage/limit*100; -1 = no limit set
+	CPULimitPercent float64 `json:"cpuLimitPercent"` // usage/limit*100; -1 = no limit set
+	MemLimitPercent float64 `json:"memLimitPercent"` // usage/limit*100; -1 = no limit set
 }
 
 type PodMetrics struct {
@@ -169,7 +169,7 @@ type DeploymentDetail struct {
 	Selector    map[string]string     `json:"selector,omitempty"`
 	Containers  []ContainerSpec       `json:"containers"`
 	Conditions  []DeploymentCondition `json:"conditions,omitempty"`
-	Pods           []JobChildPod         `json:"pods,omitempty"`
+	Pods        []JobChildPod         `json:"pods,omitempty"`
 	Labels      map[string]string     `json:"labels,omitempty"`
 	Annotations map[string]string     `json:"annotations,omitempty"`
 }
@@ -280,14 +280,14 @@ type StatefulSetList struct {
 
 type StatefulSetDetail struct {
 	StatefulSet
-	ServiceName    string                 `json:"serviceName,omitempty"`
-	UpdateStrategy string                 `json:"updateStrategy"`
-	Selector       map[string]string      `json:"selector,omitempty"`
-	Containers     []ContainerSpec        `json:"containers"`
-	Conditions     []DeploymentCondition  `json:"conditions,omitempty"`
+	ServiceName    string                `json:"serviceName,omitempty"`
+	UpdateStrategy string                `json:"updateStrategy"`
+	Selector       map[string]string     `json:"selector,omitempty"`
+	Containers     []ContainerSpec       `json:"containers"`
+	Conditions     []DeploymentCondition `json:"conditions,omitempty"`
 	Pods           []JobChildPod         `json:"pods,omitempty"`
-	Labels         map[string]string      `json:"labels,omitempty"`
-	Annotations    map[string]string      `json:"annotations,omitempty"`
+	Labels         map[string]string     `json:"labels,omitempty"`
+	Annotations    map[string]string     `json:"annotations,omitempty"`
 }
 
 // --- DaemonSet ---
@@ -585,9 +585,9 @@ type StorageClassDetail struct {
 
 type ClusterEvent struct {
 	Namespace string    `json:"namespace"`
-	Kind      string    `json:"kind"`    // Pod, Deployment, Job, etc.
-	Name      string    `json:"name"`    // object name
-	Type      string    `json:"type"`    // Normal | Warning
+	Kind      string    `json:"kind"` // Pod, Deployment, Job, etc.
+	Name      string    `json:"name"` // object name
+	Type      string    `json:"type"` // Normal | Warning
 	Reason    string    `json:"reason"`
 	Message   string    `json:"message"`
 	Count     int32     `json:"count"`
@@ -743,20 +743,104 @@ type ClusterSummary struct {
 	MemoryUsed        string  `json:"memoryUsed,omitempty"`
 	CPUPercent        float64 `json:"cpuPercent,omitempty"`
 	MemoryPercent     float64 `json:"memoryPercent,omitempty"`
+
+	// Workloads counts the major namespace-scoped kinds with a "healthy"
+	// fraction so the UI can render "deployments: 24 (22 healthy)"
+	// glance summaries per kind.
+	Workloads WorkloadCounts `json:"workloads"`
+
+	// PodPhases distributes the cluster's pods across the standard
+	// Phase values plus a synthesized "Stuck" bucket for pods that are
+	// reporting a wait/term reason that operators usually treat as
+	// broken (CrashLoopBackOff, ImagePullBackOff, etc.).
+	PodPhases PodPhaseCounts `json:"podPhases"`
+
+	// NeedsAttention is the curated list of pods that look broken right
+	// now — what the operator opened the dashboard to find. Capped at
+	// ~20 entries; the UI links each to the pod detail page.
+	NeedsAttention []FailingPod `json:"needsAttention"`
+
+	// TopByCPU / TopByMemory are the top-5 pods by current usage, only
+	// populated when metrics-server is reachable. Each entry has both
+	// the human-readable usage string and the percentage of the pod's
+	// limit (or of cluster allocatable when the pod has no limit).
+	TopByCPU    []TopPod `json:"topByCpu,omitempty"`
+	TopByMemory []TopPod `json:"topByMemory,omitempty"`
+
+	// Storage is the cluster-scoped PV + PVC snapshot used by the
+	// "storage snapshot" card.
+	Storage StorageInfo `json:"storage"`
+}
+
+// WorkloadCounts is the workload-kinds breakdown shown on the Overview
+// "what's running" card. Healthy means: ready/desired matched (or
+// equivalent) at the time of the dashboard fetch.
+type WorkloadCounts struct {
+	Deployments  WorkloadCount `json:"deployments"`
+	StatefulSets WorkloadCount `json:"statefulSets"`
+	DaemonSets   WorkloadCount `json:"daemonSets"`
+	Jobs         WorkloadCount `json:"jobs"`
+	CronJobs     WorkloadCount `json:"cronJobs"`
+}
+
+type WorkloadCount struct {
+	Total   int `json:"total"`
+	Healthy int `json:"healthy"`
+}
+
+// PodPhaseCounts is a flat distribution that sums to PodCount. "Stuck"
+// is a synthesized bucket — pods whose container statuses indicate a
+// failing wait reason (CrashLoopBackOff, ImagePullBackOff, etc.) that
+// kubectl reports separately from the K8s phase enum.
+type PodPhaseCounts struct {
+	Running   int `json:"running"`
+	Pending   int `json:"pending"`
+	Succeeded int `json:"succeeded"`
+	Failed    int `json:"failed"`
+	Unknown   int `json:"unknown"`
+	Stuck     int `json:"stuck"`
+}
+
+// FailingPod is one entry in the "needs attention" list.
+type FailingPod struct {
+	Name         string `json:"name"`
+	Namespace    string `json:"namespace"`
+	Reason       string `json:"reason"` // CrashLoopBackOff, ImagePullBackOff, OOMKilled, etc.
+	Container    string `json:"container,omitempty"`
+	Message      string `json:"message,omitempty"`
+	RestartCount int32  `json:"restartCount,omitempty"`
+	Phase        string `json:"phase"`
+}
+
+// TopPod is one entry in the top-by-CPU or top-by-memory list.
+type TopPod struct {
+	Name      string  `json:"name"`
+	Namespace string  `json:"namespace"`
+	Usage     string  `json:"usage"`             // human-readable — "120m" / "256Mi"
+	Percent   float64 `json:"percent,omitempty"` // % of pod limit; -1 when no limit
+	OfLimit   bool    `json:"ofLimit"`           // true when percent is "% of pod limit", false when "% of cluster allocatable"
+}
+
+// StorageInfo is the PV/PVC snapshot for the storage card.
+type StorageInfo struct {
+	PVCount          int    `json:"pvCount"`
+	PVCBound         int    `json:"pvcBound"`
+	PVCPending       int    `json:"pvcPending"`
+	TotalProvisioned string `json:"totalProvisioned,omitempty"` // human-readable across all bound PVs
 }
 
 // --- HPA ---
 
 type HPA struct {
-	Name            string `json:"name"`
-	Namespace       string `json:"namespace"`
-	CreatedAt time.Time `json:"createdAt"`
-	Target          string `json:"target"`
-	MinReplicas     int32  `json:"minReplicas"`
-	MaxReplicas     int32  `json:"maxReplicas"`
-	CurrentReplicas int32  `json:"currentReplicas"`
-	DesiredReplicas int32  `json:"desiredReplicas"`
-	Ready           bool   `json:"ready"`
+	Name            string    `json:"name"`
+	Namespace       string    `json:"namespace"`
+	CreatedAt       time.Time `json:"createdAt"`
+	Target          string    `json:"target"`
+	MinReplicas     int32     `json:"minReplicas"`
+	MaxReplicas     int32     `json:"maxReplicas"`
+	CurrentReplicas int32     `json:"currentReplicas"`
+	DesiredReplicas int32     `json:"desiredReplicas"`
+	Ready           bool      `json:"ready"`
 }
 
 type HPAList struct {
@@ -773,15 +857,15 @@ type HPADetail struct {
 // --- PodDisruptionBudget ---
 
 type PDB struct {
-	Name               string `json:"name"`
-	Namespace          string `json:"namespace"`
-	CreatedAt time.Time `json:"createdAt"`
-	MinAvailable       string `json:"minAvailable"`
-	MaxUnavailable     string `json:"maxUnavailable"`
-	CurrentHealthy     int32  `json:"currentHealthy"`
-	DesiredHealthy     int32  `json:"desiredHealthy"`
-	ExpectedPods       int32  `json:"expectedPods"`
-	DisruptionsAllowed int32  `json:"disruptionsAllowed"`
+	Name               string    `json:"name"`
+	Namespace          string    `json:"namespace"`
+	CreatedAt          time.Time `json:"createdAt"`
+	MinAvailable       string    `json:"minAvailable"`
+	MaxUnavailable     string    `json:"maxUnavailable"`
+	CurrentHealthy     int32     `json:"currentHealthy"`
+	DesiredHealthy     int32     `json:"desiredHealthy"`
+	ExpectedPods       int32     `json:"expectedPods"`
+	DisruptionsAllowed int32     `json:"disruptionsAllowed"`
 }
 
 type PDBList struct {
@@ -798,13 +882,13 @@ type PDBDetail struct {
 // --- ReplicaSet ---
 
 type ReplicaSet struct {
-	Name      string `json:"name"`
-	Namespace string `json:"namespace"`
+	Name      string    `json:"name"`
+	Namespace string    `json:"namespace"`
 	CreatedAt time.Time `json:"createdAt"`
-	Desired   int32  `json:"desired"`
-	Current   int32  `json:"current"`
-	Ready     int32  `json:"ready"`
-	Owner     string `json:"owner"`
+	Desired   int32     `json:"desired"`
+	Current   int32     `json:"current"`
+	Ready     int32     `json:"ready"`
+	Owner     string    `json:"owner"`
 }
 
 type ReplicaSetList struct {
@@ -827,11 +911,11 @@ type NetworkPolicyRule struct {
 }
 
 type NetworkPolicy struct {
-	Name        string   `json:"name"`
-	Namespace   string   `json:"namespace"`
-	CreatedAt time.Time `json:"createdAt"`
-	PodSelector string   `json:"podSelector"`
-	PolicyTypes []string `json:"policyTypes"`
+	Name        string    `json:"name"`
+	Namespace   string    `json:"namespace"`
+	CreatedAt   time.Time `json:"createdAt"`
+	PodSelector string    `json:"podSelector"`
+	PolicyTypes []string  `json:"policyTypes"`
 }
 
 type NetworkPolicyList struct {
@@ -849,10 +933,10 @@ type NetworkPolicyDetail struct {
 // --- IngressClass ---
 
 type IngressClass struct {
-	Name       string `json:"name"`
-	CreatedAt time.Time `json:"createdAt"`
-	Controller string `json:"controller"`
-	IsDefault  bool   `json:"isDefault"`
+	Name       string    `json:"name"`
+	CreatedAt  time.Time `json:"createdAt"`
+	Controller string    `json:"controller"`
+	IsDefault  bool      `json:"isDefault"`
 }
 
 type IngressClassList struct {
@@ -876,7 +960,7 @@ type QuotaEntry struct {
 type ResourceQuota struct {
 	Name      string                `json:"name"`
 	Namespace string                `json:"namespace"`
-	CreatedAt time.Time `json:"createdAt"`
+	CreatedAt time.Time             `json:"createdAt"`
 	Items     map[string]QuotaEntry `json:"items"`
 }
 
@@ -896,10 +980,10 @@ type LimitRangeItem struct {
 }
 
 type LimitRange struct {
-	Name       string `json:"name"`
-	Namespace  string `json:"namespace"`
-	CreatedAt time.Time `json:"createdAt"`
-	LimitCount int    `json:"limitCount"`
+	Name       string    `json:"name"`
+	Namespace  string    `json:"namespace"`
+	CreatedAt  time.Time `json:"createdAt"`
+	LimitCount int       `json:"limitCount"`
 }
 
 type LimitRangeList struct {
@@ -916,11 +1000,11 @@ type LimitRangeDetail struct {
 // --- PriorityClass ---
 
 type PriorityClass struct {
-	Name             string `json:"name"`
-	CreatedAt time.Time `json:"createdAt"`
-	Value            int32  `json:"value"`
-	GlobalDefault    bool   `json:"globalDefault"`
-	PreemptionPolicy string `json:"preemptionPolicy"`
+	Name             string    `json:"name"`
+	CreatedAt        time.Time `json:"createdAt"`
+	Value            int32     `json:"value"`
+	GlobalDefault    bool      `json:"globalDefault"`
+	PreemptionPolicy string    `json:"preemptionPolicy"`
 }
 
 type PriorityClassList struct {
@@ -937,11 +1021,11 @@ type PriorityClassDetail struct {
 // --- RuntimeClass ---
 
 type RuntimeClass struct {
-	Name           string `json:"name"`
-	CreatedAt time.Time `json:"createdAt"`
-	Handler        string `json:"handler"`
-	CPUOverhead    string `json:"cpuOverhead"`
-	MemoryOverhead string `json:"memoryOverhead"`
+	Name           string    `json:"name"`
+	CreatedAt      time.Time `json:"createdAt"`
+	Handler        string    `json:"handler"`
+	CPUOverhead    string    `json:"cpuOverhead"`
+	MemoryOverhead string    `json:"memoryOverhead"`
 }
 
 type RuntimeClassList struct {

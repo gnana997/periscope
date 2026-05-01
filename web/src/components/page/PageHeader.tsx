@@ -26,7 +26,12 @@ export function PageHeader({
   trailing,
 }: PageHeaderProps) {
   return (
-    <div className="flex flex-wrap items-end gap-x-5 gap-y-2 border-b border-border bg-bg px-6 pb-4 pt-6">
+    // Sticky glass-effect chrome: sits at the top of the page's scroll
+    // container, stays visible as content scrolls beneath. Translucent
+    // base + backdrop blur so the page underneath shows through subtly
+    // without hurting legibility. z-20 keeps it above table rows but
+    // below modal/drawer overlays (z-40+).
+    <div className="sticky top-0 z-20 flex flex-wrap items-end gap-x-5 gap-y-2 border-b border-border bg-bg/80 px-6 pb-4 pt-6 backdrop-blur-md">
       <h1
         className="font-display text-[40px] leading-[0.95] tracking-[-0.02em] text-ink"
         style={{ fontWeight: 400 }}

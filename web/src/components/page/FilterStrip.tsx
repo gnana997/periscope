@@ -22,7 +22,7 @@ export function FilterStrip({
   totalCount,
 }: FilterStripProps) {
   return (
-    <div className="flex flex-wrap items-center gap-2 border-b border-border bg-bg px-6 py-2.5">
+    <div className="sticky top-[64px] z-20 flex flex-wrap items-center gap-2 border-b border-border bg-bg/80 px-6 py-2.5 backdrop-blur-md">
       <SearchInput value={search} onChange={onSearch} />
       {statusOptions && onStatusFilter && (
         <StatusPills

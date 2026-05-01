@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import {
   Navigate,
   Outlet,
@@ -52,8 +52,28 @@ import { RuntimeClassesPage } from "./pages/RuntimeClassesPage";
 import { ExecPage } from "./pages/ExecPage";
 import { ExecSessionsProvider } from "./exec/ExecSessionsContext";
 import { Drawer } from "./exec/Drawer";
+import { SearchPalette } from "./components/search/SearchPalette";
 
 export default function App() {
+  const [searchOpen, setSearchOpen] = useState(false);
+
+  // Global Cmd+K / Ctrl+K opens the search palette. Capture phase +
+  // stopPropagation so it wins against any in-page listeners (and
+  // does not collide with the drawer's Cmd+\` toggle).
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      const meta = e.metaKey || e.ctrlKey;
+      if (!meta) return;
+      if (e.key !== "k" && e.key !== "K" && e.code !== "KeyK") return;
+      if (e.shiftKey || e.altKey) return;
+      e.preventDefault();
+      e.stopPropagation();
+      setSearchOpen((v) => !v);
+    }
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, []);
+
   useTheme();
 
   return (
@@ -105,6 +125,7 @@ export default function App() {
       <Route path="*" element={<RootRedirect />} />
       </Routes>
       </div>
+      <SearchPalette open={searchOpen} onClose={() => setSearchOpen(false)} />
       <Drawer />
     </div>
     </ExecSessionsProvider>

@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -68,6 +69,40 @@ func main() {
 				return
 			}
 			writeJSON(w, http.StatusOK, summary)
+		}))
+
+	// --- Global search (Cmd+K palette) ---
+	//
+	// Returns up to N matches per kind across the cluster. Kinds and
+	// limit are query params; both default to "everything" / 10. Errors
+	// inside one kind do not fail the whole call — see SearchResources.
+	router.Get("/api/clusters/{cluster}/search", credentials.Wrap(factory,
+		func(w http.ResponseWriter, r *http.Request, p credentials.Provider) {
+			c, ok := registry.ByName(chi.URLParam(r, "cluster"))
+			if !ok {
+				http.Error(w, "cluster not found", http.StatusNotFound)
+				return
+			}
+			q := r.URL.Query().Get("q")
+			kinds := parseSearchKinds(r.URL.Query().Get("kinds"))
+			limit := 0
+			if v := r.URL.Query().Get("limit"); v != "" {
+				if n, err := strconv.Atoi(v); err == nil {
+					limit = n
+				}
+			}
+			results, err := k8s.SearchResources(r.Context(), p, k8s.SearchArgs{
+				Cluster: c,
+				Query:   q,
+				Kinds:   kinds,
+				Limit:   limit,
+			})
+			if err != nil {
+				slog.Error("search", "cluster", c.Name, "err", err)
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			writeJSON(w, http.StatusOK, results)
 		}))
 
 	// --- LIST endpoints ---
@@ -1236,4 +1271,33 @@ func probeOneCluster(ctx context.Context, p credentials.Provider, c clusters.Clu
 	}
 	wsFails, pinned := policy.State(c.Name)
 	slog.Info("boot probe: ok", "cluster", c.Name, "ws_fails", wsFails, "pinned_spdy_until", pinned)
+}
+
+// parseSearchKinds turns the comma-separated `kinds` query param into
+// the typed enum slice the search backend expects. Empty input means
+// "all kinds" — handled by SearchResources itself, so we return nil.
+// Unknown tokens are silently dropped; the SPA only sends valid kinds.
+func parseSearchKinds(raw string) []k8s.SearchKind {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil
+	}
+	parts := strings.Split(raw, ",")
+	known := map[string]k8s.SearchKind{
+		"pods":         k8s.SearchKindPods,
+		"deployments":  k8s.SearchKindDeployments,
+		"statefulsets": k8s.SearchKindStatefulSets,
+		"daemonsets":   k8s.SearchKindDaemonSets,
+		"services":     k8s.SearchKindServices,
+		"configmaps":   k8s.SearchKindConfigMaps,
+		"secrets":      k8s.SearchKindSecrets,
+		"namespaces":   k8s.SearchKindNamespaces,
+	}
+	out := make([]k8s.SearchKind, 0, len(parts))
+	for _, p := range parts {
+		if k, ok := known[strings.TrimSpace(p)]; ok {
+			out = append(out, k)
+		}
+	}
+	return out
 }
