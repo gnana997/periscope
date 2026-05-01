@@ -11,7 +11,7 @@ import {
   type Column,
   type RowTint,
 } from "../components/table/DataTable";
-import { PhaseTag } from "../components/table/StatusDot";
+import { PhaseTag, phaseTone } from "../components/table/StatusDot";
 import {
   EmptyState,
   ErrorState,
@@ -61,12 +61,12 @@ export function PodsPage({ cluster }: { cluster: string }) {
   const failing = useMemo(
     () =>
       allPods.filter((p) =>
-        ["Failed", "CrashLoopBackOff"].includes(p.phase),
+        phaseTone(p.phase) === "red",
       ).length,
     [allPods],
   );
   const pending = useMemo(
-    () => allPods.filter((p) => p.phase === "Pending").length,
+    () => allPods.filter((p) => phaseTone(p.phase) === "yellow").length,
     [allPods],
   );
 
@@ -75,9 +75,9 @@ export function PodsPage({ cluster }: { cluster: string }) {
     if (search) r = r.filter((p) => nameMatches(p.name, search));
     if (status === "Failed")
       r = r.filter((p) =>
-        ["Failed", "CrashLoopBackOff"].includes(p.phase),
+        phaseTone(p.phase) === "red",
       );
-    else if (status) r = r.filter((p) => p.phase === status);
+    else if (status === "Running") r = r.filter((p) => phaseTone(p.phase) === "green");
     return r;
   }, [allPods, search, status]);
 
@@ -119,8 +119,8 @@ export function PodsPage({ cluster }: { cluster: string }) {
   ];
 
   const rowTint = (p: Pod): RowTint => {
-    if (["Failed", "CrashLoopBackOff"].includes(p.phase)) return "red";
-    if (p.phase === "Pending") return "yellow";
+    if (phaseTone(p.phase) === "red") return "red";
+    if (phaseTone(p.phase) === "yellow") return "yellow";
     return null;
   };
 

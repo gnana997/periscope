@@ -62,7 +62,7 @@ func listChildPods(ctx context.Context, cs kubernetes.Interface, namespace, labe
 	for _, pod := range raw.Items {
 		pods = append(pods, JobChildPod{
 			Name:      pod.Name,
-			Phase:     string(pod.Status.Phase),
+			Phase:     computePodStatus(&pod),
 			Ready:     readyCount(&pod),
 			Restarts:  totalRestarts(&pod),
 			CreatedAt: pod.CreationTimestamp.Time,

@@ -105,6 +105,91 @@ func GetPodYAML(ctx context.Context, p credentials.Provider, args GetPodArgs) (s
 	return formatYAML(raw)
 }
 
+// computePodStatus mirrors kubectl's STATUS column. The raw
+// pod.Status.Phase is too coarse for the UI — a CrashLoopBackOff pod is
+// technically still "Running" because k8s considers a restarting
+// container as part of the Running phase. This walks init containers
+// first then regular containers and surfaces the most-broken container's
+// reason, so the UI shows what users expect (CrashLoopBackOff,
+// ImagePullBackOff, Init:0/1, Completed, ...). Mirrors the logic in
+// k8s.io/kubectl/pkg/printers/internalversion.
+func computePodStatus(pod *corev1.Pod) string {
+	reason := string(pod.Status.Phase)
+	if pod.Status.Reason != "" {
+		reason = pod.Status.Reason
+	}
+
+	initializing := false
+	for i := range pod.Status.InitContainerStatuses {
+		c := pod.Status.InitContainerStatuses[i]
+		switch {
+		case c.State.Terminated != nil && c.State.Terminated.ExitCode == 0:
+			continue
+		case c.State.Terminated != nil:
+			if c.State.Terminated.Reason != "" {
+				reason = "Init:" + c.State.Terminated.Reason
+			} else if c.State.Terminated.Signal != 0 {
+				reason = fmt.Sprintf("Init:Signal:%d", c.State.Terminated.Signal)
+			} else {
+				reason = fmt.Sprintf("Init:ExitCode:%d", c.State.Terminated.ExitCode)
+			}
+			initializing = true
+		case c.State.Waiting != nil && c.State.Waiting.Reason != "" && c.State.Waiting.Reason != "PodInitializing":
+			reason = "Init:" + c.State.Waiting.Reason
+			initializing = true
+		default:
+			reason = fmt.Sprintf("Init:%d/%d", i, len(pod.Spec.InitContainers))
+			initializing = true
+		}
+		break
+	}
+
+	if !initializing {
+		hasRunning := false
+		for i := len(pod.Status.ContainerStatuses) - 1; i >= 0; i-- {
+			c := pod.Status.ContainerStatuses[i]
+			switch {
+			case c.State.Waiting != nil && c.State.Waiting.Reason != "":
+				reason = c.State.Waiting.Reason
+			case c.State.Terminated != nil && c.State.Terminated.Reason != "":
+				reason = c.State.Terminated.Reason
+			case c.State.Terminated != nil:
+				if c.State.Terminated.Signal != 0 {
+					reason = fmt.Sprintf("Signal:%d", c.State.Terminated.Signal)
+				} else {
+					reason = fmt.Sprintf("ExitCode:%d", c.State.Terminated.ExitCode)
+				}
+			case c.Ready && c.State.Running != nil:
+				hasRunning = true
+			}
+		}
+		if reason == "Completed" && hasRunning {
+			if hasReadyCondition(pod.Status.Conditions) {
+				reason = "Running"
+			} else {
+				reason = "NotReady"
+			}
+		}
+	}
+
+	if pod.DeletionTimestamp != nil {
+		if pod.Status.Reason == "NodeLost" {
+			return "Unknown"
+		}
+		return "Terminating"
+	}
+	return reason
+}
+
+func hasReadyCondition(conds []corev1.PodCondition) bool {
+	for _, c := range conds {
+		if c.Type == corev1.PodReady && c.Status == corev1.ConditionTrue {
+			return true
+		}
+	}
+	return false
+}
+
 // podSummary builds the list-view Pod DTO from a corev1.Pod.
 func podSummary(pod *corev1.Pod) Pod {
 	totalContainers := len(pod.Spec.Containers)
@@ -119,7 +204,7 @@ func podSummary(pod *corev1.Pod) Pod {
 	return Pod{
 		Name:      pod.Name,
 		Namespace: pod.Namespace,
-		Phase:     string(pod.Status.Phase),
+		Phase:     computePodStatus(pod),
 		NodeName:  pod.Spec.NodeName,
 		PodIP:     pod.Status.PodIP,
 		Ready:     strconv.Itoa(readyContainers) + "/" + strconv.Itoa(totalContainers),

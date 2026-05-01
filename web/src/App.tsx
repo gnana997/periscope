@@ -7,6 +7,8 @@ import {
   useNavigate,
   useParams,
 } from "react-router-dom";
+import { ClusterRail } from "./components/shell/ClusterRail";
+import { Brand } from "./components/shell/Brand";
 import { Sidebar } from "./components/shell/Sidebar";
 import { ErrorState, NoClustersState } from "./components/table/states";
 import { useClusters } from "./hooks/useClusters";
@@ -69,7 +71,14 @@ export default function App() {
 function AppShell() {
   return (
     <div className="flex h-full">
-      <Sidebar />
+      <div className="flex h-full shrink-0 flex-col border-r border-border bg-surface">
+        <Brand />
+        <div className="h-px bg-border" />
+        <div className="flex min-h-0 flex-1">
+          <ClusterRail />
+          <Sidebar />
+        </div>
+      </div>
       <main className="flex min-w-0 flex-1 flex-col bg-bg">
         <Outlet />
       </main>

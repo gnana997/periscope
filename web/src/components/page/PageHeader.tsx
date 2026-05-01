@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { cn } from "../../lib/cn";
+import { ThemeToggle } from "../shell/ThemeToggle";
 
 interface ActionChip {
   label: string;
@@ -38,6 +39,7 @@ export function PageHeader({
       <div className="ml-auto flex flex-wrap items-center gap-2 pb-1">
         {chips?.map((chip) => <Chip key={chip.label} {...chip} />)}
         {trailing}
+        <ThemeToggle />
       </div>
     </div>
   );
