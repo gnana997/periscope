@@ -196,7 +196,7 @@ export function PodsPage({ cluster }: { cluster: string }) {
         totalCount={allPods.length}
       />
       <SplitPane
-        storageKey="periscope.detailWidth"
+        storageKey="periscope.detailWidth.v4"
         left={
           podsQuery.isLoading ? (
             <LoadingState resource="pods" />

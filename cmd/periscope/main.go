@@ -19,6 +19,7 @@ import (
 	execsess "github.com/gnana997/periscope/internal/exec"
 	"github.com/gnana997/periscope/internal/httpx"
 	"github.com/gnana997/periscope/internal/k8s"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 func main() {
@@ -677,12 +678,17 @@ func main() {
 	// --- Pod exec (interactive shell, WebSocket) — RFC 0001 ---
 	// Behind a feature flag for PR1; enable with PERISCOPE_FEATURE_EXEC=1.
 	execSessions := execsess.NewRegistry()
+	execPolicy := k8s.NewPolicy(k8s.PolicyConfig{}) // defaults: 3 WS fails / 30m SPDY pin
 	if os.Getenv("PERISCOPE_FEATURE_EXEC") == "1" {
 		router.Get("/api/clusters/{cluster}/pods/{ns}/{name}/exec",
-			credentials.Wrap(factory, execHandler(registry, execSessions)))
+			credentials.Wrap(factory, execHandler(registry, execSessions, execPolicy)))
 		slog.Info("feature flag", "feature", "exec", "enabled", true)
+		if os.Getenv("PERISCOPE_PROBE_CLUSTERS_ON_BOOT") == "1" {
+			go probeClustersOnBoot(ctx, factory, registry, execPolicy)
+		}
 	} else {
-		_ = execSessions // silence unused if disabled
+		_ = execSessions
+		_ = execPolicy
 		slog.Info("feature flag", "feature", "exec", "enabled", false)
 	}
 
@@ -711,9 +717,40 @@ func whoami(w http.ResponseWriter, _ *http.Request, p credentials.Provider) {
 	writeJSON(w, http.StatusOK, map[string]string{"actor": p.Actor()})
 }
 
+// listClustersHandler returns the registered clusters with PR4's
+// execEnabled bit so the SPA can hide the Open Shell action and filter
+// the empty-picker dropdown when an operator has set
+// `exec.enabled: false` on a given cluster.
+//
+// We project the registry's Cluster slice into an explicit response
+// shape rather than letting json marshal Cluster directly: the Exec
+// config block stays out of the API surface (it's cluster-config, not
+// cluster-identity), but its single derived bit comes through.
 func listClustersHandler(reg *clusters.Registry) http.HandlerFunc {
+	type clusterDTO struct {
+		Name              string `json:"name"`
+		Backend           string `json:"backend"`
+		ARN               string `json:"arn,omitempty"`
+		Region            string `json:"region,omitempty"`
+		KubeconfigPath    string `json:"kubeconfigPath,omitempty"`
+		KubeconfigContext string `json:"kubeconfigContext,omitempty"`
+		ExecEnabled       bool   `json:"execEnabled"`
+	}
 	return func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, http.StatusOK, map[string]any{"clusters": reg.List()})
+		in := reg.List()
+		out := make([]clusterDTO, 0, len(in))
+		for _, c := range in {
+			out = append(out, clusterDTO{
+				Name:              c.Name,
+				Backend:           c.Backend,
+				ARN:               c.ARN,
+				Region:            c.Region,
+				KubeconfigPath:    c.KubeconfigPath,
+				KubeconfigContext: c.KubeconfigContext,
+				ExecEnabled:       c.ExecEnabled(),
+			})
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"clusters": out})
 	}
 }
 
@@ -1135,4 +1172,68 @@ func workloadLogsHandler(reg *clusters.Registry, kind string, stream workloadStr
 			}
 		}
 	}
+}
+
+// probeClustersOnBoot runs one zero-payload `/bin/true` exec against
+// every registered cluster's kube-system namespace so the
+// circuit-breaker policy gets a real signal about WS-vs-SPDY support
+// before the first user click. Failures are non-fatal — the cluster
+// just stays in default ws_then_spdy mode.
+//
+// Off by default (PERISCOPE_PROBE_CLUSTERS_ON_BOOT=1 to enable). The
+// probe needs a service-account or kubeconfig identity that can list
+// pods in kube-system AND exec into one — exactly the same RBAC the
+// real exec endpoint requires, just used eagerly.
+func probeClustersOnBoot(ctx context.Context, factory credentials.Factory, reg *clusters.Registry, policy *k8s.Policy) {
+	// Use the dev session for probes — there's no real user request
+	// here. v2 will need to revisit (per-user identity, etc.); for v1
+	// the shared-IRSA / kubeconfig identity probes against itself.
+	provider, err := factory.For(ctx, credentials.Session{Subject: "boot-probe"})
+	if err != nil {
+		slog.Warn("boot probe: skipping (credentials unavailable)", "err", err)
+		return
+	}
+	for _, c := range reg.List() {
+		if !c.ExecEnabled() {
+			continue
+		}
+		go probeOneCluster(ctx, provider, c, policy)
+	}
+}
+
+func probeOneCluster(ctx context.Context, p credentials.Provider, c clusters.Cluster, policy *k8s.Policy) {
+	probeCtx, cancel := context.WithTimeout(ctx, 8*time.Second)
+	defer cancel()
+	// Find any kube-system pod with at least one container.
+	cs, err := k8s.NewClientset(probeCtx, p, c)
+	if err != nil {
+		slog.Info("boot probe: clientset failed", "cluster", c.Name, "err", err)
+		return
+	}
+	pods, err := cs.CoreV1().Pods("kube-system").List(probeCtx, metav1.ListOptions{Limit: 1})
+	if err != nil || len(pods.Items) == 0 {
+		slog.Info("boot probe: no kube-system pod to probe", "cluster", c.Name, "err", err)
+		return
+	}
+	pod := pods.Items[0]
+	containerName := ""
+	if len(pod.Spec.Containers) > 0 {
+		containerName = pod.Spec.Containers[0].Name
+	}
+	// Discard streams — we just need the transport choice to settle.
+	_, err = k8s.ExecPod(probeCtx, p, k8s.ExecPodArgs{
+		Cluster:   c,
+		Namespace: pod.Namespace,
+		Pod:       pod.Name,
+		Container: containerName,
+		Command:   []string{"true"},
+		TTY:       false,
+		Policy:    policy,
+	})
+	if err != nil {
+		slog.Info("boot probe: completed with error (recorded by policy)", "cluster", c.Name, "err", err)
+		return
+	}
+	wsFails, pinned := policy.State(c.Name)
+	slog.Info("boot probe: ok", "cluster", c.Name, "ws_fails", wsFails, "pinned_spdy_until", pinned)
 }

@@ -68,8 +68,7 @@ func (r *Registry) List() []Session {
 }
 
 // CountForActor returns the number of active sessions owned by the given
-// actor. PR4 uses this to enforce per-user caps; PR1 keeps it for the
-// future call site.
+// actor. Used by PR4 to enforce per-user caps.
 func (r *Registry) CountForActor(actor string) int {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -80,4 +79,36 @@ func (r *Registry) CountForActor(actor string) int {
 		}
 	}
 	return n
+}
+
+// CountForCluster returns the number of active sessions targeting the
+// given cluster across all actors. Used by PR4 to enforce per-cluster
+// total caps so a single cluster can't be saturated by aggregated
+// activity from many users.
+func (r *Registry) CountForCluster(cluster string) int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	n := 0
+	for _, s := range r.sessions {
+		if s.Cluster == cluster {
+			n++
+		}
+	}
+	return n
+}
+
+// SnapshotForActor returns a copy of the sessions belonging to the given
+// actor, ordered by start time ascending. Used to populate the
+// E_CAP_USER response body so the frontend can offer "close one to free
+// a slot" without doing a separate fetch.
+func (r *Registry) SnapshotForActor(actor string) []Session {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make([]Session, 0)
+	for _, s := range r.sessions {
+		if s.Actor == actor {
+			out = append(out, s)
+		}
+	}
+	return out
 }

@@ -53,7 +53,14 @@ export function DataTable<T>({
           </div>
         ))}
       </div>
-      <div className="flex-1 overflow-auto" role="rowgroup">
+      {/* scrollbar-gutter: stable so the right edge of every row tint
+          (selected accent, failing red-soft, pending yellow-soft) lands
+          at the same x-coordinate regardless of whether the rowgroup
+          itself needs to scroll. Without it, a tall list paints a 10px
+          scrollbar that shrinks each row's effective width, while a
+          short list doesn't — and the visible right edge of the tinted
+          rows shifts between table states. */}
+      <div className="flex-1 overflow-auto [scrollbar-gutter:stable]" role="rowgroup">
         {rows.map((row) => {
           const key = rowKey(row);
           const tint = rowTint?.(row) ?? null;

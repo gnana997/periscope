@@ -37,7 +37,12 @@ function phaseTone(phase: string): string {
 
 export function EmptyPicker({ initialCluster }: EmptyPickerProps) {
   const { data: clustersData } = useClusters();
-  const clusters = clustersData?.clusters ?? [];
+  // PR4: filter out clusters where the operator has disabled exec.
+  // Older backends (pre-PR4) don't emit execEnabled — treat absence
+  // as "enabled" so the SPA stays usable against mixed deployments.
+  const clusters = (clustersData?.clusters ?? []).filter(
+    (c) => c.execEnabled !== false,
+  );
   const { openSession, setDrawerOpen } = useExecSessions();
 
   const [cluster, setCluster] = useState<string>(initialCluster ?? "");

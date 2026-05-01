@@ -532,7 +532,10 @@ exec:
   bootProbe: false                # off; if on, one /bin/true probe per cluster on startup
 ```
 
-### Per-cluster overrides (`clusters.yaml`)
+### Per-cluster overrides (`clusters.yaml`) — **shipped in PR4**
+
+Every override is optional; absence means "use the global default." Negative or
+zero values are treated as "operator typo, ignore" — the global stays.
 
 ```yaml
 clusters:
@@ -542,7 +545,10 @@ clusters:
     exec:
       enabled: true
       serverIdleSeconds: 1800     # 30 min for long-running ops debugging
+      idleWarnSeconds: 60         # 1 min of warning instead of 30 s
+      heartbeatSeconds: 20
       maxSessionsPerUser: 10
+      maxSessionsTotal: 100
 
   - name: locked-down
     backend: eks
@@ -551,8 +557,13 @@ clusters:
       enabled: false              # disable exec entirely on this cluster
 ```
 
-When `exec.enabled: false` at the cluster level, the API returns `403` with code
-`E_EXEC_DISABLED`. The Shell tab is hidden in the UI for that cluster.
+When `exec.enabled: false` at the cluster level, the API returns `403` with
+`{code: "E_EXEC_DISABLED"}`, the Open Shell action is hidden on pod detail, and
+the cluster is filtered out of the empty-state picker.
+
+When per-user / per-cluster caps are hit, the API returns `429` with
+`{code: "E_CAP_USER" | "E_CAP_CLUSTER", limit, activeSessions: [...]}`. The SPA
+uses the body to populate the cap-reached dialog with click-to-disconnect rows.
 
 ---
 
@@ -617,7 +628,7 @@ The client distinguishes `retryable` from non-retryable to decide whether to sho
 | **PR1** | Backend MVP: `internal/k8s/exec.go` (`ExecPod` + `ExecPodArgs`), `internal/exec/session.go`, `internal/exec/registry.go`, HTTP route `/api/clusters/{cluster}/pods/{ns}/{name}/exec`, `coder/websocket` upgrade, `FallbackExecutor`, audit `slog` start/end. **No idle, no reconnect, no caps.** Behind `--feature-exec` flag. | ~600 | PR0 |
 | **PR2** | Frontend MVP: `web/src/lib/exec.ts` (`ExecClient`), `Terminal.tsx`, `ExecPanel.tsx`, `ExecPage.tsx`, Shell tab on pod detail. xterm.js lazy chunk. Manual disconnect only. | ~500 | PR1 |
 | **PR3** ✓ | Lifecycle: server idle timer + IDLE_WARN, client visibility timer, heartbeat, auto-restart UX (banner, exp-backoff `[0,1,3,8]s`, silent-<800ms-drop debounce via CSS), `E_NO_SHELL` heuristic upgrade, `PERISCOPE_EXEC_IDLE_SECONDS` / `_HEARTBEAT_SECONDS` / `_IDLE_WARN_SECONDS` env knobs, xterm code-split via `React.lazy` (~340KB removed from main bundle), react-doctor accessibility & perf fixes folded in. | ~430 | PR2 |
-| **PR4** | Robustness: `ExecutorPolicy` circuit breaker, per-user/cluster caps, audit polish (`session_id`, transport field), error taxonomy, config plumbing, per-cluster overrides. | ~400 | PR3 |
+| **PR4** ✓ | Robustness: per-cluster `Policy` circuit breaker (3 WS fails → 30 min SPDY pin, self-recover), per-user (5) + per-cluster (50) concurrent caps enforced pre-upgrade with HTTP 429 + JSON body, custom `runWithFallback` replacing `NewFallbackExecutor` so we record which transport carried the stream, `transport: "ws_v5" \| "spdy"` in the audit `session_end` record, `Audit-Annotation-Periscope-Session-Id` injected via `rest.Config.WrapTransport` for v2 audit cross-reference, full error taxonomy (E_NOT_FOUND / E_EXEC_DISABLED / E_INVALID_REQUEST / E_CAP_USER / E_CAP_CLUSTER / E_INTERNAL) returned as `apiErrorJSON{code, message, …}`, per-cluster `exec:` config block in `clusters.yaml` (enabled, idle/heartbeat/idleWarn seconds, caps), `execEnabled` exposed via `/api/clusters` so the SPA hides Open Shell + filters EmptyPicker, optional boot-time `/bin/true` probe (`PERISCOPE_PROBE_CLUSTERS_ON_BOOT=1`) to seed the breaker before first user click. | ~430 | PR3 |
 | **v2** | When v2 SSO Provider lands: zero changes to exec. Verify K8s RBAC enforces. Add `k8s_identity` audit field automatically (Provider supplies it). | trivial | v2 SSO |
 | **v2.x** | Optional kubeconfig impersonation. `Provider` for kubeconfig backend supports `Impersonate-User` headers. | small | v1 |
 | **v3** | Expose `ExecPod` as MCP tool. Wraps stdin/stdout to MCP transport. Same function. | small | v3 MCP runtime |

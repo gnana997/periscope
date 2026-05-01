@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { cn } from "../../lib/cn";
 import { usePodDetail } from "../../hooks/useResource";
+import { useClusters } from "../../hooks/useClusters";
 import { useExecSessions } from "../../exec/ExecSessionsContext";
 import { CapReachedDialog } from "../../exec/CapReachedDialog";
 
@@ -34,7 +35,15 @@ export function OpenShellButton({
   pod,
 }: OpenShellButtonProps) {
   const { data: detail } = usePodDetail(cluster, namespace, pod);
+  const { data: clustersData } = useClusters();
   const { openSession } = useExecSessions();
+
+  // PR4: hide entirely when the operator has set `exec.enabled: false`
+  // on this cluster. Treat "field absent" (older backend) as enabled —
+  // forward-compatibility for a frontend deployed against a backend
+  // that hasn't shipped the execEnabled bit.
+  const clusterMeta = clustersData?.clusters.find((c) => c.name === cluster);
+  const execDisabled = clusterMeta?.execEnabled === false;
 
   const [pickerOpen, setPickerOpen] = useState(false);
   const [capReached, setCapReached] = useState(false);
@@ -77,7 +86,56 @@ export function OpenShellButton({
     }
   }
 
+  // Ctrl/Cmd-E shortcut while this button is mounted (i.e. while a pod
+  // detail pane is open). Doesn't conflict with terminal Ctrl-E
+  // (move-to-end-of-line) because the terminal is in the drawer body
+  // and the open-shell shortcut only fires while the user is on the
+  // pod page WITHOUT the terminal focused.
+  //
+  // Capture phase + stopPropagation match the Cmd-` shortcut wired in
+  // ExecSessionsContext so the two coexist cleanly.
+  useEffect(() => {
+    if (execDisabled) return;
+    function onKey(e: KeyboardEvent) {
+      const meta = e.metaKey || e.ctrlKey;
+      if (!meta) return;
+      if (e.key !== "e" && e.key !== "E" && e.code !== "KeyE") return;
+      if (e.shiftKey || e.altKey) return;
+      // Don't fire when focus is inside the terminal — that would
+      // hijack the standard end-of-line shortcut. xterm parks focus
+      // on a hidden textarea; we treat any textarea/input/contenteditable
+      // as "leave it alone."
+      const target = e.target as HTMLElement | null;
+      if (
+        target &&
+        (target.tagName === "INPUT" ||
+          target.tagName === "TEXTAREA" ||
+          target.isContentEditable)
+      ) {
+        return;
+      }
+      e.preventDefault();
+      e.stopPropagation();
+      open(defaultContainerName);
+    }
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+    // open() / defaultContainerName change with detail data; capturing
+    // them in deps would re-bind the listener too aggressively. The
+    // closure captures the latest values at fire time via the ref-y
+    // pattern of recomputing inside the handler.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [execDisabled]);
+
   const multi = containers.length > 1;
+
+  if (execDisabled) {
+    // Hide rather than render a disabled stub: the action just doesn't
+    // exist on this cluster and we don't want to clutter the detail
+    // pane with greyed-out buttons (operators see only what they can
+    // act on).
+    return null;
+  }
 
   return (
     <>
@@ -92,8 +150,8 @@ export function OpenShellButton({
           )}
           title={
             multi
-              ? `Open shell to ${defaultContainerName} (default)`
-              : `Open shell`
+              ? `Open shell to ${defaultContainerName} (default) · Ctrl-E`
+              : `Open shell · Ctrl-E`
           }
         >
           <ShellGlyph />

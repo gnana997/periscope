@@ -59,7 +59,7 @@ export default function App() {
   return (
     <ExecSessionsProvider>
     <div className="flex h-full flex-col">
-      <div className="flex min-h-0 flex-1 overflow-hidden">
+      <div className="min-h-0 flex-1 overflow-hidden">
       <Routes>
       <Route path="/" element={<RootRedirect />} />
       <Route path="/clusters/:cluster" element={<AppShell />}>

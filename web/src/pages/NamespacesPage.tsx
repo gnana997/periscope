@@ -108,7 +108,7 @@ export function NamespacesPage({ cluster }: { cluster: string }) {
         </div>
       </div>
       <SplitPane
-        storageKey="periscope.detailWidth"
+        storageKey="periscope.detailWidth.v4"
         left={
           query.isLoading ? (
             <LoadingState resource="namespaces" />

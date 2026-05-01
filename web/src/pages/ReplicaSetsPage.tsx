@@ -206,7 +206,7 @@ export function ReplicaSetsPage({ cluster }: { cluster: string }) {
       </div>
 
       <SplitPane
-        storageKey="periscope.detailWidth"
+        storageKey="periscope.detailWidth.v4"
         left={
           query.isLoading ? <LoadingState resource="replicasets" /> :
           query.isError ? <ErrorState title="couldn't reach the cluster" message={(query.error as Error).message} /> :

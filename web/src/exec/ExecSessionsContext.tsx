@@ -200,6 +200,23 @@ export function ExecSessionsProvider({ children }: { children: ReactNode }) {
           closeReason: frame.reason,
           exitCode: frame.exitCode,
         });
+        // Auto-remove the tab after a short grace period so a clean
+        // shell exit (Ctrl-D / `exit` / container completed) cleans up
+        // the drawer the same way the Disconnect button does. The
+        // grace lets the operator glance at the exit code first
+        // ("closed · exit 0"). Error states stay sticky on purpose —
+        // the user needs to read E_NO_SHELL / reconnect-failed
+        // messages before they disappear.
+        window.setTimeout(() => {
+          // Re-check before removing: the user may have already closed
+          // the tab manually, or the session may be gone via a
+          // visibility-close auto-restart cycle. closeSession is
+          // idempotent so a stale id is harmless, but skipping the
+          // call avoids a no-op.
+          if (clients.current.has(id)) {
+            closeSessionRef.current?.(id);
+          }
+        }, 2000);
       });
       client.onError((frame) => {
         updateSession(id, {
@@ -428,12 +445,39 @@ export function ExecSessionsProvider({ children }: { children: ReactNode }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Auto-collapse when the session count drops from positive to zero.
+  // Distinguishes "tabs naturally went away" (close the drawer so the
+  // page reclaims its vertical space) from "user pressed Ctrl-` with
+  // no sessions" (which sets open=true while sessions.length stays at
+  // 0 throughout — that path doesn't trip this effect).
+  const prevSessionCountRef = useRef(sessions.length);
+  useEffect(() => {
+    const prev = prevSessionCountRef.current;
+    const cur = sessions.length;
+    prevSessionCountRef.current = cur;
+    if (prev > 0 && cur === 0) {
+      setDrawer((d) => (d.open ? { ...d, open: false } : d));
+      try {
+        window.localStorage.setItem(STORAGE_OPEN, "0");
+      } catch {
+        /* ignore — localStorage may be blocked in embed contexts */
+      }
+    }
+  }, [sessions.length]);
+
   // Refs that mirror the live values for use inside the visibility
   // listener (which must not re-bind on every render).
   const sessionsRef = useRef(sessions);
   sessionsRef.current = sessions;
   const openSessionRef = useRef(openSession);
   openSessionRef.current = openSession;
+  // closeSessionRef is read by the auto-remove timer wired in
+  // openSession's client.onClosed callback. Using a ref instead of
+  // capturing closeSession directly keeps the timer's reference
+  // current — closeSession is recreated on every render and the
+  // closure captured at session-open time would be stale otherwise.
+  const closeSessionRef = useRef(closeSession);
+  closeSessionRef.current = closeSession;
 
   const value = useMemo<ExecSessionsContextValue>(
     () => ({

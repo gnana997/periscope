@@ -45,10 +45,13 @@ export function SectionTitle({ children }: { children: ReactNode }) {
 
 export function MetaPill({ k, v }: { k: string; v: string }) {
   return (
-    <div className="inline-flex max-w-full items-center gap-1 rounded-md border border-border bg-surface-2/40 px-2 py-0.5 font-mono text-[11px]">
-      <span className="text-ink-muted">{k}</span>
-      <span className="text-ink-faint">=</span>
-      <span className="truncate text-ink" title={v}>
+    // Plain `flex` (not `inline-flex`) so the chip can be a grid track
+    // and stretch to fill its 1fr column. `min-w-0` lets the value
+    // truncate inside the chip when the column gets narrow.
+    <div className="flex min-w-0 items-center gap-1 rounded-md border border-border bg-surface-2/40 px-2 py-0.5 font-mono text-[11px]">
+      <span className="shrink-0 text-ink-muted">{k}</span>
+      <span className="shrink-0 text-ink-faint">=</span>
+      <span className="min-w-0 truncate text-ink" title={v}>
         {v}
       </span>
     </div>
@@ -59,8 +62,19 @@ export function MetaPills({ map }: { map?: Record<string, string> }) {
   if (!map || Object.keys(map).length === 0) {
     return <span className="text-[11.5px] text-ink-faint">—</span>;
   }
+  // Grid with auto-fit + minmax(220px, 1fr) makes the chips responsive:
+  //   - few chips on a wide pane → each chip stretches to fill its 1fr
+  //     column (so the row is visually full)
+  //   - many chips on a narrow pane → tracks pack at the 220px minimum
+  //     and wrap to multiple rows
+  // This is the layout the operator gets either way: no perpetual right
+  // gap when there's plenty of pane width, and no awkward wrapping at
+  // narrow widths.
   return (
-    <div className="flex flex-wrap gap-1.5">
+    <div
+      className="grid gap-1.5"
+      style={{ gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))" }}
+    >
       {Object.entries(map).map(([k, v]) => (
         <MetaPill key={k} k={k} v={v} />
       ))}

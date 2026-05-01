@@ -6,6 +6,7 @@ import { Tab } from "./Tab";
 import { TerminalLazy as Terminal } from "./TerminalLazy";
 import { CollapsedBar } from "./CollapsedBar";
 import { EmptyPicker } from "./EmptyPicker";
+import { SessionFootbar } from "./SessionFootbar";
 import type { ExecSessionMeta } from "./types";
 
 /**
@@ -250,7 +251,7 @@ export function Drawer() {
               onClick={() => closeSession(active.id)}
               disabled={!closeable}
               tone="danger"
-              title="Disconnect session"
+              title="Disconnect session · or press Ctrl-D inside the shell to exit cleanly"
             >
               <svg width="9" height="9" viewBox="0 0 9 9" aria-hidden>
                 <path
@@ -346,6 +347,10 @@ export function Drawer() {
           </>
         )}
       </div>
+
+      {/* footbar — container picker + readouts. Self-hides for
+          single-container pods (component returns null). */}
+      {!empty && active && <SessionFootbar session={active} />}
     </aside>
   );
 }

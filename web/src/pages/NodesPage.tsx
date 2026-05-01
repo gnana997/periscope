@@ -178,7 +178,7 @@ export function NodesPage({ cluster }: { cluster: string }) {
         </div>
       </div>
       <SplitPane
-        storageKey="periscope.detailWidth"
+        storageKey="periscope.detailWidth.v4"
         left={
           query.isLoading ? (
             <LoadingState resource="nodes" />

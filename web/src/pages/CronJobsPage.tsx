@@ -171,7 +171,7 @@ export function CronJobsPage({ cluster }: { cluster: string }) {
         totalCount={all.length}
       />
       <SplitPane
-        storageKey="periscope.detailWidth"
+        storageKey="periscope.detailWidth.v4"
         left={
           query.isLoading ? (
             <LoadingState resource="cronjobs" />

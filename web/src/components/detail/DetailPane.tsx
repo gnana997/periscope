@@ -38,7 +38,16 @@ export function DetailPane({
   const active = tabs.find((t) => t.id === activeTab && t.ready);
 
   return (
-    <div className="flex h-full min-h-0 flex-col">
+    // min-w-0 here is load-bearing: the SplitPane's right pane has a
+    // fixed pixel width and is itself min-w-0, but every nested flex
+    // container needs to opt-in (default is min-width: auto = intrinsic
+    // content width) for `truncate` to clip in title rows. Without it,
+    // a long pod name like
+    //   cloudflare-tunnel-ingress-controller-6cfd68bfc7-cckfz
+    // pushes the title flex container's intrinsic width past the
+    // pane's set width, the layout overflows, and the visible pane
+    // appears to grow with each pod selection.
+    <div className="flex h-full min-h-0 min-w-0 flex-col">
       {/* Tab strip */}
       <div className="flex h-9 shrink-0 items-center gap-1 border-b border-border bg-surface px-3">
         {tabs.map((t) => (
@@ -86,22 +95,53 @@ export function DetailPane({
       </div>
 
       {/* Title row */}
-      <div className="border-b border-border bg-surface px-5 py-3">
-        <div className="flex items-baseline gap-3">
-          <h2 className="truncate font-mono text-[14px] font-medium text-ink" title={title}>
+      {/*
+        Both the row container and the inner flex are min-w-0 +
+        overflow-hidden so the pod name truncates at the pane's edge
+        instead of overflowing horizontally. Each truncate-able child
+        (h2, subtitle span) carries its own min-w-0 so the flex
+        algorithm permits it to shrink below its intrinsic text width.
+      */}
+      <div className="min-w-0 overflow-hidden border-b border-border bg-surface px-5 py-3">
+        <div className="flex min-w-0 items-baseline gap-3">
+          <h2
+            className="min-w-0 truncate font-mono text-[14px] font-medium text-ink"
+            title={title}
+          >
             {title}
           </h2>
           {subtitle && (
             <>
-              <span className="text-[11px] text-ink-faint">·</span>
-              <span className="truncate font-mono text-[12px] text-ink-muted">{subtitle}</span>
+              <span className="shrink-0 text-[11px] text-ink-faint">·</span>
+              <span
+                className="min-w-0 truncate font-mono text-[12px] text-ink-muted"
+                title={subtitle}
+              >
+                {subtitle}
+              </span>
             </>
           )}
         </div>
       </div>
 
       {/* Body */}
-      <div className="flex-1 overflow-auto bg-surface">
+      {/*
+        scrollbar-gutter: stable reserves the scrollbar width even when
+        content fits without scrolling. Without it, a 10px-wide
+        scrollbar (from index.css's webkit rules) appears for tall pods
+        and not for short ones, shifting the right edge by 10px between
+        selected rows. Reserving the gutter keeps the right edge —
+        and therefore the divider seam — pixel-stable across selections.
+
+        min-w-0 here matches the rest of the chain: any describe
+        component using `truncate` inside a nested flex container
+        relies on min-width: 0 propagation from this parent.
+
+        Width is governed by SplitPane (640px default); describe
+        components use flex-wrap / grid auto-fit internally and
+        naturally fill whatever width they're given.
+      */}
+      <div className="min-w-0 flex-1 overflow-auto bg-surface [scrollbar-gutter:stable]">
         {active?.content}
       </div>
     </div>

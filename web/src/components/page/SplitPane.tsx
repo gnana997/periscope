@@ -5,65 +5,106 @@ interface SplitPaneProps {
   right: ReactNode | null;
   /** Storage key — width persists across sessions if provided. */
   storageKey?: string;
-  /** Initial right-pane width as a fraction (0-1). Default 0.45. */
+  /** Initial detail-pane width in pixels. Default 640. The pane stays
+   *  this wide on every viewport; the left pane (table) takes whatever
+   *  space remains. This makes describe content render at a stable,
+   *  predictable width so chip layouts, container cards, and gauges
+   *  look the same regardless of monitor size. */
   initial?: number;
+  /** Minimum detail-pane width in pixels. Drag-resize honors this.
+   *  Default 480 — below this the chip grid collapses to one column. */
   min?: number;
+  /** Maximum detail-pane width in pixels. Default 1100 — wide enough
+   *  for YAML and event tables while still leaving room for the table. */
   max?: number;
+  /** Pixels reserved for the left pane (table) on narrow viewports.
+   *  When the container is too small to honor both `min` AND
+   *  `minLeft`, the pane is squeezed below `min` so the table never
+   *  vanishes. Default 320 — tight but usable. */
+  minLeft?: number;
 }
 
 /**
- * Horizontal split with a draggable divider. The right pane collapses
- * (and the divider hides) when `right` is null — left pane fills.
+ * Horizontal split with a draggable divider and a fixed-width right
+ * pane. The right pane collapses (and the divider hides) when `right`
+ * is null — left pane fills.
+ *
+ * Pixel-based instead of fraction-based: the detail pane stays at the
+ * same absolute width on every monitor, and the table grows/shrinks
+ * with the viewport. The previous fraction approach made describe
+ * content wider on a 4K monitor than on a laptop, which produced
+ * inconsistent chip wrap behavior and a bunch of right-side dead space
+ * for pods with short labels. Anchoring the pane to a fixed width
+ * removes that variance — all describe content lays out the same.
  *
  * Affordances:
  *   - 1px line at rest, hover thickens to ~5px tinted accent zone
  *   - Drag-grip dots appear on hover
  *   - Double-click resets to `initial`
  *   - Width persists to localStorage if `storageKey` is given
+ *   - Honors `minLeft` so the table never disappears on narrow windows
  */
 export function SplitPane({
   left,
   right,
   storageKey,
-  initial = 0.45,
-  min = 0.25,
-  max = 0.7,
+  initial = 640,
+  min = 480,
+  max = 1100,
+  minLeft = 320,
 }: SplitPaneProps) {
   const readInitial = (): number => {
     if (storageKey) {
       const stored = localStorage.getItem(storageKey);
       if (stored) {
         const v = parseFloat(stored);
-        if (!Number.isNaN(v)) return Math.min(max, Math.max(min, v));
+        if (!Number.isNaN(v) && v >= min && v <= max) {
+          return v;
+        }
       }
     }
     return initial;
   };
 
-  const [rightFraction, setRightFraction] = useState<number>(readInitial);
+  const [rightWidth, setRightWidth] = useState<number>(readInitial);
   const containerRef = useRef<HTMLDivElement>(null);
+  const [containerWidth, setContainerWidth] = useState<number>(0);
   const dragStateRef = useRef<{
     startX: number;
-    startFraction: number;
-    width: number;
+    startWidth: number;
   } | null>(null);
+
+  // Track the parent's width so we can clamp the pane on narrow
+  // viewports. Without this, opening the page on a 1280px laptop with a
+  // stored width of 800px would leave only ~480px for the table — too
+  // tight to read.
+  useEffect(() => {
+    if (!containerRef.current) return;
+    const ro = new ResizeObserver((entries) => {
+      const w = entries[0]?.contentRect.width ?? 0;
+      setContainerWidth(w);
+    });
+    ro.observe(containerRef.current);
+    return () => ro.disconnect();
+  }, []);
 
   useEffect(() => {
     if (storageKey) {
-      localStorage.setItem(storageKey, rightFraction.toFixed(4));
+      localStorage.setItem(storageKey, String(Math.round(rightWidth)));
     }
-  }, [rightFraction, storageKey]);
+  }, [rightWidth, storageKey]);
 
   useEffect(() => {
     const onMove = (e: MouseEvent) => {
       const ds = dragStateRef.current;
       if (!ds) return;
-      const dx = e.clientX - ds.startX;
-      const next = Math.max(
-        min,
-        Math.min(max, ds.startFraction - dx / ds.width),
-      );
-      setRightFraction(next);
+      // Drag the divider LEFT to grow the detail pane (subtract dx).
+      const next = ds.startWidth - (e.clientX - ds.startX);
+      const cw = containerRef.current?.getBoundingClientRect().width ?? 0;
+      // Upper bound is the smaller of the configured max and what the
+      // current viewport leaves after honoring minLeft.
+      const upper = Math.min(max, Math.max(min, cw - minLeft));
+      setRightWidth(Math.max(min, Math.min(upper, next)));
     };
     const onUp = () => {
       dragStateRef.current = null;
@@ -76,25 +117,38 @@ export function SplitPane({
       document.removeEventListener("mousemove", onMove);
       document.removeEventListener("mouseup", onUp);
     };
-  }, [min, max]);
+  }, [min, max, minLeft]);
 
   const startDrag = (e: React.MouseEvent) => {
     if (!containerRef.current) return;
-    const rect = containerRef.current.getBoundingClientRect();
     dragStateRef.current = {
       startX: e.clientX,
-      startFraction: rightFraction,
-      width: rect.width,
+      startWidth: rightWidth,
     };
     document.body.style.cursor = "col-resize";
     document.body.style.userSelect = "none";
   };
 
-  const resetToDefault = () => setRightFraction(initial);
+  const resetToDefault = () => setRightWidth(initial);
+
+  // Effective width = the stored value clamped by what the current
+  // viewport allows. We don't write this back to localStorage — the
+  // user's preference is preserved for when they widen the window
+  // again.
+  const effectiveWidth = (() => {
+    if (containerWidth <= 0) return rightWidth;
+    const upper = Math.max(min, containerWidth - minLeft);
+    // Hard floor at 1px so we never apply width: 0 (which can cause
+    // layout glitches in some browsers). Pane never goes below `min`
+    // unless the viewport itself can't accommodate that.
+    return Math.max(1, Math.min(rightWidth, upper));
+  })();
 
   return (
-    <div ref={containerRef} className="flex min-h-0 flex-1">
-      <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">{left}</div>
+    <div ref={containerRef} className="flex min-h-0 min-w-0 flex-1">
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+        {left}
+      </div>
       {right && (
         <>
           <div
@@ -116,7 +170,7 @@ export function SplitPane({
           </div>
           <div
             className="flex min-w-0 shrink-0 flex-col bg-surface"
-            style={{ width: `${rightFraction * 100}%` }}
+            style={{ width: `${effectiveWidth}px` }}
           >
             {right}
           </div>

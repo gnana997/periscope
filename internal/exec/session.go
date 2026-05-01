@@ -67,7 +67,11 @@ const pingTimeout = 10 * time.Second
 //   - registering/de-registering the session in a Registry,
 //   - emitting audit start/end records,
 //   - closing the WebSocket if Run returns an error before doing so itself.
-func Run(ctx context.Context, ws *websocket.Conn, p credentials.Provider, params Params, cfg Config) (k8s.ExecResult, Stats, error) {
+//
+// policy may be nil when the caller doesn't want circuit-breaker
+// bookkeeping; in that case ExecPod runs WS-then-SPDY without
+// remembering outcomes (PR1/PR2 behavior).
+func Run(ctx context.Context, ws *websocket.Conn, p credentials.Provider, params Params, cfg Config, policy *k8s.Policy) (k8s.ExecResult, Stats, error) {
 	// Tie the session to a cancellable context. Any path that wants to end
 	// the session — client {type:close}, idle timeout, heartbeat fail,
 	// stream EOF, error — cancels here.
@@ -240,6 +244,7 @@ func Run(ctx context.Context, ws *websocket.Conn, p credentials.Provider, params
 		Stderr:       stdoutW,
 		TerminalSize: resizeCh,
 		SessionID:    params.SessionID,
+		Policy:       policy,
 	})
 
 	// Closing the writer end of stdout signals the writer goroutine to

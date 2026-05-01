@@ -34,6 +34,13 @@ func defaultNewClient(ctx context.Context, p credentials.Provider, c clusters.Cl
 	return cs, nil
 }
 
+// NewClientset is the public, test-swappable entry point for callers
+// outside this package that need a clientset. Wraps newClientFn so the
+// existing test fakes flow through unchanged.
+func NewClientset(ctx context.Context, p credentials.Provider, c clusters.Cluster) (kubernetes.Interface, error) {
+	return newClientFn(ctx, p, c)
+}
+
 func defaultNewMetricsClient(ctx context.Context, p credentials.Provider, c clusters.Cluster) (metricsversioned.Interface, error) {
 	cfg, err := buildRestConfig(ctx, p, c)
 	if err != nil {

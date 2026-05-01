@@ -97,7 +97,7 @@ export function PriorityClassesPage({ cluster }: { cluster: string }) {
         </div>
       </div>
       <SplitPane
-        storageKey="periscope.detailWidth"
+        storageKey="periscope.detailWidth.v4"
         left={
           query.isLoading ? <LoadingState resource="priorityclasses" /> :
           query.isError ? <ErrorState title="couldn't reach the cluster" message={(query.error as Error).message} /> :

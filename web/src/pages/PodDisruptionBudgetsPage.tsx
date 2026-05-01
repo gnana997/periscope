@@ -83,7 +83,7 @@ export function PodDisruptionBudgetsPage({ cluster }: { cluster: string }) {
       />
       <FilterStrip search={search} onSearch={(v) => setParam("q", v)} resultCount={filtered.length} totalCount={all.length} />
       <SplitPane
-        storageKey="periscope.detailWidth"
+        storageKey="periscope.detailWidth.v4"
         left={
           query.isLoading ? <LoadingState resource="poddisruptionbudgets" /> :
           query.isError ? <ErrorState title="couldn't reach the cluster" message={(query.error as Error).message} /> :

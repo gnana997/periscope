@@ -13,6 +13,11 @@ export interface Cluster {
   region?: string;
   kubeconfigPath?: string;
   kubeconfigContext?: string;
+  /** PR4 — false when the operator set `exec.enabled: false` in
+   *  clusters.yaml. The UI hides the Open Shell action and filters this
+   *  cluster out of the empty-state picker. Optional/undefined for
+   *  forward-compatibility with backends that haven't shipped PR4. */
+  execEnabled?: boolean;
 }
 
 export interface ClustersResponse {

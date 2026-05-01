@@ -45,6 +45,53 @@ type Cluster struct {
 	// KubeconfigContext is the name of the context within the kubeconfig
 	// to use. Empty means "use the kubeconfig's current-context".
 	KubeconfigContext string `yaml:"kubeconfigContext,omitempty" json:"kubeconfigContext,omitempty"`
+
+	// Exec carries per-cluster overrides for pod-exec lifecycle and
+	// caps. Any field left nil/zero falls back to the global default.
+	// Omitted entirely from JSON to avoid leaking config-shape changes
+	// into the API; the listClusters handler emits a computed
+	// `execEnabled` boolean instead.
+	Exec *ExecConfig `yaml:"exec,omitempty" json:"-"`
+}
+
+// ExecConfig is the per-cluster override block. Pointer-typed scalars
+// distinguish "operator omitted this knob" (use global default) from
+// "operator set it to zero" (which would be a nonsensical config and is
+// validated against at load time).
+type ExecConfig struct {
+	// Enabled, if false, hides the Open Shell action and rejects exec
+	// requests with HTTP 403 / E_EXEC_DISABLED. Defaults to true (exec
+	// is allowed on every registered cluster unless explicitly opted
+	// out).
+	Enabled *bool `yaml:"enabled,omitempty"`
+
+	// IdleSeconds overrides PERISCOPE_EXEC_IDLE_SECONDS for this
+	// cluster. Useful when prod debugging needs a 30-minute timeout
+	// while dev clusters keep the 10-minute default.
+	IdleSeconds *int `yaml:"serverIdleSeconds,omitempty"`
+
+	// IdleWarnSeconds overrides PERISCOPE_EXEC_IDLE_WARN_SECONDS.
+	IdleWarnSeconds *int `yaml:"idleWarnSeconds,omitempty"`
+
+	// HeartbeatSeconds overrides PERISCOPE_EXEC_HEARTBEAT_SECONDS.
+	HeartbeatSeconds *int `yaml:"heartbeatSeconds,omitempty"`
+
+	// MaxSessionsPerUser overrides the global per-user concurrent cap.
+	MaxSessionsPerUser *int `yaml:"maxSessionsPerUser,omitempty"`
+
+	// MaxSessionsTotal overrides the global per-cluster total cap.
+	MaxSessionsTotal *int `yaml:"maxSessionsTotal,omitempty"`
+}
+
+// ExecEnabled reports whether pod exec is enabled for this cluster
+// after applying the default. Defaults to true when Exec is nil or
+// Exec.Enabled is nil — exec ships on by default and operators opt out
+// per-cluster.
+func (c Cluster) ExecEnabled() bool {
+	if c.Exec == nil || c.Exec.Enabled == nil {
+		return true
+	}
+	return *c.Exec.Enabled
 }
 
 // EKSName returns the AWS-side cluster name parsed from the ARN

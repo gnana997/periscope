@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"net/url"
 
 	corev1 "k8s.io/api/core/v1"
@@ -70,9 +71,16 @@ type ExecPodArgs struct {
 	TerminalSize <-chan remotecommand.TerminalSize
 
 	// SessionID is forwarded into structured logs so app-level audit can be
-	// joined to other records keyed on the same UUID. Cluster-side audit
-	// integration is a v2 concern and not wired through transport here.
+	// joined to other records keyed on the same UUID. Also injected into the
+	// outgoing apiserver request as the audit.periscope.io/session-id
+	// HTTP header via rest.Config.WrapTransport, so v2 K8s audit logs
+	// can join Periscope's app log on a single ID.
 	SessionID string
+
+	// Policy, if non-nil, governs the WS-vs-SPDY transport choice for
+	// this attempt and records the outcome. nil means "always try
+	// WS-then-SPDY without bookkeeping" (PR1/PR2 behavior).
+	Policy *Policy
 }
 
 // ResolvedExec captures the parameters that were actually used after
@@ -87,6 +95,12 @@ type ExecResult struct {
 	ExitCode int
 	Reason   string // "completed" | "container_exit" | "stream_canceled"
 	Resolved ResolvedExec
+
+	// Transport is the wire protocol that actually carried the stream.
+	// Empty when the stream never opened (config error / pod lookup
+	// failed). Surfaced into the audit session_end record so compliance
+	// teams can correlate apiserver-side transport with our log line.
+	Transport PolicyTransport
 }
 
 // ResolveExecTarget resolves the container name for a pod given the caller's
@@ -128,6 +142,14 @@ func ExecPod(ctx context.Context, p credentials.Provider, args ExecPodArgs) (Exe
 	if err != nil {
 		return ExecResult{}, err
 	}
+	// Inject session-id annotation header so v2 K8s audit can join app
+	// audit on the UUID. The header is harmless on v1 — the apiserver
+	// just ignores unknown headers — and sets us up for v2 without a
+	// migration. Wrapping a fresh copy avoids mutating shared transport
+	// state across requests.
+	if args.SessionID != "" {
+		cfg = withSessionIDHeader(cfg, args.SessionID)
+	}
 	cs, err := kubernetes.NewForConfig(cfg)
 	if err != nil {
 		return ExecResult{}, fmt.Errorf("build clientset: %w", err)
@@ -159,54 +181,136 @@ func ExecPod(ctx context.Context, p credentials.Provider, args ExecPodArgs) (Exe
 			TTY:       args.TTY,
 		}, scheme.ParameterCodec)
 
-	executor, err := buildFallbackExecutor(cfg, req.URL())
-	if err != nil {
-		return ExecResult{Resolved: resolved}, fmt.Errorf("build executor: %w", err)
+	mode := ModeWSThenSPDY
+	if args.Policy != nil {
+		mode = args.Policy.Choose(args.Cluster.Name)
 	}
 
-	streamErr := executor.StreamWithContext(ctx, remotecommand.StreamOptions{
+	transport, streamErr := runWithFallback(ctx, cfg, req.URL(), mode, remotecommand.StreamOptions{
 		Stdin:             args.Stdin,
 		Stdout:            args.Stdout,
 		Stderr:            args.Stderr,
 		Tty:               args.TTY,
 		TerminalSizeQueue: chanQueue(args.TerminalSize),
-	})
+	}, args.Policy, args.Cluster.Name)
 
 	if streamErr == nil {
-		return ExecResult{ExitCode: 0, Reason: "completed", Resolved: resolved}, nil
+		return ExecResult{ExitCode: 0, Reason: "completed", Resolved: resolved, Transport: transport}, nil
 	}
 
 	// Container exited with a non-zero status — surface the exit code.
 	var codeErr exec_util.CodeExitError
 	if errors.As(streamErr, &codeErr) {
-		return ExecResult{ExitCode: codeErr.Code, Reason: "container_exit", Resolved: resolved}, nil
+		return ExecResult{ExitCode: codeErr.Code, Reason: "container_exit", Resolved: resolved, Transport: transport}, nil
 	}
 
 	if errors.Is(streamErr, context.Canceled) || errors.Is(streamErr, context.DeadlineExceeded) {
-		return ExecResult{ExitCode: -1, Reason: "stream_canceled", Resolved: resolved}, streamErr
+		return ExecResult{ExitCode: -1, Reason: "stream_canceled", Resolved: resolved, Transport: transport}, streamErr
 	}
 
-	return ExecResult{ExitCode: -1, Resolved: resolved}, streamErr
+	return ExecResult{ExitCode: -1, Resolved: resolved, Transport: transport}, streamErr
 }
 
-// buildFallbackExecutor returns a remotecommand.Executor that prefers
-// WebSocket (v5.channel.k8s.io) and falls back to SPDY when the apiserver
-// or an intermediate proxy rejects the upgrade. This is the same shape
-// kubectl uses since 1.31.
-func buildFallbackExecutor(cfg *rest.Config, u *url.URL) (remotecommand.Executor, error) {
-	wsExec, err := remotecommand.NewWebSocketExecutor(cfg, "GET", u.String())
-	if err != nil {
-		return nil, fmt.Errorf("ws executor: %w", err)
+// runWithFallback streams the exec attempt through the chosen transport
+// and falls back to SPDY when the WS upgrade is rejected (HTTP 4xx with
+// no upgrade response). When a Policy is supplied, it observes the
+// outcome so the breaker can pin the cluster on consecutive WS failures.
+//
+// This is our own implementation of FallbackExecutor's behavior: same
+// shape as client-go's NewFallbackExecutor but instrumented so we know
+// which transport actually succeeded.
+func runWithFallback(
+	ctx context.Context,
+	cfg *rest.Config,
+	u *url.URL,
+	mode PolicyMode,
+	opts remotecommand.StreamOptions,
+	policy *Policy,
+	clusterName string,
+) (PolicyTransport, error) {
+	if mode == ModeSPDYOnly {
+		err := streamSPDY(ctx, cfg, u, opts)
+		if policy != nil {
+			policy.RecordResult(clusterName, ModeSPDYOnly, false, err == nil)
+		}
+		return TransportSPDY, err
 	}
-	spdyExec, err := remotecommand.NewSPDYExecutor(cfg, "POST", u)
-	if err != nil {
-		return nil, fmt.Errorf("spdy executor: %w", err)
+
+	// ws_then_spdy: attempt WebSocket first.
+	wsErr := streamWebSocket(ctx, cfg, u, opts)
+	if wsErr == nil {
+		if policy != nil {
+			policy.RecordResult(clusterName, ModeWSThenSPDY, false, true)
+		}
+		return TransportWS, nil
 	}
-	exec, err := remotecommand.NewFallbackExecutor(wsExec, spdyExec, httpstream.IsUpgradeFailure)
-	if err != nil {
-		return nil, fmt.Errorf("fallback executor: %w", err)
+
+	// Only fall back when the apiserver explicitly rejected the upgrade —
+	// other errors (auth, connection refused, etc.) are real failures
+	// SPDY can't recover from. This matches client-go's predicate.
+	if !httpstream.IsUpgradeFailure(wsErr) {
+		if policy != nil {
+			policy.RecordResult(clusterName, ModeWSThenSPDY, true, false)
+		}
+		return TransportWS, wsErr
 	}
-	return exec, nil
+
+	// WS handshake failed but a fallback may succeed.
+	spdyErr := streamSPDY(ctx, cfg, u, opts)
+	if policy != nil {
+		policy.RecordResult(clusterName, ModeWSThenSPDY, true, spdyErr == nil)
+	}
+	if spdyErr != nil {
+		return TransportSPDY, spdyErr
+	}
+	return TransportSPDY, nil
+}
+
+func streamWebSocket(ctx context.Context, cfg *rest.Config, u *url.URL, opts remotecommand.StreamOptions) error {
+	exec, err := remotecommand.NewWebSocketExecutor(cfg, "GET", u.String())
+	if err != nil {
+		return fmt.Errorf("ws executor: %w", err)
+	}
+	return exec.StreamWithContext(ctx, opts)
+}
+
+func streamSPDY(ctx context.Context, cfg *rest.Config, u *url.URL, opts remotecommand.StreamOptions) error {
+	exec, err := remotecommand.NewSPDYExecutor(cfg, "POST", u)
+	if err != nil {
+		return fmt.Errorf("spdy executor: %w", err)
+	}
+	return exec.StreamWithContext(ctx, opts)
+}
+
+// withSessionIDHeader returns a copy of cfg whose transport injects the
+// audit.periscope.io/session-id header on every outgoing request. The
+// apiserver echoes this into its audit annotations when audit policy
+// captures request headers, so v2 compliance teams can pivot from a
+// Periscope app log entry to the cluster's audit log on the same UUID.
+func withSessionIDHeader(cfg *rest.Config, sessionID string) *rest.Config {
+	out := rest.CopyConfig(cfg)
+	prev := out.WrapTransport
+	out.WrapTransport = func(rt http.RoundTripper) http.RoundTripper {
+		if prev != nil {
+			rt = prev(rt)
+		}
+		return roundTripperFunc(func(req *http.Request) (*http.Response, error) {
+			// Avoid clobbering an existing header — chain-friendly.
+			if req.Header.Get(sessionIDHeader) == "" {
+				req.Header.Set(sessionIDHeader, sessionID)
+			}
+			return rt.RoundTrip(req)
+		})
+	}
+	return out
+}
+
+const sessionIDHeader = "Audit-Annotation-Periscope-Session-Id"
+
+type roundTripperFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripperFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
 }
 
 // chanTermSizeQueue adapts a <-chan TerminalSize into the

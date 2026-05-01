@@ -17,6 +17,7 @@ import (
 	"github.com/gnana997/periscope/internal/clusters"
 	"github.com/gnana997/periscope/internal/credentials"
 	execsess "github.com/gnana997/periscope/internal/exec"
+	"github.com/gnana997/periscope/internal/k8s"
 )
 
 // execHandler returns a credentials.Handler that upgrades the request to a
@@ -32,26 +33,78 @@ import (
 // Audit: emits structured slog records on session_start and session_end with
 // category=audit. See RFC 0001 §10 for the schema.
 //
-// Lifecycle config (heartbeat/idle thresholds) is captured at handler
-// construction so each session gets the same values; per-cluster overrides
-// land in PR4 (RFC 0001 §11/§14).
-func execHandler(reg *clusters.Registry, sessions *execsess.Registry) credentials.Handler {
+// PR4 additions:
+//   - Per-cluster Exec config (clusters.Cluster.Exec) overrides global
+//     defaults for idle/heartbeat/caps.
+//   - Concurrent caps enforced PRE-upgrade (HTTP 429) so we don't pay
+//     the WS handshake cost when the user has nothing left to spend.
+//   - Error taxonomy via apiErrorJSON: 4xx/5xx responses carry
+//     {code, message[, activeSessions]} so the SPA can render purpose-
+//     built UX (cap dialog, "exec disabled" tag, etc.).
+//   - Audit "transport" field reports which wire (ws_v5 vs spdy)
+//     actually carried the stream.
+func execHandler(reg *clusters.Registry, sessions *execsess.Registry, policy *k8s.Policy) credentials.Handler {
 	cfg := execsess.LoadConfig()
 	slog.Info("exec lifecycle config",
 		"heartbeat_seconds", int(cfg.HeartbeatInterval.Seconds()),
 		"idle_seconds", int(cfg.IdleTimeout.Seconds()),
 		"idle_warn_seconds", int(cfg.IdleWarnLead.Seconds()),
+		"max_sessions_per_user", cfg.MaxSessionsPerUser,
+		"max_sessions_total", cfg.MaxSessionsTotal,
 	)
 	return func(w http.ResponseWriter, r *http.Request, p credentials.Provider) {
 		c, ok := reg.ByName(chi.URLParam(r, "cluster"))
 		if !ok {
-			http.Error(w, "cluster not found", http.StatusNotFound)
+			apiErrorJSON(w, http.StatusNotFound, "E_NOT_FOUND", "cluster not found", nil)
 			return
 		}
 		ns := chi.URLParam(r, "ns")
 		pod := chi.URLParam(r, "name")
 		if ns == "" || pod == "" {
-			http.Error(w, "namespace and pod required", http.StatusBadRequest)
+			apiErrorJSON(w, http.StatusBadRequest, "E_INVALID_REQUEST", "namespace and pod required", nil)
+			return
+		}
+
+		// Per-cluster overrides win over global config.
+		effectiveCfg := cfg
+		if c.Exec != nil {
+			effectiveCfg = cfg.ResolveForCluster(execsess.OverridesFromCluster(
+				c.Exec.IdleSeconds,
+				c.Exec.IdleWarnSeconds,
+				c.Exec.HeartbeatSeconds,
+				c.Exec.MaxSessionsPerUser,
+				c.Exec.MaxSessionsTotal,
+			))
+		}
+
+		// Cluster-level disable check. Lives here so the same response
+		// shape works for both "you can't exec on prod" and "cluster
+		// disappeared between page-load and click."
+		if !c.ExecEnabled() {
+			apiErrorJSON(w, http.StatusForbidden, "E_EXEC_DISABLED",
+				"pod exec is disabled on this cluster", nil)
+			return
+		}
+
+		// Cap checks BEFORE the WS upgrade — saves the handshake cost on
+		// rejection and lets us return a JSON body the SPA can read.
+		actor := p.Actor()
+		userCount := sessions.CountForActor(actor)
+		if userCount >= effectiveCfg.MaxSessionsPerUser {
+			active := capActiveSessions(sessions.SnapshotForActor(actor))
+			apiErrorJSON(w, http.StatusTooManyRequests, "E_CAP_USER",
+				"you've hit your concurrent shell cap. close one to open another.",
+				map[string]any{
+					"limit":          effectiveCfg.MaxSessionsPerUser,
+					"activeSessions": active,
+				})
+			return
+		}
+		clusterCount := sessions.CountForCluster(c.Name)
+		if clusterCount >= effectiveCfg.MaxSessionsTotal {
+			apiErrorJSON(w, http.StatusTooManyRequests, "E_CAP_CLUSTER",
+				"this cluster has hit its total shell cap. try again shortly.",
+				map[string]any{"limit": effectiveCfg.MaxSessionsTotal})
 			return
 		}
 
@@ -61,18 +114,17 @@ func execHandler(reg *clusters.Registry, sessions *execsess.Registry) credential
 
 		command, err := decodeCommand(q.Get("command"))
 		if err != nil {
-			http.Error(w, "invalid command parameter", http.StatusBadRequest)
+			apiErrorJSON(w, http.StatusBadRequest, "E_INVALID_REQUEST",
+				"invalid command parameter", nil)
 			return
 		}
 
 		ws, err := websocket.Accept(w, r, &websocket.AcceptOptions{
 			OriginPatterns: originPatterns(),
-			// stdout chunks come in 4–32 KiB; 1 MiB is plenty of headroom.
-			// Mainly bounds stdin frames the browser is allowed to send.
 		})
 		if err != nil {
 			slog.WarnContext(r.Context(), "exec.upgrade failed",
-				"err", err, "actor", p.Actor(), "cluster", c.Name, "ns", ns, "pod", pod)
+				"err", err, "actor", actor, "cluster", c.Name, "ns", ns, "pod", pod)
 			return // websocket.Accept already wrote the HTTP error
 		}
 		// Best-effort close. session.Run writes its own {type:closed} frame
@@ -82,7 +134,7 @@ func execHandler(reg *clusters.Registry, sessions *execsess.Registry) credential
 		sessionID := uuid.NewString()
 		params := execsess.Params{
 			SessionID: sessionID,
-			Actor:     p.Actor(),
+			Actor:     actor,
 			Cluster:   c,
 			Namespace: ns,
 			Pod:       pod,
@@ -102,9 +154,8 @@ func execHandler(reg *clusters.Registry, sessions *execsess.Registry) credential
 			StartedAt: started,
 		}
 		if !sessions.Add(entry) {
-			// Astronomically unlikely with UUIDv4, but handle it explicitly
-			// so we never silently overwrite an audit-tracked session.
-			http.Error(w, "session id collision", http.StatusInternalServerError)
+			apiErrorJSON(w, http.StatusInternalServerError, "E_INTERNAL",
+				"session id collision", nil)
 			return
 		}
 		defer sessions.Remove(sessionID)
@@ -124,7 +175,7 @@ func execHandler(reg *clusters.Registry, sessions *execsess.Registry) credential
 			"started_at", started.Format(time.RFC3339Nano),
 		)
 
-		result, stats, runErr := execsess.Run(r.Context(), ws, p, params, cfg)
+		result, stats, runErr := execsess.Run(r.Context(), ws, p, params, effectiveCfg, policy)
 		ended := time.Now().UTC()
 
 		closeReason := result.Reason
@@ -157,6 +208,7 @@ func execHandler(reg *clusters.Registry, sessions *execsess.Registry) credential
 			"tty", tty,
 			"command", commandOrResolved(command, result.Resolved.Command),
 			"k8s_identity", k8sIdentityLabel(c),
+			"transport", string(result.Transport),
 			"started_at", started.Format(time.RFC3339Nano),
 			"ended_at", ended.Format(time.RFC3339Nano),
 			"duration_ms", ended.Sub(started).Milliseconds(),
@@ -167,6 +219,41 @@ func execHandler(reg *clusters.Registry, sessions *execsess.Registry) credential
 			"err", errString(runErr),
 		)
 	}
+}
+
+// apiErrorJSON writes a structured JSON error response so the SPA can
+// switch on `code` instead of parsing free-text. extras is merged into
+// the body so caller-specific fields (activeSessions, limit, etc.) ride
+// along on the same envelope.
+func apiErrorJSON(w http.ResponseWriter, status int, code, message string, extras map[string]any) {
+	body := map[string]any{
+		"code":    code,
+		"message": message,
+	}
+	for k, v := range extras {
+		body[k] = v
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(body)
+}
+
+// capActiveSessions reduces a snapshot of Session records to the slim
+// view the cap-reached dialog renders. Avoids leaking unrelated fields
+// (actor, etc.) and keeps the response compact.
+func capActiveSessions(in []execsess.Session) []map[string]any {
+	out := make([]map[string]any, 0, len(in))
+	for _, s := range in {
+		out = append(out, map[string]any{
+			"id":        s.ID,
+			"cluster":   s.Cluster,
+			"namespace": s.Namespace,
+			"pod":       s.Pod,
+			"container": s.Container,
+			"startedAt": s.StartedAt.Format(time.RFC3339Nano),
+		})
+	}
+	return out
 }
 
 // decodeCommand parses the optional `command` query parameter. The wire
