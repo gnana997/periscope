@@ -43,6 +43,24 @@ func main() {
 	mux.HandleFunc("GET /api/whoami", credentials.Wrap(factory, whoami))
 	mux.HandleFunc("GET /api/clusters", listClustersHandler(registry))
 
+	// --- Overview / dashboard ---
+
+	mux.HandleFunc("GET /api/clusters/{cluster}/dashboard", credentials.Wrap(factory,
+		func(w http.ResponseWriter, r *http.Request, p credentials.Provider) {
+			c, ok := registry.ByName(r.PathValue("cluster"))
+			if !ok {
+				http.Error(w, "cluster not found", http.StatusNotFound)
+				return
+			}
+			summary, err := k8s.GetClusterSummary(r.Context(), p, k8s.GetClusterSummaryArgs{Cluster: c})
+			if err != nil {
+				slog.Error("cluster summary", "cluster", c.Name, "err", err)
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			writeJSON(w, http.StatusOK, summary)
+		}))
+
 	// --- LIST endpoints ---
 
 	mux.HandleFunc("GET /api/clusters/{cluster}/nodes", credentials.Wrap(factory,

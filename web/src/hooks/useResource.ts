@@ -3,6 +3,7 @@ import { api, type ClusterScopedKind, type YamlKind } from "../lib/api";
 import type {
   ClusterEventList,
   ClusterRoleBindingDetail,
+  ClusterSummary,
   ClusterRoleDetail,
   ConfigMapDetail,
   CronJobDetail,
@@ -82,6 +83,8 @@ export function useResource({ cluster, resource, namespace }: ResourceQueryArgs)
           return api.clusterRoleBindings(cluster!, signal);
         case "serviceaccounts":
           return api.serviceAccounts(cluster!, namespace, signal);
+        default:
+          throw new Error(`Unknown resource kind: ${resource}`);
       }
     },
     enabled: Boolean(cluster),
@@ -273,6 +276,16 @@ export function useYaml(
         ? api.clusterScopedYaml(cluster, kind as ClusterScopedKind, name!, signal)
         : api.yaml(cluster, kind as Exclude<YamlKind, ClusterScopedKind>, ns, name!, signal),
     enabled: enabled && Boolean(name),
+  });
+}
+
+// --- Cluster overview ---
+
+export function useClusterSummary(cluster: string) {
+  return useQuery<ClusterSummary>({
+    queryKey: ["cluster-summary", cluster],
+    queryFn: ({ signal }) => api.getClusterSummary(cluster, signal),
+    refetchInterval: 30_000,
   });
 }
 

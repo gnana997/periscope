@@ -1,6 +1,7 @@
 import type {
   ClusterEventList,
   ClusterRoleBindingDetail,
+  ClusterSummary,
   ClusterRoleBindingList,
   ClusterRoleDetail,
   ClusterRoleList,
@@ -124,6 +125,9 @@ export type YamlKind =
 
 export const api = {
   whoami: (signal?: AbortSignal) => getJSON<Whoami>("/api/whoami", signal),
+
+  getClusterSummary: (cluster: string, signal?: AbortSignal) =>
+    getJSON<ClusterSummary>(`/api/clusters/${enc(cluster)}/dashboard`, signal),
 
   clusters: (signal?: AbortSignal) =>
     getJSON<ClustersResponse>("/api/clusters", signal),

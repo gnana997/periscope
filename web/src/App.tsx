@@ -13,6 +13,7 @@ import { Sidebar } from "./components/shell/Sidebar";
 import { ErrorState, NoClustersState } from "./components/table/states";
 import { useClusters } from "./hooks/useClusters";
 import { useTheme } from "./hooks/useTheme";
+import { OverviewPage } from "./pages/OverviewPage";
 import { ConfigMapsPage } from "./pages/ConfigMapsPage";
 import { CronJobsPage } from "./pages/CronJobsPage";
 import { EventsPage } from "./pages/EventsPage";
@@ -47,7 +48,8 @@ export default function App() {
     <Routes>
       <Route path="/" element={<RootRedirect />} />
       <Route path="/clusters/:cluster" element={<AppShell />}>
-        <Route index element={<Navigate to="pods" replace />} />
+        <Route index element={<Navigate to="overview" replace />} />
+        <Route path="overview" element={<WithCluster Page={OverviewPage} />} />
         <Route path="pods" element={<WithCluster Page={PodsPage} />} />
         <Route path="deployments" element={<WithCluster Page={DeploymentsPage} />} />
         <Route path="statefulsets" element={<WithCluster Page={StatefulSetsPage} />} />

@@ -689,9 +689,28 @@ export interface ServiceAccountDetail extends ServiceAccount {
   annotations?: Record<string, string>;
 }
 
+// --- Cluster Overview ---
+
+export interface ClusterSummary {
+  kubernetesVersion: string;
+  provider: string;
+  nodeCount: number;
+  nodeReadyCount: number;
+  podCount: number;
+  namespaceCount: number;
+  cpuAllocatable: string;
+  memoryAllocatable: string;
+  metricsAvailable: boolean;
+  cpuUsed?: string;
+  memoryUsed?: string;
+  cpuPercent?: number;
+  memoryPercent?: number;
+}
+
 // --- Resource catalog ---
 
 export type ResourceKind =
+  | "overview"
   | "nodes"
   | "namespaces"
   | "pods"

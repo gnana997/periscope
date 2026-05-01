@@ -726,3 +726,21 @@ type ServiceAccountDetail struct {
 	Labels      map[string]string `json:"labels,omitempty"`
 	Annotations map[string]string `json:"annotations,omitempty"`
 }
+
+// --- Cluster Summary (Overview page) ---
+
+type ClusterSummary struct {
+	KubernetesVersion string  `json:"kubernetesVersion"`
+	Provider          string  `json:"provider"` // "EKS" | "Kubeconfig"
+	NodeCount         int     `json:"nodeCount"`
+	NodeReadyCount    int     `json:"nodeReadyCount"`
+	PodCount          int     `json:"podCount"`
+	NamespaceCount    int     `json:"namespaceCount"`
+	CPUAllocatable    string  `json:"cpuAllocatable"`
+	MemoryAllocatable string  `json:"memoryAllocatable"`
+	MetricsAvailable  bool    `json:"metricsAvailable"`
+	CPUUsed           string  `json:"cpuUsed,omitempty"`
+	MemoryUsed        string  `json:"memoryUsed,omitempty"`
+	CPUPercent        float64 `json:"cpuPercent,omitempty"`
+	MemoryPercent     float64 `json:"memoryPercent,omitempty"`
+}

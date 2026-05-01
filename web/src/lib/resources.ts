@@ -22,6 +22,7 @@ export type SoonResource =
   | "exec";
 
 export const RESOURCES: ResourceMeta[] = [
+  { id: "overview",     label: "Overview",     group: "Cluster",    ready: true  },
   { id: "pods",         label: "Pods",         group: "Workloads",  ready: true  },
   { id: "deployments",  label: "Deployments",  group: "Workloads",  ready: true  },
   { id: "statefulsets", label: "StatefulSets", group: "Workloads",  ready: true  },
