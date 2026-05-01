@@ -6,7 +6,7 @@
 
 import type { ResourceKind } from "./types";
 
-export type ResourceGroup = "Workloads" | "Networking" | "Config" | "Cluster";
+export type ResourceGroup = "Workloads" | "Networking" | "Config" | "Storage" | "Cluster";
 
 export interface ResourceMeta {
   id: ResourceKind | SoonResource;
@@ -30,10 +30,13 @@ export const RESOURCES: ResourceMeta[] = [
   { id: "cronjobs",     label: "CronJobs",     group: "Workloads",  ready: true  },
   { id: "services",     label: "Services",     group: "Networking", ready: true  },
   { id: "ingresses",    label: "Ingresses",    group: "Networking", ready: true  },
-  { id: "configmaps",   label: "ConfigMaps",   group: "Config",     ready: true  },
-  { id: "secrets",      label: "Secrets",      group: "Config",     ready: true  },
-  { id: "namespaces",   label: "Namespaces",   group: "Cluster",    ready: true  },
-  { id: "events",       label: "Events",       group: "Cluster",    ready: true  },
+  { id: "configmaps",    label: "ConfigMaps",    group: "Config",   ready: true  },
+  { id: "secrets",       label: "Secrets",       group: "Config",   ready: true  },
+  { id: "pvcs",          label: "PersistentVolumeClaims", group: "Storage",  ready: true  },
+  { id: "pvs",           label: "PersistentVolumes", group: "Storage", ready: true },
+  { id: "storageclasses", label: "StorageClasses", group: "Storage", ready: true },
+  { id: "namespaces",    label: "Namespaces",    group: "Cluster",  ready: true  },
+  { id: "events",        label: "Events",        group: "Cluster",  ready: true  },
 ];
 
 export const RESOURCE_GROUPS: ResourceGroup[] = [
@@ -41,6 +44,7 @@ export const RESOURCE_GROUPS: ResourceGroup[] = [
   "Workloads",
   "Networking",
   "Config",
+  "Storage",
 ];
 
 export function resourcesByGroup(group: ResourceGroup): ResourceMeta[] {

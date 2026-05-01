@@ -29,6 +29,8 @@ function resourcePath(
     Ingress: "ingresses",
     ConfigMap: "configmaps",
     Secret: "secrets",
+    PersistentVolumeClaim: "pvcs",
+    PersistentVolume: "pvs",
   };
   const route = kindMap[kind];
   if (!route) return null;

@@ -23,6 +23,9 @@ import { PodsPage } from "./pages/PodsPage";
 import { SecretsPage } from "./pages/SecretsPage";
 import { ServicesPage } from "./pages/ServicesPage";
 import { StatefulSetsPage } from "./pages/StatefulSetsPage";
+import { PVCsPage } from "./pages/PVCsPage";
+import { PVsPage } from "./pages/PVsPage";
+import { StorageClassesPage } from "./pages/StorageClassesPage";
 
 export default function App() {
   useTheme();
@@ -44,6 +47,9 @@ export default function App() {
         <Route path="secrets" element={<WithCluster Page={SecretsPage} />} />
         <Route path="namespaces" element={<WithCluster Page={NamespacesPage} />} />
         <Route path="events" element={<WithCluster Page={EventsPage} />} />
+        <Route path="pvcs" element={<WithCluster Page={PVCsPage} />} />
+        <Route path="pvs" element={<WithCluster Page={PVsPage} />} />
+        <Route path="storageclasses" element={<WithCluster Page={StorageClassesPage} />} />
       </Route>
       <Route path="*" element={<RootRedirect />} />
     </Routes>

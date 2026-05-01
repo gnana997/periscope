@@ -416,6 +416,90 @@ type CronJobDetail struct {
 	Annotations                map[string]string `json:"annotations,omitempty"`
 }
 
+// --- PersistentVolumeClaim ---
+
+type PVC struct {
+	Name         string    `json:"name"`
+	Namespace    string    `json:"namespace"`
+	Status       string    `json:"status"`
+	StorageClass string    `json:"storageClass,omitempty"`
+	Capacity     string    `json:"capacity,omitempty"`
+	AccessModes  []string  `json:"accessModes"`
+	CreatedAt    time.Time `json:"createdAt"`
+}
+
+type PVCList struct {
+	PVCs []PVC `json:"pvcs"`
+}
+
+type PVCCondition struct {
+	Type    string `json:"type"`
+	Status  string `json:"status"`
+	Reason  string `json:"reason,omitempty"`
+	Message string `json:"message,omitempty"`
+}
+
+type PVCDetail struct {
+	PVC
+	VolumeName  string            `json:"volumeName,omitempty"`
+	Conditions  []PVCCondition    `json:"conditions,omitempty"`
+	Labels      map[string]string `json:"labels,omitempty"`
+	Annotations map[string]string `json:"annotations,omitempty"`
+}
+
+// --- PersistentVolume ---
+
+type PVClaimRef struct {
+	Namespace string `json:"namespace"`
+	Name      string `json:"name"`
+}
+
+type PV struct {
+	Name          string    `json:"name"`
+	Status        string    `json:"status"`
+	StorageClass  string    `json:"storageClass,omitempty"`
+	Capacity      string    `json:"capacity,omitempty"`
+	AccessModes   []string  `json:"accessModes"`
+	ReclaimPolicy string    `json:"reclaimPolicy,omitempty"`
+	CreatedAt     time.Time `json:"createdAt"`
+}
+
+type PVList struct {
+	PVs []PV `json:"pvs"`
+}
+
+type PVDetail struct {
+	PV
+	ClaimRef    *PVClaimRef       `json:"claimRef,omitempty"`
+	VolumeMode  string            `json:"volumeMode,omitempty"`
+	Source      string            `json:"source,omitempty"`
+	Labels      map[string]string `json:"labels,omitempty"`
+	Annotations map[string]string `json:"annotations,omitempty"`
+}
+
+// --- StorageClass ---
+
+type StorageClass struct {
+	Name                 string    `json:"name"`
+	Provisioner          string    `json:"provisioner"`
+	ReclaimPolicy        string    `json:"reclaimPolicy,omitempty"`
+	VolumeBindingMode    string    `json:"volumeBindingMode,omitempty"`
+	AllowVolumeExpansion bool      `json:"allowVolumeExpansion"`
+	CreatedAt            time.Time `json:"createdAt"`
+}
+
+type StorageClassList struct {
+	StorageClasses []StorageClass `json:"storageClasses"`
+}
+
+type StorageClassDetail struct {
+	StorageClass
+	Parameters   map[string]string `json:"parameters,omitempty"`
+	MountOptions []string          `json:"mountOptions,omitempty"`
+	Labels       map[string]string `json:"labels,omitempty"`
+	Annotations  map[string]string `json:"annotations,omitempty"`
+}
+
 // --- ClusterEvent ---
 //
 // Used by the cluster-wide events list page. Distinct from the per-object

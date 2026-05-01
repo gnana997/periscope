@@ -107,6 +107,24 @@ func main() {
 				return k8s.ListCronJobs(ctx, p, k8s.ListCronJobsArgs{Cluster: c, Namespace: ns})
 			})))
 
+	mux.HandleFunc("GET /api/clusters/{cluster}/pvcs", credentials.Wrap(factory,
+		listResource(registry, "pvcs",
+			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, ns string) (k8s.PVCList, error) {
+				return k8s.ListPVCs(ctx, p, k8s.ListPVCsArgs{Cluster: c, Namespace: ns})
+			})))
+
+	mux.HandleFunc("GET /api/clusters/{cluster}/pvs", credentials.Wrap(factory,
+		listResource(registry, "pvs",
+			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, _ string) (k8s.PVList, error) {
+				return k8s.ListPVs(ctx, p, k8s.ListPVsArgs{Cluster: c})
+			})))
+
+	mux.HandleFunc("GET /api/clusters/{cluster}/storageclasses", credentials.Wrap(factory,
+		listResource(registry, "storageclasses",
+			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, _ string) (k8s.StorageClassList, error) {
+				return k8s.ListStorageClasses(ctx, p, k8s.ListStorageClassesArgs{Cluster: c})
+			})))
+
 	// --- GET (detail) endpoints ---
 
 	mux.HandleFunc("GET /api/clusters/{cluster}/pods/{ns}/{name}", credentials.Wrap(factory,
@@ -169,11 +187,29 @@ func main() {
 				return k8s.GetCronJob(ctx, p, k8s.GetCronJobArgs{Cluster: c, Namespace: ns, Name: name})
 			})))
 
-	// Namespaces are cluster-scoped: no {ns} segment.
+	mux.HandleFunc("GET /api/clusters/{cluster}/pvcs/{ns}/{name}", credentials.Wrap(factory,
+		detailHandler(registry, "pvc",
+			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, ns, name string) (k8s.PVCDetail, error) {
+				return k8s.GetPVC(ctx, p, k8s.GetPVCArgs{Cluster: c, Namespace: ns, Name: name})
+			})))
+
+	// Namespaces, PVs, and StorageClasses are cluster-scoped: no {ns} segment.
 	mux.HandleFunc("GET /api/clusters/{cluster}/namespaces/{name}", credentials.Wrap(factory,
 		detailHandler(registry, "namespace",
 			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, _, name string) (k8s.NamespaceDetail, error) {
 				return k8s.GetNamespace(ctx, p, k8s.GetNamespaceArgs{Cluster: c, Name: name})
+			})))
+
+	mux.HandleFunc("GET /api/clusters/{cluster}/pvs/{name}", credentials.Wrap(factory,
+		detailHandler(registry, "pv",
+			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, _, name string) (k8s.PVDetail, error) {
+				return k8s.GetPV(ctx, p, k8s.GetPVArgs{Cluster: c, Name: name})
+			})))
+
+	mux.HandleFunc("GET /api/clusters/{cluster}/storageclasses/{name}", credentials.Wrap(factory,
+		detailHandler(registry, "storageclass",
+			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, _, name string) (k8s.StorageClassDetail, error) {
+				return k8s.GetStorageClass(ctx, p, k8s.GetStorageClassArgs{Cluster: c, Name: name})
 			})))
 
 	// --- YAML endpoints ---
@@ -244,6 +280,24 @@ func main() {
 				return k8s.GetNamespaceYAML(ctx, p, k8s.GetNamespaceArgs{Cluster: c, Name: name})
 			})))
 
+	mux.HandleFunc("GET /api/clusters/{cluster}/pvcs/{ns}/{name}/yaml", credentials.Wrap(factory,
+		yamlHandler(registry, "pvc",
+			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, ns, name string) (string, error) {
+				return k8s.GetPVCYAML(ctx, p, k8s.GetPVCArgs{Cluster: c, Namespace: ns, Name: name})
+			})))
+
+	mux.HandleFunc("GET /api/clusters/{cluster}/pvs/{name}/yaml", credentials.Wrap(factory,
+		yamlHandler(registry, "pv",
+			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, _, name string) (string, error) {
+				return k8s.GetPVYAML(ctx, p, k8s.GetPVArgs{Cluster: c, Name: name})
+			})))
+
+	mux.HandleFunc("GET /api/clusters/{cluster}/storageclasses/{name}/yaml", credentials.Wrap(factory,
+		yamlHandler(registry, "storageclass",
+			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, _, name string) (string, error) {
+				return k8s.GetStorageClassYAML(ctx, p, k8s.GetStorageClassArgs{Cluster: c, Name: name})
+			})))
+
 	// --- Cluster-wide events list ---
 
 	mux.HandleFunc("GET /api/clusters/{cluster}/events", credentials.Wrap(factory,
@@ -276,6 +330,12 @@ func main() {
 		credentials.Wrap(factory, eventsHandler(registry, "CronJob")))
 	mux.HandleFunc("GET /api/clusters/{cluster}/namespaces/{name}/events",
 		credentials.Wrap(factory, eventsHandler(registry, "Namespace")))
+	mux.HandleFunc("GET /api/clusters/{cluster}/pvcs/{ns}/{name}/events",
+		credentials.Wrap(factory, eventsHandler(registry, "PersistentVolumeClaim")))
+	mux.HandleFunc("GET /api/clusters/{cluster}/pvs/{name}/events",
+		credentials.Wrap(factory, eventsHandler(registry, "PersistentVolume")))
+	mux.HandleFunc("GET /api/clusters/{cluster}/storageclasses/{name}/events",
+		credentials.Wrap(factory, eventsHandler(registry, "StorageClass")))
 
 	// --- Secret reveal endpoint (audit-logged, per-key) ---
 

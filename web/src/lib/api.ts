@@ -18,12 +18,18 @@ import type {
   NamespaceList,
   PodDetail,
   PodList,
+  PVCDetail,
+  PVCList,
+  PVDetail,
+  PVList,
   SecretDetail,
   SecretList,
   ServiceDetail,
   ServiceList,
   StatefulSetDetail,
   StatefulSetList,
+  StorageClassDetail,
+  StorageClassList,
   Whoami,
 } from "./types";
 
@@ -79,6 +85,8 @@ function clusterScopedURL(c: string, kind: string, name: string, suffix?: string
   return suffix ? `${base}/${suffix}` : base;
 }
 
+export type ClusterScopedKind = "namespaces" | "pvs" | "storageclasses";
+
 export type YamlKind =
   | "pods"
   | "deployments"
@@ -90,7 +98,10 @@ export type YamlKind =
   | "secrets"
   | "jobs"
   | "cronjobs"
-  | "namespaces";
+  | "namespaces"
+  | "pvcs"
+  | "pvs"
+  | "storageclasses";
 
 export const api = {
   whoami: (signal?: AbortSignal) => getJSON<Whoami>("/api/whoami", signal),
@@ -158,6 +169,17 @@ export const api = {
     return getJSON<ClusterEventList>(`/api/clusters/${enc(cluster)}/events${qs}`, signal);
   },
 
+  pvcs: (cluster: string, namespace?: string, signal?: AbortSignal) => {
+    const qs = namespace ? `?namespace=${enc(namespace)}` : "";
+    return getJSON<PVCList>(`/api/clusters/${enc(cluster)}/pvcs${qs}`, signal);
+  },
+
+  pvs: (cluster: string, signal?: AbortSignal) =>
+    getJSON<PVList>(`/api/clusters/${enc(cluster)}/pvs`, signal),
+
+  storageClasses: (cluster: string, signal?: AbortSignal) =>
+    getJSON<StorageClassList>(`/api/clusters/${enc(cluster)}/storageclasses`, signal),
+
   // --- GET (detail) ---
 
   getPod: (c: string, ns: string, name: string, signal?: AbortSignal) =>
@@ -193,6 +215,15 @@ export const api = {
   getNamespace: (c: string, name: string, signal?: AbortSignal) =>
     getJSON<NamespaceDetail>(clusterScopedURL(c, "namespaces", name), signal),
 
+  getPVC: (c: string, ns: string, name: string, signal?: AbortSignal) =>
+    getJSON<PVCDetail>(nsURL(c, "pvcs", ns, name), signal),
+
+  getPV: (c: string, name: string, signal?: AbortSignal) =>
+    getJSON<PVDetail>(clusterScopedURL(c, "pvs", name), signal),
+
+  getStorageClass: (c: string, name: string, signal?: AbortSignal) =>
+    getJSON<StorageClassDetail>(clusterScopedURL(c, "storageclasses", name), signal),
+
   // --- Secret reveal: per-key value, audit-logged server-side. ---
   // Fetched on user click only. Never as part of any other endpoint.
 
@@ -212,7 +243,7 @@ export const api = {
 
   yaml: (
     c: string,
-    kind: Exclude<YamlKind, "namespaces">,
+    kind: Exclude<YamlKind, ClusterScopedKind>,
     ns: string,
     name: string,
     signal?: AbortSignal,
@@ -221,11 +252,14 @@ export const api = {
   namespaceYaml: (c: string, name: string, signal?: AbortSignal) =>
     getText(clusterScopedURL(c, "namespaces", name, "yaml"), signal),
 
+  clusterScopedYaml: (c: string, kind: ClusterScopedKind, name: string, signal?: AbortSignal) =>
+    getText(clusterScopedURL(c, kind, name, "yaml"), signal),
+
   // --- Events ---
 
   events: (
     c: string,
-    kind: Exclude<YamlKind, "namespaces">,
+    kind: Exclude<YamlKind, ClusterScopedKind>,
     ns: string,
     name: string,
     signal?: AbortSignal,
@@ -233,6 +267,9 @@ export const api = {
 
   namespaceEvents: (c: string, name: string, signal?: AbortSignal) =>
     getJSON<EventList>(clusterScopedURL(c, "namespaces", name, "events"), signal),
+
+  clusterScopedEvents: (c: string, kind: ClusterScopedKind, name: string, signal?: AbortSignal) =>
+    getJSON<EventList>(clusterScopedURL(c, kind, name, "events"), signal),
 };
 
 export { ApiError };

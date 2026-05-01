@@ -419,6 +419,87 @@ export interface ClusterEventList {
   events: ClusterEvent[];
 }
 
+// --- PersistentVolumeClaim ---
+
+export interface PVC {
+  name: string;
+  namespace: string;
+  status: string;
+  storageClass?: string;
+  capacity?: string;
+  accessModes: string[];
+  createdAt: string;
+}
+
+export interface PVCList {
+  pvcs: PVC[];
+}
+
+export interface PVCCondition {
+  type: string;
+  status: string;
+  reason?: string;
+  message?: string;
+}
+
+export interface PVCDetail extends PVC {
+  volumeName?: string;
+  conditions?: PVCCondition[];
+  labels?: Record<string, string>;
+  annotations?: Record<string, string>;
+}
+
+// --- PersistentVolume ---
+
+export interface PVClaimRef {
+  namespace: string;
+  name: string;
+}
+
+export interface PV {
+  name: string;
+  status: string;
+  storageClass?: string;
+  capacity?: string;
+  accessModes: string[];
+  reclaimPolicy?: string;
+  createdAt: string;
+}
+
+export interface PVList {
+  pvs: PV[];
+}
+
+export interface PVDetail extends PV {
+  claimRef?: PVClaimRef;
+  volumeMode?: string;
+  source?: string;
+  labels?: Record<string, string>;
+  annotations?: Record<string, string>;
+}
+
+// --- StorageClass ---
+
+export interface StorageClass {
+  name: string;
+  provisioner: string;
+  reclaimPolicy?: string;
+  volumeBindingMode?: string;
+  allowVolumeExpansion: boolean;
+  createdAt: string;
+}
+
+export interface StorageClassList {
+  storageClasses: StorageClass[];
+}
+
+export interface StorageClassDetail extends StorageClass {
+  parameters?: Record<string, string>;
+  mountOptions?: string[];
+  labels?: Record<string, string>;
+  annotations?: Record<string, string>;
+}
+
 // --- Resource catalog ---
 
 export type ResourceKind =
@@ -433,7 +514,10 @@ export type ResourceKind =
   | "secrets"
   | "jobs"
   | "cronjobs"
-  | "events";
+  | "events"
+  | "pvcs"
+  | "pvs"
+  | "storageclasses";
 
 export type ResourceListResponse =
   | NamespaceList
@@ -447,4 +531,7 @@ export type ResourceListResponse =
   | SecretList
   | JobList
   | CronJobList
-  | ClusterEventList;
+  | ClusterEventList
+  | PVCList
+  | PVList
+  | StorageClassList;

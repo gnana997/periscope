@@ -1,5 +1,5 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { api, type YamlKind } from "../lib/api";
+import { api, type ClusterScopedKind, type YamlKind } from "../lib/api";
 import type {
   ClusterEventList,
   ConfigMapDetail,
@@ -11,11 +11,14 @@ import type {
   JobDetail,
   NamespaceDetail,
   PodDetail,
+  PVCDetail,
+  PVDetail,
   ResourceKind,
   ResourceListResponse,
   SecretDetail,
   ServiceDetail,
   StatefulSetDetail,
+  StorageClassDetail,
 } from "../lib/types";
 
 interface ResourceQueryArgs {
@@ -53,6 +56,12 @@ export function useResource({ cluster, resource, namespace }: ResourceQueryArgs)
           return api.cronjobs(cluster!, namespace, signal);
         case "events":
           return api.clusterEvents(cluster!, namespace, signal);
+        case "pvcs":
+          return api.pvcs(cluster!, namespace, signal);
+        case "pvs":
+          return api.pvs(cluster!, signal);
+        case "storageclasses":
+          return api.storageClasses(cluster!, signal);
       }
     },
     enabled: Boolean(cluster),
@@ -150,6 +159,30 @@ export function useClusterEvents(cluster: string, namespace?: string) {
   });
 }
 
+export function usePVCDetail(cluster: string, ns: string, name: string | null) {
+  return useQuery<PVCDetail>({
+    queryKey: ["pvc-detail", cluster, ns, name],
+    queryFn: ({ signal }) => api.getPVC(cluster, ns, name!, signal),
+    enabled: Boolean(name),
+  });
+}
+
+export function usePVDetail(cluster: string, name: string | null) {
+  return useQuery<PVDetail>({
+    queryKey: ["pv-detail", cluster, name],
+    queryFn: ({ signal }) => api.getPV(cluster, name!, signal),
+    enabled: Boolean(name),
+  });
+}
+
+export function useStorageClassDetail(cluster: string, name: string | null) {
+  return useQuery<StorageClassDetail>({
+    queryKey: ["storageclass-detail", cluster, name],
+    queryFn: ({ signal }) => api.getStorageClass(cluster, name!, signal),
+    enabled: Boolean(name),
+  });
+}
+
 export function useNamespaceDetail(cluster: string, name: string | null) {
   return useQuery<NamespaceDetail>({
     queryKey: ["namespace-detail", cluster, name],
@@ -190,9 +223,9 @@ export function useYaml(
   return useQuery<string>({
     queryKey: ["yaml", cluster, kind, ns, name],
     queryFn: ({ signal }) =>
-      kind === "namespaces"
-        ? api.namespaceYaml(cluster, name!, signal)
-        : api.yaml(cluster, kind, ns, name!, signal),
+      (["namespaces", "pvs", "storageclasses"] as ClusterScopedKind[]).includes(kind as ClusterScopedKind)
+        ? api.clusterScopedYaml(cluster, kind as ClusterScopedKind, name!, signal)
+        : api.yaml(cluster, kind as Exclude<YamlKind, ClusterScopedKind>, ns, name!, signal),
     enabled: enabled && Boolean(name),
   });
 }
@@ -209,9 +242,9 @@ export function useObjectEvents(
   return useQuery<EventList>({
     queryKey: ["events", cluster, kind, ns, name],
     queryFn: ({ signal }) =>
-      kind === "namespaces"
-        ? api.namespaceEvents(cluster, name!, signal)
-        : api.events(cluster, kind, ns, name!, signal),
+      (["namespaces", "pvs", "storageclasses"] as ClusterScopedKind[]).includes(kind as ClusterScopedKind)
+        ? api.clusterScopedEvents(cluster, kind as ClusterScopedKind, name!, signal)
+        : api.events(cluster, kind as Exclude<YamlKind, ClusterScopedKind>, ns, name!, signal),
     enabled: enabled && Boolean(name),
   });
 }
