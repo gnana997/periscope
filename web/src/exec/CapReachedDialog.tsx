@@ -32,12 +32,21 @@ export function CapReachedDialog({ open, onClose }: CapReachedDialogProps) {
   );
 
   return (
+    // Backdrop. role="presentation" because clicking it dismisses but it's
+    // not itself an actionable surface (Esc and the Dismiss button are the
+    // documented keyboard paths — react-doctor accessibility finding).
     <div
+      role="presentation"
       className="fixed inset-0 z-50 flex items-center justify-center bg-ink/40 px-4 backdrop-blur-[2px]"
       onClick={onClose}
     >
       <div
         onClick={(e) => e.stopPropagation()}
+        onKeyDown={(e) => {
+          // Don't let Enter/Space bubble to the backdrop and dismiss the
+          // dialog when the focus is inside it.
+          e.stopPropagation();
+        }}
         className="w-full max-w-md rounded-md border border-border-strong bg-surface p-4 font-sans shadow-[0_24px_48px_-16px_rgba(0,0,0,0.4)]"
         role="dialog"
         aria-modal="true"

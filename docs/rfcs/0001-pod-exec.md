@@ -342,9 +342,12 @@ EOF, context cancellation, container exit.
 
 ### Heartbeat
 
-WebSocket-level ping every 20 s, pong timeout 10 s. Implemented at the
-`coder/websocket` library level; missed pong → connection close with code 1006,
-client transitions to RECONNECTING.
+WebSocket-level ping every `cfg.HeartbeatInterval` (20 s default), pong wait 10 s.
+Implemented in `internal/exec/session.go` via `ws.Ping(ctx)` on a dedicated
+goroutine — `coder/websocket` serializes writes internally so it composes with the
+stdout writer goroutine without a mutex. Ping failure tags `closeOverride =
+heartbeat_timeout` and cancels the session context, which unwinds the rest of the
+pumps cleanly.
 
 ### Idle definition
 
@@ -613,7 +616,7 @@ The client distinguishes `retryable` from non-retryable to decide whether to sho
 | **PR0** | chi router migration. No exec code yet. Existing routes converted from `http.ServeMux` to `chi.Router`. **`credentials.Wrap` is preserved as-is** — it returns an `http.HandlerFunc`, which plugs straight into chi. Provider stays an explicit argument per ground rules ("`context.Context` carries cancellation and deadlines, not credentials"). Scaffolding `RequestID`, `Recoverer`, `RealIP`, and an `AuditBegin` no-op stub are added as standard chi middlewares (none read or carry credentials). | ~250 | — |
 | **PR1** | Backend MVP: `internal/k8s/exec.go` (`ExecPod` + `ExecPodArgs`), `internal/exec/session.go`, `internal/exec/registry.go`, HTTP route `/api/clusters/{cluster}/pods/{ns}/{name}/exec`, `coder/websocket` upgrade, `FallbackExecutor`, audit `slog` start/end. **No idle, no reconnect, no caps.** Behind `--feature-exec` flag. | ~600 | PR0 |
 | **PR2** | Frontend MVP: `web/src/lib/exec.ts` (`ExecClient`), `Terminal.tsx`, `ExecPanel.tsx`, `ExecPage.tsx`, Shell tab on pod detail. xterm.js lazy chunk. Manual disconnect only. | ~500 | PR1 |
-| **PR3** | Lifecycle: server idle timer + IDLE_WARN, client visibility timer, heartbeat, auto-restart UX (banner, backoff, silent <5s drops). | ~400 | PR2 |
+| **PR3** ✓ | Lifecycle: server idle timer + IDLE_WARN, client visibility timer, heartbeat, auto-restart UX (banner, exp-backoff `[0,1,3,8]s`, silent-<800ms-drop debounce via CSS), `E_NO_SHELL` heuristic upgrade, `PERISCOPE_EXEC_IDLE_SECONDS` / `_HEARTBEAT_SECONDS` / `_IDLE_WARN_SECONDS` env knobs, xterm code-split via `React.lazy` (~340KB removed from main bundle), react-doctor accessibility & perf fixes folded in. | ~430 | PR2 |
 | **PR4** | Robustness: `ExecutorPolicy` circuit breaker, per-user/cluster caps, audit polish (`session_id`, transport field), error taxonomy, config plumbing, per-cluster overrides. | ~400 | PR3 |
 | **v2** | When v2 SSO Provider lands: zero changes to exec. Verify K8s RBAC enforces. Add `k8s_identity` audit field automatically (Provider supplies it). | trivial | v2 SSO |
 | **v2.x** | Optional kubeconfig impersonation. `Provider` for kubeconfig backend supports `Impersonate-User` headers. | small | v1 |

@@ -6,7 +6,12 @@
  *   text frames    →  JSON control messages
  */
 
-export type SessionStatus = "connecting" | "connected" | "closed" | "error";
+export type SessionStatus =
+  | "connecting"
+  | "connected"
+  | "reconnecting"
+  | "closed"
+  | "error";
 
 // Server → browser control frames
 export interface HelloFrame {
@@ -77,4 +82,16 @@ export interface ExecSessionMeta {
   errorMessage?: string;
   /** Last time stdout was received — used for tab activity pulse. */
   lastActivityAt: number;
+  /** Unix-ms timestamp the most recent idle_warn arrived. The Drawer
+   *  renders a yellow inactivity banner while
+   *  Date.now() - lastIdleWarnAt < idleWarnSecondsRemaining * 1000. */
+  lastIdleWarnAt?: number;
+  /** Seconds the server said remained when emitting idle_warn. */
+  idleWarnSecondsRemaining?: number;
+  /** Reconnect attempt counter — surfaced in the banner copy
+   *  ("reconnecting (attempt 2/4)"). Reset on successful reconnect. */
+  reconnectAttempt?: number;
+  /** Total number of times this session has reconnected since opening.
+   *  Useful for the audit / debugging panel. */
+  reconnectCount?: number;
 }

@@ -1,7 +1,7 @@
 import {
   createContext,
+  use,
   useCallback,
-  useContext,
   useEffect,
   useMemo,
   useRef,
@@ -59,6 +59,23 @@ interface ExecSessionsContextValue {
   toggleDrawer: () => void;
   /** Look up the live ExecClient for rendering a Terminal. */
   getClient: (id: string) => ExecClient | null;
+  /** Banner action: skip reconnect backoff and try now. */
+  reconnectNow: (id: string) => void;
+  /** Banner action: abandon reconnection — flips status to error. */
+  giveUpReconnect: (id: string) => void;
+}
+
+// Visibility-close window: any session closed by the visibility timer
+// within this many ms of the user returning is auto-restarted. Beyond
+// this window, the user has to click reconnect on the banner.
+const AUTO_RESTART_WINDOW_MS = 60_000;
+// How long the tab can stay hidden before we voluntarily close live
+// sessions (RFC 0001 §7).
+const VISIBILITY_HIDE_LIMIT_MS = 5 * 60_000;
+
+interface VisibilityRecent {
+  params: OpenSessionInput;
+  closedAt: number;
 }
 
 const Ctx = createContext<ExecSessionsContextValue | null>(null);
@@ -204,6 +221,15 @@ export function ExecSessionsProvider({ children }: { children: ReactNode }) {
           );
         });
       });
+      client.onIdleWarn((frame) => {
+        updateSession(id, {
+          lastIdleWarnAt: Date.now(),
+          idleWarnSecondsRemaining: frame.secondsRemaining,
+        });
+      });
+      client.onReconnectScheduled(({ attempt }) => {
+        updateSession(id, { reconnectAttempt: attempt });
+      });
 
       setSessions((prev) => [...prev, meta]);
       setActiveSessionId(id);
@@ -311,6 +337,104 @@ export function ExecSessionsProvider({ children }: { children: ReactNode }) {
     return clients.current.get(id) ?? null;
   }, []);
 
+  const reconnectNow = useCallback((id: string) => {
+    clients.current.get(id)?.reconnectNow();
+  }, []);
+
+  const giveUpReconnect = useCallback((id: string) => {
+    clients.current.get(id)?.giveUp();
+  }, []);
+
+  // Visibility timer: when the tab has been hidden continuously for
+  // VISIBILITY_HIDE_LIMIT_MS, voluntarily close every live session and
+  // remember their params. On return, auto-restart anything closed
+  // within AUTO_RESTART_WINDOW_MS — same shell wiring, fresh kernel
+  // session.
+  const recentsRef = useRef<VisibilityRecent[]>([]);
+  const hiddenSinceRef = useRef<number | null>(null);
+  const hiddenTimerRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    function liveSessionsSnapshot(): {
+      id: string;
+      params: OpenSessionInput;
+    }[] {
+      return sessionsRef.current
+        .filter((s) => s.status === "connecting" || s.status === "connected")
+        .map((s) => ({
+          id: s.id,
+          params: {
+            cluster: s.cluster,
+            namespace: s.namespace,
+            pod: s.pod,
+            container: s.requestedContainer || undefined,
+          },
+        }));
+    }
+
+    function fireHiddenClose() {
+      const live = liveSessionsSnapshot();
+      const closedAt = Date.now();
+      for (const { id, params } of live) {
+        recentsRef.current.push({ params, closedAt });
+        const c = clients.current.get(id);
+        if (c) c.close();
+      }
+      // Trim recents that aren't worth restarting any more.
+      recentsRef.current = recentsRef.current.filter(
+        (r) => closedAt - r.closedAt < AUTO_RESTART_WINDOW_MS,
+      );
+    }
+
+    function onVisibility() {
+      if (document.visibilityState === "hidden") {
+        hiddenSinceRef.current = Date.now();
+        if (hiddenTimerRef.current !== null) {
+          window.clearTimeout(hiddenTimerRef.current);
+        }
+        hiddenTimerRef.current = window.setTimeout(
+          fireHiddenClose,
+          VISIBILITY_HIDE_LIMIT_MS,
+        );
+      } else {
+        // Coming back. Cancel any pending hidden-close (we made it back
+        // in time), then auto-restart any sessions the timer DID close
+        // during this hidden window.
+        hiddenSinceRef.current = null;
+        if (hiddenTimerRef.current !== null) {
+          window.clearTimeout(hiddenTimerRef.current);
+          hiddenTimerRef.current = null;
+        }
+        const now = Date.now();
+        const fresh = recentsRef.current.filter(
+          (r) => now - r.closedAt < AUTO_RESTART_WINDOW_MS,
+        );
+        recentsRef.current = [];
+        for (const r of fresh) {
+          openSessionRef.current?.(r.params);
+        }
+      }
+    }
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisibility);
+      if (hiddenTimerRef.current !== null) {
+        window.clearTimeout(hiddenTimerRef.current);
+      }
+    };
+    // We deliberately don't depend on sessions / openSession here; the
+    // refs below capture the latest values without causing the listener
+    // to re-bind on every state change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Refs that mirror the live values for use inside the visibility
+  // listener (which must not re-bind on every render).
+  const sessionsRef = useRef(sessions);
+  sessionsRef.current = sessions;
+  const openSessionRef = useRef(openSession);
+  openSessionRef.current = openSession;
+
   const value = useMemo<ExecSessionsContextValue>(
     () => ({
       sessions,
@@ -323,6 +447,8 @@ export function ExecSessionsProvider({ children }: { children: ReactNode }) {
       setDrawerHeight,
       toggleDrawer,
       getClient,
+      reconnectNow,
+      giveUpReconnect,
     }),
     [
       sessions,
@@ -335,6 +461,8 @@ export function ExecSessionsProvider({ children }: { children: ReactNode }) {
       setDrawerHeight,
       toggleDrawer,
       getClient,
+      reconnectNow,
+      giveUpReconnect,
     ],
   );
 
@@ -342,7 +470,11 @@ export function ExecSessionsProvider({ children }: { children: ReactNode }) {
 }
 
 export function useExecSessions(): ExecSessionsContextValue {
-  const v = useContext(Ctx);
+  // React 19's `use()` reads context with the same semantics as
+  // useContext but is allowed inside conditionals and loops, so it's the
+  // forward-looking choice for new code (RFC 0001 §7 and the
+  // react-doctor recommendation).
+  const v = use(Ctx);
   if (!v) {
     throw new Error("useExecSessions must be used within ExecSessionsProvider");
   }

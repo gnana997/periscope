@@ -124,3 +124,17 @@ pre,
 ::-webkit-scrollbar-thumb:hover {
   background: var(--border-strong);
 }
+
+/* fadein — used by the exec drawer's reconnect banner so silent
+   reconnects under 800ms never paint at all. The 800ms delay (set inline
+   on the element) is the debounce window; the 200ms duration is the
+   actual fade. If the reconnect succeeds before 800ms, the banner never
+   becomes visible. */
+@keyframes fadein {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}

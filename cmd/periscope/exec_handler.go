@@ -31,7 +31,17 @@ import (
 //
 // Audit: emits structured slog records on session_start and session_end with
 // category=audit. See RFC 0001 §10 for the schema.
+//
+// Lifecycle config (heartbeat/idle thresholds) is captured at handler
+// construction so each session gets the same values; per-cluster overrides
+// land in PR4 (RFC 0001 §11/§14).
 func execHandler(reg *clusters.Registry, sessions *execsess.Registry) credentials.Handler {
+	cfg := execsess.LoadConfig()
+	slog.Info("exec lifecycle config",
+		"heartbeat_seconds", int(cfg.HeartbeatInterval.Seconds()),
+		"idle_seconds", int(cfg.IdleTimeout.Seconds()),
+		"idle_warn_seconds", int(cfg.IdleWarnLead.Seconds()),
+	)
 	return func(w http.ResponseWriter, r *http.Request, p credentials.Provider) {
 		c, ok := reg.ByName(chi.URLParam(r, "cluster"))
 		if !ok {
@@ -114,7 +124,7 @@ func execHandler(reg *clusters.Registry, sessions *execsess.Registry) credential
 			"started_at", started.Format(time.RFC3339Nano),
 		)
 
-		result, stats, runErr := execsess.Run(r.Context(), ws, p, params)
+		result, stats, runErr := execsess.Run(r.Context(), ws, p, params, cfg)
 		ended := time.Now().UTC()
 
 		closeReason := result.Reason

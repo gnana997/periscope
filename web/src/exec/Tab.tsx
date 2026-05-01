@@ -13,6 +13,7 @@ interface TabProps {
 const STATUS_DOT: Record<ExecSessionMeta["status"], string> = {
   connecting: "bg-yellow",
   connected: "bg-green",
+  reconnecting: "bg-yellow",
   closed: "bg-ink-faint/50",
   error: "bg-red",
 };
@@ -20,6 +21,7 @@ const STATUS_DOT: Record<ExecSessionMeta["status"], string> = {
 const STATUS_LABEL: Record<ExecSessionMeta["status"], string> = {
   connecting: "connecting",
   connected: "connected",
+  reconnecting: "reconnecting",
   closed: "session ended",
   error: "errored",
 };
@@ -90,6 +92,7 @@ export function Tab({ session, active, onFocus, onClose }: TabProps) {
           STATUS_DOT[session.status],
           pulse && session.status === "connected" && "opacity-100",
           !pulse && session.status === "connected" && "opacity-70",
+          session.status === "reconnecting" && "animate-pulse",
         )}
       />
 
@@ -101,13 +104,24 @@ export function Tab({ session, active, onFocus, onClose }: TabProps) {
       {/* pod name */}
       <span className="min-w-0 truncate">{session.pod}</span>
 
-      {/* close X — visible on hover or when active */}
+      {/* close X — visible on hover or when active. Stays a span+role
+          (rather than a real <button>) because the outer Tab is already
+          a <button>; nested buttons are invalid. onKeyDown handles
+          Enter/Space so the control is still keyboard-actionable
+          (react-doctor accessibility finding). */}
       <span
         role="button"
         tabIndex={-1}
         onClick={(e) => {
           e.stopPropagation();
           onClose();
+        }}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.stopPropagation();
+            e.preventDefault();
+            onClose();
+          }
         }}
         aria-label={`Close session for ${session.pod}`}
         className={cn(

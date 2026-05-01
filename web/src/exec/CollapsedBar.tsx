@@ -15,7 +15,8 @@ import type { ExecSessionMeta, SessionStatus } from "./types";
  */
 
 const PRIORITY: Record<SessionStatus, number> = {
-  error: 4,
+  error: 5,
+  reconnecting: 4,
   connecting: 3,
   connected: 2,
   closed: 1,
@@ -32,6 +33,7 @@ function aggregateStatus(sessions: ExecSessionMeta[]): SessionStatus {
 const STATUS_DOT: Record<SessionStatus, string> = {
   connecting: "bg-yellow",
   connected: "bg-green",
+  reconnecting: "bg-yellow",
   closed: "bg-ink-faint/50",
   error: "bg-red",
 };

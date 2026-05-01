@@ -3,7 +3,7 @@ import { useParams } from "react-router-dom";
 import { cn } from "../lib/cn";
 import { useExecSessions } from "./ExecSessionsContext";
 import { Tab } from "./Tab";
-import { Terminal } from "./Terminal";
+import { TerminalLazy as Terminal } from "./TerminalLazy";
 import { CollapsedBar } from "./CollapsedBar";
 import { EmptyPicker } from "./EmptyPicker";
 import type { ExecSessionMeta } from "./types";
@@ -52,6 +52,14 @@ function statusPill(s: ExecSessionMeta) {
       return { label: "connecting…", tone: "yellow" as const, sub: null };
     case "connected":
       return { label: "connected", tone: "green" as const, sub: time };
+    case "reconnecting": {
+      const attempt = s.reconnectAttempt ?? 1;
+      return {
+        label: "reconnecting",
+        tone: "yellow" as const,
+        sub: `${attempt}/4`,
+      };
+    }
     case "closed":
       return {
         label: "closed",
@@ -108,15 +116,24 @@ export function Drawer() {
     dragStateRef.current = null;
     window.removeEventListener("pointermove", onDragMove);
     window.removeEventListener("pointerup", stopDrag);
-    document.body.style.cursor = "";
-    document.body.style.userSelect = "";
+    // Batched cleanup via removeProperty so we don't issue two sequential
+    // style writes (react-doctor performance finding) and don't clobber
+    // any unrelated inline styles set elsewhere.
+    document.body.style.removeProperty("cursor");
+    document.body.style.removeProperty("user-select");
   }, [onDragMove]);
 
   const startDrag = useCallback(
     (e: React.PointerEvent) => {
       dragStateRef.current = { startY: e.clientY, startH: drawer.height };
-      document.body.style.cursor = "ns-resize";
-      document.body.style.userSelect = "none";
+      // Single setProperty call vs two style assignments. The browser
+      // batches inside setProperty itself; the goal is one observable
+      // write per drag-start.
+      document.body.style.setProperty(
+        "cursor",
+        "ns-resize",
+      );
+      document.body.style.setProperty("user-select", "none");
       window.addEventListener("pointermove", onDragMove);
       window.addEventListener("pointerup", stopDrag);
     },
@@ -279,6 +296,9 @@ export function Drawer() {
         </div>
       </div>
 
+      {/* status banner — reconnecting / no_shell / idle_warn / give-up */}
+      {!empty && active && <SessionBanner session={active} />}
+
       {/* info expander — drops below the chrome row only when open */}
       {!empty && active && infoOpen && (
         <div className="grid shrink-0 grid-cols-[auto_1fr_auto_1fr] gap-x-4 gap-y-1 border-b border-border bg-surface-2/40 px-3 py-2 font-mono text-[10.5px]">
@@ -395,6 +415,197 @@ function Field({ k, v }: { k: string; v: string }) {
       <span className="uppercase tracking-[0.08em] text-ink-faint">{k}</span>
       <span className="truncate text-ink-muted">{v}</span>
     </>
+  );
+}
+
+// SessionBanner renders a contextual banner under the chrome row when the
+// active session needs to surface lifecycle state — reconnecting, gave-up,
+// idle warning, or a friendly error like E_NO_SHELL.
+//
+// The banner uses a CSS-only delayed fade-in so silent <800ms reconnects
+// never paint at all — the banner element renders, but `fadein` doesn't
+// elapse before status flips back. No JS timer juggling.
+function SessionBanner({ session }: { session: ExecSessionMeta }) {
+  const { reconnectNow, giveUpReconnect, closeSession } = useExecSessions();
+
+  // Idle-warn banner — server told us inactivity will close the session.
+  // Render while we're still inside the warning window. Show even when
+  // status has flipped to closed, briefly, so the user sees why.
+  const idleWarnUntil =
+    session.lastIdleWarnAt && session.idleWarnSecondsRemaining
+      ? session.lastIdleWarnAt + session.idleWarnSecondsRemaining * 1000
+      : 0;
+  const showIdleWarn =
+    session.status === "connected" &&
+    idleWarnUntil > 0 &&
+    Date.now() < idleWarnUntil;
+
+  // No-shell error: backend marked the close with a friendlier code.
+  const showNoShell =
+    session.status === "error" && session.errorCode === "E_NO_SHELL";
+
+  // Reconnect-failed (gave up after MAX_RECONNECT_ATTEMPTS).
+  const showGivenUp =
+    session.status === "error" &&
+    (session.errorCode === "E_RECONNECT_FAILED" ||
+      session.errorCode === "E_RECONNECT_GAVE_UP");
+
+  const showReconnecting = session.status === "reconnecting";
+
+  if (!showIdleWarn && !showNoShell && !showGivenUp && !showReconnecting) {
+    return null;
+  }
+
+  if (showIdleWarn) {
+    const secondsLeft = Math.max(
+      1,
+      Math.ceil((idleWarnUntil - Date.now()) / 1000),
+    );
+    return (
+      <BannerShell tone="yellow" instant>
+        <span>
+          session will close in{" "}
+          <span className="tabular-nums">{secondsLeft}s</span> due to
+          inactivity. type any key to keep it alive.
+        </span>
+      </BannerShell>
+    );
+  }
+
+  if (showNoShell) {
+    return (
+      <BannerShell tone="red" instant>
+        <span>
+          this container has no shell on PATH. pick another container
+          or pod.
+        </span>
+        <BannerButton onClick={() => closeSession(session.id)}>
+          close
+        </BannerButton>
+      </BannerShell>
+    );
+  }
+
+  if (showGivenUp) {
+    return (
+      <BannerShell tone="red" instant>
+        <span>
+          {session.errorMessage ?? "couldn't reconnect."} the shell on
+          the apiserver is gone — reconnecting opens a fresh session.
+        </span>
+        <BannerButton onClick={() => closeSession(session.id)}>
+          close
+        </BannerButton>
+      </BannerShell>
+    );
+  }
+
+  // showReconnecting
+  const attempt = session.reconnectAttempt ?? 1;
+  return (
+    <BannerShell tone="yellow">
+      <span className="flex items-center gap-1.5">
+        <RetryGlyph />
+        <span>
+          reconnecting{" "}
+          <span className="text-ink-faint">
+            (attempt <span className="tabular-nums">{attempt}</span>/4)
+          </span>
+        </span>
+      </span>
+      <BannerButton onClick={() => reconnectNow(session.id)}>
+        retry now
+      </BannerButton>
+      <BannerButton onClick={() => giveUpReconnect(session.id)} tone="muted">
+        give up
+      </BannerButton>
+    </BannerShell>
+  );
+}
+
+function BannerShell({
+  tone,
+  instant,
+  children,
+}: {
+  tone: "yellow" | "red";
+  /** When true, banner appears instantly (errors). When false, banner
+   *  fades in after 800ms so silent reconnects don't paint at all. */
+  instant?: boolean;
+  children: React.ReactNode;
+}) {
+  const surface =
+    tone === "yellow"
+      ? "border-yellow/40 bg-yellow-soft text-yellow"
+      : "border-red/40 bg-red-soft text-red";
+  return (
+    <div
+      className={cn(
+        "flex h-7 shrink-0 items-center gap-2 border-b px-3 font-mono text-[11px]",
+        surface,
+        !instant && "animate-[fadein_200ms_ease-in_800ms_both]",
+      )}
+      style={
+        instant
+          ? undefined
+          : { opacity: 0, animationFillMode: "forwards" as const }
+      }
+    >
+      {children}
+    </div>
+  );
+}
+
+function BannerButton({
+  children,
+  onClick,
+  tone,
+}: {
+  children: React.ReactNode;
+  onClick: () => void;
+  tone?: "muted";
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        "ml-auto flex h-5 items-center rounded border px-1.5 font-mono text-[10.5px] transition-colors",
+        tone === "muted"
+          ? "ml-1 border-border bg-surface text-ink-muted hover:border-border-strong hover:text-ink"
+          : "border-current bg-surface/80 hover:bg-surface",
+      )}
+    >
+      {children}
+    </button>
+  );
+}
+
+function RetryGlyph() {
+  return (
+    <svg
+      width="11"
+      height="11"
+      viewBox="0 0 11 11"
+      aria-hidden
+      className="animate-spin"
+    >
+      <path
+        d="M9.2 5.5a3.7 3.7 0 1 1-1.1-2.6"
+        stroke="currentColor"
+        strokeWidth="1.4"
+        fill="none"
+        strokeLinecap="round"
+      />
+      <path
+        d="M9.5 1.7v2.6h-2.6"
+        stroke="currentColor"
+        strokeWidth="1.4"
+        fill="none"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
   );
 }
 
