@@ -26,8 +26,10 @@ func Empty() *Registry {
 }
 
 // LoadFromFile reads the registry YAML at path and returns a Registry.
-// Errors on missing file, invalid YAML, missing required fields,
-// malformed ARN, or duplicate cluster names.
+// Errors on missing file, invalid YAML, missing required fields per
+// backend, malformed ARN, unknown backend, or duplicate cluster names.
+//
+// Backend defaults to "eks" when omitted, for backward compatibility.
 func LoadFromFile(path string) (*Registry, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
@@ -48,15 +50,31 @@ func LoadFromFile(path string) (*Registry, error) {
 		if c.Name == "" {
 			return nil, fmt.Errorf("cluster index %d has empty name", i)
 		}
-		if c.ARN == "" {
-			return nil, fmt.Errorf("cluster %q has empty arn", c.Name)
+		if c.Backend == "" {
+			c.Backend = BackendEKS
+			f.Clusters[i] = c
 		}
-		if c.Region == "" {
-			return nil, fmt.Errorf("cluster %q has empty region", c.Name)
+
+		switch c.Backend {
+		case BackendEKS:
+			if c.ARN == "" {
+				return nil, fmt.Errorf("cluster %q (eks): empty arn", c.Name)
+			}
+			if c.Region == "" {
+				return nil, fmt.Errorf("cluster %q (eks): empty region", c.Name)
+			}
+			if c.EKSName() == "" {
+				return nil, fmt.Errorf("cluster %q (eks): invalid ARN %q (expected ':cluster/<name>')", c.Name, c.ARN)
+			}
+		case BackendKubeconfig:
+			if c.KubeconfigPath == "" {
+				return nil, fmt.Errorf("cluster %q (kubeconfig): empty kubeconfigPath", c.Name)
+			}
+		default:
+			return nil, fmt.Errorf("cluster %q: unknown backend %q (must be %q or %q)",
+				c.Name, c.Backend, BackendEKS, BackendKubeconfig)
 		}
-		if c.EKSName() == "" {
-			return nil, fmt.Errorf("cluster %q has invalid EKS ARN %q (expected ':cluster/<name>')", c.Name, c.ARN)
-		}
+
 		if _, dup := byName[c.Name]; dup {
 			return nil, fmt.Errorf("duplicate cluster name %q", c.Name)
 		}

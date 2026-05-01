@@ -46,6 +46,99 @@ clusters:
 	}
 }
 
+func TestLoadFromFile_backendDefaultsToEKS(t *testing.T) {
+	p := writeTempFile(t, `
+clusters:
+  - name: prod
+    arn: arn:aws:eks:us-east-1:123456789012:cluster/prod
+    region: us-east-1
+`)
+	r, err := LoadFromFile(p)
+	if err != nil {
+		t.Fatalf("LoadFromFile: %v", err)
+	}
+	c, _ := r.ByName("prod")
+	if c.Backend != BackendEKS {
+		t.Errorf("Backend default = %q, want %q", c.Backend, BackendEKS)
+	}
+}
+
+func TestLoadFromFile_explicitEKSBackend(t *testing.T) {
+	p := writeTempFile(t, `
+clusters:
+  - name: prod
+    backend: eks
+    arn: arn:aws:eks:us-east-1:123456789012:cluster/prod
+    region: us-east-1
+`)
+	r, err := LoadFromFile(p)
+	if err != nil {
+		t.Fatalf("LoadFromFile: %v", err)
+	}
+	c, _ := r.ByName("prod")
+	if c.Backend != BackendEKS {
+		t.Errorf("Backend = %q, want %q", c.Backend, BackendEKS)
+	}
+}
+
+func TestLoadFromFile_kubeconfigBackend(t *testing.T) {
+	p := writeTempFile(t, `
+clusters:
+  - name: kind-local
+    backend: kubeconfig
+    kubeconfigPath: /home/dev/.kube/config
+    kubeconfigContext: kind-kind
+`)
+	r, err := LoadFromFile(p)
+	if err != nil {
+		t.Fatalf("LoadFromFile: %v", err)
+	}
+	c, ok := r.ByName("kind-local")
+	if !ok {
+		t.Fatal("ByName(kind-local) not found")
+	}
+	if c.Backend != BackendKubeconfig {
+		t.Errorf("Backend = %q, want %q", c.Backend, BackendKubeconfig)
+	}
+	if c.KubeconfigPath != "/home/dev/.kube/config" {
+		t.Errorf("KubeconfigPath = %q", c.KubeconfigPath)
+	}
+	if c.KubeconfigContext != "kind-kind" {
+		t.Errorf("KubeconfigContext = %q", c.KubeconfigContext)
+	}
+}
+
+func TestLoadFromFile_kubeconfigContextOptional(t *testing.T) {
+	p := writeTempFile(t, `
+clusters:
+  - name: kind-local
+    backend: kubeconfig
+    kubeconfigPath: /home/dev/.kube/config
+`)
+	if _, err := LoadFromFile(p); err != nil {
+		t.Fatalf("LoadFromFile: %v", err)
+	}
+}
+
+func TestLoadFromFile_mixedBackends(t *testing.T) {
+	p := writeTempFile(t, `
+clusters:
+  - name: prod-eks
+    arn: arn:aws:eks:us-east-1:123456789012:cluster/prod
+    region: us-east-1
+  - name: kind-local
+    backend: kubeconfig
+    kubeconfigPath: /home/dev/.kube/config
+`)
+	r, err := LoadFromFile(p)
+	if err != nil {
+		t.Fatalf("LoadFromFile: %v", err)
+	}
+	if got := len(r.List()); got != 2 {
+		t.Fatalf("List() len = %d, want 2", got)
+	}
+}
+
 func TestLoadFromFile_errors(t *testing.T) {
 	cases := []struct {
 		name string
@@ -53,9 +146,11 @@ func TestLoadFromFile_errors(t *testing.T) {
 	}{
 		{"empty cluster list", `clusters: []`},
 		{"missing name", "clusters:\n  - arn: arn:aws:eks:us-east-1:1:cluster/a\n    region: us-east-1\n"},
-		{"missing arn", "clusters:\n  - name: a\n    region: us-east-1\n"},
-		{"missing region", "clusters:\n  - name: a\n    arn: arn:aws:eks:us-east-1:1:cluster/a\n"},
-		{"invalid arn", "clusters:\n  - name: a\n    arn: not-an-arn\n    region: us-east-1\n"},
+		{"eks: missing arn", "clusters:\n  - name: a\n    region: us-east-1\n"},
+		{"eks: missing region", "clusters:\n  - name: a\n    arn: arn:aws:eks:us-east-1:1:cluster/a\n"},
+		{"eks: invalid arn", "clusters:\n  - name: a\n    arn: not-an-arn\n    region: us-east-1\n"},
+		{"kubeconfig: missing path", "clusters:\n  - name: a\n    backend: kubeconfig\n"},
+		{"unknown backend", "clusters:\n  - name: a\n    backend: weird\n"},
 		{"duplicate name", `
 clusters:
   - name: prod
