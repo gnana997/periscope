@@ -450,3 +450,45 @@ export function useRuntimeClassDetail(cluster: string, name: string | null) {
     enabled: Boolean(name),
   });
 }
+
+// --- CRDs + custom resources ---
+
+export function useCRDs(cluster: string) {
+  return useQuery({
+    queryKey: ["crds", cluster],
+    queryFn: ({ signal }) => api.crds(cluster, signal),
+    // CRDs change infrequently — cache hit is the common case.
+    staleTime: 30_000,
+  });
+}
+
+export function useCustomResources(
+  cluster: string,
+  group: string,
+  version: string,
+  plural: string,
+  namespace?: string,
+) {
+  return useQuery({
+    queryKey: ["customresources", cluster, group, version, plural, namespace ?? ""],
+    queryFn: ({ signal }) =>
+      api.customResources(cluster, group, version, plural, namespace, signal),
+    enabled: Boolean(group && version && plural),
+  });
+}
+
+export function useCustomResourceDetail(
+  cluster: string,
+  group: string,
+  version: string,
+  plural: string,
+  namespace: string | null,
+  name: string | null,
+) {
+  return useQuery({
+    queryKey: ["customresource", cluster, group, version, plural, namespace ?? "", name ?? ""],
+    queryFn: ({ signal }) =>
+      api.getCustomResource(cluster, group, version, plural, namespace, name!, signal),
+    enabled: Boolean(name && group && version && plural),
+  });
+}

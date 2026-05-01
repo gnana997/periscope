@@ -105,6 +105,32 @@ func main() {
 			writeJSON(w, http.StatusOK, results)
 		}))
 
+	// --- CRDs + custom resources ---
+	router.Get("/api/clusters/{cluster}/crds", credentials.Wrap(factory,
+		func(w http.ResponseWriter, r *http.Request, p credentials.Provider) {
+			c, ok := registry.ByName(chi.URLParam(r, "cluster"))
+			if !ok {
+				http.Error(w, "cluster not found", http.StatusNotFound)
+				return
+			}
+			result, err := k8s.ListCRDs(r.Context(), p, c)
+			if err != nil {
+				slog.Error("list CRDs", "cluster", c.Name, "err", err)
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			writeJSON(w, http.StatusOK, result)
+		}))
+
+	router.Get("/api/clusters/{cluster}/customresources/{group}/{version}/{plural}",
+		credentials.Wrap(factory, customResourceListHandler(registry)))
+	router.Get("/api/clusters/{cluster}/customresources/{group}/{version}/{plural}/{ns}/{name}",
+		credentials.Wrap(factory, customResourceDetailHandler(registry)))
+	router.Get("/api/clusters/{cluster}/customresources/{group}/{version}/{plural}/{ns}/{name}/yaml",
+		credentials.Wrap(factory, customResourceYAMLHandler(registry)))
+	router.Get("/api/clusters/{cluster}/customresources/{group}/{version}/{plural}/{ns}/{name}/events",
+		credentials.Wrap(factory, customResourceEventsHandler(registry)))
+
 	// --- LIST endpoints ---
 
 	router.Get("/api/clusters/{cluster}/nodes", credentials.Wrap(factory,
@@ -1300,4 +1326,129 @@ func parseSearchKinds(raw string) []k8s.SearchKind {
 		}
 	}
 	return out
+}
+
+// --- Custom-resource handler factories -----------------------------------
+//
+// Shape mirrors listResource / detailHandler for built-ins, but takes
+// the GVR from the URL path. The "_" placeholder for {ns} marks
+// cluster-scoped CRs — keeps the chi route tree single rather than
+// branching on scope.
+//
+// The CRD lookup (FindCRDByPlural) inside ListCustomResources gives
+// us the resource Kind for events, so we don't need a separate
+// per-CRD route map.
+
+const clusterScopedNamespacePlaceholder = "_"
+
+func crdRefFromRequest(r *http.Request, withName bool) k8s.CustomResourceRef {
+	ref := k8s.CustomResourceRef{
+		Group:   chi.URLParam(r, "group"),
+		Version: chi.URLParam(r, "version"),
+		Plural:  chi.URLParam(r, "plural"),
+	}
+	ns := chi.URLParam(r, "ns")
+	if ns != clusterScopedNamespacePlaceholder {
+		ref.Namespace = ns
+	}
+	if withName {
+		ref.Name = chi.URLParam(r, "name")
+	}
+	return ref
+}
+
+func customResourceListHandler(reg *clusters.Registry) credentials.Handler {
+	return func(w http.ResponseWriter, r *http.Request, p credentials.Provider) {
+		c, ok := reg.ByName(chi.URLParam(r, "cluster"))
+		if !ok {
+			http.Error(w, "cluster not found", http.StatusNotFound)
+			return
+		}
+		ref := k8s.CustomResourceRef{
+			Cluster:   c,
+			Group:     chi.URLParam(r, "group"),
+			Version:   chi.URLParam(r, "version"),
+			Plural:    chi.URLParam(r, "plural"),
+			Namespace: r.URL.Query().Get("namespace"),
+		}
+		result, err := k8s.ListCustomResources(r.Context(), p, ref)
+		if err != nil {
+			slog.Error("list custom resources", "cluster", c.Name, "gvr", ref.Group+"/"+ref.Version+"/"+ref.Plural, "err", err)
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		writeJSON(w, http.StatusOK, result)
+	}
+}
+
+func customResourceDetailHandler(reg *clusters.Registry) credentials.Handler {
+	return func(w http.ResponseWriter, r *http.Request, p credentials.Provider) {
+		c, ok := reg.ByName(chi.URLParam(r, "cluster"))
+		if !ok {
+			http.Error(w, "cluster not found", http.StatusNotFound)
+			return
+		}
+		ref := crdRefFromRequest(r, true)
+		ref.Cluster = c
+		result, err := k8s.GetCustomResource(r.Context(), p, ref)
+		if err != nil {
+			slog.Error("get custom resource", "cluster", c.Name, "name", ref.Name, "err", err)
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		writeJSON(w, http.StatusOK, result)
+	}
+}
+
+func customResourceYAMLHandler(reg *clusters.Registry) credentials.Handler {
+	return func(w http.ResponseWriter, r *http.Request, p credentials.Provider) {
+		c, ok := reg.ByName(chi.URLParam(r, "cluster"))
+		if !ok {
+			http.Error(w, "cluster not found", http.StatusNotFound)
+			return
+		}
+		ref := crdRefFromRequest(r, true)
+		ref.Cluster = c
+		yaml, err := k8s.GetCustomResourceYAML(r.Context(), p, ref)
+		if err != nil {
+			slog.Error("get custom resource yaml", "cluster", c.Name, "name", ref.Name, "err", err)
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		_, _ = w.Write([]byte(yaml))
+	}
+}
+
+func customResourceEventsHandler(reg *clusters.Registry) credentials.Handler {
+	return func(w http.ResponseWriter, r *http.Request, p credentials.Provider) {
+		c, ok := reg.ByName(chi.URLParam(r, "cluster"))
+		if !ok {
+			http.Error(w, "cluster not found", http.StatusNotFound)
+			return
+		}
+		ref := crdRefFromRequest(r, true)
+		ref.Cluster = c
+		// Look up the CRD's Kind so we can filter events by
+		// involvedObject.kind. Caching the lookup would shave a
+		// round-trip but the CRD list call is fast and the events tab
+		// is opened on demand.
+		crd, err := k8s.FindCRDByPlural(r.Context(), p, c, ref.Group, ref.Version, ref.Plural)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusNotFound)
+			return
+		}
+		events, err := k8s.ListObjectEvents(r.Context(), p, k8s.ListObjectEventsArgs{
+			Cluster:   c,
+			Namespace: ref.Namespace,
+			Kind:      crd.Kind,
+			Name:      ref.Name,
+		})
+		if err != nil {
+			slog.Error("get custom resource events", "cluster", c.Name, "name", ref.Name, "err", err)
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		writeJSON(w, http.StatusOK, events)
+	}
 }

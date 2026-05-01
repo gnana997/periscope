@@ -49,6 +49,8 @@ import { ResourceQuotasPage } from "./pages/ResourceQuotasPage";
 import { LimitRangesPage } from "./pages/LimitRangesPage";
 import { PriorityClassesPage } from "./pages/PriorityClassesPage";
 import { RuntimeClassesPage } from "./pages/RuntimeClassesPage";
+import { CRDsPage } from "./pages/CRDsPage";
+import { CustomResourcesPage } from "./pages/CustomResourcesPage";
 import { ExecPage } from "./pages/ExecPage";
 import { ExecSessionsProvider } from "./exec/ExecSessionsContext";
 import { Drawer } from "./exec/Drawer";
@@ -115,6 +117,8 @@ export default function App() {
         <Route path="limitranges" element={<WithCluster Page={LimitRangesPage} />} />
         <Route path="priorityclasses" element={<WithCluster Page={PriorityClassesPage} />} />
         <Route path="runtimeclasses" element={<WithCluster Page={RuntimeClassesPage} />} />
+        <Route path="crds" element={<WithCluster Page={CRDsPage} />} />
+        <Route path="customresources/:group/:version/:plural" element={<WithCluster Page={CustomResourcesPage} />} />
         <Route path="pods/:ns/:name/logs" element={<WithCluster Page={PodLogsPage} />} />
         <Route path="deployments/:ns/:name/logs" element={<WithCluster Page={DeploymentLogsPage} />} />
         <Route path="statefulsets/:ns/:name/logs" element={<WithCluster Page={StatefulSetLogsPage} />} />

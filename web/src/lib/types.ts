@@ -795,6 +795,81 @@ export interface SearchResultList {
   results: SearchResult[];
 }
 
+// --- CRDs (Custom Resource Definitions) ---
+
+/** One column the CRD's author wants surfaced in `kubectl get` and our
+ *  list view. JSONPath is the kubectl-style expression evaluated against
+ *  the unstructured custom resource. */
+export interface PrinterColumn {
+  name: string;
+  type: string;
+  format?: string;
+  description?: string;
+  jsonPath: string;
+  /** kubectl shows priority>0 only with `-o wide`. We mirror that —
+   *  default list view skips them. */
+  priority?: number;
+}
+
+export interface CRDVersion {
+  name: string;
+  served: boolean;
+  storage: boolean;
+  deprecated?: boolean;
+  printerColumns?: PrinterColumn[];
+}
+
+export interface CRD {
+  /** "<plural>.<group>" — the CRD's own metadata.name. */
+  name: string;
+  group: string;
+  kind: string;
+  plural: string;
+  singular?: string;
+  shortNames?: string[];
+  scope: "Namespaced" | "Cluster";
+  versions: CRDVersion[];
+  /** The version we'll query against — the storage version when it's
+   *  served, otherwise the first served version. */
+  servedVersion: string;
+  storageVersion: string;
+  createdAt: string;
+}
+
+export interface CRDList {
+  crds: CRD[];
+}
+
+// --- Custom resources (instances of a CRD) ---
+
+export interface CustomResource {
+  name: string;
+  namespace?: string;
+  createdAt: string;
+  /** Pre-formatted printer-column values, keyed by column name. */
+  columns: Record<string, string>;
+}
+
+export interface CustomResourceList {
+  items: CustomResource[];
+  /** The columns the rows were rendered against — frontend builds the
+   *  DataTable from this so each CRD gets its own column layout
+   *  without compile-time knowledge. */
+  columns: PrinterColumn[];
+  scope: "Namespaced" | "Cluster";
+}
+
+export interface CustomResourceDetail {
+  name: string;
+  namespace?: string;
+  kind: string;
+  apiVersion: string;
+  createdAt: string;
+  /** Full unstructured object — render as YAML, pull individual fields
+   *  for describe view, etc. */
+  object: Record<string, unknown>;
+}
+
 // --- Resource catalog ---
 
 export type ResourceKind =
@@ -828,7 +903,8 @@ export type ResourceKind =
   | "resourcequotas"
   | "limitranges"
   | "priorityclasses"
-  | "runtimeclasses";
+  | "runtimeclasses"
+  | "crds";
 
 export type ResourceListResponse =
   | NodeList

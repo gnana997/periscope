@@ -2,6 +2,9 @@ import type {
   ClusterEventList,
   ClusterRoleBindingDetail,
   ClusterSummary,
+  CRDList,
+  CustomResourceDetail,
+  CustomResourceList,
   SearchKind,
   SearchResultList,
   ClusterRoleBindingList,
@@ -177,6 +180,61 @@ export const api = {
 
   clusters: (signal?: AbortSignal) =>
     getJSON<ClustersResponse>("/api/clusters", signal),
+
+  // --- CRDs + custom resources -------------------------------------
+
+  crds: (cluster: string, signal?: AbortSignal) =>
+    getJSON<CRDList>(`/api/clusters/${enc(cluster)}/crds`, signal),
+
+  /** List custom resources of a given GVR. namespace is optional —
+   *  empty/undefined means "all namespaces" for namespaced CRDs (the
+   *  backend ignores it for cluster-scoped). */
+  customResources: (
+    cluster: string,
+    group: string,
+    version: string,
+    plural: string,
+    namespace?: string,
+    signal?: AbortSignal,
+  ) => {
+    const base = `/api/clusters/${enc(cluster)}/customresources/${enc(group)}/${enc(version)}/${enc(plural)}`;
+    const url = namespace ? `${base}?namespace=${enc(namespace)}` : base;
+    return getJSON<CustomResourceList>(url, signal);
+  },
+
+  /** Backend uses "_" as the URL placeholder for cluster-scoped
+   *  resources — see clusterScopedNamespacePlaceholder in main.go. */
+  getCustomResource: (
+    cluster: string,
+    group: string,
+    version: string,
+    plural: string,
+    namespace: string | null,
+    name: string,
+    signal?: AbortSignal,
+  ) => {
+    const ns = namespace && namespace.length > 0 ? namespace : "_";
+    return getJSON<CustomResourceDetail>(
+      `/api/clusters/${enc(cluster)}/customresources/${enc(group)}/${enc(version)}/${enc(plural)}/${enc(ns)}/${enc(name)}`,
+      signal,
+    );
+  },
+
+  getCustomResourceYAML: (
+    cluster: string,
+    group: string,
+    version: string,
+    plural: string,
+    namespace: string | null,
+    name: string,
+    signal?: AbortSignal,
+  ) => {
+    const ns = namespace && namespace.length > 0 ? namespace : "_";
+    return getText(
+      `/api/clusters/${enc(cluster)}/customresources/${enc(group)}/${enc(version)}/${enc(plural)}/${enc(ns)}/${enc(name)}/yaml`,
+      signal,
+    );
+  },
 
   // --- LIST ---
 

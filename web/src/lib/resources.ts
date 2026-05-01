@@ -6,7 +6,7 @@
 
 import type { ResourceKind } from "./types";
 
-export type ResourceGroup = "Workloads" | "Networking" | "Config" | "Storage" | "Cluster" | "Access";
+export type ResourceGroup = "Workloads" | "Networking" | "Config" | "Storage" | "Cluster" | "Access" | "Extensions";
 
 export interface ResourceMeta {
   id: ResourceKind | SoonResource;
@@ -53,6 +53,7 @@ export const RESOURCES: ResourceMeta[] = [
   { id: "rolebindings",        label: "RoleBindings",        group: "Access",   ready: true  },
   { id: "clusterrolebindings", label: "ClusterRoleBindings", group: "Access",   ready: true  },
   { id: "serviceaccounts",     label: "ServiceAccounts",     group: "Access",   ready: true  },
+  { id: "crds",                label: "Custom Resources",     group: "Extensions", ready: true  },
 ];
 
 export const RESOURCE_GROUPS: ResourceGroup[] = [
@@ -62,6 +63,7 @@ export const RESOURCE_GROUPS: ResourceGroup[] = [
   "Config",
   "Storage",
   "Access",
+  "Extensions",
 ];
 
 export function resourcesByGroup(group: ResourceGroup): ResourceMeta[] {
