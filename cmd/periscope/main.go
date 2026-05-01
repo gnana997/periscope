@@ -45,6 +45,12 @@ func main() {
 
 	// --- LIST endpoints ---
 
+	mux.HandleFunc("GET /api/clusters/{cluster}/nodes", credentials.Wrap(factory,
+		listResource(registry, "nodes",
+			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, _ string) (k8s.NodeList, error) {
+				return k8s.ListNodes(ctx, p, k8s.ListNodesArgs{Cluster: c})
+			})))
+
 	mux.HandleFunc("GET /api/clusters/{cluster}/namespaces", credentials.Wrap(factory,
 		listResource(registry, "namespaces",
 			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, _ string) (k8s.NamespaceList, error) {
@@ -129,6 +135,36 @@ func main() {
 				return k8s.ListStorageClasses(ctx, p, k8s.ListStorageClassesArgs{Cluster: c})
 			})))
 
+	mux.HandleFunc("GET /api/clusters/{cluster}/roles", credentials.Wrap(factory,
+		listResource(registry, "roles",
+			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, ns string) (k8s.RoleList, error) {
+				return k8s.ListRoles(ctx, p, k8s.ListRolesArgs{Cluster: c, Namespace: ns})
+			})))
+
+	mux.HandleFunc("GET /api/clusters/{cluster}/clusterroles", credentials.Wrap(factory,
+		listResource(registry, "clusterroles",
+			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, _ string) (k8s.ClusterRoleList, error) {
+				return k8s.ListClusterRoles(ctx, p, k8s.ListClusterRolesArgs{Cluster: c})
+			})))
+
+	mux.HandleFunc("GET /api/clusters/{cluster}/rolebindings", credentials.Wrap(factory,
+		listResource(registry, "rolebindings",
+			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, ns string) (k8s.RoleBindingList, error) {
+				return k8s.ListRoleBindings(ctx, p, k8s.ListRoleBindingsArgs{Cluster: c, Namespace: ns})
+			})))
+
+	mux.HandleFunc("GET /api/clusters/{cluster}/clusterrolebindings", credentials.Wrap(factory,
+		listResource(registry, "clusterrolebindings",
+			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, _ string) (k8s.ClusterRoleBindingList, error) {
+				return k8s.ListClusterRoleBindings(ctx, p, k8s.ListClusterRoleBindingsArgs{Cluster: c})
+			})))
+
+	mux.HandleFunc("GET /api/clusters/{cluster}/serviceaccounts", credentials.Wrap(factory,
+		listResource(registry, "serviceaccounts",
+			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, ns string) (k8s.ServiceAccountList, error) {
+				return k8s.ListServiceAccounts(ctx, p, k8s.ListServiceAccountsArgs{Cluster: c, Namespace: ns})
+			})))
+
 	// --- GET (detail) endpoints ---
 
 	mux.HandleFunc("GET /api/clusters/{cluster}/pods/{ns}/{name}", credentials.Wrap(factory,
@@ -197,7 +233,31 @@ func main() {
 				return k8s.GetPVC(ctx, p, k8s.GetPVCArgs{Cluster: c, Namespace: ns, Name: name})
 			})))
 
-	// Namespaces, PVs, and StorageClasses are cluster-scoped: no {ns} segment.
+	mux.HandleFunc("GET /api/clusters/{cluster}/roles/{ns}/{name}", credentials.Wrap(factory,
+		detailHandler(registry, "role",
+			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, ns, name string) (k8s.RoleDetail, error) {
+				return k8s.GetRole(ctx, p, k8s.GetRoleArgs{Cluster: c, Namespace: ns, Name: name})
+			})))
+
+	mux.HandleFunc("GET /api/clusters/{cluster}/rolebindings/{ns}/{name}", credentials.Wrap(factory,
+		detailHandler(registry, "rolebinding",
+			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, ns, name string) (k8s.RoleBindingDetail, error) {
+				return k8s.GetRoleBinding(ctx, p, k8s.GetRoleBindingArgs{Cluster: c, Namespace: ns, Name: name})
+			})))
+
+	mux.HandleFunc("GET /api/clusters/{cluster}/serviceaccounts/{ns}/{name}", credentials.Wrap(factory,
+		detailHandler(registry, "serviceaccount",
+			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, ns, name string) (k8s.ServiceAccountDetail, error) {
+				return k8s.GetServiceAccount(ctx, p, k8s.GetServiceAccountArgs{Cluster: c, Namespace: ns, Name: name})
+			})))
+
+	// Nodes, Namespaces, PVs, and StorageClasses are cluster-scoped: no {ns} segment.
+	mux.HandleFunc("GET /api/clusters/{cluster}/nodes/{name}", credentials.Wrap(factory,
+		detailHandler(registry, "node",
+			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, _, name string) (k8s.NodeDetail, error) {
+				return k8s.GetNode(ctx, p, k8s.GetNodeArgs{Cluster: c, Name: name})
+			})))
+
 	mux.HandleFunc("GET /api/clusters/{cluster}/namespaces/{name}", credentials.Wrap(factory,
 		detailHandler(registry, "namespace",
 			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, _, name string) (k8s.NamespaceDetail, error) {
@@ -214,6 +274,32 @@ func main() {
 		detailHandler(registry, "storageclass",
 			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, _, name string) (k8s.StorageClassDetail, error) {
 				return k8s.GetStorageClass(ctx, p, k8s.GetStorageClassArgs{Cluster: c, Name: name})
+			})))
+
+	mux.HandleFunc("GET /api/clusters/{cluster}/clusterroles/{name}", credentials.Wrap(factory,
+		detailHandler(registry, "clusterrole",
+			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, _, name string) (k8s.ClusterRoleDetail, error) {
+				return k8s.GetClusterRole(ctx, p, k8s.GetClusterRoleArgs{Cluster: c, Name: name})
+			})))
+
+	mux.HandleFunc("GET /api/clusters/{cluster}/clusterrolebindings/{name}", credentials.Wrap(factory,
+		detailHandler(registry, "clusterrolebinding",
+			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, _, name string) (k8s.ClusterRoleBindingDetail, error) {
+				return k8s.GetClusterRoleBinding(ctx, p, k8s.GetClusterRoleBindingArgs{Cluster: c, Name: name})
+			})))
+
+	// --- Metrics endpoints ---
+
+	mux.HandleFunc("GET /api/clusters/{cluster}/nodes/{name}/metrics", credentials.Wrap(factory,
+		detailHandler(registry, "node-metrics",
+			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, _, name string) (k8s.NodeMetrics, error) {
+				return k8s.GetNodeMetrics(ctx, p, k8s.GetNodeArgs{Cluster: c, Name: name})
+			})))
+
+	mux.HandleFunc("GET /api/clusters/{cluster}/pods/{ns}/{name}/metrics", credentials.Wrap(factory,
+		detailHandler(registry, "pod-metrics",
+			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, ns, name string) (k8s.PodMetrics, error) {
+				return k8s.GetPodMetrics(ctx, p, k8s.GetPodArgs{Cluster: c, Namespace: ns, Name: name})
 			})))
 
 	// --- YAML endpoints ---
@@ -300,6 +386,36 @@ func main() {
 		yamlHandler(registry, "storageclass",
 			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, _, name string) (string, error) {
 				return k8s.GetStorageClassYAML(ctx, p, k8s.GetStorageClassArgs{Cluster: c, Name: name})
+			})))
+
+	mux.HandleFunc("GET /api/clusters/{cluster}/roles/{ns}/{name}/yaml", credentials.Wrap(factory,
+		yamlHandler(registry, "role",
+			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, ns, name string) (string, error) {
+				return k8s.GetRoleYAML(ctx, p, k8s.GetRoleArgs{Cluster: c, Namespace: ns, Name: name})
+			})))
+
+	mux.HandleFunc("GET /api/clusters/{cluster}/clusterroles/{name}/yaml", credentials.Wrap(factory,
+		yamlHandler(registry, "clusterrole",
+			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, _, name string) (string, error) {
+				return k8s.GetClusterRoleYAML(ctx, p, k8s.GetClusterRoleArgs{Cluster: c, Name: name})
+			})))
+
+	mux.HandleFunc("GET /api/clusters/{cluster}/rolebindings/{ns}/{name}/yaml", credentials.Wrap(factory,
+		yamlHandler(registry, "rolebinding",
+			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, ns, name string) (string, error) {
+				return k8s.GetRoleBindingYAML(ctx, p, k8s.GetRoleBindingArgs{Cluster: c, Namespace: ns, Name: name})
+			})))
+
+	mux.HandleFunc("GET /api/clusters/{cluster}/clusterrolebindings/{name}/yaml", credentials.Wrap(factory,
+		yamlHandler(registry, "clusterrolebinding",
+			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, _, name string) (string, error) {
+				return k8s.GetClusterRoleBindingYAML(ctx, p, k8s.GetClusterRoleBindingArgs{Cluster: c, Name: name})
+			})))
+
+	mux.HandleFunc("GET /api/clusters/{cluster}/serviceaccounts/{ns}/{name}/yaml", credentials.Wrap(factory,
+		yamlHandler(registry, "serviceaccount",
+			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, ns, name string) (string, error) {
+				return k8s.GetServiceAccountYAML(ctx, p, k8s.GetServiceAccountArgs{Cluster: c, Namespace: ns, Name: name})
 			})))
 
 	// --- Cluster-wide events list ---

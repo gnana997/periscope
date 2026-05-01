@@ -1,7 +1,8 @@
-import { usePodDetail } from "../../../hooks/useResource";
+import { usePodDetail, usePodMetrics } from "../../../hooks/useResource";
 import { ageFrom } from "../../../lib/format";
 import { cn } from "../../../lib/cn";
 import { StatusDot } from "../../table/StatusDot";
+import { CircularGauge, CircularGaugeSkeleton } from "../../ui/CircularGauge";
 import { DetailError, DetailLoading } from "../states";
 import {
   ConditionList,
@@ -13,7 +14,7 @@ import {
   readyStatTone,
   restartStatTone,
 } from "./shared";
-import type { ContainerStatus } from "../../../lib/types";
+import type { ContainerMetrics, ContainerStatus } from "../../../lib/types";
 
 export function PodDescribe({
   cluster,
@@ -25,6 +26,7 @@ export function PodDescribe({
   name: string;
 }) {
   const { data, isLoading, isError, error } = usePodDetail(cluster, ns, name);
+  const metrics = usePodMetrics(cluster, ns, name);
 
   if (isLoading) return <DetailLoading />;
   if (isError)
@@ -60,12 +62,21 @@ export function PodDescribe({
         {data.initContainers && data.initContainers.length > 0 && (
           <>
             <SectionTitle>Init containers</SectionTitle>
-            <ContainerCardList items={data.initContainers} />
+            <ContainerCardList items={data.initContainers} metricsByName={{}} />
           </>
         )}
 
         <SectionTitle>Containers</SectionTitle>
-        <ContainerCardList items={data.containers} />
+        <ContainerCardList
+          items={data.containers}
+          metricsByName={
+            metrics.data?.containers
+              ? Object.fromEntries(metrics.data.containers.map((m) => [m.name, m]))
+              : {}
+          }
+          metricsLoading={metrics.isLoading}
+          metricsUnavailable={metrics.data?.available === false}
+        />
 
         <SectionTitle>Labels</SectionTitle>
         <MetaPills map={data.labels} />
@@ -77,7 +88,17 @@ export function PodDescribe({
   );
 }
 
-function ContainerCardList({ items }: { items: ContainerStatus[] }) {
+function ContainerCardList({
+  items,
+  metricsByName,
+  metricsLoading,
+  metricsUnavailable,
+}: {
+  items: ContainerStatus[];
+  metricsByName: Record<string, ContainerMetrics>;
+  metricsLoading?: boolean;
+  metricsUnavailable?: boolean;
+}) {
   return (
     <ul className="space-y-2">
       {items.map((c) => {
@@ -97,11 +118,13 @@ function ContainerCardList({ items }: { items: ContainerStatus[] }) {
               : stateTone === "red"
                 ? "text-red"
                 : "text-ink-muted";
+        const m = metricsByName[c.name];
         return (
           <li
             key={c.name}
             className="rounded-md border border-border bg-surface-2/40 px-3 py-2"
           >
+            {/* Header row */}
             <div className="flex items-center gap-2">
               <span className="font-mono text-[12.5px] font-medium text-ink">
                 {c.name}
@@ -127,17 +150,65 @@ function ContainerCardList({ items }: { items: ContainerStatus[] }) {
                 ↻ {c.restartCount}
               </span>
             </div>
+
+            {/* Image */}
             <div
               className="mt-1 truncate font-mono text-[11.5px] text-ink-muted"
               title={c.image}
             >
               {c.image}
             </div>
+
             {c.message && (
               <div className="mt-1 break-words text-[11.5px] text-ink-muted">
                 {c.message}
               </div>
             )}
+
+            {/* Requests / limits */}
+            {(c.cpuRequest || c.cpuLimit || c.memoryRequest || c.memoryLimit) && (
+              <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-ink-faint">
+                {(c.cpuRequest || c.cpuLimit) && (
+                  <span>
+                    CPU{" "}
+                    <span className="font-mono text-ink-muted">
+                      req {c.cpuRequest ?? "—"} · lim {c.cpuLimit ?? "—"}
+                    </span>
+                  </span>
+                )}
+                {(c.memoryRequest || c.memoryLimit) && (
+                  <span>
+                    Memory{" "}
+                    <span className="font-mono text-ink-muted">
+                      req {c.memoryRequest ?? "—"} · lim {c.memoryLimit ?? "—"}
+                    </span>
+                  </span>
+                )}
+              </div>
+            )}
+
+            {/* Usage gauges */}
+            {metricsUnavailable ? null : metricsLoading ? (
+              <div className="mt-3 flex justify-around">
+                <CircularGaugeSkeleton label="CPU" />
+                <CircularGaugeSkeleton label="Memory" />
+              </div>
+            ) : m ? (
+              <div className="mt-3 flex justify-around">
+                <CircularGauge
+                  percent={m.cpuLimitPercent >= 0 ? m.cpuLimitPercent : null}
+                  label="CPU"
+                  usageLabel={m.cpuUsage ?? "—"}
+                  totalLabel={c.cpuLimit ?? undefined}
+                />
+                <CircularGauge
+                  percent={m.memLimitPercent >= 0 ? m.memLimitPercent : null}
+                  label="Memory"
+                  usageLabel={m.memoryUsage ?? "—"}
+                  totalLabel={c.memoryLimit ?? undefined}
+                />
+              </div>
+            ) : null}
           </li>
         );
       })}

@@ -1,5 +1,9 @@
 import type {
   ClusterEventList,
+  ClusterRoleBindingDetail,
+  ClusterRoleBindingList,
+  ClusterRoleDetail,
+  ClusterRoleList,
   ClustersResponse,
   ConfigMapDetail,
   ConfigMapList,
@@ -15,6 +19,10 @@ import type {
   JobDetail,
   JobList,
   NamespaceDetail,
+  NodeDetail,
+  NodeList,
+  NodeMetrics,
+  PodMetrics,
   NamespaceList,
   PodDetail,
   PodList,
@@ -22,8 +30,14 @@ import type {
   PVCList,
   PVDetail,
   PVList,
+  RoleBindingDetail,
+  RoleBindingList,
+  RoleDetail,
+  RoleList,
   SecretDetail,
   SecretList,
+  ServiceAccountDetail,
+  ServiceAccountList,
   ServiceDetail,
   ServiceList,
   StatefulSetDetail,
@@ -85,7 +99,7 @@ function clusterScopedURL(c: string, kind: string, name: string, suffix?: string
   return suffix ? `${base}/${suffix}` : base;
 }
 
-export type ClusterScopedKind = "namespaces" | "pvs" | "storageclasses";
+export type ClusterScopedKind = "namespaces" | "pvs" | "storageclasses" | "clusterroles" | "clusterrolebindings";
 
 export type YamlKind =
   | "pods"
@@ -101,7 +115,12 @@ export type YamlKind =
   | "namespaces"
   | "pvcs"
   | "pvs"
-  | "storageclasses";
+  | "storageclasses"
+  | "roles"
+  | "clusterroles"
+  | "rolebindings"
+  | "clusterrolebindings"
+  | "serviceaccounts";
 
 export const api = {
   whoami: (signal?: AbortSignal) => getJSON<Whoami>("/api/whoami", signal),
@@ -110,6 +129,9 @@ export const api = {
     getJSON<ClustersResponse>("/api/clusters", signal),
 
   // --- LIST ---
+
+  nodes: (cluster: string, signal?: AbortSignal) =>
+    getJSON<NodeList>(`/api/clusters/${enc(cluster)}/nodes`, signal),
 
   namespaces: (cluster: string, signal?: AbortSignal) =>
     getJSON<NamespaceList>(`/api/clusters/${enc(cluster)}/namespaces`, signal),
@@ -212,6 +234,15 @@ export const api = {
   getCronJob: (c: string, ns: string, name: string, signal?: AbortSignal) =>
     getJSON<CronJobDetail>(nsURL(c, "cronjobs", ns, name), signal),
 
+  getNode: (c: string, name: string, signal?: AbortSignal) =>
+    getJSON<NodeDetail>(clusterScopedURL(c, "nodes", name), signal),
+
+  getNodeMetrics: (c: string, name: string, signal?: AbortSignal) =>
+    getJSON<NodeMetrics>(clusterScopedURL(c, "nodes", name, "metrics"), signal),
+
+  getPodMetrics: (c: string, ns: string, name: string, signal?: AbortSignal) =>
+    getJSON<PodMetrics>(nsURL(c, "pods", ns, name, "metrics"), signal),
+
   getNamespace: (c: string, name: string, signal?: AbortSignal) =>
     getJSON<NamespaceDetail>(clusterScopedURL(c, "namespaces", name), signal),
 
@@ -223,6 +254,37 @@ export const api = {
 
   getStorageClass: (c: string, name: string, signal?: AbortSignal) =>
     getJSON<StorageClassDetail>(clusterScopedURL(c, "storageclasses", name), signal),
+
+  roles: (cluster: string, namespace?: string, signal?: AbortSignal) => {
+    const qs = namespace ? `?namespace=${enc(namespace)}` : "";
+    return getJSON<RoleList>(`/api/clusters/${enc(cluster)}/roles${qs}`, signal);
+  },
+  getRoles: (c: string, ns: string, name: string, signal?: AbortSignal) =>
+    getJSON<RoleDetail>(nsURL(c, "roles", ns, name), signal),
+
+  clusterRoles: (cluster: string, signal?: AbortSignal) =>
+    getJSON<ClusterRoleList>(`/api/clusters/${enc(cluster)}/clusterroles`, signal),
+  getClusterRole: (c: string, name: string, signal?: AbortSignal) =>
+    getJSON<ClusterRoleDetail>(clusterScopedURL(c, "clusterroles", name), signal),
+
+  roleBindings: (cluster: string, namespace?: string, signal?: AbortSignal) => {
+    const qs = namespace ? `?namespace=${enc(namespace)}` : "";
+    return getJSON<RoleBindingList>(`/api/clusters/${enc(cluster)}/rolebindings${qs}`, signal);
+  },
+  getRoleBinding: (c: string, ns: string, name: string, signal?: AbortSignal) =>
+    getJSON<RoleBindingDetail>(nsURL(c, "rolebindings", ns, name), signal),
+
+  clusterRoleBindings: (cluster: string, signal?: AbortSignal) =>
+    getJSON<ClusterRoleBindingList>(`/api/clusters/${enc(cluster)}/clusterrolebindings`, signal),
+  getClusterRoleBinding: (c: string, name: string, signal?: AbortSignal) =>
+    getJSON<ClusterRoleBindingDetail>(clusterScopedURL(c, "clusterrolebindings", name), signal),
+
+  serviceAccounts: (cluster: string, namespace?: string, signal?: AbortSignal) => {
+    const qs = namespace ? `?namespace=${enc(namespace)}` : "";
+    return getJSON<ServiceAccountList>(`/api/clusters/${enc(cluster)}/serviceaccounts${qs}`, signal);
+  },
+  getServiceAccount: (c: string, ns: string, name: string, signal?: AbortSignal) =>
+    getJSON<ServiceAccountDetail>(nsURL(c, "serviceaccounts", ns, name), signal),
 
   // --- Secret reveal: per-key value, audit-logged server-side. ---
   // Fetched on user click only. Never as part of any other endpoint.

@@ -234,5 +234,17 @@ func containerStatusFor(spec corev1.Container, status corev1.ContainerStatus) Co
 	default:
 		out.State = "Unknown"
 	}
+	if v := spec.Resources.Requests.Cpu(); !v.IsZero() {
+		out.CPURequest = v.String()
+	}
+	if v := spec.Resources.Requests.Memory(); !v.IsZero() {
+		out.MemoryRequest = v.String()
+	}
+	if v := spec.Resources.Limits.Cpu(); !v.IsZero() {
+		out.CPULimit = v.String()
+	}
+	if v := spec.Resources.Limits.Memory(); !v.IsZero() {
+		out.MemoryLimit = v.String()
+	}
 	return out
 }

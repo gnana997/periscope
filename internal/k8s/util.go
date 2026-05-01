@@ -11,6 +11,34 @@ import (
 	"k8s.io/client-go/kubernetes"
 )
 
+const (
+	kib = 1024
+	mib = 1024 * kib
+	gib = 1024 * mib
+)
+
+// formatCPU converts millicore values to a human-readable string.
+func formatCPU(milliCores int64) string {
+	if milliCores >= 1000 {
+		return fmt.Sprintf("%.2f cores", float64(milliCores)/1000)
+	}
+	return fmt.Sprintf("%dm", milliCores)
+}
+
+// formatMemory converts a byte count to a human-readable binary string.
+func formatMemory(bytes int64) string {
+	switch {
+	case bytes >= gib:
+		return fmt.Sprintf("%.1f GiB", float64(bytes)/float64(gib))
+	case bytes >= mib:
+		return fmt.Sprintf("%.1f MiB", float64(bytes)/float64(mib))
+	case bytes >= kib:
+		return fmt.Sprintf("%.1f KiB", float64(bytes)/float64(kib))
+	default:
+		return fmt.Sprintf("%d B", bytes)
+	}
+}
+
 // childPodLimit caps inline child pods across all resource types.
 const childPodLimit = 20
 

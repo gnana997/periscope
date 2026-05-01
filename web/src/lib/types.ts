@@ -23,6 +23,54 @@ export interface Whoami {
   actor: string;
 }
 
+// --- Node ---
+
+export interface Node {
+  name: string;
+  status: string; // "Ready" | "NotReady" | "Unknown"
+  roles: string[];
+  kubeletVersion: string;
+  internalIP: string;
+  cpuCapacity: string;
+  memoryCapacity: string;
+  createdAt: string;
+}
+
+export interface NodeList {
+  nodes: Node[];
+}
+
+export interface NodeCondition {
+  type: string;
+  status: string;
+  reason?: string;
+  message?: string;
+}
+
+export interface NodeTaint {
+  key: string;
+  value?: string;
+  effect: string;
+}
+
+export interface NodeInfo {
+  osImage: string;
+  kernelVersion: string;
+  containerRuntime: string;
+  kubeletVersion: string;
+  kubeProxyVersion: string;
+}
+
+export interface NodeDetail extends Node {
+  conditions: NodeCondition[];
+  taints?: NodeTaint[];
+  labels?: Record<string, string>;
+  annotations?: Record<string, string>;
+  nodeInfo: NodeInfo;
+  cpuAllocatable: string;
+  memoryAllocatable: string;
+}
+
 // --- Namespace ---
 
 export interface Namespace {
@@ -72,6 +120,33 @@ export interface ContainerStatus {
   message?: string;
   ready: boolean;
   restartCount: number;
+  cpuRequest?: string;
+  cpuLimit?: string;
+  memoryRequest?: string;
+  memoryLimit?: string;
+}
+
+// --- Metrics ---
+
+export interface NodeMetrics {
+  available: boolean;
+  cpuPercent?: number;
+  memoryPercent?: number;
+  cpuUsage?: string;
+  memoryUsage?: string;
+}
+
+export interface ContainerMetrics {
+  name: string;
+  cpuUsage?: string;
+  memoryUsage?: string;
+  cpuLimitPercent: number;  // -1 = no limit set
+  memLimitPercent: number;  // -1 = no limit set
+}
+
+export interface PodMetrics {
+  available: boolean;
+  containers?: ContainerMetrics[];
 }
 
 export interface PodDetail extends Pod {
@@ -500,9 +575,124 @@ export interface StorageClassDetail extends StorageClass {
   annotations?: Record<string, string>;
 }
 
+// --- RBAC ---
+
+export interface PolicyRule {
+  verbs: string[];
+  apiGroups?: string[];
+  resources?: string[];
+  resourceNames?: string[];
+  nonResourceURLs?: string[];
+}
+
+export interface RoleRef {
+  kind: string;
+  name: string;
+}
+
+export interface RBACSubject {
+  kind: string;
+  name: string;
+  namespace?: string;
+}
+
+export interface Role {
+  name: string;
+  namespace: string;
+  ruleCount: number;
+  createdAt: string;
+}
+
+export interface RoleList {
+  roles: Role[];
+}
+
+export interface RoleDetail extends Role {
+  rules: PolicyRule[];
+  labels?: Record<string, string>;
+  annotations?: Record<string, string>;
+}
+
+export interface ClusterRole {
+  name: string;
+  ruleCount: number;
+  createdAt: string;
+}
+
+export interface ClusterRoleList {
+  clusterRoles: ClusterRole[];
+}
+
+export interface ClusterRoleDetail extends ClusterRole {
+  rules: PolicyRule[];
+  aggregationLabels?: string[];
+  labels?: Record<string, string>;
+  annotations?: Record<string, string>;
+}
+
+export interface RoleBinding {
+  name: string;
+  namespace: string;
+  roleRef: string;
+  subjectCount: number;
+  createdAt: string;
+}
+
+export interface RoleBindingList {
+  roleBindings: RoleBinding[];
+}
+
+export interface RoleBindingDetail {
+  name: string;
+  namespace: string;
+  createdAt: string;
+  roleRef: RoleRef;
+  subjects: RBACSubject[];
+  labels?: Record<string, string>;
+  annotations?: Record<string, string>;
+}
+
+export interface ClusterRoleBinding {
+  name: string;
+  roleRef: string;
+  subjectCount: number;
+  createdAt: string;
+}
+
+export interface ClusterRoleBindingList {
+  clusterRoleBindings: ClusterRoleBinding[];
+}
+
+export interface ClusterRoleBindingDetail {
+  name: string;
+  createdAt: string;
+  roleRef: RoleRef;
+  subjects: RBACSubject[];
+  labels?: Record<string, string>;
+  annotations?: Record<string, string>;
+}
+
+export interface ServiceAccount {
+  name: string;
+  namespace: string;
+  secrets: number;
+  createdAt: string;
+}
+
+export interface ServiceAccountList {
+  serviceAccounts: ServiceAccount[];
+}
+
+export interface ServiceAccountDetail extends ServiceAccount {
+  secretNames?: string[];
+  labels?: Record<string, string>;
+  annotations?: Record<string, string>;
+}
+
 // --- Resource catalog ---
 
 export type ResourceKind =
+  | "nodes"
   | "namespaces"
   | "pods"
   | "deployments"
@@ -517,9 +707,15 @@ export type ResourceKind =
   | "events"
   | "pvcs"
   | "pvs"
-  | "storageclasses";
+  | "storageclasses"
+  | "roles"
+  | "clusterroles"
+  | "rolebindings"
+  | "clusterrolebindings"
+  | "serviceaccounts";
 
 export type ResourceListResponse =
+  | NodeList
   | NamespaceList
   | PodList
   | DeploymentList
@@ -534,4 +730,9 @@ export type ResourceListResponse =
   | ClusterEventList
   | PVCList
   | PVList
-  | StorageClassList;
+  | StorageClassList
+  | RoleList
+  | ClusterRoleList
+  | RoleBindingList
+  | ClusterRoleBindingList
+  | ServiceAccountList;

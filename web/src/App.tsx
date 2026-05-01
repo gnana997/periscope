@@ -21,6 +21,7 @@ import { DeploymentsPage } from "./pages/DeploymentsPage";
 import { IngressesPage } from "./pages/IngressesPage";
 import { JobsPage } from "./pages/JobsPage";
 import { NamespacesPage } from "./pages/NamespacesPage";
+import { NodesPage } from "./pages/NodesPage";
 import { PodsPage } from "./pages/PodsPage";
 import { SecretsPage } from "./pages/SecretsPage";
 import { ServicesPage } from "./pages/ServicesPage";
@@ -28,6 +29,11 @@ import { StatefulSetsPage } from "./pages/StatefulSetsPage";
 import { PVCsPage } from "./pages/PVCsPage";
 import { PVsPage } from "./pages/PVsPage";
 import { StorageClassesPage } from "./pages/StorageClassesPage";
+import { RolesPage } from "./pages/RolesPage";
+import { ClusterRolesPage } from "./pages/ClusterRolesPage";
+import { RoleBindingsPage } from "./pages/RoleBindingsPage";
+import { ClusterRoleBindingsPage } from "./pages/ClusterRoleBindingsPage";
+import { ServiceAccountsPage } from "./pages/ServiceAccountsPage";
 import { PodLogsPage } from "./pages/PodLogsPage";
 import { DeploymentLogsPage } from "./pages/DeploymentLogsPage";
 import { StatefulSetLogsPage } from "./pages/StatefulSetLogsPage";
@@ -52,11 +58,17 @@ export default function App() {
         <Route path="ingresses" element={<WithCluster Page={IngressesPage} />} />
         <Route path="configmaps" element={<WithCluster Page={ConfigMapsPage} />} />
         <Route path="secrets" element={<WithCluster Page={SecretsPage} />} />
+        <Route path="nodes" element={<WithCluster Page={NodesPage} />} />
         <Route path="namespaces" element={<WithCluster Page={NamespacesPage} />} />
         <Route path="events" element={<WithCluster Page={EventsPage} />} />
         <Route path="pvcs" element={<WithCluster Page={PVCsPage} />} />
         <Route path="pvs" element={<WithCluster Page={PVsPage} />} />
         <Route path="storageclasses" element={<WithCluster Page={StorageClassesPage} />} />
+        <Route path="roles" element={<WithCluster Page={RolesPage} />} />
+        <Route path="clusterroles" element={<WithCluster Page={ClusterRolesPage} />} />
+        <Route path="rolebindings" element={<WithCluster Page={RoleBindingsPage} />} />
+        <Route path="clusterrolebindings" element={<WithCluster Page={ClusterRoleBindingsPage} />} />
+        <Route path="serviceaccounts" element={<WithCluster Page={ServiceAccountsPage} />} />
         <Route path="pods/:ns/:name/logs" element={<WithCluster Page={PodLogsPage} />} />
         <Route path="deployments/:ns/:name/logs" element={<WithCluster Page={DeploymentLogsPage} />} />
         <Route path="statefulsets/:ns/:name/logs" element={<WithCluster Page={StatefulSetLogsPage} />} />

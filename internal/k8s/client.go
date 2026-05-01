@@ -10,31 +10,57 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
+	metricsversioned "k8s.io/metrics/pkg/client/clientset/versioned"
 
 	"github.com/gnana997/periscope/internal/clusters"
 	"github.com/gnana997/periscope/internal/credentials"
 )
 
-// newClientFn is the function used to construct a Kubernetes clientset
-// for a request. Production points it at defaultNewClient; tests swap it
-// for a fake clientset.
+// newClientFn is swapped out by tests for a fake clientset.
 var newClientFn = defaultNewClient
 
+// newMetricsClientFn is swapped out by tests for a fake metrics clientset.
+var newMetricsClientFn = defaultNewMetricsClient
+
 func defaultNewClient(ctx context.Context, p credentials.Provider, c clusters.Cluster) (kubernetes.Interface, error) {
+	cfg, err := buildRestConfig(ctx, p, c)
+	if err != nil {
+		return nil, err
+	}
+	cs, err := kubernetes.NewForConfig(cfg)
+	if err != nil {
+		return nil, fmt.Errorf("build clientset: %w", err)
+	}
+	return cs, nil
+}
+
+func defaultNewMetricsClient(ctx context.Context, p credentials.Provider, c clusters.Cluster) (metricsversioned.Interface, error) {
+	cfg, err := buildRestConfig(ctx, p, c)
+	if err != nil {
+		return nil, err
+	}
+	mc, err := metricsversioned.NewForConfig(cfg)
+	if err != nil {
+		return nil, fmt.Errorf("build metrics clientset: %w", err)
+	}
+	return mc, nil
+}
+
+// buildRestConfig produces a *rest.Config for the cluster using either the
+// kubeconfig or EKS backend. Both newClientFn and newMetricsClientFn use it
+// so auth logic lives in exactly one place.
+func buildRestConfig(ctx context.Context, p credentials.Provider, c clusters.Cluster) (*rest.Config, error) {
 	switch c.Backend {
 	case clusters.BackendKubeconfig:
-		return newKubeconfigClient(c)
+		return buildKubeconfigRestConfig(c)
 	case clusters.BackendEKS, "":
-		return newEKSClient(ctx, p, c)
+		return buildEKSRestConfig(ctx, p, c)
 	default:
 		return nil, fmt.Errorf("cluster %q: unknown backend %q", c.Name, c.Backend)
 	}
 }
 
-// newEKSClient builds a Kubernetes clientset by calling eks:DescribeCluster
-// (using the Provider's AWS credentials) for the endpoint and CA, then
-// minting a short-lived bearer token via MintEKSToken.
-func newEKSClient(ctx context.Context, p credentials.Provider, c clusters.Cluster) (kubernetes.Interface, error) {
+func buildEKSRestConfig(ctx context.Context, p credentials.Provider, c clusters.Cluster) (*rest.Config, error) {
 	awsCfg := aws.Config{
 		Region:      c.Region,
 		Credentials: p,
@@ -61,24 +87,16 @@ func newEKSClient(ctx context.Context, p credentials.Provider, c clusters.Cluste
 		return nil, err
 	}
 
-	cs, err := kubernetes.NewForConfig(&rest.Config{
+	return &rest.Config{
 		Host:        *out.Cluster.Endpoint,
 		BearerToken: token,
 		TLSClientConfig: rest.TLSClientConfig{
 			CAData: caPEM,
 		},
-	})
-	if err != nil {
-		return nil, fmt.Errorf("build clientset: %w", err)
-	}
-	return cs, nil
+	}, nil
 }
 
-// newKubeconfigClient builds a Kubernetes clientset from a kubeconfig
-// file. The Provider's AWS credentials are not used here — the
-// kubeconfig itself carries the auth. Useful for local dev (KIND) and
-// non-AWS clusters.
-func newKubeconfigClient(c clusters.Cluster) (kubernetes.Interface, error) {
+func buildKubeconfigRestConfig(c clusters.Cluster) (*rest.Config, error) {
 	cfg, err := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(
 		&clientcmd.ClientConfigLoadingRules{ExplicitPath: c.KubeconfigPath},
 		&clientcmd.ConfigOverrides{CurrentContext: c.KubeconfigContext},
@@ -86,10 +104,5 @@ func newKubeconfigClient(c clusters.Cluster) (kubernetes.Interface, error) {
 	if err != nil {
 		return nil, fmt.Errorf("load kubeconfig %q: %w", c.KubeconfigPath, err)
 	}
-
-	cs, err := kubernetes.NewForConfig(cfg)
-	if err != nil {
-		return nil, fmt.Errorf("build clientset: %w", err)
-	}
-	return cs, nil
+	return cfg, nil
 }

@@ -7,6 +7,55 @@ package k8s
 
 import "time"
 
+// --- Node ---
+
+type Node struct {
+	Name           string    `json:"name"`
+	Status         string    `json:"status"` // "Ready" | "NotReady" | "Unknown"
+	Roles          []string  `json:"roles"`
+	KubeletVersion string    `json:"kubeletVersion"`
+	InternalIP     string    `json:"internalIP"`
+	CPUCapacity    string    `json:"cpuCapacity"`
+	MemoryCapacity string    `json:"memoryCapacity"`
+	CreatedAt      time.Time `json:"createdAt"`
+}
+
+type NodeList struct {
+	Nodes []Node `json:"nodes"`
+}
+
+type NodeCondition struct {
+	Type    string `json:"type"`
+	Status  string `json:"status"`
+	Reason  string `json:"reason,omitempty"`
+	Message string `json:"message,omitempty"`
+}
+
+type NodeTaint struct {
+	Key    string `json:"key"`
+	Value  string `json:"value,omitempty"`
+	Effect string `json:"effect"`
+}
+
+type NodeInfo struct {
+	OSImage          string `json:"osImage"`
+	KernelVersion    string `json:"kernelVersion"`
+	ContainerRuntime string `json:"containerRuntime"`
+	KubeletVersion   string `json:"kubeletVersion"`
+	KubeProxyVersion string `json:"kubeProxyVersion"`
+}
+
+type NodeDetail struct {
+	Node
+	Conditions        []NodeCondition   `json:"conditions"`
+	Taints            []NodeTaint       `json:"taints,omitempty"`
+	Labels            map[string]string `json:"labels,omitempty"`
+	Annotations       map[string]string `json:"annotations,omitempty"`
+	NodeInfo          NodeInfo          `json:"nodeInfo"`
+	CPUAllocatable    string            `json:"cpuAllocatable"`
+	MemoryAllocatable string            `json:"memoryAllocatable"`
+}
+
 // --- Namespace ---
 
 type Namespace struct {
@@ -62,13 +111,40 @@ type PodCondition struct {
 }
 
 type ContainerStatus struct {
-	Name         string `json:"name"`
-	Image        string `json:"image"`
-	State        string `json:"state"`
-	Reason       string `json:"reason,omitempty"`
-	Message      string `json:"message,omitempty"`
-	Ready        bool   `json:"ready"`
-	RestartCount int32  `json:"restartCount"`
+	Name          string `json:"name"`
+	Image         string `json:"image"`
+	State         string `json:"state"`
+	Reason        string `json:"reason,omitempty"`
+	Message       string `json:"message,omitempty"`
+	Ready         bool   `json:"ready"`
+	RestartCount  int32  `json:"restartCount"`
+	CPURequest    string `json:"cpuRequest,omitempty"`
+	CPULimit      string `json:"cpuLimit,omitempty"`
+	MemoryRequest string `json:"memoryRequest,omitempty"`
+	MemoryLimit   string `json:"memoryLimit,omitempty"`
+}
+
+// --- Metrics ---
+
+type NodeMetrics struct {
+	Available     bool    `json:"available"`
+	CPUPercent    float64 `json:"cpuPercent,omitempty"`
+	MemoryPercent float64 `json:"memoryPercent,omitempty"`
+	CPUUsage      string  `json:"cpuUsage,omitempty"`
+	MemoryUsage   string  `json:"memoryUsage,omitempty"`
+}
+
+type ContainerMetrics struct {
+	Name            string  `json:"name"`
+	CPUUsage        string  `json:"cpuUsage,omitempty"`
+	MemoryUsage     string  `json:"memoryUsage,omitempty"`
+	CPULimitPercent float64 `json:"cpuLimitPercent"`  // usage/limit*100; -1 = no limit set
+	MemLimitPercent float64 `json:"memLimitPercent"`  // usage/limit*100; -1 = no limit set
+}
+
+type PodMetrics struct {
+	Available  bool               `json:"available"`
+	Containers []ContainerMetrics `json:"containers,omitempty"`
 }
 
 // --- Deployment ---
@@ -522,4 +598,131 @@ type ClusterEvent struct {
 
 type ClusterEventList struct {
 	Events []ClusterEvent `json:"events"`
+}
+
+// --- RBAC ---
+
+type PolicyRule struct {
+	Verbs           []string `json:"verbs"`
+	APIGroups       []string `json:"apiGroups,omitempty"`
+	Resources       []string `json:"resources,omitempty"`
+	ResourceNames   []string `json:"resourceNames,omitempty"`
+	NonResourceURLs []string `json:"nonResourceURLs,omitempty"`
+}
+
+type RoleRef struct {
+	Kind string `json:"kind"`
+	Name string `json:"name"`
+}
+
+type RBACSubject struct {
+	Kind      string `json:"kind"`
+	Name      string `json:"name"`
+	Namespace string `json:"namespace,omitempty"`
+}
+
+// Role (namespace-scoped)
+
+type Role struct {
+	Name      string    `json:"name"`
+	Namespace string    `json:"namespace"`
+	RuleCount int       `json:"ruleCount"`
+	CreatedAt time.Time `json:"createdAt"`
+}
+
+type RoleList struct {
+	Roles []Role `json:"roles"`
+}
+
+type RoleDetail struct {
+	Role
+	Rules       []PolicyRule      `json:"rules"`
+	Labels      map[string]string `json:"labels,omitempty"`
+	Annotations map[string]string `json:"annotations,omitempty"`
+}
+
+// ClusterRole (cluster-scoped)
+
+type ClusterRole struct {
+	Name      string    `json:"name"`
+	RuleCount int       `json:"ruleCount"`
+	CreatedAt time.Time `json:"createdAt"`
+}
+
+type ClusterRoleList struct {
+	ClusterRoles []ClusterRole `json:"clusterRoles"`
+}
+
+type ClusterRoleDetail struct {
+	ClusterRole
+	Rules             []PolicyRule      `json:"rules"`
+	AggregationLabels []string          `json:"aggregationLabels,omitempty"`
+	Labels            map[string]string `json:"labels,omitempty"`
+	Annotations       map[string]string `json:"annotations,omitempty"`
+}
+
+// RoleBinding (namespace-scoped)
+
+type RoleBinding struct {
+	Name         string    `json:"name"`
+	Namespace    string    `json:"namespace"`
+	RoleRef      string    `json:"roleRef"`
+	SubjectCount int       `json:"subjectCount"`
+	CreatedAt    time.Time `json:"createdAt"`
+}
+
+type RoleBindingList struct {
+	RoleBindings []RoleBinding `json:"roleBindings"`
+}
+
+type RoleBindingDetail struct {
+	Name        string            `json:"name"`
+	Namespace   string            `json:"namespace"`
+	CreatedAt   time.Time         `json:"createdAt"`
+	RoleRef     RoleRef           `json:"roleRef"`
+	Subjects    []RBACSubject     `json:"subjects"`
+	Labels      map[string]string `json:"labels,omitempty"`
+	Annotations map[string]string `json:"annotations,omitempty"`
+}
+
+// ClusterRoleBinding (cluster-scoped)
+
+type ClusterRoleBinding struct {
+	Name         string    `json:"name"`
+	RoleRef      string    `json:"roleRef"`
+	SubjectCount int       `json:"subjectCount"`
+	CreatedAt    time.Time `json:"createdAt"`
+}
+
+type ClusterRoleBindingList struct {
+	ClusterRoleBindings []ClusterRoleBinding `json:"clusterRoleBindings"`
+}
+
+type ClusterRoleBindingDetail struct {
+	Name        string            `json:"name"`
+	CreatedAt   time.Time         `json:"createdAt"`
+	RoleRef     RoleRef           `json:"roleRef"`
+	Subjects    []RBACSubject     `json:"subjects"`
+	Labels      map[string]string `json:"labels,omitempty"`
+	Annotations map[string]string `json:"annotations,omitempty"`
+}
+
+// ServiceAccount (namespace-scoped)
+
+type ServiceAccount struct {
+	Name      string    `json:"name"`
+	Namespace string    `json:"namespace"`
+	Secrets   int       `json:"secrets"`
+	CreatedAt time.Time `json:"createdAt"`
+}
+
+type ServiceAccountList struct {
+	ServiceAccounts []ServiceAccount `json:"serviceAccounts"`
+}
+
+type ServiceAccountDetail struct {
+	ServiceAccount
+	SecretNames []string          `json:"secretNames,omitempty"`
+	Labels      map[string]string `json:"labels,omitempty"`
+	Annotations map[string]string `json:"annotations,omitempty"`
 }

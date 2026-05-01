@@ -6,7 +6,7 @@
 
 import type { ResourceKind } from "./types";
 
-export type ResourceGroup = "Workloads" | "Networking" | "Config" | "Storage" | "Cluster";
+export type ResourceGroup = "Workloads" | "Networking" | "Config" | "Storage" | "Cluster" | "Access";
 
 export interface ResourceMeta {
   id: ResourceKind | SoonResource;
@@ -35,8 +35,14 @@ export const RESOURCES: ResourceMeta[] = [
   { id: "pvcs",          label: "PersistentVolumeClaims", group: "Storage",  ready: true  },
   { id: "pvs",           label: "PersistentVolumes", group: "Storage", ready: true },
   { id: "storageclasses", label: "StorageClasses", group: "Storage", ready: true },
-  { id: "namespaces",    label: "Namespaces",    group: "Cluster",  ready: true  },
-  { id: "events",        label: "Events",        group: "Cluster",  ready: true  },
+  { id: "nodes",               label: "Nodes",               group: "Cluster",  ready: true  },
+  { id: "namespaces",          label: "Namespaces",          group: "Cluster",  ready: true  },
+  { id: "events",              label: "Events",              group: "Cluster",  ready: true  },
+  { id: "roles",               label: "Roles",               group: "Access",   ready: true  },
+  { id: "clusterroles",        label: "ClusterRoles",        group: "Access",   ready: true  },
+  { id: "rolebindings",        label: "RoleBindings",        group: "Access",   ready: true  },
+  { id: "clusterrolebindings", label: "ClusterRoleBindings", group: "Access",   ready: true  },
+  { id: "serviceaccounts",     label: "ServiceAccounts",     group: "Access",   ready: true  },
 ];
 
 export const RESOURCE_GROUPS: ResourceGroup[] = [
@@ -45,6 +51,7 @@ export const RESOURCE_GROUPS: ResourceGroup[] = [
   "Networking",
   "Config",
   "Storage",
+  "Access",
 ];
 
 export function resourcesByGroup(group: ResourceGroup): ResourceMeta[] {

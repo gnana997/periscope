@@ -2,6 +2,8 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { api, type ClusterScopedKind, type YamlKind } from "../lib/api";
 import type {
   ClusterEventList,
+  ClusterRoleBindingDetail,
+  ClusterRoleDetail,
   ConfigMapDetail,
   CronJobDetail,
   DaemonSetDetail,
@@ -10,12 +12,18 @@ import type {
   IngressDetail,
   JobDetail,
   NamespaceDetail,
+  NodeDetail,
+  NodeMetrics,
   PodDetail,
+  PodMetrics,
   PVCDetail,
   PVDetail,
   ResourceKind,
   ResourceListResponse,
+  RoleBindingDetail,
+  RoleDetail,
   SecretDetail,
+  ServiceAccountDetail,
   ServiceDetail,
   StatefulSetDetail,
   StorageClassDetail,
@@ -32,6 +40,8 @@ export function useResource({ cluster, resource, namespace }: ResourceQueryArgs)
     queryKey: ["resource", cluster, resource, namespace ?? ""],
     queryFn: ({ signal }): Promise<ResourceListResponse> => {
       switch (resource) {
+        case "nodes":
+          return api.nodes(cluster!, signal);
         case "namespaces":
           return api.namespaces(cluster!, signal);
         case "pods":
@@ -62,6 +72,16 @@ export function useResource({ cluster, resource, namespace }: ResourceQueryArgs)
           return api.pvs(cluster!, signal);
         case "storageclasses":
           return api.storageClasses(cluster!, signal);
+        case "roles":
+          return api.roles(cluster!, namespace, signal);
+        case "clusterroles":
+          return api.clusterRoles(cluster!, signal);
+        case "rolebindings":
+          return api.roleBindings(cluster!, namespace, signal);
+        case "clusterrolebindings":
+          return api.clusterRoleBindings(cluster!, signal);
+        case "serviceaccounts":
+          return api.serviceAccounts(cluster!, namespace, signal);
       }
     },
     enabled: Boolean(cluster),
@@ -191,6 +211,32 @@ export function useNamespaceDetail(cluster: string, name: string | null) {
   });
 }
 
+export function useNodeDetail(cluster: string, name: string | null) {
+  return useQuery<NodeDetail>({
+    queryKey: ["node-detail", cluster, name],
+    queryFn: ({ signal }) => api.getNode(cluster, name!, signal),
+    enabled: Boolean(name),
+  });
+}
+
+export function useNodeMetrics(cluster: string, name: string | null) {
+  return useQuery<NodeMetrics>({
+    queryKey: ["node-metrics", cluster, name],
+    queryFn: ({ signal }) => api.getNodeMetrics(cluster, name!, signal),
+    enabled: Boolean(name),
+    refetchInterval: 30_000,
+  });
+}
+
+export function usePodMetrics(cluster: string, ns: string, name: string | null) {
+  return useQuery<PodMetrics>({
+    queryKey: ["pod-metrics", cluster, ns, name],
+    queryFn: ({ signal }) => api.getPodMetrics(cluster, ns, name!, signal),
+    enabled: Boolean(name),
+    refetchInterval: 30_000,
+  });
+}
+
 // --- Secret reveal — mutation, NOT a query.
 // Modeled as a mutation so it only fires on explicit user action, never
 // preloads or revalidates on focus. Each call audit-logs server-side.
@@ -223,10 +269,52 @@ export function useYaml(
   return useQuery<string>({
     queryKey: ["yaml", cluster, kind, ns, name],
     queryFn: ({ signal }) =>
-      (["namespaces", "pvs", "storageclasses"] as ClusterScopedKind[]).includes(kind as ClusterScopedKind)
+      (["namespaces", "pvs", "storageclasses", "clusterroles", "clusterrolebindings"] as ClusterScopedKind[]).includes(kind as ClusterScopedKind)
         ? api.clusterScopedYaml(cluster, kind as ClusterScopedKind, name!, signal)
         : api.yaml(cluster, kind as Exclude<YamlKind, ClusterScopedKind>, ns, name!, signal),
     enabled: enabled && Boolean(name),
+  });
+}
+
+// --- RBAC detail hooks ---
+
+export function useRoleDetail(cluster: string, ns: string, name: string | null) {
+  return useQuery<RoleDetail>({
+    queryKey: ["role-detail", cluster, ns, name],
+    queryFn: ({ signal }) => api.getRoles(cluster, ns, name!, signal),
+    enabled: Boolean(name),
+  });
+}
+
+export function useClusterRoleDetail(cluster: string, name: string | null) {
+  return useQuery<ClusterRoleDetail>({
+    queryKey: ["clusterrole-detail", cluster, name],
+    queryFn: ({ signal }) => api.getClusterRole(cluster, name!, signal),
+    enabled: Boolean(name),
+  });
+}
+
+export function useRoleBindingDetail(cluster: string, ns: string, name: string | null) {
+  return useQuery<RoleBindingDetail>({
+    queryKey: ["rolebinding-detail", cluster, ns, name],
+    queryFn: ({ signal }) => api.getRoleBinding(cluster, ns, name!, signal),
+    enabled: Boolean(name),
+  });
+}
+
+export function useClusterRoleBindingDetail(cluster: string, name: string | null) {
+  return useQuery<ClusterRoleBindingDetail>({
+    queryKey: ["clusterrolebinding-detail", cluster, name],
+    queryFn: ({ signal }) => api.getClusterRoleBinding(cluster, name!, signal),
+    enabled: Boolean(name),
+  });
+}
+
+export function useServiceAccountDetail(cluster: string, ns: string, name: string | null) {
+  return useQuery<ServiceAccountDetail>({
+    queryKey: ["serviceaccount-detail", cluster, ns, name],
+    queryFn: ({ signal }) => api.getServiceAccount(cluster, ns, name!, signal),
+    enabled: Boolean(name),
   });
 }
 
@@ -242,7 +330,7 @@ export function useObjectEvents(
   return useQuery<EventList>({
     queryKey: ["events", cluster, kind, ns, name],
     queryFn: ({ signal }) =>
-      (["namespaces", "pvs", "storageclasses"] as ClusterScopedKind[]).includes(kind as ClusterScopedKind)
+      (["namespaces", "pvs", "storageclasses", "clusterroles", "clusterrolebindings"] as ClusterScopedKind[]).includes(kind as ClusterScopedKind)
         ? api.clusterScopedEvents(cluster, kind as ClusterScopedKind, name!, signal)
         : api.events(cluster, kind as Exclude<YamlKind, ClusterScopedKind>, ns, name!, signal),
     enabled: enabled && Boolean(name),
