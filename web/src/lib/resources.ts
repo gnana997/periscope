@@ -20,17 +20,15 @@ export interface ResourceMeta {
 export type SoonResource =
   | "logs"
   | "exec"
-  | "events"
-  | "jobs"
-  | "cronjobs";
+  | "events";
 
 export const RESOURCES: ResourceMeta[] = [
   { id: "pods",         label: "Pods",         group: "Workloads",  ready: true  },
   { id: "deployments",  label: "Deployments",  group: "Workloads",  ready: true  },
   { id: "statefulsets", label: "StatefulSets", group: "Workloads",  ready: true  },
   { id: "daemonsets",   label: "DaemonSets",   group: "Workloads",  ready: true  },
-  { id: "jobs",         label: "Jobs",         group: "Workloads",  ready: false },
-  { id: "cronjobs",     label: "CronJobs",     group: "Workloads",  ready: false },
+  { id: "jobs",         label: "Jobs",         group: "Workloads",  ready: true  },
+  { id: "cronjobs",     label: "CronJobs",     group: "Workloads",  ready: true  },
   { id: "services",     label: "Services",     group: "Networking", ready: true  },
   { id: "ingresses",    label: "Ingresses",    group: "Networking", ready: true  },
   { id: "configmaps",   label: "ConfigMaps",   group: "Config",     ready: true  },

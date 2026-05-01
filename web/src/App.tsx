@@ -12,9 +12,11 @@ import { ErrorState, NoClustersState } from "./components/table/states";
 import { useClusters } from "./hooks/useClusters";
 import { useTheme } from "./hooks/useTheme";
 import { ConfigMapsPage } from "./pages/ConfigMapsPage";
+import { CronJobsPage } from "./pages/CronJobsPage";
 import { DaemonSetsPage } from "./pages/DaemonSetsPage";
 import { DeploymentsPage } from "./pages/DeploymentsPage";
 import { IngressesPage } from "./pages/IngressesPage";
+import { JobsPage } from "./pages/JobsPage";
 import { NamespacesPage } from "./pages/NamespacesPage";
 import { PodsPage } from "./pages/PodsPage";
 import { SecretsPage } from "./pages/SecretsPage";
@@ -33,6 +35,8 @@ export default function App() {
         <Route path="deployments" element={<WithCluster Page={DeploymentsPage} />} />
         <Route path="statefulsets" element={<WithCluster Page={StatefulSetsPage} />} />
         <Route path="daemonsets" element={<WithCluster Page={DaemonSetsPage} />} />
+        <Route path="jobs" element={<WithCluster Page={JobsPage} />} />
+        <Route path="cronjobs" element={<WithCluster Page={CronJobsPage} />} />
         <Route path="services" element={<WithCluster Page={ServicesPage} />} />
         <Route path="ingresses" element={<WithCluster Page={IngressesPage} />} />
         <Route path="configmaps" element={<WithCluster Page={ConfigMapsPage} />} />

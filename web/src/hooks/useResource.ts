@@ -2,10 +2,12 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { api, type YamlKind } from "../lib/api";
 import type {
   ConfigMapDetail,
+  CronJobDetail,
   DaemonSetDetail,
   DeploymentDetail,
   EventList,
   IngressDetail,
+  JobDetail,
   NamespaceDetail,
   PodDetail,
   ResourceKind,
@@ -44,6 +46,10 @@ export function useResource({ cluster, resource, namespace }: ResourceQueryArgs)
           return api.configmaps(cluster!, namespace, signal);
         case "secrets":
           return api.secrets(cluster!, namespace, signal);
+        case "jobs":
+          return api.jobs(cluster!, namespace, signal);
+        case "cronjobs":
+          return api.cronjobs(cluster!, namespace, signal);
       }
     },
     enabled: Boolean(cluster),
@@ -112,6 +118,22 @@ export function useSecretDetail(cluster: string, ns: string, name: string | null
   return useQuery<SecretDetail>({
     queryKey: ["secret-detail", cluster, ns, name],
     queryFn: ({ signal }) => api.getSecret(cluster, ns, name!, signal),
+    enabled: Boolean(name),
+  });
+}
+
+export function useJobDetail(cluster: string, ns: string, name: string | null) {
+  return useQuery<JobDetail>({
+    queryKey: ["job-detail", cluster, ns, name],
+    queryFn: ({ signal }) => api.getJob(cluster, ns, name!, signal),
+    enabled: Boolean(name),
+  });
+}
+
+export function useCronJobDetail(cluster: string, ns: string, name: string | null) {
+  return useQuery<CronJobDetail>({
+    queryKey: ["cronjob-detail", cluster, ns, name],
+    queryFn: ({ signal }) => api.getCronJob(cluster, ns, name!, signal),
     enabled: Boolean(name),
   });
 }

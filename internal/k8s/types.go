@@ -315,3 +315,99 @@ type IngressDetail struct {
 	Labels      map[string]string `json:"labels,omitempty"`
 	Annotations map[string]string `json:"annotations,omitempty"`
 }
+
+// --- Job ---
+//
+// Completions is the kubectl-style "succeeded/desired" string ("1/1",
+// "2/3"). Status collapses the controller's condition list into a single
+// label: Complete | Failed | Running | Suspended. Duration is the wall
+// clock from start to completion (or now, if running) — pre-rendered by
+// the backend so the frontend doesn't need a humanizer.
+
+type Job struct {
+	Name        string    `json:"name"`
+	Namespace   string    `json:"namespace"`
+	Completions string    `json:"completions"`
+	Status      string    `json:"status"`
+	Duration    string    `json:"duration,omitempty"`
+	CreatedAt   time.Time `json:"createdAt"`
+}
+
+type JobList struct {
+	Jobs []Job `json:"jobs"`
+}
+
+type JobCondition struct {
+	Type    string `json:"type"`
+	Status  string `json:"status"`
+	Reason  string `json:"reason,omitempty"`
+	Message string `json:"message,omitempty"`
+}
+
+// JobChildPod is the inline-rendered pod row on JobDetail. Compact
+// shape — full pod info is one click away on the Pods page.
+type JobChildPod struct {
+	Name      string    `json:"name"`
+	Phase     string    `json:"phase"`
+	Ready     string    `json:"ready"`
+	Restarts  int32     `json:"restarts"`
+	CreatedAt time.Time `json:"createdAt"`
+}
+
+type JobDetail struct {
+	Job
+	Parallelism    int32             `json:"parallelism"`
+	BackoffLimit   int32             `json:"backoffLimit"`
+	Active         int32             `json:"active"`
+	Succeeded      int32             `json:"succeeded"`
+	Failed         int32             `json:"failed"`
+	Suspend        bool              `json:"suspend"`
+	StartTime      *time.Time        `json:"startTime,omitempty"`
+	CompletionTime *time.Time        `json:"completionTime,omitempty"`
+	Containers     []ContainerSpec   `json:"containers"`
+	Conditions     []JobCondition    `json:"conditions,omitempty"`
+	Selector       map[string]string `json:"selector,omitempty"`
+	Pods           []JobChildPod     `json:"pods"`
+	Labels         map[string]string `json:"labels,omitempty"`
+	Annotations    map[string]string `json:"annotations,omitempty"`
+}
+
+// --- CronJob ---
+
+type CronJob struct {
+	Name             string     `json:"name"`
+	Namespace        string     `json:"namespace"`
+	Schedule         string     `json:"schedule"`
+	Suspend          bool       `json:"suspend"`
+	Active           int32      `json:"active"`
+	LastScheduleTime *time.Time `json:"lastScheduleTime,omitempty"`
+	CreatedAt        time.Time  `json:"createdAt"`
+}
+
+type CronJobList struct {
+	CronJobs []CronJob `json:"cronJobs"`
+}
+
+// CronJobChildJob is the inline-rendered job row on CronJobDetail —
+// last N jobs spawned by this CronJob, newest first.
+type CronJobChildJob struct {
+	Name           string     `json:"name"`
+	Status         string     `json:"status"`
+	Completions    string     `json:"completions"`
+	StartTime      *time.Time `json:"startTime,omitempty"`
+	CompletionTime *time.Time `json:"completionTime,omitempty"`
+	Duration       string     `json:"duration,omitempty"`
+}
+
+type CronJobDetail struct {
+	CronJob
+	ConcurrencyPolicy          string            `json:"concurrencyPolicy"`
+	StartingDeadlineSeconds    *int64            `json:"startingDeadlineSeconds,omitempty"`
+	SuccessfulJobsHistoryLimit int32             `json:"successfulJobsHistoryLimit"`
+	FailedJobsHistoryLimit     int32             `json:"failedJobsHistoryLimit"`
+	LastSuccessfulTime         *time.Time        `json:"lastSuccessfulTime,omitempty"`
+	Containers                 []ContainerSpec   `json:"containers"`
+	Jobs                       []CronJobChildJob `json:"jobs"`
+	Labels                     map[string]string `json:"labels,omitempty"`
+	Annotations                map[string]string `json:"annotations,omitempty"`
+}

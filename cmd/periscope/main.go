@@ -94,6 +94,18 @@ func main() {
 				return k8s.ListSecrets(ctx, p, k8s.ListSecretsArgs{Cluster: c, Namespace: ns})
 			})))
 
+	mux.HandleFunc("GET /api/clusters/{cluster}/jobs", credentials.Wrap(factory,
+		listResource(registry, "jobs",
+			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, ns string) (k8s.JobList, error) {
+				return k8s.ListJobs(ctx, p, k8s.ListJobsArgs{Cluster: c, Namespace: ns})
+			})))
+
+	mux.HandleFunc("GET /api/clusters/{cluster}/cronjobs", credentials.Wrap(factory,
+		listResource(registry, "cronjobs",
+			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, ns string) (k8s.CronJobList, error) {
+				return k8s.ListCronJobs(ctx, p, k8s.ListCronJobsArgs{Cluster: c, Namespace: ns})
+			})))
+
 	// --- GET (detail) endpoints ---
 
 	mux.HandleFunc("GET /api/clusters/{cluster}/pods/{ns}/{name}", credentials.Wrap(factory,
@@ -142,6 +154,18 @@ func main() {
 		detailHandler(registry, "secret",
 			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, ns, name string) (k8s.SecretDetail, error) {
 				return k8s.GetSecret(ctx, p, k8s.GetSecretArgs{Cluster: c, Namespace: ns, Name: name})
+			})))
+
+	mux.HandleFunc("GET /api/clusters/{cluster}/jobs/{ns}/{name}", credentials.Wrap(factory,
+		detailHandler(registry, "job",
+			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, ns, name string) (k8s.JobDetail, error) {
+				return k8s.GetJob(ctx, p, k8s.GetJobArgs{Cluster: c, Namespace: ns, Name: name})
+			})))
+
+	mux.HandleFunc("GET /api/clusters/{cluster}/cronjobs/{ns}/{name}", credentials.Wrap(factory,
+		detailHandler(registry, "cronjob",
+			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, ns, name string) (k8s.CronJobDetail, error) {
+				return k8s.GetCronJob(ctx, p, k8s.GetCronJobArgs{Cluster: c, Namespace: ns, Name: name})
 			})))
 
 	// Namespaces are cluster-scoped: no {ns} segment.
@@ -201,6 +225,18 @@ func main() {
 				return k8s.GetSecretYAML(ctx, p, k8s.GetSecretArgs{Cluster: c, Namespace: ns, Name: name})
 			})))
 
+	mux.HandleFunc("GET /api/clusters/{cluster}/jobs/{ns}/{name}/yaml", credentials.Wrap(factory,
+		yamlHandler(registry, "job",
+			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, ns, name string) (string, error) {
+				return k8s.GetJobYAML(ctx, p, k8s.GetJobArgs{Cluster: c, Namespace: ns, Name: name})
+			})))
+
+	mux.HandleFunc("GET /api/clusters/{cluster}/cronjobs/{ns}/{name}/yaml", credentials.Wrap(factory,
+		yamlHandler(registry, "cronjob",
+			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, ns, name string) (string, error) {
+				return k8s.GetCronJobYAML(ctx, p, k8s.GetCronJobArgs{Cluster: c, Namespace: ns, Name: name})
+			})))
+
 	mux.HandleFunc("GET /api/clusters/{cluster}/namespaces/{name}/yaml", credentials.Wrap(factory,
 		yamlHandler(registry, "namespace",
 			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, _, name string) (string, error) {
@@ -225,6 +261,10 @@ func main() {
 		credentials.Wrap(factory, eventsHandler(registry, "ConfigMap")))
 	mux.HandleFunc("GET /api/clusters/{cluster}/secrets/{ns}/{name}/events",
 		credentials.Wrap(factory, eventsHandler(registry, "Secret")))
+	mux.HandleFunc("GET /api/clusters/{cluster}/jobs/{ns}/{name}/events",
+		credentials.Wrap(factory, eventsHandler(registry, "Job")))
+	mux.HandleFunc("GET /api/clusters/{cluster}/cronjobs/{ns}/{name}/events",
+		credentials.Wrap(factory, eventsHandler(registry, "CronJob")))
 	mux.HandleFunc("GET /api/clusters/{cluster}/namespaces/{name}/events",
 		credentials.Wrap(factory, eventsHandler(registry, "Namespace")))
 

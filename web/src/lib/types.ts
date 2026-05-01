@@ -294,6 +294,92 @@ export interface SecretDetail extends Secret {
   immutable?: boolean;
 }
 
+// --- Job ---
+
+export type JobStatus = "Complete" | "Failed" | "Running" | "Suspended" | "Pending";
+
+export interface Job {
+  name: string;
+  namespace: string;
+  completions: string;
+  status: JobStatus;
+  duration?: string;
+  createdAt: string;
+}
+
+export interface JobList {
+  jobs: Job[];
+}
+
+export interface JobCondition {
+  type: string;
+  status: string;
+  reason?: string;
+  message?: string;
+}
+
+export interface JobChildPod {
+  name: string;
+  phase: string;
+  ready: string;
+  restarts: number;
+  createdAt: string;
+}
+
+export interface JobDetail extends Job {
+  parallelism: number;
+  backoffLimit: number;
+  active: number;
+  succeeded: number;
+  failed: number;
+  suspend: boolean;
+  startTime?: string;
+  completionTime?: string;
+  containers: ContainerSpec[];
+  conditions?: JobCondition[];
+  selector?: Record<string, string>;
+  pods: JobChildPod[];
+  labels?: Record<string, string>;
+  annotations?: Record<string, string>;
+}
+
+// --- CronJob ---
+
+export interface CronJob {
+  name: string;
+  namespace: string;
+  schedule: string;
+  suspend: boolean;
+  active: number;
+  lastScheduleTime?: string;
+  createdAt: string;
+}
+
+export interface CronJobList {
+  cronJobs: CronJob[];
+}
+
+export interface CronJobChildJob {
+  name: string;
+  status: JobStatus;
+  completions: string;
+  startTime?: string;
+  completionTime?: string;
+  duration?: string;
+}
+
+export interface CronJobDetail extends CronJob {
+  concurrencyPolicy: string;
+  startingDeadlineSeconds?: number;
+  successfulJobsHistoryLimit: number;
+  failedJobsHistoryLimit: number;
+  lastSuccessfulTime?: string;
+  containers: ContainerSpec[];
+  jobs: CronJobChildJob[];
+  labels?: Record<string, string>;
+  annotations?: Record<string, string>;
+}
+
 // --- Events ---
 
 export interface Event {
@@ -321,7 +407,9 @@ export type ResourceKind =
   | "services"
   | "ingresses"
   | "configmaps"
-  | "secrets";
+  | "secrets"
+  | "jobs"
+  | "cronjobs";
 
 export type ResourceListResponse =
   | NamespaceList
@@ -332,4 +420,6 @@ export type ResourceListResponse =
   | ServiceList
   | IngressList
   | ConfigMapList
-  | SecretList;
+  | SecretList
+  | JobList
+  | CronJobList;

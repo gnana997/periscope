@@ -2,6 +2,8 @@ import type {
   ClustersResponse,
   ConfigMapDetail,
   ConfigMapList,
+  CronJobDetail,
+  CronJobList,
   DaemonSetDetail,
   DaemonSetList,
   DeploymentDetail,
@@ -9,6 +11,8 @@ import type {
   EventList,
   IngressDetail,
   IngressList,
+  JobDetail,
+  JobList,
   NamespaceDetail,
   NamespaceList,
   PodDetail,
@@ -83,6 +87,8 @@ export type YamlKind =
   | "ingresses"
   | "configmaps"
   | "secrets"
+  | "jobs"
+  | "cronjobs"
   | "namespaces";
 
 export const api = {
@@ -136,6 +142,16 @@ export const api = {
     return getJSON<SecretList>(`/api/clusters/${enc(cluster)}/secrets${qs}`, signal);
   },
 
+  jobs: (cluster: string, namespace?: string, signal?: AbortSignal) => {
+    const qs = namespace ? `?namespace=${enc(namespace)}` : "";
+    return getJSON<JobList>(`/api/clusters/${enc(cluster)}/jobs${qs}`, signal);
+  },
+
+  cronjobs: (cluster: string, namespace?: string, signal?: AbortSignal) => {
+    const qs = namespace ? `?namespace=${enc(namespace)}` : "";
+    return getJSON<CronJobList>(`/api/clusters/${enc(cluster)}/cronjobs${qs}`, signal);
+  },
+
   // --- GET (detail) ---
 
   getPod: (c: string, ns: string, name: string, signal?: AbortSignal) =>
@@ -161,6 +177,12 @@ export const api = {
 
   getSecret: (c: string, ns: string, name: string, signal?: AbortSignal) =>
     getJSON<SecretDetail>(nsURL(c, "secrets", ns, name), signal),
+
+  getJob: (c: string, ns: string, name: string, signal?: AbortSignal) =>
+    getJSON<JobDetail>(nsURL(c, "jobs", ns, name), signal),
+
+  getCronJob: (c: string, ns: string, name: string, signal?: AbortSignal) =>
+    getJSON<CronJobDetail>(nsURL(c, "cronjobs", ns, name), signal),
 
   getNamespace: (c: string, name: string, signal?: AbortSignal) =>
     getJSON<NamespaceDetail>(clusterScopedURL(c, "namespaces", name), signal),
