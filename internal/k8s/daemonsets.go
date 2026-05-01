@@ -69,6 +69,10 @@ func GetDaemonSet(ctx context.Context, p credentials.Provider, args GetDaemonSet
 		selector = raw.Spec.Selector.MatchLabels
 	}
 
+	pods, podErr := childPodsBySelector(ctx, cs, args.Namespace, raw.Spec.Selector)
+	if podErr != nil {
+		return DaemonSetDetail{}, fmt.Errorf("list daemonset pods: %w", podErr)
+	}
 	return DaemonSetDetail{
 		DaemonSet:      daemonSetSummary(raw),
 		UpdateStrategy: string(raw.Spec.UpdateStrategy.Type),
@@ -76,6 +80,7 @@ func GetDaemonSet(ctx context.Context, p credentials.Provider, args GetDaemonSet
 		NodeSelector:   raw.Spec.Template.Spec.NodeSelector,
 		Containers:     containers,
 		Conditions:     conds,
+		Pods:           pods,
 		Labels:         raw.Labels,
 		Annotations:    raw.Annotations,
 	}, nil

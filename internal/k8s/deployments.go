@@ -69,12 +69,17 @@ func GetDeployment(ctx context.Context, p credentials.Provider, args GetDeployme
 		selector = raw.Spec.Selector.MatchLabels
 	}
 
+	pods, podErr := childPodsBySelector(ctx, cs, args.Namespace, raw.Spec.Selector)
+	if podErr != nil {
+		return DeploymentDetail{}, fmt.Errorf("list deployment pods: %w", podErr)
+	}
 	return DeploymentDetail{
 		Deployment:  deploymentSummary(raw),
 		Strategy:    string(raw.Spec.Strategy.Type),
 		Selector:    selector,
 		Containers:  containers,
 		Conditions:  conds,
+		Pods:        pods,
 		Labels:      raw.Labels,
 		Annotations: raw.Annotations,
 	}, nil

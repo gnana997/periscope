@@ -69,6 +69,10 @@ func GetStatefulSet(ctx context.Context, p credentials.Provider, args GetStatefu
 		selector = raw.Spec.Selector.MatchLabels
 	}
 
+	pods, podErr := childPodsBySelector(ctx, cs, args.Namespace, raw.Spec.Selector)
+	if podErr != nil {
+		return StatefulSetDetail{}, fmt.Errorf("list statefulset pods: %w", podErr)
+	}
 	return StatefulSetDetail{
 		StatefulSet:    statefulSetSummary(raw),
 		ServiceName:    raw.Spec.ServiceName,
@@ -76,6 +80,7 @@ func GetStatefulSet(ctx context.Context, p credentials.Provider, args GetStatefu
 		Selector:       selector,
 		Containers:     containers,
 		Conditions:     conds,
+		Pods:           pods,
 		Labels:         raw.Labels,
 		Annotations:    raw.Annotations,
 	}, nil

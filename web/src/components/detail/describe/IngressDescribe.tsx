@@ -1,3 +1,4 @@
+import { Link } from "react-router-dom";
 import { useIngressDetail } from "../../../hooks/useResource";
 import { ageFrom } from "../../../lib/format";
 import { DetailError, DetailLoading } from "../states";
@@ -77,15 +78,22 @@ export function IngressDescribe({
                           {p.pathType}
                         </span>
                         <span className="text-ink-faint">→</span>
-                        <span className="text-ink">
+                        <Link
+                          to={
+                            `/clusters/${encodeURIComponent(cluster)}/services` +
+                            `?sel=${encodeURIComponent(p.backend.serviceName)}` +
+                            `&selNs=${encodeURIComponent(ns)}&tab=describe`
+                          }
+                          className="text-ink hover:text-accent hover:underline"
+                        >
                           {p.backend.serviceName}
-                          {p.backend.servicePort && (
-                            <>
-                              <span className="text-ink-faint">:</span>
-                              {p.backend.servicePort}
-                            </>
-                          )}
-                        </span>
+                        </Link>
+                        {p.backend.servicePort && (
+                          <span className="text-ink">
+                            <span className="text-ink-faint">:</span>
+                            {p.backend.servicePort}
+                          </span>
+                        )}
                       </li>
                     ))}
                   </ul>

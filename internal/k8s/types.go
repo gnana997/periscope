@@ -93,6 +93,7 @@ type DeploymentDetail struct {
 	Selector    map[string]string     `json:"selector,omitempty"`
 	Containers  []ContainerSpec       `json:"containers"`
 	Conditions  []DeploymentCondition `json:"conditions,omitempty"`
+	Pods           []JobChildPod         `json:"pods,omitempty"`
 	Labels      map[string]string     `json:"labels,omitempty"`
 	Annotations map[string]string     `json:"annotations,omitempty"`
 }
@@ -138,6 +139,7 @@ type ServiceDetail struct {
 	Service
 	Selector        map[string]string `json:"selector,omitempty"`
 	SessionAffinity string            `json:"sessionAffinity,omitempty"`
+	Pods            []JobChildPod     `json:"pods,omitempty"`
 	Labels          map[string]string `json:"labels,omitempty"`
 	Annotations     map[string]string `json:"annotations,omitempty"`
 }
@@ -207,6 +209,7 @@ type StatefulSetDetail struct {
 	Selector       map[string]string      `json:"selector,omitempty"`
 	Containers     []ContainerSpec        `json:"containers"`
 	Conditions     []DeploymentCondition  `json:"conditions,omitempty"`
+	Pods           []JobChildPod         `json:"pods,omitempty"`
 	Labels         map[string]string      `json:"labels,omitempty"`
 	Annotations    map[string]string      `json:"annotations,omitempty"`
 }
@@ -235,6 +238,7 @@ type DaemonSetDetail struct {
 	NodeSelector   map[string]string     `json:"nodeSelector,omitempty"`
 	Containers     []ContainerSpec       `json:"containers"`
 	Conditions     []DeploymentCondition `json:"conditions,omitempty"`
+	Pods           []JobChildPod         `json:"pods,omitempty"`
 	Labels         map[string]string     `json:"labels,omitempty"`
 	Annotations    map[string]string     `json:"annotations,omitempty"`
 }

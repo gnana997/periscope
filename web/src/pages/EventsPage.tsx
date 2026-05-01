@@ -34,8 +34,8 @@ function resourcePath(
   if (!route) return null;
   return (
     `/clusters/${encodeURIComponent(cluster)}/` +
-    `${route}?ns=${encodeURIComponent(ns)}` +
-    `&sel=${encodeURIComponent(name)}&selNs=${encodeURIComponent(ns)}&tab=describe`
+    `${route}?sel=${encodeURIComponent(name)}` +
+    `&selNs=${encodeURIComponent(ns)}&tab=describe`
   );
 }
 

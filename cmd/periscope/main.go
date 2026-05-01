@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 	"os"
@@ -326,6 +327,9 @@ func listResource[Resp any](
 		}
 		result, err := op(r.Context(), p, c, r.URL.Query().Get("namespace"))
 		if err != nil {
+			if errors.Is(err, context.Canceled) {
+				return
+			}
 			slog.ErrorContext(r.Context(), "list operation failed",
 				"resource", resource, "err", err,
 				"cluster", c.Name, "actor", p.Actor())
@@ -353,6 +357,9 @@ func detailHandler[Resp any](
 		name := r.PathValue("name")
 		result, err := op(r.Context(), p, c, ns, name)
 		if err != nil {
+			if errors.Is(err, context.Canceled) {
+				return
+			}
 			slog.ErrorContext(r.Context(), "get operation failed",
 				"resource", resource, "err", err,
 				"cluster", c.Name, "ns", ns, "name", name, "actor", p.Actor())
@@ -379,6 +386,9 @@ func yamlHandler(
 		name := r.PathValue("name")
 		result, err := op(r.Context(), p, c, ns, name)
 		if err != nil {
+			if errors.Is(err, context.Canceled) {
+				return
+			}
 			slog.ErrorContext(r.Context(), "yaml operation failed",
 				"resource", resource, "err", err,
 				"cluster", c.Name, "ns", ns, "name", name, "actor", p.Actor())
@@ -405,6 +415,9 @@ func eventsHandler(reg *clusters.Registry, kind string) credentials.Handler {
 			Cluster: c, Kind: kind, Namespace: ns, Name: name,
 		})
 		if err != nil {
+			if errors.Is(err, context.Canceled) {
+				return
+			}
 			slog.ErrorContext(r.Context(), "events operation failed",
 				"kind", kind, "err", err,
 				"cluster", c.Name, "ns", ns, "name", name, "actor", p.Actor())
@@ -432,6 +445,9 @@ func secretRevealHandler(reg *clusters.Registry) credentials.Handler {
 			Cluster: c, Namespace: ns, Name: name, Key: key,
 		})
 		if err != nil {
+			if errors.Is(err, context.Canceled) {
+				return
+			}
 			slog.ErrorContext(r.Context(), "secret reveal failed",
 				"err", err, "cluster", c.Name, "ns", ns, "name", name, "key", key,
 				"actor", p.Actor())

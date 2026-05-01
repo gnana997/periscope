@@ -5,6 +5,7 @@ import {
   ConditionList,
   KV,
   MetaPills,
+  PodRow,
   SectionTitle,
   StatStrip,
   type StatTone,
@@ -79,6 +80,17 @@ export function DeploymentDescribe({
           <>
             <SectionTitle>Conditions</SectionTitle>
             <ConditionList items={data.conditions} />
+          </>
+        )}
+
+        {data.pods && data.pods.length > 0 && (
+          <>
+            <SectionTitle>Pods</SectionTitle>
+            <ul className="space-y-1">
+              {data.pods.map((pod) => (
+                <PodRow key={pod.name} cluster={cluster} ns={ns} pod={pod} />
+              ))}
+            </ul>
           </>
         )}
 

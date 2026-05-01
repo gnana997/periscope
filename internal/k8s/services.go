@@ -48,10 +48,15 @@ func GetService(ctx context.Context, p credentials.Provider, args GetServiceArgs
 	if err != nil {
 		return ServiceDetail{}, fmt.Errorf("get service %s/%s: %w", args.Namespace, args.Name, err)
 	}
+	pods, podErr := childPodsByLabelMap(ctx, cs, args.Namespace, raw.Spec.Selector)
+	if podErr != nil {
+		return ServiceDetail{}, fmt.Errorf("list service pods: %w", podErr)
+	}
 	return ServiceDetail{
 		Service:         serviceSummary(raw),
 		Selector:        raw.Spec.Selector,
 		SessionAffinity: string(raw.Spec.SessionAffinity),
+		Pods:            pods,
 		Labels:          raw.Labels,
 		Annotations:     raw.Annotations,
 	}, nil

@@ -117,6 +117,7 @@ export interface DeploymentDetail extends Deployment {
   selector?: Record<string, string>;
   containers: ContainerSpec[];
   conditions?: DeploymentCondition[];
+  pods?: JobChildPod[];
   labels?: Record<string, string>;
   annotations?: Record<string, string>;
 }
@@ -143,6 +144,7 @@ export interface StatefulSetDetail extends StatefulSet {
   selector?: Record<string, string>;
   containers: ContainerSpec[];
   conditions?: DeploymentCondition[];
+  pods?: JobChildPod[];
   labels?: Record<string, string>;
   annotations?: Record<string, string>;
 }
@@ -170,6 +172,7 @@ export interface DaemonSetDetail extends DaemonSet {
   nodeSelector?: Record<string, string>;
   containers: ContainerSpec[];
   conditions?: DeploymentCondition[];
+  pods?: JobChildPod[];
   labels?: Record<string, string>;
   annotations?: Record<string, string>;
 }
@@ -201,6 +204,7 @@ export interface ServiceList {
 export interface ServiceDetail extends Service {
   selector?: Record<string, string>;
   sessionAffinity?: string;
+  pods?: JobChildPod[];
   labels?: Record<string, string>;
   annotations?: Record<string, string>;
 }

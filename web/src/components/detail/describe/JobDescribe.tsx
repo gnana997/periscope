@@ -1,13 +1,12 @@
-import { Link } from "react-router-dom";
 import { useJobDetail } from "../../../hooks/useResource";
 import { ageFrom } from "../../../lib/format";
-import { cn } from "../../../lib/cn";
-import type { JobChildPod, JobStatus } from "../../../lib/types";
+import type { JobStatus } from "../../../lib/types";
 import { DetailError, DetailLoading } from "../states";
 import {
   ConditionList,
   KV,
   MetaPills,
+  PodRow,
   SectionTitle,
   StatStrip,
   type StatTone,
@@ -28,20 +27,6 @@ function statusTone(s: JobStatus): StatTone {
   }
 }
 
-function podPhaseTone(phase: string): string {
-  switch (phase) {
-    case "Running":
-      return "text-accent";
-    case "Succeeded":
-      return "text-green";
-    case "Failed":
-      return "text-red";
-    case "Pending":
-      return "text-yellow";
-    default:
-      return "text-ink-muted";
-  }
-}
 
 export function JobDescribe({
   cluster,
@@ -172,58 +157,3 @@ export function JobDescribe({
   );
 }
 
-function PodRow({
-  cluster,
-  ns,
-  pod,
-}: {
-  cluster: string;
-  ns: string;
-  pod: JobChildPod;
-}) {
-  const target =
-    `/clusters/${encodeURIComponent(cluster)}/pods` +
-    `?ns=${encodeURIComponent(ns)}` +
-    `&sel=${encodeURIComponent(pod.name)}` +
-    `&selNs=${encodeURIComponent(ns)}` +
-    `&tab=describe`;
-
-  return (
-    <li>
-      <Link
-        to={target}
-        className="group flex items-center gap-3 rounded-md border border-border bg-surface-2/40 px-3 py-1.5 transition-colors hover:border-border-strong hover:bg-surface-2"
-      >
-        <span
-          className={cn("block size-1.5 rounded-full", {
-            "bg-accent": pod.phase === "Running",
-            "bg-green": pod.phase === "Succeeded",
-            "bg-red": pod.phase === "Failed",
-            "bg-yellow": pod.phase === "Pending",
-            "bg-ink-faint":
-              pod.phase !== "Running" &&
-              pod.phase !== "Succeeded" &&
-              pod.phase !== "Failed" &&
-              pod.phase !== "Pending",
-          })}
-        />
-        <span className="truncate font-mono text-[12px] text-ink group-hover:text-ink">
-          {pod.name}
-        </span>
-        <span
-          className={cn(
-            "font-mono text-[11.5px]",
-            podPhaseTone(pod.phase),
-          )}
-        >
-          {pod.phase}
-        </span>
-        <span className="ml-auto flex items-center gap-3 font-mono text-[11px] text-ink-muted tabular">
-          <span>{pod.ready}</span>
-          <span>↻ {pod.restarts}</span>
-          <span>{ageFrom(pod.createdAt)}</span>
-        </span>
-      </Link>
-    </li>
-  );
-}

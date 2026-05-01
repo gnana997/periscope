@@ -1,7 +1,7 @@
 import { useServiceDetail } from "../../../hooks/useResource";
 import { ageFrom } from "../../../lib/format";
 import { DetailError, DetailLoading } from "../states";
-import { KV, MetaPills, SectionTitle, StatStrip } from "./shared";
+import { KV, MetaPills, PodRow, SectionTitle, StatStrip } from "./shared";
 
 export function ServiceDescribe({
   cluster,
@@ -68,6 +68,17 @@ export function ServiceDescribe({
               </li>
             ))}
           </ul>
+        )}
+
+        {data.pods && data.pods.length > 0 && (
+          <>
+            <SectionTitle>Pods</SectionTitle>
+            <ul className="space-y-1">
+              {data.pods.map((pod) => (
+                <PodRow key={pod.name} cluster={cluster} ns={ns} pod={pod} />
+              ))}
+            </ul>
+          </>
         )}
 
         {data.selector && Object.keys(data.selector).length > 0 && (
