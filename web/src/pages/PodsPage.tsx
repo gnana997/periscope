@@ -18,6 +18,9 @@ import {
   LoadingState,
 } from "../components/table/states";
 import { DetailPane } from "../components/detail/DetailPane";
+import { PodDescribe } from "../components/detail/describe/PodDescribe";
+import { YamlView } from "../components/detail/YamlView";
+import { EventsView } from "../components/detail/EventsView";
 import { NamespacePicker } from "../components/shell/NamespacePicker";
 import { cn } from "../lib/cn";
 
@@ -26,12 +29,23 @@ export function PodsPage({ cluster }: { cluster: string }) {
   const namespace = params.get("ns");
   const search = params.get("q") ?? "";
   const status = params.get("status");
+  const selectedNs = params.get("selNs");
   const selectedName = params.get("sel");
+  const activeTab = params.get("tab") ?? "describe";
 
   const setParam = (key: string, value: string | null) => {
     const next = new URLSearchParams(params);
     if (value === null || value === "") next.delete(key);
     else next.set(key, value);
+    setParams(next, { replace: true });
+  };
+
+  const setMany = (updates: Record<string, string | null>) => {
+    const next = new URLSearchParams(params);
+    for (const [key, value] of Object.entries(updates)) {
+      if (value === null || value === "") next.delete(key);
+      else next.set(key, value);
+    }
     setParams(next, { replace: true });
   };
 
@@ -66,49 +80,25 @@ export function PodsPage({ cluster }: { cluster: string }) {
     return r;
   }, [allPods, search, status]);
 
-  const selected = selectedName
-    ? allPods.find((p) => p.name === selectedName) ?? null
-    : null;
+  const selectedKey =
+    selectedNs && selectedName ? `${selectedNs}/${selectedName}` : null;
 
   const columns: Column<Pod>[] = [
-    {
-      key: "name",
-      header: "name",
-      weight: 3,
-      cellClassName: "font-mono text-ink",
-      accessor: (p) => p.name,
-    },
-    {
-      key: "namespace",
-      header: "namespace",
-      weight: 1.4,
-      cellClassName: "font-mono text-ink-muted",
-      accessor: (p) => p.namespace,
-    },
-    {
-      key: "phase",
-      header: "phase",
-      weight: 1.2,
-      accessor: (p) => <PhaseTag phase={p.phase} />,
-    },
+    { key: "name", header: "name", weight: 3, cellClassName: "font-mono text-ink", accessor: (p) => p.name },
+    { key: "namespace", header: "namespace", weight: 1.4, cellClassName: "font-mono text-ink-muted", accessor: (p) => p.namespace },
+    { key: "phase", header: "phase", weight: 1.2, accessor: (p) => <PhaseTag phase={p.phase} /> },
     {
       key: "ready",
       header: "ready",
       weight: 0.6,
       align: "right",
       cellClassName: "font-mono",
-      accessor: (p) => (
-        <span
-          className={cn(
-            (() => {
-              const [r, t] = p.ready.split("/").map((n) => parseInt(n, 10));
-              return r < t ? "text-yellow" : "text-ink";
-            })(),
-          )}
-        >
-          {p.ready}
-        </span>
-      ),
+      accessor: (p) => {
+        const [r, t] = p.ready.split("/").map((n) => parseInt(n, 10));
+        return (
+          <span className={cn(r < t ? "text-yellow" : "text-ink")}>{p.ready}</span>
+        );
+      },
     },
     {
       key: "restarts",
@@ -117,41 +107,14 @@ export function PodsPage({ cluster }: { cluster: string }) {
       align: "right",
       cellClassName: "font-mono",
       accessor: (p) => (
-        <span
-          className={
-            p.restarts > 5
-              ? "text-red"
-              : p.restarts > 0
-                ? "text-yellow"
-                : "text-ink-muted"
-          }
-        >
+        <span className={p.restarts > 5 ? "text-red" : p.restarts > 0 ? "text-yellow" : "text-ink-muted"}>
           {p.restarts}
         </span>
       ),
     },
-    {
-      key: "node",
-      header: "node",
-      weight: 1.6,
-      cellClassName: "font-mono text-ink-muted",
-      accessor: (p) => p.nodeName ?? "—",
-    },
-    {
-      key: "ip",
-      header: "pod ip",
-      weight: 1.1,
-      cellClassName: "font-mono text-ink-muted",
-      accessor: (p) => p.podIP ?? "—",
-    },
-    {
-      key: "age",
-      header: "age",
-      weight: 0.6,
-      align: "right",
-      cellClassName: "font-mono text-ink-muted",
-      accessor: (p) => ageFrom(p.createdAt),
-    },
+    { key: "node", header: "node", weight: 1.6, cellClassName: "font-mono text-ink-muted", accessor: (p) => p.nodeName ?? "—" },
+    { key: "ip", header: "pod ip", weight: 1.1, cellClassName: "font-mono text-ink-muted", accessor: (p) => p.podIP ?? "—" },
+    { key: "age", header: "age", weight: 0.6, align: "right", cellClassName: "font-mono text-ink-muted", accessor: (p) => ageFrom(p.createdAt) },
   ];
 
   const rowTint = (p: Pod): RowTint => {
@@ -159,6 +122,39 @@ export function PodsPage({ cluster }: { cluster: string }) {
     if (p.phase === "Pending") return "yellow";
     return null;
   };
+
+  const detail =
+    selectedNs && selectedName ? (
+      <DetailPane
+        title={selectedName}
+        subtitle={selectedNs}
+        activeTab={activeTab}
+        onTabChange={(id) => setParam("tab", id)}
+        onClose={() => setMany({ sel: null, selNs: null, tab: null })}
+        tabs={[
+          {
+            id: "describe",
+            label: "describe",
+            ready: true,
+            content: <PodDescribe cluster={cluster} ns={selectedNs} name={selectedName} />,
+          },
+          {
+            id: "yaml",
+            label: "yaml",
+            ready: true,
+            content: <YamlView cluster={cluster} kind="pods" ns={selectedNs} name={selectedName} />,
+          },
+          {
+            id: "events",
+            label: "events",
+            ready: true,
+            content: <EventsView cluster={cluster} kind="pods" ns={selectedNs} name={selectedName} />,
+          },
+          { id: "logs", label: "logs", ready: false },
+          { id: "exec", label: "exec", ready: false },
+        ]}
+      />
+    ) : null;
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -172,22 +168,8 @@ export function PodsPage({ cluster }: { cluster: string }) {
             : undefined
         }
         chips={[
-          {
-            label: "failing",
-            count: failing,
-            tone: "red",
-            active: status === "Failed",
-            onClick: () =>
-              setParam("status", status === "Failed" ? null : "Failed"),
-          },
-          {
-            label: "pending",
-            count: pending,
-            tone: "yellow",
-            active: status === "Pending",
-            onClick: () =>
-              setParam("status", status === "Pending" ? null : "Pending"),
-          },
+          { label: "failing", count: failing, tone: "red", active: status === "Failed", onClick: () => setParam("status", status === "Failed" ? null : "Failed") },
+          { label: "pending", count: pending, tone: "yellow", active: status === "Pending", onClick: () => setParam("status", status === "Pending" ? null : "Pending") },
         ]}
         trailing={<NamespacePicker />}
       />
@@ -201,14 +183,12 @@ export function PodsPage({ cluster }: { cluster: string }) {
         totalCount={allPods.length}
       />
       <SplitPane
+        storageKey="periscope.detailWidth"
         left={
           podsQuery.isLoading ? (
             <LoadingState resource="pods" />
           ) : podsQuery.isError ? (
-            <ErrorState
-              title="couldn't reach the cluster"
-              message={(podsQuery.error as Error).message}
-            />
+            <ErrorState title="couldn't reach the cluster" message={(podsQuery.error as Error).message} />
           ) : filtered.length === 0 ? (
             <EmptyState resource="pods" namespace={namespace} />
           ) : (
@@ -217,20 +197,12 @@ export function PodsPage({ cluster }: { cluster: string }) {
               rows={filtered}
               rowKey={(p) => `${p.namespace}/${p.name}`}
               rowTint={rowTint}
-              onRowClick={(p) => setParam("sel", p.name)}
-              selectedKey={
-                selected
-                  ? `${selected.namespace}/${selected.name}`
-                  : null
-              }
+              onRowClick={(p) => setMany({ sel: p.name, selNs: p.namespace, tab: "describe" })}
+              selectedKey={selectedKey}
             />
           )
         }
-        right={
-          selected ? (
-            <DetailPane pod={selected} onClose={() => setParam("sel", null)} />
-          ) : null
-        }
+        right={detail}
       />
     </div>
   );

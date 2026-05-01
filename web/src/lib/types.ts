@@ -1,7 +1,7 @@
 /**
  * DTO types matching the backend Periscope API responses.
  * Source of truth: internal/k8s/types.go and internal/clusters/cluster.go.
- * Keep in sync manually for v1; codegen later if drift becomes painful.
+ * Keep in sync manually for v1.
  */
 
 export type ClusterBackend = "eks" | "kubeconfig";
@@ -23,6 +23,8 @@ export interface Whoami {
   actor: string;
 }
 
+// --- Namespace ---
+
 export interface Namespace {
   name: string;
   phase: string;
@@ -32,6 +34,13 @@ export interface Namespace {
 export interface NamespaceList {
   namespaces: Namespace[];
 }
+
+export interface NamespaceDetail extends Namespace {
+  labels?: Record<string, string>;
+  annotations?: Record<string, string>;
+}
+
+// --- Pod ---
 
 export interface Pod {
   name: string;
@@ -48,6 +57,35 @@ export interface PodList {
   pods: Pod[];
 }
 
+export interface PodCondition {
+  type: string;
+  status: string;
+  reason?: string;
+  message?: string;
+}
+
+export interface ContainerStatus {
+  name: string;
+  image: string;
+  state: string;
+  reason?: string;
+  message?: string;
+  ready: boolean;
+  restartCount: number;
+}
+
+export interface PodDetail extends Pod {
+  hostIP?: string;
+  qosClass?: string;
+  conditions?: PodCondition[];
+  containers: ContainerStatus[];
+  initContainers?: ContainerStatus[];
+  labels?: Record<string, string>;
+  annotations?: Record<string, string>;
+}
+
+// --- Deployment ---
+
 export interface Deployment {
   name: string;
   namespace: string;
@@ -61,6 +99,29 @@ export interface Deployment {
 export interface DeploymentList {
   deployments: Deployment[];
 }
+
+export interface DeploymentCondition {
+  type: string;
+  status: string;
+  reason?: string;
+  message?: string;
+}
+
+export interface ContainerSpec {
+  name: string;
+  image: string;
+}
+
+export interface DeploymentDetail extends Deployment {
+  strategy: string;
+  selector?: Record<string, string>;
+  containers: ContainerSpec[];
+  conditions?: DeploymentCondition[];
+  labels?: Record<string, string>;
+  annotations?: Record<string, string>;
+}
+
+// --- Service ---
 
 export interface ServicePort {
   name?: string;
@@ -84,6 +145,15 @@ export interface ServiceList {
   services: Service[];
 }
 
+export interface ServiceDetail extends Service {
+  selector?: Record<string, string>;
+  sessionAffinity?: string;
+  labels?: Record<string, string>;
+  annotations?: Record<string, string>;
+}
+
+// --- ConfigMap ---
+
 export interface ConfigMap {
   name: string;
   namespace: string;
@@ -94,6 +164,31 @@ export interface ConfigMap {
 export interface ConfigMapList {
   configMaps: ConfigMap[];
 }
+
+export interface ConfigMapDetail extends ConfigMap {
+  data?: Record<string, string>;
+  binaryDataKeys?: string[];
+  labels?: Record<string, string>;
+  annotations?: Record<string, string>;
+}
+
+// --- Events ---
+
+export interface Event {
+  type: string;
+  reason: string;
+  message: string;
+  count: number;
+  first: string;
+  last: string;
+  source: string;
+}
+
+export interface EventList {
+  events: Event[];
+}
+
+// --- Resource catalog ---
 
 export type ResourceKind =
   | "namespaces"

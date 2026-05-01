@@ -1,6 +1,15 @@
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../lib/api";
-import type { ResourceKind, ResourceListResponse } from "../lib/types";
+import type {
+  ConfigMapDetail,
+  DeploymentDetail,
+  EventList,
+  NamespaceDetail,
+  PodDetail,
+  ResourceKind,
+  ResourceListResponse,
+  ServiceDetail,
+} from "../lib/types";
 
 interface ResourceQueryArgs {
   cluster: string | undefined;
@@ -26,5 +35,85 @@ export function useResource({ cluster, resource, namespace }: ResourceQueryArgs)
       }
     },
     enabled: Boolean(cluster),
+  });
+}
+
+// --- Detail fetchers (lazy: only run when enabled by the caller) ---
+
+export function usePodDetail(cluster: string, ns: string, name: string | null) {
+  return useQuery<PodDetail>({
+    queryKey: ["pod-detail", cluster, ns, name],
+    queryFn: ({ signal }) => api.getPod(cluster, ns, name!, signal),
+    enabled: Boolean(name),
+  });
+}
+
+export function useDeploymentDetail(cluster: string, ns: string, name: string | null) {
+  return useQuery<DeploymentDetail>({
+    queryKey: ["deployment-detail", cluster, ns, name],
+    queryFn: ({ signal }) => api.getDeployment(cluster, ns, name!, signal),
+    enabled: Boolean(name),
+  });
+}
+
+export function useServiceDetail(cluster: string, ns: string, name: string | null) {
+  return useQuery<ServiceDetail>({
+    queryKey: ["service-detail", cluster, ns, name],
+    queryFn: ({ signal }) => api.getService(cluster, ns, name!, signal),
+    enabled: Boolean(name),
+  });
+}
+
+export function useConfigMapDetail(cluster: string, ns: string, name: string | null) {
+  return useQuery<ConfigMapDetail>({
+    queryKey: ["configmap-detail", cluster, ns, name],
+    queryFn: ({ signal }) => api.getConfigMap(cluster, ns, name!, signal),
+    enabled: Boolean(name),
+  });
+}
+
+export function useNamespaceDetail(cluster: string, name: string | null) {
+  return useQuery<NamespaceDetail>({
+    queryKey: ["namespace-detail", cluster, name],
+    queryFn: ({ signal }) => api.getNamespace(cluster, name!, signal),
+    enabled: Boolean(name),
+  });
+}
+
+// --- YAML ---
+
+export function useYaml(
+  cluster: string,
+  kind: "pods" | "deployments" | "services" | "configmaps" | "namespaces",
+  ns: string,
+  name: string | null,
+  enabled: boolean,
+) {
+  return useQuery<string>({
+    queryKey: ["yaml", cluster, kind, ns, name],
+    queryFn: ({ signal }) =>
+      kind === "namespaces"
+        ? api.namespaceYaml(cluster, name!, signal)
+        : api.yaml(cluster, kind, ns, name!, signal),
+    enabled: enabled && Boolean(name),
+  });
+}
+
+// --- Events (per object) ---
+
+export function useObjectEvents(
+  cluster: string,
+  kind: "pods" | "deployments" | "services" | "configmaps" | "namespaces",
+  ns: string,
+  name: string | null,
+  enabled: boolean,
+) {
+  return useQuery<EventList>({
+    queryKey: ["events", cluster, kind, ns, name],
+    queryFn: ({ signal }) =>
+      kind === "namespaces"
+        ? api.namespaceEvents(cluster, name!, signal)
+        : api.events(cluster, kind, ns, name!, signal),
+    enabled: enabled && Boolean(name),
   });
 }

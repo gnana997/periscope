@@ -1,9 +1,15 @@
 import type {
   ClustersResponse,
+  ConfigMapDetail,
   ConfigMapList,
+  DeploymentDetail,
   DeploymentList,
+  EventList,
+  NamespaceDetail,
   NamespaceList,
+  PodDetail,
   PodList,
+  ServiceDetail,
   ServiceList,
   Whoami,
 } from "./types";
@@ -36,49 +42,105 @@ async function getJSON<T>(path: string, signal?: AbortSignal): Promise<T> {
   return (await res.json()) as T;
 }
 
+async function getText(path: string, signal?: AbortSignal): Promise<string> {
+  const res = await fetch(path, { signal });
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new ApiError(
+      `${res.status} ${res.statusText} on ${path}`,
+      res.status,
+      text,
+    );
+  }
+  return await res.text();
+}
+
+const enc = encodeURIComponent;
+
+// Build a URL for namespaced resources: /api/clusters/:c/:kind/:ns/:name(/suffix?)
+function nsURL(c: string, kind: string, ns: string, name: string, suffix?: string) {
+  const base = `/api/clusters/${enc(c)}/${kind}/${enc(ns)}/${enc(name)}`;
+  return suffix ? `${base}/${suffix}` : base;
+}
+// Cluster-scoped (Namespace): /api/clusters/:c/namespaces/:name(/suffix?)
+function clusterScopedURL(c: string, kind: string, name: string, suffix?: string) {
+  const base = `/api/clusters/${enc(c)}/${kind}/${enc(name)}`;
+  return suffix ? `${base}/${suffix}` : base;
+}
+
 export const api = {
   whoami: (signal?: AbortSignal) => getJSON<Whoami>("/api/whoami", signal),
 
   clusters: (signal?: AbortSignal) =>
     getJSON<ClustersResponse>("/api/clusters", signal),
 
+  // --- LIST ---
+
   namespaces: (cluster: string, signal?: AbortSignal) =>
-    getJSON<NamespaceList>(
-      `/api/clusters/${encodeURIComponent(cluster)}/namespaces`,
-      signal,
-    ),
+    getJSON<NamespaceList>(`/api/clusters/${enc(cluster)}/namespaces`, signal),
 
   pods: (cluster: string, namespace?: string, signal?: AbortSignal) => {
-    const qs = namespace ? `?namespace=${encodeURIComponent(namespace)}` : "";
-    return getJSON<PodList>(
-      `/api/clusters/${encodeURIComponent(cluster)}/pods${qs}`,
-      signal,
-    );
+    const qs = namespace ? `?namespace=${enc(namespace)}` : "";
+    return getJSON<PodList>(`/api/clusters/${enc(cluster)}/pods${qs}`, signal);
   },
 
   deployments: (cluster: string, namespace?: string, signal?: AbortSignal) => {
-    const qs = namespace ? `?namespace=${encodeURIComponent(namespace)}` : "";
-    return getJSON<DeploymentList>(
-      `/api/clusters/${encodeURIComponent(cluster)}/deployments${qs}`,
-      signal,
-    );
+    const qs = namespace ? `?namespace=${enc(namespace)}` : "";
+    return getJSON<DeploymentList>(`/api/clusters/${enc(cluster)}/deployments${qs}`, signal);
   },
 
   services: (cluster: string, namespace?: string, signal?: AbortSignal) => {
-    const qs = namespace ? `?namespace=${encodeURIComponent(namespace)}` : "";
-    return getJSON<ServiceList>(
-      `/api/clusters/${encodeURIComponent(cluster)}/services${qs}`,
-      signal,
-    );
+    const qs = namespace ? `?namespace=${enc(namespace)}` : "";
+    return getJSON<ServiceList>(`/api/clusters/${enc(cluster)}/services${qs}`, signal);
   },
 
   configmaps: (cluster: string, namespace?: string, signal?: AbortSignal) => {
-    const qs = namespace ? `?namespace=${encodeURIComponent(namespace)}` : "";
-    return getJSON<ConfigMapList>(
-      `/api/clusters/${encodeURIComponent(cluster)}/configmaps${qs}`,
-      signal,
-    );
+    const qs = namespace ? `?namespace=${enc(namespace)}` : "";
+    return getJSON<ConfigMapList>(`/api/clusters/${enc(cluster)}/configmaps${qs}`, signal);
   },
+
+  // --- GET (detail) ---
+
+  getPod: (c: string, ns: string, name: string, signal?: AbortSignal) =>
+    getJSON<PodDetail>(nsURL(c, "pods", ns, name), signal),
+
+  getDeployment: (c: string, ns: string, name: string, signal?: AbortSignal) =>
+    getJSON<DeploymentDetail>(nsURL(c, "deployments", ns, name), signal),
+
+  getService: (c: string, ns: string, name: string, signal?: AbortSignal) =>
+    getJSON<ServiceDetail>(nsURL(c, "services", ns, name), signal),
+
+  getConfigMap: (c: string, ns: string, name: string, signal?: AbortSignal) =>
+    getJSON<ConfigMapDetail>(nsURL(c, "configmaps", ns, name), signal),
+
+  getNamespace: (c: string, name: string, signal?: AbortSignal) =>
+    getJSON<NamespaceDetail>(clusterScopedURL(c, "namespaces", name), signal),
+
+  // --- YAML ---
+
+  yaml: (
+    c: string,
+    kind: "pods" | "deployments" | "services" | "configmaps",
+    ns: string,
+    name: string,
+    signal?: AbortSignal,
+  ) => getText(nsURL(c, kind, ns, name, "yaml"), signal),
+
+  namespaceYaml: (c: string, name: string, signal?: AbortSignal) =>
+    getText(clusterScopedURL(c, "namespaces", name, "yaml"), signal),
+
+  // --- Events (per object) ---
+
+  events: (
+    c: string,
+    kind: "pods" | "deployments" | "services" | "configmaps",
+    ns: string,
+    name: string,
+    signal?: AbortSignal,
+  ) => getJSON<EventList>(nsURL(c, kind, ns, name, "events"), signal),
+
+  namespaceEvents: (c: string, name: string, signal?: AbortSignal) =>
+    getJSON<EventList>(clusterScopedURL(c, "namespaces", name, "events"), signal),
 };
 
 export { ApiError };

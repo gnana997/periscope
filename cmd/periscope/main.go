@@ -38,35 +38,115 @@ func main() {
 	mux.HandleFunc("GET /api/whoami", credentials.Wrap(factory, whoami))
 	mux.HandleFunc("GET /api/clusters", listClustersHandler(registry))
 
-	mux.HandleFunc("GET /api/clusters/{name}/namespaces", credentials.Wrap(factory,
+	// --- LIST endpoints ---
+
+	mux.HandleFunc("GET /api/clusters/{cluster}/namespaces", credentials.Wrap(factory,
 		listResource(registry, "namespaces",
 			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, _ string) (k8s.NamespaceList, error) {
 				return k8s.ListNamespaces(ctx, p, k8s.ListNamespacesArgs{Cluster: c})
 			})))
 
-	mux.HandleFunc("GET /api/clusters/{name}/pods", credentials.Wrap(factory,
+	mux.HandleFunc("GET /api/clusters/{cluster}/pods", credentials.Wrap(factory,
 		listResource(registry, "pods",
 			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, ns string) (k8s.PodList, error) {
 				return k8s.ListPods(ctx, p, k8s.ListPodsArgs{Cluster: c, Namespace: ns})
 			})))
 
-	mux.HandleFunc("GET /api/clusters/{name}/deployments", credentials.Wrap(factory,
+	mux.HandleFunc("GET /api/clusters/{cluster}/deployments", credentials.Wrap(factory,
 		listResource(registry, "deployments",
 			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, ns string) (k8s.DeploymentList, error) {
 				return k8s.ListDeployments(ctx, p, k8s.ListDeploymentsArgs{Cluster: c, Namespace: ns})
 			})))
 
-	mux.HandleFunc("GET /api/clusters/{name}/services", credentials.Wrap(factory,
+	mux.HandleFunc("GET /api/clusters/{cluster}/services", credentials.Wrap(factory,
 		listResource(registry, "services",
 			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, ns string) (k8s.ServiceList, error) {
 				return k8s.ListServices(ctx, p, k8s.ListServicesArgs{Cluster: c, Namespace: ns})
 			})))
 
-	mux.HandleFunc("GET /api/clusters/{name}/configmaps", credentials.Wrap(factory,
+	mux.HandleFunc("GET /api/clusters/{cluster}/configmaps", credentials.Wrap(factory,
 		listResource(registry, "configmaps",
 			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, ns string) (k8s.ConfigMapList, error) {
 				return k8s.ListConfigMaps(ctx, p, k8s.ListConfigMapsArgs{Cluster: c, Namespace: ns})
 			})))
+
+	// --- GET (detail) endpoints ---
+
+	mux.HandleFunc("GET /api/clusters/{cluster}/pods/{ns}/{name}", credentials.Wrap(factory,
+		detailHandler(registry, "pod",
+			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, ns, name string) (k8s.PodDetail, error) {
+				return k8s.GetPod(ctx, p, k8s.GetPodArgs{Cluster: c, Namespace: ns, Name: name})
+			})))
+
+	mux.HandleFunc("GET /api/clusters/{cluster}/deployments/{ns}/{name}", credentials.Wrap(factory,
+		detailHandler(registry, "deployment",
+			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, ns, name string) (k8s.DeploymentDetail, error) {
+				return k8s.GetDeployment(ctx, p, k8s.GetDeploymentArgs{Cluster: c, Namespace: ns, Name: name})
+			})))
+
+	mux.HandleFunc("GET /api/clusters/{cluster}/services/{ns}/{name}", credentials.Wrap(factory,
+		detailHandler(registry, "service",
+			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, ns, name string) (k8s.ServiceDetail, error) {
+				return k8s.GetService(ctx, p, k8s.GetServiceArgs{Cluster: c, Namespace: ns, Name: name})
+			})))
+
+	mux.HandleFunc("GET /api/clusters/{cluster}/configmaps/{ns}/{name}", credentials.Wrap(factory,
+		detailHandler(registry, "configmap",
+			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, ns, name string) (k8s.ConfigMapDetail, error) {
+				return k8s.GetConfigMap(ctx, p, k8s.GetConfigMapArgs{Cluster: c, Namespace: ns, Name: name})
+			})))
+
+	// Namespaces are cluster-scoped: no {ns} segment.
+	mux.HandleFunc("GET /api/clusters/{cluster}/namespaces/{name}", credentials.Wrap(factory,
+		detailHandler(registry, "namespace",
+			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, _, name string) (k8s.NamespaceDetail, error) {
+				return k8s.GetNamespace(ctx, p, k8s.GetNamespaceArgs{Cluster: c, Name: name})
+			})))
+
+	// --- YAML endpoints ---
+
+	mux.HandleFunc("GET /api/clusters/{cluster}/pods/{ns}/{name}/yaml", credentials.Wrap(factory,
+		yamlHandler(registry, "pod",
+			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, ns, name string) (string, error) {
+				return k8s.GetPodYAML(ctx, p, k8s.GetPodArgs{Cluster: c, Namespace: ns, Name: name})
+			})))
+
+	mux.HandleFunc("GET /api/clusters/{cluster}/deployments/{ns}/{name}/yaml", credentials.Wrap(factory,
+		yamlHandler(registry, "deployment",
+			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, ns, name string) (string, error) {
+				return k8s.GetDeploymentYAML(ctx, p, k8s.GetDeploymentArgs{Cluster: c, Namespace: ns, Name: name})
+			})))
+
+	mux.HandleFunc("GET /api/clusters/{cluster}/services/{ns}/{name}/yaml", credentials.Wrap(factory,
+		yamlHandler(registry, "service",
+			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, ns, name string) (string, error) {
+				return k8s.GetServiceYAML(ctx, p, k8s.GetServiceArgs{Cluster: c, Namespace: ns, Name: name})
+			})))
+
+	mux.HandleFunc("GET /api/clusters/{cluster}/configmaps/{ns}/{name}/yaml", credentials.Wrap(factory,
+		yamlHandler(registry, "configmap",
+			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, ns, name string) (string, error) {
+				return k8s.GetConfigMapYAML(ctx, p, k8s.GetConfigMapArgs{Cluster: c, Namespace: ns, Name: name})
+			})))
+
+	mux.HandleFunc("GET /api/clusters/{cluster}/namespaces/{name}/yaml", credentials.Wrap(factory,
+		yamlHandler(registry, "namespace",
+			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, _, name string) (string, error) {
+				return k8s.GetNamespaceYAML(ctx, p, k8s.GetNamespaceArgs{Cluster: c, Name: name})
+			})))
+
+	// --- Events endpoints (per object) ---
+
+	mux.HandleFunc("GET /api/clusters/{cluster}/pods/{ns}/{name}/events",
+		credentials.Wrap(factory, eventsHandler(registry, "Pod")))
+	mux.HandleFunc("GET /api/clusters/{cluster}/deployments/{ns}/{name}/events",
+		credentials.Wrap(factory, eventsHandler(registry, "Deployment")))
+	mux.HandleFunc("GET /api/clusters/{cluster}/services/{ns}/{name}/events",
+		credentials.Wrap(factory, eventsHandler(registry, "Service")))
+	mux.HandleFunc("GET /api/clusters/{cluster}/configmaps/{ns}/{name}/events",
+		credentials.Wrap(factory, eventsHandler(registry, "ConfigMap")))
+	mux.HandleFunc("GET /api/clusters/{cluster}/namespaces/{name}/events",
+		credentials.Wrap(factory, eventsHandler(registry, "Namespace")))
 
 	port := os.Getenv("PORT")
 	if port == "" {
@@ -99,17 +179,14 @@ func listClustersHandler(reg *clusters.Registry) http.HandlerFunc {
 	}
 }
 
-// listResource wraps a list-style operation with the common HTTP machinery:
-// resolve cluster from {name} path param, extract optional ?namespace=
-// query param, invoke the typed op, JSON-encode the response, log errors
-// with actor + cluster context.
+// listResource wraps a list-style operation.
 func listResource[Resp any](
 	reg *clusters.Registry,
 	resource string,
 	op func(ctx context.Context, p credentials.Provider, c clusters.Cluster, ns string) (Resp, error),
 ) credentials.Handler {
 	return func(w http.ResponseWriter, r *http.Request, p credentials.Provider) {
-		c, ok := reg.ByName(r.PathValue("name"))
+		c, ok := reg.ByName(r.PathValue("cluster"))
 		if !ok {
 			http.Error(w, "cluster not found", http.StatusNotFound)
 			return
@@ -119,6 +196,85 @@ func listResource[Resp any](
 			slog.ErrorContext(r.Context(), "list operation failed",
 				"resource", resource, "err", err,
 				"cluster", c.Name, "actor", p.Actor())
+			http.Error(w, "operation failed", http.StatusInternalServerError)
+			return
+		}
+		writeJSON(w, http.StatusOK, result)
+	}
+}
+
+// detailHandler wraps a Get-style operation that returns a typed DTO.
+// {ns} is empty for cluster-scoped resources (e.g. namespaces).
+func detailHandler[Resp any](
+	reg *clusters.Registry,
+	resource string,
+	op func(ctx context.Context, p credentials.Provider, c clusters.Cluster, ns, name string) (Resp, error),
+) credentials.Handler {
+	return func(w http.ResponseWriter, r *http.Request, p credentials.Provider) {
+		c, ok := reg.ByName(r.PathValue("cluster"))
+		if !ok {
+			http.Error(w, "cluster not found", http.StatusNotFound)
+			return
+		}
+		ns := r.PathValue("ns")
+		name := r.PathValue("name")
+		result, err := op(r.Context(), p, c, ns, name)
+		if err != nil {
+			slog.ErrorContext(r.Context(), "get operation failed",
+				"resource", resource, "err", err,
+				"cluster", c.Name, "ns", ns, "name", name, "actor", p.Actor())
+			http.Error(w, "operation failed", http.StatusInternalServerError)
+			return
+		}
+		writeJSON(w, http.StatusOK, result)
+	}
+}
+
+// yamlHandler wraps a Get-style operation that returns a YAML string.
+func yamlHandler(
+	reg *clusters.Registry,
+	resource string,
+	op func(ctx context.Context, p credentials.Provider, c clusters.Cluster, ns, name string) (string, error),
+) credentials.Handler {
+	return func(w http.ResponseWriter, r *http.Request, p credentials.Provider) {
+		c, ok := reg.ByName(r.PathValue("cluster"))
+		if !ok {
+			http.Error(w, "cluster not found", http.StatusNotFound)
+			return
+		}
+		ns := r.PathValue("ns")
+		name := r.PathValue("name")
+		result, err := op(r.Context(), p, c, ns, name)
+		if err != nil {
+			slog.ErrorContext(r.Context(), "yaml operation failed",
+				"resource", resource, "err", err,
+				"cluster", c.Name, "ns", ns, "name", name, "actor", p.Actor())
+			http.Error(w, "operation failed", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/yaml; charset=utf-8")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(result))
+	}
+}
+
+// eventsHandler wraps ListObjectEvents with a fixed Kind for the route.
+func eventsHandler(reg *clusters.Registry, kind string) credentials.Handler {
+	return func(w http.ResponseWriter, r *http.Request, p credentials.Provider) {
+		c, ok := reg.ByName(r.PathValue("cluster"))
+		if !ok {
+			http.Error(w, "cluster not found", http.StatusNotFound)
+			return
+		}
+		ns := r.PathValue("ns")
+		name := r.PathValue("name")
+		result, err := k8s.ListObjectEvents(r.Context(), p, k8s.ListObjectEventsArgs{
+			Cluster: c, Kind: kind, Namespace: ns, Name: name,
+		})
+		if err != nil {
+			slog.ErrorContext(r.Context(), "events operation failed",
+				"kind", kind, "err", err,
+				"cluster", c.Name, "ns", ns, "name", name, "actor", p.Actor())
 			http.Error(w, "operation failed", http.StatusInternalServerError)
 			return
 		}

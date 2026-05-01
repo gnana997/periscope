@@ -19,7 +19,13 @@ type NamespaceList struct {
 	Namespaces []Namespace `json:"namespaces"`
 }
 
-// --- Pod (list view) ---
+type NamespaceDetail struct {
+	Namespace
+	Labels      map[string]string `json:"labels,omitempty"`
+	Annotations map[string]string `json:"annotations,omitempty"`
+}
+
+// --- Pod ---
 
 type Pod struct {
 	Name      string    `json:"name"`
@@ -37,7 +43,35 @@ type PodList struct {
 	Pods []Pod `json:"pods"`
 }
 
-// --- Deployment (list view) ---
+type PodDetail struct {
+	Pod
+	HostIP         string            `json:"hostIP,omitempty"`
+	QOSClass       string            `json:"qosClass,omitempty"`
+	Conditions     []PodCondition    `json:"conditions,omitempty"`
+	Containers     []ContainerStatus `json:"containers"`
+	InitContainers []ContainerStatus `json:"initContainers,omitempty"`
+	Labels         map[string]string `json:"labels,omitempty"`
+	Annotations    map[string]string `json:"annotations,omitempty"`
+}
+
+type PodCondition struct {
+	Type    string `json:"type"`
+	Status  string `json:"status"`
+	Reason  string `json:"reason,omitempty"`
+	Message string `json:"message,omitempty"`
+}
+
+type ContainerStatus struct {
+	Name         string `json:"name"`
+	Image        string `json:"image"`
+	State        string `json:"state"`
+	Reason       string `json:"reason,omitempty"`
+	Message      string `json:"message,omitempty"`
+	Ready        bool   `json:"ready"`
+	RestartCount int32  `json:"restartCount"`
+}
+
+// --- Deployment ---
 
 type Deployment struct {
 	Name              string    `json:"name"`
@@ -53,7 +87,29 @@ type DeploymentList struct {
 	Deployments []Deployment `json:"deployments"`
 }
 
-// --- Service (list view) ---
+type DeploymentDetail struct {
+	Deployment
+	Strategy    string                `json:"strategy"`
+	Selector    map[string]string     `json:"selector,omitempty"`
+	Containers  []ContainerSpec       `json:"containers"`
+	Conditions  []DeploymentCondition `json:"conditions,omitempty"`
+	Labels      map[string]string     `json:"labels,omitempty"`
+	Annotations map[string]string     `json:"annotations,omitempty"`
+}
+
+type DeploymentCondition struct {
+	Type    string `json:"type"`
+	Status  string `json:"status"`
+	Reason  string `json:"reason,omitempty"`
+	Message string `json:"message,omitempty"`
+}
+
+type ContainerSpec struct {
+	Name  string `json:"name"`
+	Image string `json:"image"`
+}
+
+// --- Service ---
 
 type Service struct {
 	Name       string        `json:"name"`
@@ -69,8 +125,7 @@ type ServicePort struct {
 	Name     string `json:"name,omitempty"`
 	Protocol string `json:"protocol"`
 	Port     int32  `json:"port"`
-	// TargetPort is a string because Kubernetes uses intstr.IntOrString
-	// (a port can be a port number or a named port).
+	// TargetPort is a string because Kubernetes uses intstr.IntOrString.
 	TargetPort string `json:"targetPort"`
 	NodePort   int32  `json:"nodePort,omitempty"`
 }
@@ -79,11 +134,19 @@ type ServiceList struct {
 	Services []Service `json:"services"`
 }
 
-// --- ConfigMap (list view) ---
+type ServiceDetail struct {
+	Service
+	Selector        map[string]string `json:"selector,omitempty"`
+	SessionAffinity string            `json:"sessionAffinity,omitempty"`
+	Labels          map[string]string `json:"labels,omitempty"`
+	Annotations     map[string]string `json:"annotations,omitempty"`
+}
+
+// --- ConfigMap ---
 //
-// List view exposes the key count only — never key names or values.
-// Same secrets-redaction principle applied here for consistency. Key
-// names land in the read (Get) view; values never appear in v1.
+// List view exposes only the key count — never names or values.
+// Detail view exposes keys and values; ConfigMap data is config, not
+// secret. Secrets (when they land) follow stricter redaction rules.
 
 type ConfigMap struct {
 	Name      string    `json:"name"`
@@ -94,4 +157,29 @@ type ConfigMap struct {
 
 type ConfigMapList struct {
 	ConfigMaps []ConfigMap `json:"configMaps"`
+}
+
+type ConfigMapDetail struct {
+	ConfigMap
+	Data           map[string]string `json:"data,omitempty"`
+	BinaryDataKeys []string          `json:"binaryDataKeys,omitempty"`
+	Labels         map[string]string `json:"labels,omitempty"`
+	Annotations    map[string]string `json:"annotations,omitempty"`
+}
+
+// --- Events (shared across resources) ---
+
+type Event struct {
+	// Type is "Normal" or "Warning".
+	Type    string    `json:"type"`
+	Reason  string    `json:"reason"`
+	Message string    `json:"message"`
+	Count   int32     `json:"count"`
+	First   time.Time `json:"first"`
+	Last    time.Time `json:"last"`
+	Source  string    `json:"source"`
+}
+
+type EventList struct {
+	Events []Event `json:"events"`
 }

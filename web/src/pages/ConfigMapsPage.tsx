@@ -12,17 +12,33 @@ import {
   ErrorState,
   LoadingState,
 } from "../components/table/states";
+import { DetailPane } from "../components/detail/DetailPane";
+import { ConfigMapDescribe } from "../components/detail/describe/ConfigMapDescribe";
+import { YamlView } from "../components/detail/YamlView";
+import { EventsView } from "../components/detail/EventsView";
 import { NamespacePicker } from "../components/shell/NamespacePicker";
 
 export function ConfigMapsPage({ cluster }: { cluster: string }) {
   const [params, setParams] = useSearchParams();
   const namespace = params.get("ns");
   const search = params.get("q") ?? "";
+  const selectedNs = params.get("selNs");
+  const selectedName = params.get("sel");
+  const activeTab = params.get("tab") ?? "describe";
 
   const setParam = (key: string, value: string | null) => {
     const next = new URLSearchParams(params);
     if (value === null || value === "") next.delete(key);
     else next.set(key, value);
+    setParams(next, { replace: true });
+  };
+
+  const setMany = (updates: Record<string, string | null>) => {
+    const next = new URLSearchParams(params);
+    for (const [key, value] of Object.entries(updates)) {
+      if (value === null || value === "") next.delete(key);
+      else next.set(key, value);
+    }
     setParams(next, { replace: true });
   };
 
@@ -38,38 +54,31 @@ export function ConfigMapsPage({ cluster }: { cluster: string }) {
     [all, search],
   );
 
+  const selectedKey =
+    selectedNs && selectedName ? `${selectedNs}/${selectedName}` : null;
+
   const columns: Column<ConfigMap>[] = [
-    {
-      key: "name",
-      header: "name",
-      weight: 3.5,
-      cellClassName: "font-mono text-ink",
-      accessor: (c) => c.name,
-    },
-    {
-      key: "namespace",
-      header: "namespace",
-      weight: 1.4,
-      cellClassName: "font-mono text-ink-muted",
-      accessor: (c) => c.namespace,
-    },
-    {
-      key: "keys",
-      header: "keys",
-      weight: 0.5,
-      align: "right",
-      cellClassName: "font-mono text-ink-muted",
-      accessor: (c) => c.keyCount,
-    },
-    {
-      key: "age",
-      header: "age",
-      weight: 0.5,
-      align: "right",
-      cellClassName: "font-mono text-ink-muted",
-      accessor: (c) => ageFrom(c.createdAt),
-    },
+    { key: "name", header: "name", weight: 3.5, cellClassName: "font-mono text-ink", accessor: (c) => c.name },
+    { key: "namespace", header: "namespace", weight: 1.4, cellClassName: "font-mono text-ink-muted", accessor: (c) => c.namespace },
+    { key: "keys", header: "keys", weight: 0.5, align: "right", cellClassName: "font-mono text-ink-muted", accessor: (c) => c.keyCount },
+    { key: "age", header: "age", weight: 0.5, align: "right", cellClassName: "font-mono text-ink-muted", accessor: (c) => ageFrom(c.createdAt) },
   ];
+
+  const detail =
+    selectedNs && selectedName ? (
+      <DetailPane
+        title={selectedName}
+        subtitle={selectedNs}
+        activeTab={activeTab}
+        onTabChange={(id) => setParam("tab", id)}
+        onClose={() => setMany({ sel: null, selNs: null, tab: null })}
+        tabs={[
+          { id: "describe", label: "describe", ready: true, content: <ConfigMapDescribe cluster={cluster} ns={selectedNs} name={selectedName} /> },
+          { id: "yaml", label: "yaml", ready: true, content: <YamlView cluster={cluster} kind="configmaps" ns={selectedNs} name={selectedName} /> },
+          { id: "events", label: "events", ready: true, content: <EventsView cluster={cluster} kind="configmaps" ns={selectedNs} name={selectedName} /> },
+        ]}
+      />
+    ) : null;
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -91,14 +100,12 @@ export function ConfigMapsPage({ cluster }: { cluster: string }) {
         totalCount={all.length}
       />
       <SplitPane
+        storageKey="periscope.detailWidth"
         left={
           query.isLoading ? (
             <LoadingState resource="configmaps" />
           ) : query.isError ? (
-            <ErrorState
-              title="couldn't reach the cluster"
-              message={(query.error as Error).message}
-            />
+            <ErrorState title="couldn't reach the cluster" message={(query.error as Error).message} />
           ) : filtered.length === 0 ? (
             <EmptyState resource="configmaps" namespace={namespace} />
           ) : (
@@ -106,10 +113,12 @@ export function ConfigMapsPage({ cluster }: { cluster: string }) {
               columns={columns}
               rows={filtered}
               rowKey={(c) => `${c.namespace}/${c.name}`}
+              onRowClick={(c) => setMany({ sel: c.name, selNs: c.namespace, tab: "describe" })}
+              selectedKey={selectedKey}
             />
           )
         }
-        right={null}
+        right={detail}
       />
     </div>
   );

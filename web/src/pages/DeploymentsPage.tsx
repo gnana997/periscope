@@ -16,6 +16,10 @@ import {
   ErrorState,
   LoadingState,
 } from "../components/table/states";
+import { DetailPane } from "../components/detail/DetailPane";
+import { DeploymentDescribe } from "../components/detail/describe/DeploymentDescribe";
+import { YamlView } from "../components/detail/YamlView";
+import { EventsView } from "../components/detail/EventsView";
 import { NamespacePicker } from "../components/shell/NamespacePicker";
 import { cn } from "../lib/cn";
 
@@ -23,11 +27,23 @@ export function DeploymentsPage({ cluster }: { cluster: string }) {
   const [params, setParams] = useSearchParams();
   const namespace = params.get("ns");
   const search = params.get("q") ?? "";
+  const selectedNs = params.get("selNs");
+  const selectedName = params.get("sel");
+  const activeTab = params.get("tab") ?? "describe";
 
   const setParam = (key: string, value: string | null) => {
     const next = new URLSearchParams(params);
     if (value === null || value === "") next.delete(key);
     else next.set(key, value);
+    setParams(next, { replace: true });
+  };
+
+  const setMany = (updates: Record<string, string | null>) => {
+    const next = new URLSearchParams(params);
+    for (const [key, value] of Object.entries(updates)) {
+      if (value === null || value === "") next.delete(key);
+      else next.set(key, value);
+    }
     setParams(next, { replace: true });
   };
 
@@ -43,21 +59,12 @@ export function DeploymentsPage({ cluster }: { cluster: string }) {
     [all, search],
   );
 
+  const selectedKey =
+    selectedNs && selectedName ? `${selectedNs}/${selectedName}` : null;
+
   const columns: Column<Deployment>[] = [
-    {
-      key: "name",
-      header: "name",
-      weight: 3,
-      cellClassName: "font-mono text-ink",
-      accessor: (d) => d.name,
-    },
-    {
-      key: "namespace",
-      header: "namespace",
-      weight: 1.4,
-      cellClassName: "font-mono text-ink-muted",
-      accessor: (d) => d.namespace,
-    },
+    { key: "name", header: "name", weight: 3, cellClassName: "font-mono text-ink", accessor: (d) => d.name },
+    { key: "namespace", header: "namespace", weight: 1.4, cellClassName: "font-mono text-ink-muted", accessor: (d) => d.namespace },
     {
       key: "ready",
       header: "ready",
@@ -65,39 +72,14 @@ export function DeploymentsPage({ cluster }: { cluster: string }) {
       align: "right",
       cellClassName: "font-mono",
       accessor: (d) => (
-        <span
-          className={cn(
-            d.readyReplicas < d.replicas ? "text-yellow" : "text-ink",
-          )}
-        >
+        <span className={cn(d.readyReplicas < d.replicas ? "text-yellow" : "text-ink")}>
           {d.readyReplicas}/{d.replicas}
         </span>
       ),
     },
-    {
-      key: "updated",
-      header: "up-to-date",
-      weight: 0.7,
-      align: "right",
-      cellClassName: "font-mono text-ink-muted",
-      accessor: (d) => d.updatedReplicas,
-    },
-    {
-      key: "available",
-      header: "available",
-      weight: 0.7,
-      align: "right",
-      cellClassName: "font-mono text-ink-muted",
-      accessor: (d) => d.availableReplicas,
-    },
-    {
-      key: "age",
-      header: "age",
-      weight: 0.5,
-      align: "right",
-      cellClassName: "font-mono text-ink-muted",
-      accessor: (d) => ageFrom(d.createdAt),
-    },
+    { key: "updated", header: "up-to-date", weight: 0.7, align: "right", cellClassName: "font-mono text-ink-muted", accessor: (d) => d.updatedReplicas },
+    { key: "available", header: "available", weight: 0.7, align: "right", cellClassName: "font-mono text-ink-muted", accessor: (d) => d.availableReplicas },
+    { key: "age", header: "age", weight: 0.5, align: "right", cellClassName: "font-mono text-ink-muted", accessor: (d) => ageFrom(d.createdAt) },
   ];
 
   const rowTint = (d: Deployment): RowTint => {
@@ -105,6 +87,22 @@ export function DeploymentsPage({ cluster }: { cluster: string }) {
     if (d.readyReplicas < d.replicas) return "yellow";
     return null;
   };
+
+  const detail =
+    selectedNs && selectedName ? (
+      <DetailPane
+        title={selectedName}
+        subtitle={selectedNs}
+        activeTab={activeTab}
+        onTabChange={(id) => setParam("tab", id)}
+        onClose={() => setMany({ sel: null, selNs: null, tab: null })}
+        tabs={[
+          { id: "describe", label: "describe", ready: true, content: <DeploymentDescribe cluster={cluster} ns={selectedNs} name={selectedName} /> },
+          { id: "yaml", label: "yaml", ready: true, content: <YamlView cluster={cluster} kind="deployments" ns={selectedNs} name={selectedName} /> },
+          { id: "events", label: "events", ready: true, content: <EventsView cluster={cluster} kind="deployments" ns={selectedNs} name={selectedName} /> },
+        ]}
+      />
+    ) : null;
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -126,14 +124,12 @@ export function DeploymentsPage({ cluster }: { cluster: string }) {
         totalCount={all.length}
       />
       <SplitPane
+        storageKey="periscope.detailWidth"
         left={
           query.isLoading ? (
             <LoadingState resource="deployments" />
           ) : query.isError ? (
-            <ErrorState
-              title="couldn't reach the cluster"
-              message={(query.error as Error).message}
-            />
+            <ErrorState title="couldn't reach the cluster" message={(query.error as Error).message} />
           ) : filtered.length === 0 ? (
             <EmptyState resource="deployments" namespace={namespace} />
           ) : (
@@ -142,10 +138,12 @@ export function DeploymentsPage({ cluster }: { cluster: string }) {
               rows={filtered}
               rowKey={(d) => `${d.namespace}/${d.name}`}
               rowTint={rowTint}
+              onRowClick={(d) => setMany({ sel: d.name, selNs: d.namespace, tab: "describe" })}
+              selectedKey={selectedKey}
             />
           )
         }
-        right={null}
+        right={detail}
       />
     </div>
   );
