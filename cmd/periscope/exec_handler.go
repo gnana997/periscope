@@ -114,7 +114,7 @@ func execHandler(reg *clusters.Registry, sessions *execsess.Registry) credential
 			"started_at", started.Format(time.RFC3339Nano),
 		)
 
-		result, runErr := execsess.Run(r.Context(), ws, p, params)
+		result, stats, runErr := execsess.Run(r.Context(), ws, p, params)
 		ended := time.Now().UTC()
 
 		closeReason := result.Reason
@@ -152,6 +152,8 @@ func execHandler(reg *clusters.Registry, sessions *execsess.Registry) credential
 			"duration_ms", ended.Sub(started).Milliseconds(),
 			"close_reason", closeReason,
 			"exit_code", result.ExitCode,
+			"bytes_stdin", stats.BytesIn,
+			"bytes_stdout", stats.BytesOut,
 			"err", errString(runErr),
 		)
 	}

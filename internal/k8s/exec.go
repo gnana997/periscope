@@ -26,11 +26,26 @@ import (
 const DefaultContainerAnnotation = "kubectl.kubernetes.io/default-container"
 
 // DefaultShellCommand is the command used when the caller does not supply
-// one. Tries bash first, falls back to sh, so we work on both glibc and
-// alpine images. Distroless images without /bin/sh produce E_NO_SHELL.
+// one. Two compatibility choices that took some work to get right:
+//
+//  1. Unqualified program names ("sh", "bash") rather than absolute paths
+//     so the container runtime (runc/crun) performs PATH lookup. This
+//     matters for images that ship a shell at /usr/bin/sh or
+//     /usr/bin/bash without the conventional /bin/sh symlink — common
+//     in Wolfi, newer distroless variants, and custom slim images.
+//
+//  2. `command -v bash` BEFORE `exec bash` instead of `exec bash || exec sh`.
+//     POSIX-strict shells (busybox sh, dash) terminate the shell with
+//     status 127 when an `exec` target isn't found, *before* the `||`
+//     branch can run. So the elegant `||` chain only works on
+//     bash/ksh/zsh — silently broken on alpine/busybox images that have
+//     sh but no bash. Probing first sidesteps that.
+//
+// Containers that ship no shell at all on PATH still fail with exit 127;
+// PR3 will detect that case up-front and surface E_NO_SHELL.
 var DefaultShellCommand = []string{
-	"/bin/sh", "-c",
-	"exec /bin/bash 2>/dev/null || exec /bin/sh",
+	"sh", "-c",
+	"command -v bash >/dev/null 2>&1 && exec bash; exec sh",
 }
 
 // ExecPodArgs is the set of inputs to ExecPod. Streams are wired by the

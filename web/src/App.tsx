@@ -49,12 +49,18 @@ import { ResourceQuotasPage } from "./pages/ResourceQuotasPage";
 import { LimitRangesPage } from "./pages/LimitRangesPage";
 import { PriorityClassesPage } from "./pages/PriorityClassesPage";
 import { RuntimeClassesPage } from "./pages/RuntimeClassesPage";
+import { ExecPage } from "./pages/ExecPage";
+import { ExecSessionsProvider } from "./exec/ExecSessionsContext";
+import { Drawer } from "./exec/Drawer";
 
 export default function App() {
   useTheme();
 
   return (
-    <Routes>
+    <ExecSessionsProvider>
+    <div className="flex h-full flex-col">
+      <div className="flex min-h-0 flex-1 overflow-hidden">
+      <Routes>
       <Route path="/" element={<RootRedirect />} />
       <Route path="/clusters/:cluster" element={<AppShell />}>
         <Route index element={<Navigate to="overview" replace />} />
@@ -94,9 +100,14 @@ export default function App() {
         <Route path="statefulsets/:ns/:name/logs" element={<WithCluster Page={StatefulSetLogsPage} />} />
         <Route path="daemonsets/:ns/:name/logs" element={<WithCluster Page={DaemonSetLogsPage} />} />
         <Route path="jobs/:ns/:name/logs" element={<WithCluster Page={JobLogsPage} />} />
+        <Route path="pods/:ns/:name/exec" element={<WithCluster Page={ExecPage} />} />
       </Route>
       <Route path="*" element={<RootRedirect />} />
-    </Routes>
+      </Routes>
+      </div>
+      <Drawer />
+    </div>
+    </ExecSessionsProvider>
   );
 }
 

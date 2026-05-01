@@ -19,6 +19,7 @@ import {
 } from "../components/table/states";
 import { DetailPane } from "../components/detail/DetailPane";
 import { PodDescribe } from "../components/detail/describe/PodDescribe";
+import { OpenShellButton } from "../components/exec/OpenShellButton";
 import { YamlView } from "../components/detail/YamlView";
 import { EventsView } from "../components/detail/EventsView";
 import { PodLogsTab } from "../components/logs/PodLogsTab";
@@ -157,8 +158,14 @@ export function PodsPage({ cluster }: { cluster: string }) {
             ready: true,
             content: <PodLogsTab cluster={cluster} ns={selectedNs} name={selectedName} />,
           },
-          { id: "exec", label: "exec", ready: false },
         ]}
+        actions={
+          <OpenShellButton
+            cluster={cluster}
+            namespace={selectedNs}
+            pod={selectedName}
+          />
+        }
       />
     ) : null;
 

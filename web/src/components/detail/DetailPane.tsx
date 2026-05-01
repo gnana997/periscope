@@ -18,6 +18,8 @@ interface DetailPaneProps {
   activeTab: string;
   onTabChange: (id: string) => void;
   onClose: () => void;
+  /** Optional action node rendered in the tab strip just before the close button. */
+  actions?: ReactNode;
 }
 
 /**
@@ -31,6 +33,7 @@ export function DetailPane({
   activeTab,
   onTabChange,
   onClose,
+  actions,
 }: DetailPaneProps) {
   const active = tabs.find((t) => t.id === activeTab && t.ready);
 
@@ -62,7 +65,8 @@ export function DetailPane({
             )}
           </button>
         ))}
-        <div className="ml-auto">
+        <div className="ml-auto flex items-center gap-2">
+          {actions}
           <button
             type="button"
             onClick={onClose}

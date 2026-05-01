@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-	"log/slog"
 	"sync/atomic"
 	"time"
 
@@ -43,14 +42,23 @@ type Params struct {
 	TTY       bool
 }
 
+// Stats captures byte-level metrics for the audit end record. Counts are
+// best-effort: they reflect what we forwarded between the WebSocket and the
+// exec stream, not what the container actually consumed or emitted.
+type Stats struct {
+	BytesIn  int64
+	BytesOut int64
+}
+
 // Run executes a single exec session over the supplied WebSocket. It blocks
-// until the stream ends and returns the final result for audit logging.
+// until the stream ends and returns the final result + byte counts for
+// audit logging.
 //
 // The caller is responsible for:
 //   - registering/de-registering the session in a Registry,
 //   - emitting audit start/end records,
 //   - closing the WebSocket if Run returns an error before doing so itself.
-func Run(ctx context.Context, ws *websocket.Conn, p credentials.Provider, params Params) (k8s.ExecResult, error) {
+func Run(ctx context.Context, ws *websocket.Conn, p credentials.Provider, params Params) (k8s.ExecResult, Stats, error) {
 	// Tie the session to a cancellable context. Any path that wants to end
 	// the session — client {type:close}, stream EOF, error — cancels here.
 	sessionCtx, cancel := context.WithCancel(ctx)
@@ -153,18 +161,8 @@ func Run(ctx context.Context, ws *websocket.Conn, p credentials.Provider, params
 	closed := closedFrame(result, execErr)
 	_ = writeControl(sessionCtx, ws, closed)
 
-	// Annotate the audit record's bytes_* fields via slog, and return the
-	// result + error for the caller's session_end record.
-	slog.InfoContext(ctx, "pod_exec.session.streamed",
-		"category", "audit_detail",
-		"session_id", params.SessionID,
-		"bytes_stdin", bytesIn.Load(),
-		"bytes_stdout", bytesOut.Load(),
-		"close_reason", closed.Reason,
-		"exit_code", closed.ExitCode,
-	)
-
-	return result, execErr
+	stats := Stats{BytesIn: bytesIn.Load(), BytesOut: bytesOut.Load()}
+	return result, stats, execErr
 }
 
 // controlFrame is the JSON envelope for browser-facing text-frame messages.

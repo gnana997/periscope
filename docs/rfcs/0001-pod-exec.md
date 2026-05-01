@@ -671,9 +671,14 @@ to parse byte prefixes in JS, and the WS spec gives us frame typing for free.
 
 These were open during initial review and have since been resolved.
 
-1. **Default shell command:** `/bin/sh -c "exec /bin/bash 2>/dev/null || exec /bin/sh"`
-   — inline command, single round-trip. Revisit if user feedback demands a probe
-   step.
+1. **Default shell command:** `sh -c "command -v bash >/dev/null 2>&1 && exec bash; exec sh"`.
+   Uses unqualified program names so the container runtime (runc/crun) performs
+   PATH lookup — matters for images that ship a shell at `/usr/bin/sh` without
+   the `/bin/sh` symlink (Wolfi, newer distroless, custom slim images). Probes
+   `bash` with `command -v` *before* `exec`-ing it because POSIX-strict shells
+   (busybox sh, dash) terminate the shell with status 127 when an `exec`
+   target isn't found, *before* a `||` branch can run — so the elegant
+   `exec bash || exec sh` idiom is silently broken on alpine/busybox images.
 2. **Session info pill shows K8s identity in v1.** Always reads `shared-irsa-v1` in
    v1; honest and educates users about what identity actually executes their
    commands. Becomes load-bearing in v2.
