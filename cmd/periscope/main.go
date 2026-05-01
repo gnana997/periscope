@@ -6,7 +6,6 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
-	"strings"
 
 	"github.com/gnana997/periscope/internal/clusters"
 	"github.com/gnana997/periscope/internal/credentials"
@@ -32,13 +31,42 @@ func main() {
 	}
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
+	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))
 	})
-	mux.HandleFunc("/api/whoami", credentials.Wrap(factory, whoami))
-	mux.HandleFunc("/api/clusters", listClustersHandler(registry))
-	mux.HandleFunc("/api/clusters/", credentials.Wrap(factory, namespacesHandler(registry)))
+	mux.HandleFunc("GET /api/whoami", credentials.Wrap(factory, whoami))
+	mux.HandleFunc("GET /api/clusters", listClustersHandler(registry))
+
+	mux.HandleFunc("GET /api/clusters/{name}/namespaces", credentials.Wrap(factory,
+		listResource(registry, "namespaces",
+			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, _ string) (k8s.NamespaceList, error) {
+				return k8s.ListNamespaces(ctx, p, k8s.ListNamespacesArgs{Cluster: c})
+			})))
+
+	mux.HandleFunc("GET /api/clusters/{name}/pods", credentials.Wrap(factory,
+		listResource(registry, "pods",
+			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, ns string) (k8s.PodList, error) {
+				return k8s.ListPods(ctx, p, k8s.ListPodsArgs{Cluster: c, Namespace: ns})
+			})))
+
+	mux.HandleFunc("GET /api/clusters/{name}/deployments", credentials.Wrap(factory,
+		listResource(registry, "deployments",
+			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, ns string) (k8s.DeploymentList, error) {
+				return k8s.ListDeployments(ctx, p, k8s.ListDeploymentsArgs{Cluster: c, Namespace: ns})
+			})))
+
+	mux.HandleFunc("GET /api/clusters/{name}/services", credentials.Wrap(factory,
+		listResource(registry, "services",
+			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, ns string) (k8s.ServiceList, error) {
+				return k8s.ListServices(ctx, p, k8s.ListServicesArgs{Cluster: c, Namespace: ns})
+			})))
+
+	mux.HandleFunc("GET /api/clusters/{name}/configmaps", credentials.Wrap(factory,
+		listResource(registry, "configmaps",
+			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, ns string) (k8s.ConfigMapList, error) {
+				return k8s.ListConfigMaps(ctx, p, k8s.ListConfigMapsArgs{Cluster: c, Namespace: ns})
+			})))
 
 	port := os.Getenv("PORT")
 	if port == "" {
@@ -71,42 +99,31 @@ func listClustersHandler(reg *clusters.Registry) http.HandlerFunc {
 	}
 }
 
-func namespacesHandler(reg *clusters.Registry) credentials.Handler {
+// listResource wraps a list-style operation with the common HTTP machinery:
+// resolve cluster from {name} path param, extract optional ?namespace=
+// query param, invoke the typed op, JSON-encode the response, log errors
+// with actor + cluster context.
+func listResource[Resp any](
+	reg *clusters.Registry,
+	resource string,
+	op func(ctx context.Context, p credentials.Provider, c clusters.Cluster, ns string) (Resp, error),
+) credentials.Handler {
 	return func(w http.ResponseWriter, r *http.Request, p credentials.Provider) {
-		name, ok := parseClusterNamespacesPath(r.URL.Path)
-		if !ok {
-			http.NotFound(w, r)
-			return
-		}
-		c, ok := reg.ByName(name)
+		c, ok := reg.ByName(r.PathValue("name"))
 		if !ok {
 			http.Error(w, "cluster not found", http.StatusNotFound)
 			return
 		}
-		result, err := k8s.ListNamespaces(r.Context(), p, k8s.ListNamespacesArgs{Cluster: c})
+		result, err := op(r.Context(), p, c, r.URL.Query().Get("namespace"))
 		if err != nil {
-			slog.ErrorContext(r.Context(), "ListNamespaces failed",
-				"err", err, "cluster", name, "actor", p.Actor())
-			http.Error(w, "list namespaces failed", http.StatusInternalServerError)
+			slog.ErrorContext(r.Context(), "list operation failed",
+				"resource", resource, "err", err,
+				"cluster", c.Name, "actor", p.Actor())
+			http.Error(w, "operation failed", http.StatusInternalServerError)
 			return
 		}
 		writeJSON(w, http.StatusOK, result)
 	}
-}
-
-// parseClusterNamespacesPath extracts <name> from /api/clusters/<name>/namespaces.
-// Returns false for any other shape under /api/clusters/.
-func parseClusterNamespacesPath(path string) (string, bool) {
-	const prefix = "/api/clusters/"
-	const suffix = "/namespaces"
-	if !strings.HasPrefix(path, prefix) || !strings.HasSuffix(path, suffix) {
-		return "", false
-	}
-	name := path[len(prefix) : len(path)-len(suffix)]
-	if name == "" || strings.Contains(name, "/") {
-		return "", false
-	}
-	return name, true
 }
 
 func writeJSON(w http.ResponseWriter, status int, body any) {
