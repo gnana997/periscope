@@ -16,6 +16,7 @@ import (
 
 	"github.com/gnana997/periscope/internal/clusters"
 	"github.com/gnana997/periscope/internal/credentials"
+	execsess "github.com/gnana997/periscope/internal/exec"
 	"github.com/gnana997/periscope/internal/httpx"
 	"github.com/gnana997/periscope/internal/k8s"
 )
@@ -672,6 +673,18 @@ func main() {
 
 	router.Get("/api/clusters/{cluster}/secrets/{ns}/{name}/data/{key}",
 		credentials.Wrap(factory, secretRevealHandler(registry)))
+
+	// --- Pod exec (interactive shell, WebSocket) — RFC 0001 ---
+	// Behind a feature flag for PR1; enable with PERISCOPE_FEATURE_EXEC=1.
+	execSessions := execsess.NewRegistry()
+	if os.Getenv("PERISCOPE_FEATURE_EXEC") == "1" {
+		router.Get("/api/clusters/{cluster}/pods/{ns}/{name}/exec",
+			credentials.Wrap(factory, execHandler(registry, execSessions)))
+		slog.Info("feature flag", "feature", "exec", "enabled", true)
+	} else {
+		_ = execSessions // silence unused if disabled
+		slog.Info("feature flag", "feature", "exec", "enabled", false)
+	}
 
 	port := os.Getenv("PORT")
 	if port == "" {

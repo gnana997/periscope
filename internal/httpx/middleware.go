@@ -22,11 +22,18 @@ func AuditBegin(next http.Handler) http.Handler {
 	})
 }
 
-// RequestID returns chi's RequestID middleware. Re-exported here so
-// cmd/periscope/main.go imports a single httpx package for middleware
-// composition rather than two.
+// RequestID generates a per-request ID, stores it on the request context
+// (readable via chi's middleware.GetReqID), and echoes it back to the
+// caller as the X-Request-Id response header. The header makes the ID
+// visible in browser devtools, curl -D, and reverse-proxy logs, which is
+// useful when correlating a stuck pod-exec session with backend slog.
 func RequestID(next http.Handler) http.Handler {
-	return middleware.RequestID(next)
+	return middleware.RequestID(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if id := middleware.GetReqID(r.Context()); id != "" {
+			w.Header().Set("X-Request-Id", id)
+		}
+		next.ServeHTTP(w, r)
+	}))
 }
 
 // RealIP returns chi's RealIP middleware. Same rationale as RequestID.
