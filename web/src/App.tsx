@@ -27,6 +27,7 @@ import { PVCsPage } from "./pages/PVCsPage";
 import { PVsPage } from "./pages/PVsPage";
 import { StorageClassesPage } from "./pages/StorageClassesPage";
 import { PodLogsPage } from "./pages/PodLogsPage";
+import { DeploymentLogsPage } from "./pages/DeploymentLogsPage";
 
 export default function App() {
   useTheme();
@@ -52,6 +53,7 @@ export default function App() {
         <Route path="pvs" element={<WithCluster Page={PVsPage} />} />
         <Route path="storageclasses" element={<WithCluster Page={StorageClassesPage} />} />
         <Route path="pods/:ns/:name/logs" element={<WithCluster Page={PodLogsPage} />} />
+        <Route path="deployments/:ns/:name/logs" element={<WithCluster Page={DeploymentLogsPage} />} />
       </Route>
       <Route path="*" element={<RootRedirect />} />
     </Routes>

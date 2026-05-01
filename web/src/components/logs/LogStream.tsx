@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { cn } from "../../lib/cn";
 import type { LogLine } from "../../hooks/useLogStream";
+import { podColor } from "./podColor";
 
 const SEARCH_CONTEXT = 5;
 
@@ -16,15 +17,26 @@ export interface LogStreamProps {
   wrap: boolean;
   timestamps: boolean;
   follow: boolean;
+  // For multi-pod (deployment) streams: when non-empty, only lines whose
+  // pod attribution is in this set are shown. Empty = show all.
+  podFilter?: string[];
 }
 
 export function LogStream(props: LogStreamProps) {
-  const { lines, search, wrap, timestamps, follow } = props;
+  const { lines, search, wrap, timestamps, follow, podFilter } = props;
   const parentRef = useRef<HTMLDivElement | null>(null);
+
+  // Apply pod filter first; the search/context-expansion logic runs over
+  // the already-filtered slice so context windows make sense.
+  const filteredLines = useMemo(() => {
+    if (!podFilter || podFilter.length === 0) return lines;
+    const set = new Set(podFilter);
+    return lines.filter((l) => l.pod !== undefined && set.has(l.pod));
+  }, [lines, podFilter]);
 
   const rows: Row[] = useMemo(() => {
     if (!search) {
-      return lines.map((l, i) => ({
+      return filteredLines.map((l, i) => ({
         kind: "line" as const,
         line: l,
         isMatch: false,
@@ -34,8 +46,8 @@ export function LogStream(props: LogStreamProps) {
 
     const q = search.toLowerCase();
     const matches: number[] = [];
-    for (let i = 0; i < lines.length; i++) {
-      if (lines[i].text.toLowerCase().includes(q)) matches.push(i);
+    for (let i = 0; i < filteredLines.length; i++) {
+      if (filteredLines[i].text.toLowerCase().includes(q)) matches.push(i);
     }
     if (matches.length === 0) return [{ kind: "no-matches" }];
 
@@ -43,7 +55,7 @@ export function LogStream(props: LogStreamProps) {
     const include = new Set<number>();
     for (const m of matches) {
       const lo = Math.max(0, m - SEARCH_CONTEXT);
-      const hi = Math.min(lines.length - 1, m + SEARCH_CONTEXT);
+      const hi = Math.min(filteredLines.length - 1, m + SEARCH_CONTEXT);
       for (let i = lo; i <= hi; i++) include.add(i);
     }
     const sorted = [...include].sort((a, b) => a - b);
@@ -56,14 +68,14 @@ export function LogStream(props: LogStreamProps) {
       }
       out.push({
         kind: "line",
-        line: lines[i],
+        line: filteredLines[i],
         isMatch: matchSet.has(i),
         index: i,
       });
       prev = i;
     }
     return out;
-  }, [lines, search]);
+  }, [filteredLines, search]);
 
   const virtualizer = useVirtualizer({
     count: rows.length,
@@ -132,10 +144,13 @@ export function LogStream(props: LogStreamProps) {
   const handleCopy = async (bufferIndex: number) => {
     const COPY_CONTEXT = 5;
     const lo = Math.max(0, bufferIndex - COPY_CONTEXT);
-    const hi = Math.min(lines.length - 1, bufferIndex + COPY_CONTEXT);
-    const slice = lines.slice(lo, hi + 1);
+    const hi = Math.min(filteredLines.length - 1, bufferIndex + COPY_CONTEXT);
+    const slice = filteredLines.slice(lo, hi + 1);
     const text = slice
-      .map((l) => (l.ts ? `${l.ts} ${l.text}` : l.text))
+      .map((l) => {
+        const head = l.pod ? `[${l.pod}] ` : "";
+        return l.ts ? `${l.ts} ${head}${l.text}` : `${head}${l.text}`;
+      })
       .join("\n");
     try {
       await navigator.clipboard.writeText(text);
@@ -344,10 +359,11 @@ function Line({
       )}
       {line.pod && (
         <span
-          className="mr-3 shrink-0 select-none text-[10.5px] text-ink-muted"
+          className="mr-3 shrink-0 select-none font-medium text-[10.5px]"
+          style={{ color: podColor(line.pod) }}
           title={line.pod}
         >
-          [{line.pod}]
+          {line.pod}
         </span>
       )}
       <span

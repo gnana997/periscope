@@ -8,10 +8,15 @@ export interface LogLine {
   container?: string;
 }
 
+// Discriminated union over the supported log endpoints. Adding a new source
+// (StatefulSet, DaemonSet, ...) means adding a variant here and a matching
+// case in buildUrl below.
+export type LogStreamSource =
+  | { kind: "pod"; cluster: string; namespace: string; name: string }
+  | { kind: "deployment"; cluster: string; namespace: string; name: string };
+
 export interface LogStreamConfig {
-  cluster: string;
-  namespace: string;
-  name: string;
+  source: LogStreamSource;
   container?: string;
   tailLines?: number;
   sinceSeconds?: number;
@@ -30,18 +35,33 @@ export interface UseLogStreamResult {
   lines: LogLine[];
   status: LogStreamStatus;
   error?: string;
-  /** Total lines received including any dropped from buffer overflow. */
+  /** Total lines received, including any dropped from buffer overflow. */
   totalReceived: number;
   /** True when older lines were evicted to keep within BUFFER_CAP. */
   overflowed: boolean;
   /** Closes the current stream and re-opens it with the same config. */
   reload: () => void;
+  /**
+   * Active source pods reported via `event: meta`. Always [] for pod streams;
+   * grows/shrinks live for deployment streams as pods are added/removed.
+   */
+  pods: string[];
 }
 
 const BUFFER_CAP = 50_000;
 const FLUSH_INTERVAL_MS = 50;
 
-// useLogStream consumes a Periscope pod-logs SSE endpoint.
+function buildUrl(source: LogStreamSource, params: URLSearchParams): string {
+  const enc = encodeURIComponent;
+  const path =
+    source.kind === "pod"
+      ? `/api/clusters/${enc(source.cluster)}/pods/${enc(source.namespace)}/${enc(source.name)}/logs`
+      : `/api/clusters/${enc(source.cluster)}/deployments/${enc(source.namespace)}/${enc(source.name)}/logs`;
+  const qs = params.toString();
+  return qs ? `${path}?${qs}` : path;
+}
+
+// useLogStream consumes a Periscope logs SSE endpoint (pod or deployment).
 //
 // The hook keeps the most recent BUFFER_CAP lines in a ring; older lines are
 // dropped (search-with-context still works on whatever is in buffer). Lines
@@ -53,6 +73,7 @@ export function useLogStream(config: LogStreamConfig): UseLogStreamResult {
   const [error, setError] = useState<string | undefined>(undefined);
   const [totalReceived, setTotalReceived] = useState(0);
   const [overflowed, setOverflowed] = useState(false);
+  const [pods, setPods] = useState<string[]>([]);
   const [reloadTick, setReloadTick] = useState(0);
 
   const reload = useCallback(() => setReloadTick((t) => t + 1), []);
@@ -92,6 +113,7 @@ export function useLogStream(config: LogStreamConfig): UseLogStreamResult {
     setError(undefined);
     setTotalReceived(0);
     setOverflowed(false);
+    setPods([]);
 
     const params = new URLSearchParams();
     if (config.container) params.set("container", config.container);
@@ -105,12 +127,7 @@ export function useLogStream(config: LogStreamConfig): UseLogStreamResult {
     if (config.follow !== undefined) {
       params.set("follow", String(config.follow));
     }
-    const qs = params.toString();
-    const url =
-      `/api/clusters/${encodeURIComponent(config.cluster)}` +
-      `/pods/${encodeURIComponent(config.namespace)}` +
-      `/${encodeURIComponent(config.name)}/logs` +
-      (qs ? `?${qs}` : "");
+    const url = buildUrl(config.source, params);
 
     const es = new EventSource(url);
 
@@ -139,6 +156,16 @@ export function useLogStream(config: LogStreamConfig): UseLogStreamResult {
         // Malformed line — skip silently rather than tearing down the stream.
       }
     };
+
+    es.addEventListener("meta", (event) => {
+      const me = event as MessageEvent;
+      try {
+        const parsed = JSON.parse(me.data) as { pods?: string[] };
+        if (Array.isArray(parsed.pods)) setPods(parsed.pods);
+      } catch {
+        // Ignore malformed meta events.
+      }
+    });
 
     es.addEventListener("done", () => {
       closedManually = true;
@@ -180,9 +207,10 @@ export function useLogStream(config: LogStreamConfig): UseLogStreamResult {
       if (flushTimer !== null) window.clearTimeout(flushTimer);
     };
   }, [
-    config.cluster,
-    config.namespace,
-    config.name,
+    config.source.kind,
+    config.source.cluster,
+    config.source.namespace,
+    config.source.name,
     config.container,
     config.tailLines,
     config.sinceSeconds,
@@ -191,5 +219,5 @@ export function useLogStream(config: LogStreamConfig): UseLogStreamResult {
     reloadTick,
   ]);
 
-  return { lines, status, error, totalReceived, overflowed, reload };
+  return { lines, status, error, totalReceived, overflowed, reload, pods };
 }

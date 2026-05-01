@@ -20,6 +20,7 @@ import { DetailPane } from "../components/detail/DetailPane";
 import { DeploymentDescribe } from "../components/detail/describe/DeploymentDescribe";
 import { YamlView } from "../components/detail/YamlView";
 import { EventsView } from "../components/detail/EventsView";
+import { DeploymentLogsTab } from "../components/logs/DeploymentLogsTab";
 import { NamespacePicker } from "../components/shell/NamespacePicker";
 import { cn } from "../lib/cn";
 
@@ -100,6 +101,7 @@ export function DeploymentsPage({ cluster }: { cluster: string }) {
           { id: "describe", label: "describe", ready: true, content: <DeploymentDescribe cluster={cluster} ns={selectedNs} name={selectedName} /> },
           { id: "yaml", label: "yaml", ready: true, content: <YamlView cluster={cluster} kind="deployments" ns={selectedNs} name={selectedName} /> },
           { id: "events", label: "events", ready: true, content: <EventsView cluster={cluster} kind="deployments" ns={selectedNs} name={selectedName} /> },
+          { id: "logs", label: "logs", ready: true, content: <DeploymentLogsTab cluster={cluster} ns={selectedNs} name={selectedName} /> },
         ]}
       />
     ) : null;

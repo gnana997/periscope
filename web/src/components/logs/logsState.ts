@@ -1,8 +1,11 @@
-// Shared state shape + (de)serialization for the pod logs view.
+// Shared state shape + (de)serialization for the pod and deployment logs
+// views. Both wrappers (in-tab local state, full-page URL state) read/write a
+// LogsViewState. The full-page wrapper round-trips through query params so
+// URLs are shareable.
 //
-// Both wrappers (in-tab local state, full-page URL state) read/write a
-// LogsViewState. The full-page wrapper round-trips through query params
-// using stateToParams/paramsToState so URLs are shareable.
+// `podFilter` is only meaningful for deployment streams; pod streams ignore
+// it. It's part of the shared shape so the toolbar/state plumbing stays
+// uniform between the two variants.
 
 export interface LogsViewState {
   container: string;
@@ -13,6 +16,7 @@ export interface LogsViewState {
   timestamps: boolean;
   wrap: boolean;
   search: string;
+  podFilter: string[];
 }
 
 export const TAIL_DEFAULT = 1000;
@@ -26,6 +30,7 @@ export const DEFAULT_LOGS_STATE: LogsViewState = {
   timestamps: true,
   wrap: false,
   search: "",
+  podFilter: [],
 };
 
 // Only non-default fields land in the URL — keeps shared links short.
@@ -39,6 +44,7 @@ export function stateToParams(state: LogsViewState): URLSearchParams {
   if (!state.timestamps) p.set("ts", "false");
   if (state.wrap) p.set("wrap", "true");
   if (state.search) p.set("q", state.search);
+  if (state.podFilter.length > 0) p.set("pf", state.podFilter.join(","));
   return p;
 }
 
@@ -56,10 +62,11 @@ export function paramsToState(params: URLSearchParams): LogsViewState {
     timestamps: params.get("ts") !== "false",
     wrap: params.get("wrap") === "true",
     search: params.get("q") ?? "",
+    podFilter: (params.get("pf") ?? "").split(",").filter(Boolean),
   };
 }
 
-export function buildLogsPagePath(
+export function buildPodLogsPath(
   cluster: string,
   namespace: string,
   name: string,
@@ -73,3 +80,22 @@ export function buildLogsPagePath(
     (qs ? `?${qs}` : "")
   );
 }
+
+export function buildDeploymentLogsPath(
+  cluster: string,
+  namespace: string,
+  name: string,
+  state: LogsViewState,
+): string {
+  const qs = stateToParams(state).toString();
+  return (
+    `/clusters/${encodeURIComponent(cluster)}` +
+    `/deployments/${encodeURIComponent(namespace)}` +
+    `/${encodeURIComponent(name)}/logs` +
+    (qs ? `?${qs}` : "")
+  );
+}
+
+// Backwards-compatible alias for callers that pre-date the deployment
+// variant; new code should call buildPodLogsPath directly.
+export const buildLogsPagePath = buildPodLogsPath;

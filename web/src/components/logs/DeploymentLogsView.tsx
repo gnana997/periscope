@@ -1,12 +1,13 @@
 import { useEffect } from "react";
-import { usePodDetail } from "../../hooks/useResource";
+import { useDeploymentDetail } from "../../hooks/useResource";
 import { useLogStream } from "../../hooks/useLogStream";
 import { LogToolbar } from "./LogToolbar";
 import { LogStream } from "./LogStream";
+import { PodFilterStrip } from "./PodFilterStrip";
 import type { LogsViewState } from "./logsState";
-import { buildLogsPagePath } from "./logsState";
+import { buildDeploymentLogsPath } from "./logsState";
 
-export interface PodLogsViewProps {
+export interface DeploymentLogsViewProps {
   cluster: string;
   namespace: string;
   name: string;
@@ -17,31 +18,28 @@ export interface PodLogsViewProps {
   showExpand?: boolean;
 }
 
-export function PodLogsView({
+export function DeploymentLogsView({
   cluster,
   namespace,
   name,
   state,
   onStateChange,
   showExpand,
-}: PodLogsViewProps) {
-  const podDetail = usePodDetail(cluster, namespace, name);
+}: DeploymentLogsViewProps) {
+  const detail = useDeploymentDetail(cluster, namespace, name);
+  const containers = (detail.data?.containers ?? []).map((c) => c.name);
 
-  const containers = (podDetail.data?.containers ?? []).map((c) => c.name);
-  const initContainers = (podDetail.data?.initContainers ?? []).map((c) => c.name);
+  // Resolve container: explicit selection > first in template.
+  const resolved = state.container || containers[0] || "";
 
-  // Resolve container: explicit selection > first regular > first init.
-  const resolved =
-    state.container || containers[0] || initContainers[0] || "";
-
-  // Once the pod loads, write the resolved container into state so the
-  // URL/share view reflects what's actually streaming.
+  // Once the deployment loads, write the resolved container into state so
+  // the URL/share view reflects what's actually streaming.
   useEffect(() => {
     if (!state.container && resolved) onStateChange({ container: resolved });
   }, [state.container, resolved, onStateChange]);
 
   const stream = useLogStream({
-    source: { kind: "pod", cluster, namespace, name },
+    source: { kind: "deployment", cluster, namespace, name },
     container: resolved,
     tailLines: state.tailLines,
     sinceSeconds: state.sinceSeconds ?? undefined,
@@ -49,18 +47,27 @@ export function PodLogsView({
     follow: state.follow,
   });
 
-  const pagePath = buildLogsPagePath(cluster, namespace, name, {
+  const pagePath = buildDeploymentLogsPath(cluster, namespace, name, {
     ...state,
     container: resolved,
   });
   const shareUrl = `${window.location.origin}${pagePath}`;
   const expandTo = showExpand ? pagePath : undefined;
 
+  const togglePod = (pod: string) => {
+    const has = state.podFilter.includes(pod);
+    onStateChange({
+      podFilter: has
+        ? state.podFilter.filter((p) => p !== pod)
+        : [...state.podFilter, pod],
+    });
+  };
+
   return (
     <div className="flex h-full min-h-0 flex-col">
       <LogToolbar
         containers={containers}
-        initContainers={initContainers}
+        initContainers={[]}
         container={resolved}
         onContainerChange={(v) => onStateChange({ container: v })}
         tailLines={state.tailLines}
@@ -85,6 +92,13 @@ export function PodLogsView({
         expandTo={expandTo}
       />
 
+      <PodFilterStrip
+        pods={stream.pods}
+        selected={state.podFilter}
+        onToggle={togglePod}
+        onClear={() => onStateChange({ podFilter: [] })}
+      />
+
       {stream.status === "error" && stream.error && (
         <div className="border-b border-red/30 bg-red-soft/30 px-5 py-2 font-mono text-[11.5px] text-red">
           {stream.error} — click reload to retry
@@ -97,6 +111,7 @@ export function PodLogsView({
         wrap={state.wrap}
         timestamps={state.timestamps}
         follow={state.follow}
+        podFilter={state.podFilter}
       />
     </div>
   );

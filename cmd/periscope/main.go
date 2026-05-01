@@ -345,6 +345,8 @@ func main() {
 
 	mux.HandleFunc("GET /api/clusters/{cluster}/pods/{ns}/{name}/logs",
 		credentials.Wrap(factory, podLogsHandler(registry)))
+	mux.HandleFunc("GET /api/clusters/{cluster}/deployments/{ns}/{name}/logs",
+		credentials.Wrap(factory, deploymentLogsHandler(registry)))
 
 	// --- Secret reveal endpoint (audit-logged, per-key) ---
 
@@ -653,4 +655,147 @@ func writeJSON(w http.ResponseWriter, status int, body any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(body)
+}
+
+// deploymentEvent is an internal handle the deploymentLogsHandler uses to
+// fan in lines and pod-set updates from k8s.StreamDeploymentLogs onto the
+// single goroutine that owns the SSE ResponseWriter.
+type deploymentEvent struct {
+	kind string // "line" | "podSet"
+	pod  string
+	line string
+	pods []string
+}
+
+// channelSink implements k8s.DeploymentLogSink by pushing into a buffered
+// channel. Line uses non-blocking send and drops on overflow (frontend
+// already maintains its own buffer); PodSet blocks because it's rare and
+// changes need to be delivered.
+type channelSink struct {
+	ch  chan<- deploymentEvent
+	ctx context.Context
+}
+
+func (s *channelSink) Line(pod, line string) {
+	select {
+	case s.ch <- deploymentEvent{kind: "line", pod: pod, line: line}:
+	case <-s.ctx.Done():
+	default:
+		// Channel full; drop. Acceptable — the frontend ring buffer will
+		// continue, and over-driving log floods isn't a useful UX anyway.
+	}
+}
+
+func (s *channelSink) PodSet(pods []string) {
+	select {
+	case s.ch <- deploymentEvent{kind: "podSet", pods: pods}:
+	case <-s.ctx.Done():
+	}
+}
+
+// deploymentLogsHandler streams aggregated logs for every pod matching a
+// deployment's selector as Server-Sent Events. Same line shape as the
+// pod-logs handler but with a `p` field for per-pod attribution; pod-set
+// changes are emitted as `event: meta` so the frontend can update its
+// legend live.
+func deploymentLogsHandler(reg *clusters.Registry) credentials.Handler {
+	return func(w http.ResponseWriter, r *http.Request, p credentials.Provider) {
+		c, ok := reg.ByName(r.PathValue("cluster"))
+		if !ok {
+			http.Error(w, "cluster not found", http.StatusNotFound)
+			return
+		}
+		flusher, ok := w.(http.Flusher)
+		if !ok {
+			http.Error(w, "streaming unsupported", http.StatusInternalServerError)
+			return
+		}
+
+		q := r.URL.Query()
+		args := k8s.DeploymentLogsArgs{
+			Cluster:    c,
+			Namespace:  r.PathValue("ns"),
+			Name:       r.PathValue("name"),
+			Container:  q.Get("container"),
+			Previous:   q.Get("previous") == "true",
+			Follow:     q.Get("follow") != "false",
+			Timestamps: true,
+		}
+		if v := q.Get("tailLines"); v != "" {
+			if n, err := strconv.ParseInt(v, 10, 64); err == nil && n > 0 {
+				args.TailLines = &n
+			}
+		}
+		if v := q.Get("sinceSeconds"); v != "" {
+			if n, err := strconv.ParseInt(v, 10, 64); err == nil && n > 0 {
+				args.SinceSeconds = &n
+			}
+		}
+
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Header().Set("Cache-Control", "no-cache, no-transform")
+		w.Header().Set("Connection", "keep-alive")
+		w.Header().Set("X-Accel-Buffering", "no")
+		w.WriteHeader(http.StatusOK)
+		flusher.Flush()
+
+		eventCh := make(chan deploymentEvent, 4096)
+		sink := &channelSink{ch: eventCh, ctx: r.Context()}
+
+		var streamErr error
+		streamDone := make(chan struct{})
+		go func() {
+			defer close(streamDone)
+			defer close(eventCh)
+			streamErr = k8s.StreamDeploymentLogs(r.Context(), p, args, sink)
+		}()
+
+		heartbeat := time.NewTicker(15 * time.Second)
+		defer heartbeat.Stop()
+
+		type linePayload struct {
+			T string `json:"t,omitempty"`
+			P string `json:"p,omitempty"`
+			L string `json:"l"`
+		}
+		type metaPayload struct {
+			Pods []string `json:"pods"`
+		}
+
+		for {
+			select {
+			case <-r.Context().Done():
+				<-streamDone
+				return
+			case <-heartbeat.C:
+				_, _ = fmt.Fprint(w, ": ping\n\n")
+				flusher.Flush()
+			case ev, ok := <-eventCh:
+				if !ok {
+					<-streamDone
+					if streamErr != nil && !errors.Is(streamErr, context.Canceled) {
+						slog.ErrorContext(r.Context(), "deployment log stream failed",
+							"err", streamErr, "cluster", c.Name,
+							"ns", args.Namespace, "name", args.Name, "actor", p.Actor())
+						payload, _ := json.Marshal(map[string]string{"message": streamErr.Error()})
+						_, _ = fmt.Fprintf(w, "event: error\ndata: %s\n\n", payload)
+					} else {
+						_, _ = fmt.Fprint(w, "event: done\ndata: {}\n\n")
+					}
+					flusher.Flush()
+					return
+				}
+				switch ev.kind {
+				case "line":
+					ts, msg := k8s.SplitLogTimestamp(ev.line)
+					payload, _ := json.Marshal(linePayload{T: ts, P: ev.pod, L: msg})
+					_, _ = fmt.Fprintf(w, "data: %s\n\n", payload)
+				case "podSet":
+					payload, _ := json.Marshal(metaPayload{Pods: ev.pods})
+					_, _ = fmt.Fprintf(w, "event: meta\ndata: %s\n\n", payload)
+				}
+				flusher.Flush()
+			}
+		}
+	}
 }
