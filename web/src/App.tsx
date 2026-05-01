@@ -12,10 +12,12 @@ import { ErrorState, NoClustersState } from "./components/table/states";
 import { useClusters } from "./hooks/useClusters";
 import { useTheme } from "./hooks/useTheme";
 import { ConfigMapsPage } from "./pages/ConfigMapsPage";
+import { DaemonSetsPage } from "./pages/DaemonSetsPage";
 import { DeploymentsPage } from "./pages/DeploymentsPage";
 import { NamespacesPage } from "./pages/NamespacesPage";
 import { PodsPage } from "./pages/PodsPage";
 import { ServicesPage } from "./pages/ServicesPage";
+import { StatefulSetsPage } from "./pages/StatefulSetsPage";
 
 export default function App() {
   useTheme();
@@ -29,6 +31,14 @@ export default function App() {
         <Route
           path="deployments"
           element={<WithCluster Page={DeploymentsPage} />}
+        />
+        <Route
+          path="statefulsets"
+          element={<WithCluster Page={StatefulSetsPage} />}
+        />
+        <Route
+          path="daemonsets"
+          element={<WithCluster Page={DaemonSetsPage} />}
         />
         <Route path="services" element={<WithCluster Page={ServicesPage} />} />
         <Route

@@ -121,6 +121,59 @@ export interface DeploymentDetail extends Deployment {
   annotations?: Record<string, string>;
 }
 
+// --- StatefulSet ---
+
+export interface StatefulSet {
+  name: string;
+  namespace: string;
+  replicas: number;
+  readyReplicas: number;
+  updatedReplicas: number;
+  currentReplicas: number;
+  createdAt: string;
+}
+
+export interface StatefulSetList {
+  statefulSets: StatefulSet[];
+}
+
+export interface StatefulSetDetail extends StatefulSet {
+  serviceName?: string;
+  updateStrategy: string;
+  selector?: Record<string, string>;
+  containers: ContainerSpec[];
+  conditions?: DeploymentCondition[];
+  labels?: Record<string, string>;
+  annotations?: Record<string, string>;
+}
+
+// --- DaemonSet ---
+
+export interface DaemonSet {
+  name: string;
+  namespace: string;
+  desiredNumberScheduled: number;
+  numberReady: number;
+  updatedNumberScheduled: number;
+  numberAvailable: number;
+  numberMisscheduled: number;
+  createdAt: string;
+}
+
+export interface DaemonSetList {
+  daemonSets: DaemonSet[];
+}
+
+export interface DaemonSetDetail extends DaemonSet {
+  updateStrategy: string;
+  selector?: Record<string, string>;
+  nodeSelector?: Record<string, string>;
+  containers: ContainerSpec[];
+  conditions?: DeploymentCondition[];
+  labels?: Record<string, string>;
+  annotations?: Record<string, string>;
+}
+
 // --- Service ---
 
 export interface ServicePort {
@@ -194,6 +247,8 @@ export type ResourceKind =
   | "namespaces"
   | "pods"
   | "deployments"
+  | "statefulsets"
+  | "daemonsets"
   | "services"
   | "configmaps";
 
@@ -201,5 +256,7 @@ export type ResourceListResponse =
   | NamespaceList
   | PodList
   | DeploymentList
+  | StatefulSetList
+  | DaemonSetList
   | ServiceList
   | ConfigMapList;

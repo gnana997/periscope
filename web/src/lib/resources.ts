@@ -21,8 +21,6 @@ export type SoonResource =
   | "logs"
   | "exec"
   | "events"
-  | "statefulsets"
-  | "daemonsets"
   | "ingresses"
   | "secrets"
   | "jobs"
@@ -31,8 +29,8 @@ export type SoonResource =
 export const RESOURCES: ResourceMeta[] = [
   { id: "pods",         label: "Pods",         group: "Workloads",  ready: true  },
   { id: "deployments",  label: "Deployments",  group: "Workloads",  ready: true  },
-  { id: "statefulsets", label: "StatefulSets", group: "Workloads",  ready: false },
-  { id: "daemonsets",   label: "DaemonSets",   group: "Workloads",  ready: false },
+  { id: "statefulsets", label: "StatefulSets", group: "Workloads",  ready: true  },
+  { id: "daemonsets",   label: "DaemonSets",   group: "Workloads",  ready: true  },
   { id: "jobs",         label: "Jobs",         group: "Workloads",  ready: false },
   { id: "cronjobs",     label: "CronJobs",     group: "Workloads",  ready: false },
   { id: "services",     label: "Services",     group: "Networking", ready: true  },

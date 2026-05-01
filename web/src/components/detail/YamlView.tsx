@@ -1,11 +1,12 @@
 import { Fragment, type ReactNode, useState } from "react";
 import { useYaml } from "../../hooks/useResource";
+import type { YamlKind } from "../../lib/api";
 import { cn } from "../../lib/cn";
 import { DetailError, DetailLoading } from "./states";
 
 interface YamlViewProps {
   cluster: string;
-  kind: "pods" | "deployments" | "services" | "configmaps" | "namespaces";
+  kind: YamlKind;
   ns: string;
   name: string;
 }

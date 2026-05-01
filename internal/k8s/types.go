@@ -183,3 +183,58 @@ type Event struct {
 type EventList struct {
 	Events []Event `json:"events"`
 }
+
+// --- StatefulSet ---
+
+type StatefulSet struct {
+	Name            string    `json:"name"`
+	Namespace       string    `json:"namespace"`
+	Replicas        int32     `json:"replicas"`
+	ReadyReplicas   int32     `json:"readyReplicas"`
+	UpdatedReplicas int32     `json:"updatedReplicas"`
+	CurrentReplicas int32     `json:"currentReplicas"`
+	CreatedAt       time.Time `json:"createdAt"`
+}
+
+type StatefulSetList struct {
+	StatefulSets []StatefulSet `json:"statefulSets"`
+}
+
+type StatefulSetDetail struct {
+	StatefulSet
+	ServiceName    string                 `json:"serviceName,omitempty"`
+	UpdateStrategy string                 `json:"updateStrategy"`
+	Selector       map[string]string      `json:"selector,omitempty"`
+	Containers     []ContainerSpec        `json:"containers"`
+	Conditions     []DeploymentCondition  `json:"conditions,omitempty"`
+	Labels         map[string]string      `json:"labels,omitempty"`
+	Annotations    map[string]string      `json:"annotations,omitempty"`
+}
+
+// --- DaemonSet ---
+
+type DaemonSet struct {
+	Name                   string    `json:"name"`
+	Namespace              string    `json:"namespace"`
+	DesiredNumberScheduled int32     `json:"desiredNumberScheduled"`
+	NumberReady            int32     `json:"numberReady"`
+	UpdatedNumberScheduled int32     `json:"updatedNumberScheduled"`
+	NumberAvailable        int32     `json:"numberAvailable"`
+	NumberMisscheduled     int32     `json:"numberMisscheduled"`
+	CreatedAt              time.Time `json:"createdAt"`
+}
+
+type DaemonSetList struct {
+	DaemonSets []DaemonSet `json:"daemonSets"`
+}
+
+type DaemonSetDetail struct {
+	DaemonSet
+	UpdateStrategy string                `json:"updateStrategy"`
+	Selector       map[string]string     `json:"selector,omitempty"`
+	NodeSelector   map[string]string     `json:"nodeSelector,omitempty"`
+	Containers     []ContainerSpec       `json:"containers"`
+	Conditions     []DeploymentCondition `json:"conditions,omitempty"`
+	Labels         map[string]string     `json:"labels,omitempty"`
+	Annotations    map[string]string     `json:"annotations,omitempty"`
+}

@@ -58,6 +58,18 @@ func main() {
 				return k8s.ListDeployments(ctx, p, k8s.ListDeploymentsArgs{Cluster: c, Namespace: ns})
 			})))
 
+	mux.HandleFunc("GET /api/clusters/{cluster}/statefulsets", credentials.Wrap(factory,
+		listResource(registry, "statefulsets",
+			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, ns string) (k8s.StatefulSetList, error) {
+				return k8s.ListStatefulSets(ctx, p, k8s.ListStatefulSetsArgs{Cluster: c, Namespace: ns})
+			})))
+
+	mux.HandleFunc("GET /api/clusters/{cluster}/daemonsets", credentials.Wrap(factory,
+		listResource(registry, "daemonsets",
+			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, ns string) (k8s.DaemonSetList, error) {
+				return k8s.ListDaemonSets(ctx, p, k8s.ListDaemonSetsArgs{Cluster: c, Namespace: ns})
+			})))
+
 	mux.HandleFunc("GET /api/clusters/{cluster}/services", credentials.Wrap(factory,
 		listResource(registry, "services",
 			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, ns string) (k8s.ServiceList, error) {
@@ -82,6 +94,18 @@ func main() {
 		detailHandler(registry, "deployment",
 			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, ns, name string) (k8s.DeploymentDetail, error) {
 				return k8s.GetDeployment(ctx, p, k8s.GetDeploymentArgs{Cluster: c, Namespace: ns, Name: name})
+			})))
+
+	mux.HandleFunc("GET /api/clusters/{cluster}/statefulsets/{ns}/{name}", credentials.Wrap(factory,
+		detailHandler(registry, "statefulset",
+			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, ns, name string) (k8s.StatefulSetDetail, error) {
+				return k8s.GetStatefulSet(ctx, p, k8s.GetStatefulSetArgs{Cluster: c, Namespace: ns, Name: name})
+			})))
+
+	mux.HandleFunc("GET /api/clusters/{cluster}/daemonsets/{ns}/{name}", credentials.Wrap(factory,
+		detailHandler(registry, "daemonset",
+			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, ns, name string) (k8s.DaemonSetDetail, error) {
+				return k8s.GetDaemonSet(ctx, p, k8s.GetDaemonSetArgs{Cluster: c, Namespace: ns, Name: name})
 			})))
 
 	mux.HandleFunc("GET /api/clusters/{cluster}/services/{ns}/{name}", credentials.Wrap(factory,
@@ -117,6 +141,18 @@ func main() {
 				return k8s.GetDeploymentYAML(ctx, p, k8s.GetDeploymentArgs{Cluster: c, Namespace: ns, Name: name})
 			})))
 
+	mux.HandleFunc("GET /api/clusters/{cluster}/statefulsets/{ns}/{name}/yaml", credentials.Wrap(factory,
+		yamlHandler(registry, "statefulset",
+			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, ns, name string) (string, error) {
+				return k8s.GetStatefulSetYAML(ctx, p, k8s.GetStatefulSetArgs{Cluster: c, Namespace: ns, Name: name})
+			})))
+
+	mux.HandleFunc("GET /api/clusters/{cluster}/daemonsets/{ns}/{name}/yaml", credentials.Wrap(factory,
+		yamlHandler(registry, "daemonset",
+			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, ns, name string) (string, error) {
+				return k8s.GetDaemonSetYAML(ctx, p, k8s.GetDaemonSetArgs{Cluster: c, Namespace: ns, Name: name})
+			})))
+
 	mux.HandleFunc("GET /api/clusters/{cluster}/services/{ns}/{name}/yaml", credentials.Wrap(factory,
 		yamlHandler(registry, "service",
 			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, ns, name string) (string, error) {
@@ -141,6 +177,10 @@ func main() {
 		credentials.Wrap(factory, eventsHandler(registry, "Pod")))
 	mux.HandleFunc("GET /api/clusters/{cluster}/deployments/{ns}/{name}/events",
 		credentials.Wrap(factory, eventsHandler(registry, "Deployment")))
+	mux.HandleFunc("GET /api/clusters/{cluster}/statefulsets/{ns}/{name}/events",
+		credentials.Wrap(factory, eventsHandler(registry, "StatefulSet")))
+	mux.HandleFunc("GET /api/clusters/{cluster}/daemonsets/{ns}/{name}/events",
+		credentials.Wrap(factory, eventsHandler(registry, "DaemonSet")))
 	mux.HandleFunc("GET /api/clusters/{cluster}/services/{ns}/{name}/events",
 		credentials.Wrap(factory, eventsHandler(registry, "Service")))
 	mux.HandleFunc("GET /api/clusters/{cluster}/configmaps/{ns}/{name}/events",

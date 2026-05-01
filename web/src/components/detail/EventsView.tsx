@@ -1,4 +1,5 @@
 import { useObjectEvents } from "../../hooks/useResource";
+import type { YamlKind } from "../../lib/api";
 import { ageFrom } from "../../lib/format";
 import { cn } from "../../lib/cn";
 import { DetailEmpty, DetailError, DetailLoading } from "./states";
@@ -6,7 +7,7 @@ import type { Event } from "../../lib/types";
 
 interface EventsViewProps {
   cluster: string;
-  kind: "pods" | "deployments" | "services" | "configmaps" | "namespaces";
+  kind: YamlKind;
   ns: string;
   name: string;
 }

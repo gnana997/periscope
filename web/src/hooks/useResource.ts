@@ -1,7 +1,8 @@
 import { useQuery } from "@tanstack/react-query";
-import { api } from "../lib/api";
+import { api, type YamlKind } from "../lib/api";
 import type {
   ConfigMapDetail,
+  DaemonSetDetail,
   DeploymentDetail,
   EventList,
   NamespaceDetail,
@@ -9,6 +10,7 @@ import type {
   ResourceKind,
   ResourceListResponse,
   ServiceDetail,
+  StatefulSetDetail,
 } from "../lib/types";
 
 interface ResourceQueryArgs {
@@ -28,6 +30,10 @@ export function useResource({ cluster, resource, namespace }: ResourceQueryArgs)
           return api.pods(cluster!, namespace, signal);
         case "deployments":
           return api.deployments(cluster!, namespace, signal);
+        case "statefulsets":
+          return api.statefulsets(cluster!, namespace, signal);
+        case "daemonsets":
+          return api.daemonsets(cluster!, namespace, signal);
         case "services":
           return api.services(cluster!, namespace, signal);
         case "configmaps":
@@ -52,6 +58,22 @@ export function useDeploymentDetail(cluster: string, ns: string, name: string | 
   return useQuery<DeploymentDetail>({
     queryKey: ["deployment-detail", cluster, ns, name],
     queryFn: ({ signal }) => api.getDeployment(cluster, ns, name!, signal),
+    enabled: Boolean(name),
+  });
+}
+
+export function useStatefulSetDetail(cluster: string, ns: string, name: string | null) {
+  return useQuery<StatefulSetDetail>({
+    queryKey: ["statefulset-detail", cluster, ns, name],
+    queryFn: ({ signal }) => api.getStatefulSet(cluster, ns, name!, signal),
+    enabled: Boolean(name),
+  });
+}
+
+export function useDaemonSetDetail(cluster: string, ns: string, name: string | null) {
+  return useQuery<DaemonSetDetail>({
+    queryKey: ["daemonset-detail", cluster, ns, name],
+    queryFn: ({ signal }) => api.getDaemonSet(cluster, ns, name!, signal),
     enabled: Boolean(name),
   });
 }
@@ -84,7 +106,7 @@ export function useNamespaceDetail(cluster: string, name: string | null) {
 
 export function useYaml(
   cluster: string,
-  kind: "pods" | "deployments" | "services" | "configmaps" | "namespaces",
+  kind: YamlKind,
   ns: string,
   name: string | null,
   enabled: boolean,
@@ -103,7 +125,7 @@ export function useYaml(
 
 export function useObjectEvents(
   cluster: string,
-  kind: "pods" | "deployments" | "services" | "configmaps" | "namespaces",
+  kind: YamlKind,
   ns: string,
   name: string | null,
   enabled: boolean,
