@@ -18,3 +18,7 @@ web/.vite/
 .env
 .env.*
 !.env.example
+
+# Local cluster registry (operator-specific, not committed)
+/clusters.yaml
+/clusters.local.yaml

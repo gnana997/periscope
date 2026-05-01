@@ -1,0 +1,90 @@
+import { useEffect, useRef, useState, type ReactNode } from "react";
+
+interface SplitPaneProps {
+  left: ReactNode;
+  right: ReactNode | null;
+  /** Initial right-pane width as a fraction (0-1). */
+  initial?: number;
+  min?: number;
+  max?: number;
+}
+
+/**
+ * Horizontal split with a draggable divider. The right pane collapses
+ * (and the divider hides) when `right` is null — the left pane fills.
+ */
+export function SplitPane({
+  left,
+  right,
+  initial = 0.45,
+  min = 0.25,
+  max = 0.7,
+}: SplitPaneProps) {
+  const [rightFraction, setRightFraction] = useState(initial);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const dragStateRef = useRef<{
+    startX: number;
+    startFraction: number;
+    width: number;
+  } | null>(null);
+
+  useEffect(() => {
+    const onMove = (e: MouseEvent) => {
+      const ds = dragStateRef.current;
+      if (!ds) return;
+      const dx = e.clientX - ds.startX;
+      const next = Math.max(
+        min,
+        Math.min(max, ds.startFraction - dx / ds.width),
+      );
+      setRightFraction(next);
+    };
+    const onUp = () => {
+      dragStateRef.current = null;
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+    };
+    document.addEventListener("mousemove", onMove);
+    document.addEventListener("mouseup", onUp);
+    return () => {
+      document.removeEventListener("mousemove", onMove);
+      document.removeEventListener("mouseup", onUp);
+    };
+  }, [min, max]);
+
+  const startDrag = (e: React.MouseEvent) => {
+    if (!containerRef.current) return;
+    const rect = containerRef.current.getBoundingClientRect();
+    dragStateRef.current = {
+      startX: e.clientX,
+      startFraction: rightFraction,
+      width: rect.width,
+    };
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+  };
+
+  return (
+    <div ref={containerRef} className="flex min-h-0 flex-1">
+      <div className="min-w-0 flex-1 overflow-hidden">{left}</div>
+      {right && (
+        <>
+          <div
+            onMouseDown={startDrag}
+            className="group relative w-px shrink-0 cursor-col-resize bg-border"
+            role="separator"
+            aria-orientation="vertical"
+          >
+            <div className="absolute inset-y-0 -left-1 -right-1 group-hover:bg-accent-soft" />
+          </div>
+          <div
+            className="flex min-w-0 shrink-0 flex-col bg-surface"
+            style={{ width: `${rightFraction * 100}%` }}
+          >
+            {right}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
