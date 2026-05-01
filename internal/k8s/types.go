@@ -411,3 +411,27 @@ type CronJobDetail struct {
 	Labels                     map[string]string `json:"labels,omitempty"`
 	Annotations                map[string]string `json:"annotations,omitempty"`
 }
+
+// --- ClusterEvent ---
+//
+// Used by the cluster-wide events list page. Distinct from the per-object
+// Event type (used in detail-pane EventsView tabs) — this one carries
+// namespace and involvedObject context so the frontend can render a
+// meaningful row and cross-link to the affected resource.
+
+type ClusterEvent struct {
+	Namespace string    `json:"namespace"`
+	Kind      string    `json:"kind"`    // Pod, Deployment, Job, etc.
+	Name      string    `json:"name"`    // object name
+	Type      string    `json:"type"`    // Normal | Warning
+	Reason    string    `json:"reason"`
+	Message   string    `json:"message"`
+	Count     int32     `json:"count"`
+	First     time.Time `json:"first"`
+	Last      time.Time `json:"last"`
+	Source    string    `json:"source"`
+}
+
+type ClusterEventList struct {
+	Events []ClusterEvent `json:"events"`
+}

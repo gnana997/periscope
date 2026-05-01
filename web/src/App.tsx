@@ -13,6 +13,7 @@ import { useClusters } from "./hooks/useClusters";
 import { useTheme } from "./hooks/useTheme";
 import { ConfigMapsPage } from "./pages/ConfigMapsPage";
 import { CronJobsPage } from "./pages/CronJobsPage";
+import { EventsPage } from "./pages/EventsPage";
 import { DaemonSetsPage } from "./pages/DaemonSetsPage";
 import { DeploymentsPage } from "./pages/DeploymentsPage";
 import { IngressesPage } from "./pages/IngressesPage";
@@ -42,6 +43,7 @@ export default function App() {
         <Route path="configmaps" element={<WithCluster Page={ConfigMapsPage} />} />
         <Route path="secrets" element={<WithCluster Page={SecretsPage} />} />
         <Route path="namespaces" element={<WithCluster Page={NamespacesPage} />} />
+        <Route path="events" element={<WithCluster Page={EventsPage} />} />
       </Route>
       <Route path="*" element={<RootRedirect />} />
     </Routes>

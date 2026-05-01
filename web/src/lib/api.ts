@@ -1,4 +1,5 @@
 import type {
+  ClusterEventList,
   ClustersResponse,
   ConfigMapDetail,
   ConfigMapList,
@@ -150,6 +151,11 @@ export const api = {
   cronjobs: (cluster: string, namespace?: string, signal?: AbortSignal) => {
     const qs = namespace ? `?namespace=${enc(namespace)}` : "";
     return getJSON<CronJobList>(`/api/clusters/${enc(cluster)}/cronjobs${qs}`, signal);
+  },
+
+  clusterEvents: (cluster: string, namespace?: string, signal?: AbortSignal) => {
+    const qs = namespace ? `?namespace=${enc(namespace)}` : "";
+    return getJSON<ClusterEventList>(`/api/clusters/${enc(cluster)}/events${qs}`, signal);
   },
 
   // --- GET (detail) ---

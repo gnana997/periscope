@@ -243,6 +243,14 @@ func main() {
 				return k8s.GetNamespaceYAML(ctx, p, k8s.GetNamespaceArgs{Cluster: c, Name: name})
 			})))
 
+	// --- Cluster-wide events list ---
+
+	mux.HandleFunc("GET /api/clusters/{cluster}/events", credentials.Wrap(factory,
+		listResource(registry, "events",
+			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, ns string) (k8s.ClusterEventList, error) {
+				return k8s.ListClusterEvents(ctx, p, k8s.ListClusterEventsArgs{Cluster: c, Namespace: ns})
+			})))
+
 	// --- Events endpoints (per object) ---
 
 	mux.HandleFunc("GET /api/clusters/{cluster}/pods/{ns}/{name}/events",

@@ -380,7 +380,7 @@ export interface CronJobDetail extends CronJob {
   annotations?: Record<string, string>;
 }
 
-// --- Events ---
+// --- Events (per-object, used in detail-pane tabs) ---
 
 export interface Event {
   type: string;
@@ -396,6 +396,25 @@ export interface EventList {
   events: Event[];
 }
 
+// --- ClusterEvent (cluster-wide events list page) ---
+
+export interface ClusterEvent {
+  namespace: string;
+  kind: string;
+  name: string;
+  type: string;
+  reason: string;
+  message: string;
+  count: number;
+  first: string;
+  last: string;
+  source: string;
+}
+
+export interface ClusterEventList {
+  events: ClusterEvent[];
+}
+
 // --- Resource catalog ---
 
 export type ResourceKind =
@@ -409,7 +428,8 @@ export type ResourceKind =
   | "configmaps"
   | "secrets"
   | "jobs"
-  | "cronjobs";
+  | "cronjobs"
+  | "events";
 
 export type ResourceListResponse =
   | NamespaceList
@@ -422,4 +442,5 @@ export type ResourceListResponse =
   | ConfigMapList
   | SecretList
   | JobList
-  | CronJobList;
+  | CronJobList
+  | ClusterEventList;

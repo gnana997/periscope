@@ -19,8 +19,7 @@ export interface ResourceMeta {
 /** Resources that appear in the nav as "SOON". */
 export type SoonResource =
   | "logs"
-  | "exec"
-  | "events";
+  | "exec";
 
 export const RESOURCES: ResourceMeta[] = [
   { id: "pods",         label: "Pods",         group: "Workloads",  ready: true  },
@@ -34,14 +33,14 @@ export const RESOURCES: ResourceMeta[] = [
   { id: "configmaps",   label: "ConfigMaps",   group: "Config",     ready: true  },
   { id: "secrets",      label: "Secrets",      group: "Config",     ready: true  },
   { id: "namespaces",   label: "Namespaces",   group: "Cluster",    ready: true  },
-  { id: "events",       label: "Events",       group: "Cluster",    ready: false },
+  { id: "events",       label: "Events",       group: "Cluster",    ready: true  },
 ];
 
 export const RESOURCE_GROUPS: ResourceGroup[] = [
+  "Cluster",
   "Workloads",
   "Networking",
   "Config",
-  "Cluster",
 ];
 
 export function resourcesByGroup(group: ResourceGroup): ResourceMeta[] {

@@ -1,6 +1,7 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { api, type YamlKind } from "../lib/api";
 import type {
+  ClusterEventList,
   ConfigMapDetail,
   CronJobDetail,
   DaemonSetDetail,
@@ -50,6 +51,8 @@ export function useResource({ cluster, resource, namespace }: ResourceQueryArgs)
           return api.jobs(cluster!, namespace, signal);
         case "cronjobs":
           return api.cronjobs(cluster!, namespace, signal);
+        case "events":
+          return api.clusterEvents(cluster!, namespace, signal);
       }
     },
     enabled: Boolean(cluster),
@@ -135,6 +138,15 @@ export function useCronJobDetail(cluster: string, ns: string, name: string | nul
     queryKey: ["cronjob-detail", cluster, ns, name],
     queryFn: ({ signal }) => api.getCronJob(cluster, ns, name!, signal),
     enabled: Boolean(name),
+  });
+}
+
+export function useClusterEvents(cluster: string, namespace?: string) {
+  return useQuery<ClusterEventList>({
+    queryKey: ["cluster-events", cluster, namespace ?? ""],
+    queryFn: ({ signal }) => api.clusterEvents(cluster, namespace, signal),
+    enabled: Boolean(cluster),
+    refetchInterval: 15_000,
   });
 }
 
