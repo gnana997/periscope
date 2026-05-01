@@ -26,6 +26,7 @@ import { StatefulSetsPage } from "./pages/StatefulSetsPage";
 import { PVCsPage } from "./pages/PVCsPage";
 import { PVsPage } from "./pages/PVsPage";
 import { StorageClassesPage } from "./pages/StorageClassesPage";
+import { PodLogsPage } from "./pages/PodLogsPage";
 
 export default function App() {
   useTheme();
@@ -50,6 +51,7 @@ export default function App() {
         <Route path="pvcs" element={<WithCluster Page={PVCsPage} />} />
         <Route path="pvs" element={<WithCluster Page={PVsPage} />} />
         <Route path="storageclasses" element={<WithCluster Page={StorageClassesPage} />} />
+        <Route path="pods/:ns/:name/logs" element={<WithCluster Page={PodLogsPage} />} />
       </Route>
       <Route path="*" element={<RootRedirect />} />
     </Routes>

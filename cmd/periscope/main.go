@@ -1,12 +1,16 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
+	"strconv"
+	"time"
 
 	"github.com/gnana997/periscope/internal/clusters"
 	"github.com/gnana997/periscope/internal/credentials"
@@ -337,6 +341,11 @@ func main() {
 	mux.HandleFunc("GET /api/clusters/{cluster}/storageclasses/{name}/events",
 		credentials.Wrap(factory, eventsHandler(registry, "StorageClass")))
 
+	// --- Logs (SSE streaming) endpoints ---
+
+	mux.HandleFunc("GET /api/clusters/{cluster}/pods/{ns}/{name}/logs",
+		credentials.Wrap(factory, podLogsHandler(registry)))
+
 	// --- Secret reveal endpoint (audit-logged, per-key) ---
 
 	mux.HandleFunc("GET /api/clusters/{cluster}/secrets/{ns}/{name}/data/{key}",
@@ -518,6 +527,125 @@ func secretRevealHandler(reg *clusters.Registry) credentials.Handler {
 		w.Header().Set("Cache-Control", "no-store")
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write(value)
+	}
+}
+
+// podLogsHandler streams a single pod's logs as Server-Sent Events.
+//
+// Each log line is emitted as: data: {"t":"<RFC3339Nano>","l":"<message>"}
+// followed by an empty line. A heartbeat comment ": ping" is sent every 15s
+// so reverse proxies don't sever idle connections during quiet periods.
+func podLogsHandler(reg *clusters.Registry) credentials.Handler {
+	return func(w http.ResponseWriter, r *http.Request, p credentials.Provider) {
+		c, ok := reg.ByName(r.PathValue("cluster"))
+		if !ok {
+			http.Error(w, "cluster not found", http.StatusNotFound)
+			return
+		}
+		flusher, ok := w.(http.Flusher)
+		if !ok {
+			http.Error(w, "streaming unsupported", http.StatusInternalServerError)
+			return
+		}
+
+		q := r.URL.Query()
+		args := k8s.PodLogsArgs{
+			Cluster:    c,
+			Namespace:  r.PathValue("ns"),
+			Name:       r.PathValue("name"),
+			Container:  q.Get("container"),
+			Previous:   q.Get("previous") == "true",
+			Follow:     q.Get("follow") != "false",
+			Timestamps: true,
+		}
+		if v := q.Get("tailLines"); v != "" {
+			if n, err := strconv.ParseInt(v, 10, 64); err == nil && n > 0 {
+				args.TailLines = &n
+			}
+		}
+		if v := q.Get("sinceSeconds"); v != "" {
+			if n, err := strconv.ParseInt(v, 10, 64); err == nil && n > 0 {
+				args.SinceSeconds = &n
+			}
+		}
+
+		stream, err := k8s.OpenPodLogStream(r.Context(), p, args)
+		if err != nil {
+			if errors.Is(err, context.Canceled) {
+				return
+			}
+			slog.ErrorContext(r.Context(), "open pod log stream failed",
+				"err", err, "cluster", c.Name, "ns", args.Namespace,
+				"name", args.Name, "container", args.Container, "actor", p.Actor())
+			http.Error(w, "open log stream failed", http.StatusBadGateway)
+			return
+		}
+		defer stream.Close()
+
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Header().Set("Cache-Control", "no-cache, no-transform")
+		w.Header().Set("Connection", "keep-alive")
+		w.Header().Set("X-Accel-Buffering", "no")
+		w.WriteHeader(http.StatusOK)
+		flusher.Flush()
+
+		// Lines are read off the upstream in a goroutine so the main loop
+		// can multiplex line emission with the heartbeat ticker. Only the
+		// main loop writes to w (ResponseWriter is not goroutine-safe).
+		type scanResult struct {
+			line string
+			err  error
+			eof  bool
+		}
+		lineCh := make(chan scanResult, 64)
+		go func() {
+			scanner := bufio.NewScanner(stream)
+			scanner.Buffer(make([]byte, 64*1024), 1<<20) // up to 1 MiB per line
+			for scanner.Scan() {
+				select {
+				case <-r.Context().Done():
+					return
+				case lineCh <- scanResult{line: scanner.Text()}:
+				}
+			}
+			select {
+			case <-r.Context().Done():
+			case lineCh <- scanResult{err: scanner.Err(), eof: true}:
+			}
+		}()
+
+		heartbeat := time.NewTicker(15 * time.Second)
+		defer heartbeat.Stop()
+
+		type linePayload struct {
+			T string `json:"t,omitempty"`
+			L string `json:"l"`
+		}
+
+		for {
+			select {
+			case <-r.Context().Done():
+				return
+			case <-heartbeat.C:
+				_, _ = fmt.Fprint(w, ": ping\n\n")
+				flusher.Flush()
+			case res := <-lineCh:
+				if res.eof {
+					if res.err != nil && !errors.Is(res.err, context.Canceled) {
+						payload, _ := json.Marshal(map[string]string{"message": res.err.Error()})
+						_, _ = fmt.Fprintf(w, "event: error\ndata: %s\n\n", payload)
+					} else {
+						_, _ = fmt.Fprint(w, "event: done\ndata: {}\n\n")
+					}
+					flusher.Flush()
+					return
+				}
+				ts, msg := k8s.SplitLogTimestamp(res.line)
+				payload, _ := json.Marshal(linePayload{T: ts, L: msg})
+				_, _ = fmt.Fprintf(w, "data: %s\n\n", payload)
+				flusher.Flush()
+			}
+		}
 	}
 }
 

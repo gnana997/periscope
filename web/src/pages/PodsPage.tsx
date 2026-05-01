@@ -21,6 +21,7 @@ import { DetailPane } from "../components/detail/DetailPane";
 import { PodDescribe } from "../components/detail/describe/PodDescribe";
 import { YamlView } from "../components/detail/YamlView";
 import { EventsView } from "../components/detail/EventsView";
+import { PodLogsTab } from "../components/logs/PodLogsTab";
 import { NamespacePicker } from "../components/shell/NamespacePicker";
 import { cn } from "../lib/cn";
 
@@ -150,7 +151,12 @@ export function PodsPage({ cluster }: { cluster: string }) {
             ready: true,
             content: <EventsView cluster={cluster} kind="pods" ns={selectedNs} name={selectedName} />,
           },
-          { id: "logs", label: "logs", ready: false },
+          {
+            id: "logs",
+            label: "logs",
+            ready: true,
+            content: <PodLogsTab cluster={cluster} ns={selectedNs} name={selectedName} />,
+          },
           { id: "exec", label: "exec", ready: false },
         ]}
       />
