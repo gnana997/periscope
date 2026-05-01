@@ -8,12 +8,21 @@ export interface LogLine {
   container?: string;
 }
 
-// Discriminated union over the supported log endpoints. Adding a new source
-// (StatefulSet, DaemonSet, ...) means adding a variant here and a matching
-// case in buildUrl below.
+// Per-pod attribution received via SSE `event: meta`. Node is empty when
+// the pod isn't yet scheduled.
+export interface PodAttribution {
+  name: string;
+  node: string;
+}
+
+// Discriminated union over the supported log endpoints. Adding a new
+// source means adding a variant here and a matching case in buildUrl.
 export type LogStreamSource =
   | { kind: "pod"; cluster: string; namespace: string; name: string }
-  | { kind: "deployment"; cluster: string; namespace: string; name: string };
+  | { kind: "deployment"; cluster: string; namespace: string; name: string }
+  | { kind: "statefulset"; cluster: string; namespace: string; name: string }
+  | { kind: "daemonset"; cluster: string; namespace: string; name: string }
+  | { kind: "job"; cluster: string; namespace: string; name: string };
 
 export interface LogStreamConfig {
   source: LogStreamSource;
@@ -42,38 +51,47 @@ export interface UseLogStreamResult {
   /** Closes the current stream and re-opens it with the same config. */
   reload: () => void;
   /**
-   * Active source pods reported via `event: meta`. Always [] for pod streams;
-   * grows/shrinks live for deployment streams as pods are added/removed.
+   * Active source pods reported via `event: meta`. Always [] for pod
+   * streams; grows/shrinks live for workload streams as pods are
+   * added/removed.
    */
-  pods: string[];
+  pods: PodAttribution[];
 }
 
 const BUFFER_CAP = 50_000;
 const FLUSH_INTERVAL_MS = 50;
 
+const SOURCE_PATHS: Record<LogStreamSource["kind"], string> = {
+  pod: "pods",
+  deployment: "deployments",
+  statefulset: "statefulsets",
+  daemonset: "daemonsets",
+  job: "jobs",
+};
+
 function buildUrl(source: LogStreamSource, params: URLSearchParams): string {
   const enc = encodeURIComponent;
+  const segment = SOURCE_PATHS[source.kind];
   const path =
-    source.kind === "pod"
-      ? `/api/clusters/${enc(source.cluster)}/pods/${enc(source.namespace)}/${enc(source.name)}/logs`
-      : `/api/clusters/${enc(source.cluster)}/deployments/${enc(source.namespace)}/${enc(source.name)}/logs`;
+    `/api/clusters/${enc(source.cluster)}/${segment}` +
+    `/${enc(source.namespace)}/${enc(source.name)}/logs`;
   const qs = params.toString();
   return qs ? `${path}?${qs}` : path;
 }
 
-// useLogStream consumes a Periscope logs SSE endpoint (pod or deployment).
+// useLogStream consumes a Periscope logs SSE endpoint (pod or workload).
 //
-// The hook keeps the most recent BUFFER_CAP lines in a ring; older lines are
-// dropped (search-with-context still works on whatever is in buffer). Lines
-// are batched on a 50ms timer to keep React re-renders bounded under high-
-// volume streams.
+// The hook keeps the most recent BUFFER_CAP lines in a ring; older lines
+// are dropped (search-with-context still works on whatever is in buffer).
+// Lines are batched on a 50ms timer to keep React re-renders bounded
+// under high-volume streams.
 export function useLogStream(config: LogStreamConfig): UseLogStreamResult {
   const [lines, setLines] = useState<LogLine[]>([]);
   const [status, setStatus] = useState<LogStreamStatus>("idle");
   const [error, setError] = useState<string | undefined>(undefined);
   const [totalReceived, setTotalReceived] = useState(0);
   const [overflowed, setOverflowed] = useState(false);
-  const [pods, setPods] = useState<string[]>([]);
+  const [pods, setPods] = useState<PodAttribution[]>([]);
   const [reloadTick, setReloadTick] = useState(0);
 
   const reload = useCallback(() => setReloadTick((t) => t + 1), []);
@@ -160,8 +178,17 @@ export function useLogStream(config: LogStreamConfig): UseLogStreamResult {
     es.addEventListener("meta", (event) => {
       const me = event as MessageEvent;
       try {
-        const parsed = JSON.parse(me.data) as { pods?: string[] };
-        if (Array.isArray(parsed.pods)) setPods(parsed.pods);
+        const parsed = JSON.parse(me.data) as {
+          pods?: Array<{ name?: string; node?: string }>;
+        };
+        if (Array.isArray(parsed.pods)) {
+          setPods(
+            parsed.pods.map((p) => ({
+              name: p.name ?? "",
+              node: p.node ?? "",
+            })),
+          );
+        }
       } catch {
         // Ignore malformed meta events.
       }

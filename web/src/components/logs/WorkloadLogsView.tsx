@@ -1,13 +1,19 @@
 import { useEffect } from "react";
-import { useDeploymentDetail } from "../../hooks/useResource";
+import {
+  useDaemonSetDetail,
+  useDeploymentDetail,
+  useJobDetail,
+  useStatefulSetDetail,
+} from "../../hooks/useResource";
 import { useLogStream } from "../../hooks/useLogStream";
 import { LogToolbar } from "./LogToolbar";
 import { LogStream } from "./LogStream";
-import { PodFilterStrip } from "./PodFilterStrip";
+import { PodFilterStrip, type WorkloadKind } from "./PodFilterStrip";
 import type { LogsViewState } from "./logsState";
-import { buildDeploymentLogsPath } from "./logsState";
+import { buildWorkloadLogsPath } from "./logsState";
 
-export interface DeploymentLogsViewProps {
+export interface WorkloadLogsViewProps {
+  kind: WorkloadKind;
   cluster: string;
   namespace: string;
   name: string;
@@ -18,28 +24,55 @@ export interface DeploymentLogsViewProps {
   showExpand?: boolean;
 }
 
-export function DeploymentLogsView({
+// useWorkloadContainers calls every detail hook unconditionally (rules of
+// hooks) but only enables the one matching `kind` (passing name=null is
+// the convention for "don't fetch"). Returns the container-name list once
+// the active hook resolves.
+function useWorkloadContainers(
+  kind: WorkloadKind,
+  cluster: string,
+  namespace: string,
+  name: string,
+): string[] {
+  const dep = useDeploymentDetail(cluster, namespace, kind === "deployment" ? name : null);
+  const sts = useStatefulSetDetail(cluster, namespace, kind === "statefulset" ? name : null);
+  const ds = useDaemonSetDetail(cluster, namespace, kind === "daemonset" ? name : null);
+  const job = useJobDetail(cluster, namespace, kind === "job" ? name : null);
+
+  switch (kind) {
+    case "deployment":
+      return (dep.data?.containers ?? []).map((c) => c.name);
+    case "statefulset":
+      return (sts.data?.containers ?? []).map((c) => c.name);
+    case "daemonset":
+      return (ds.data?.containers ?? []).map((c) => c.name);
+    case "job":
+      return (job.data?.containers ?? []).map((c) => c.name);
+  }
+}
+
+export function WorkloadLogsView({
+  kind,
   cluster,
   namespace,
   name,
   state,
   onStateChange,
   showExpand,
-}: DeploymentLogsViewProps) {
-  const detail = useDeploymentDetail(cluster, namespace, name);
-  const containers = (detail.data?.containers ?? []).map((c) => c.name);
+}: WorkloadLogsViewProps) {
+  const containers = useWorkloadContainers(kind, cluster, namespace, name);
 
   // Resolve container: explicit selection > first in template.
   const resolved = state.container || containers[0] || "";
 
-  // Once the deployment loads, write the resolved container into state so
+  // Once the workload loads, write the resolved container into state so
   // the URL/share view reflects what's actually streaming.
   useEffect(() => {
     if (!state.container && resolved) onStateChange({ container: resolved });
   }, [state.container, resolved, onStateChange]);
 
   const stream = useLogStream({
-    source: { kind: "deployment", cluster, namespace, name },
+    source: { kind, cluster, namespace, name },
     container: resolved,
     tailLines: state.tailLines,
     sinceSeconds: state.sinceSeconds ?? undefined,
@@ -47,7 +80,7 @@ export function DeploymentLogsView({
     follow: state.follow,
   });
 
-  const pagePath = buildDeploymentLogsPath(cluster, namespace, name, {
+  const pagePath = buildWorkloadLogsPath(kind, cluster, namespace, name, {
     ...state,
     container: resolved,
   });
@@ -93,6 +126,7 @@ export function DeploymentLogsView({
       />
 
       <PodFilterStrip
+        kind={kind}
         pods={stream.pods}
         selected={state.podFilter}
         onToggle={togglePod}

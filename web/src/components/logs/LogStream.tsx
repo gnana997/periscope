@@ -89,24 +89,83 @@ export function LogStream(props: LogStreamProps) {
   // state so the jump-to-bottom FAB can show/hide.
   const wasAtBottomRef = useRef(true);
   const [isAtBottom, setIsAtBottom] = useState(true);
+
+  // userScrollActiveRef gates the auto-scroll effect. When the user is
+  // actively scrolling (wheel/touch/key input within the last 200ms), we
+  // suppress auto-scroll so that incoming lines can't snap them back to
+  // the bottom mid-scroll. Without this, a high-volume stream's auto-
+  // scroll wins the race against the user's queued scroll event.
+  const userScrollActiveRef = useRef(false);
+
+  const recomputeAtBottom = () => {
+    const el = parentRef.current;
+    if (!el) return;
+    const slack = 4;
+    const overflowed = el.scrollHeight > el.clientHeight + slack;
+    const atBottom = !overflowed
+      ? true
+      : el.scrollHeight - el.scrollTop - el.clientHeight <= slack;
+    wasAtBottomRef.current = atBottom;
+    setIsAtBottom((prev) => (prev === atBottom ? prev : atBottom));
+  };
+
   useEffect(() => {
     const el = parentRef.current;
     if (!el) return;
-    const onScroll = () => {
-      const slack = 4;
-      const atBottom =
-        el.scrollHeight - el.scrollTop - el.clientHeight <= slack;
-      wasAtBottomRef.current = atBottom;
-      setIsAtBottom(atBottom);
+    el.addEventListener("scroll", recomputeAtBottom);
+    return () => el.removeEventListener("scroll", recomputeAtBottom);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Detect user-initiated scroll input synchronously, before the resulting
+  // scroll event has had a chance to fire. We listen for wheel, touchmove
+  // and arrow/page/home/end key presses on the scroll container.
+  useEffect(() => {
+    const el = parentRef.current;
+    if (!el) return;
+    let timer: number | undefined;
+    const mark = () => {
+      userScrollActiveRef.current = true;
+      if (timer !== undefined) window.clearTimeout(timer);
+      timer = window.setTimeout(() => {
+        userScrollActiveRef.current = false;
+      }, 200);
     };
-    el.addEventListener("scroll", onScroll);
-    return () => el.removeEventListener("scroll", onScroll);
+    const isScrollKey = (e: KeyboardEvent) =>
+      e.key === "ArrowUp" ||
+      e.key === "ArrowDown" ||
+      e.key === "PageUp" ||
+      e.key === "PageDown" ||
+      e.key === "Home" ||
+      e.key === "End";
+    const onKey = (e: KeyboardEvent) => {
+      if (isScrollKey(e)) mark();
+    };
+    el.addEventListener("wheel", mark, { passive: true });
+    el.addEventListener("touchmove", mark, { passive: true });
+    el.addEventListener("keydown", onKey);
+    return () => {
+      if (timer !== undefined) window.clearTimeout(timer);
+      el.removeEventListener("wheel", mark);
+      el.removeEventListener("touchmove", mark);
+      el.removeEventListener("keydown", onKey);
+    };
   }, []);
 
   useEffect(() => {
-    if (!follow || rows.length === 0) return;
-    if (!wasAtBottomRef.current) return;
-    virtualizer.scrollToIndex(rows.length - 1, { align: "end" });
+    if (rows.length === 0) return;
+    if (
+      follow &&
+      wasAtBottomRef.current &&
+      !userScrollActiveRef.current
+    ) {
+      virtualizer.scrollToIndex(rows.length - 1, { align: "end" });
+    }
+    // After new rows render, the scroll container's geometry has changed —
+    // recompute even if no scroll event fires (matters when initial lines
+    // overflow the viewport before the user has interacted).
+    recomputeAtBottom();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rows.length, follow, virtualizer]);
 
   const jumpToBottom = () => {
@@ -178,8 +237,7 @@ export function LogStream(props: LogStreamProps) {
     <div className="relative min-h-0 flex-1 bg-bg">
       <div
         ref={parentRef}
-        className="h-full overflow-y-auto"
-        style={{ contain: "strict" }}
+        className="absolute inset-0 overflow-y-auto"
       >
       <div
         style={{
@@ -226,11 +284,11 @@ export function LogStream(props: LogStreamProps) {
         })}
       </div>
       </div>
-      {follow && !isAtBottom && rows.length > 0 && (
+      {!isAtBottom && rows.length > 0 && (
         <button
           type="button"
           onClick={jumpToBottom}
-          className="absolute bottom-4 right-6 z-10 flex items-center gap-1.5 rounded-full bg-accent px-3.5 py-2 font-mono text-[11px] font-medium text-bg shadow-lg transition-transform hover:scale-105"
+          className="absolute bottom-4 right-6 z-10 flex items-center gap-1.5 rounded-full bg-accent px-3.5 py-2 font-mono text-[11.5px] font-medium text-bg shadow-lg transition-transform hover:scale-105"
         >
           <span className="text-[14px] leading-none">↓</span>
           jump to bottom

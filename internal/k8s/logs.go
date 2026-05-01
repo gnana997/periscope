@@ -63,8 +63,6 @@ func OpenPodLogStream(ctx context.Context, p credentials.Provider, args PodLogsA
 // the line doesn't have one (e.g. multi-line continuations from container
 // runtimes that don't re-stamp every fragment).
 func SplitLogTimestamp(line string) (string, string) {
-	// K8s emits "2026-05-01T12:34:56.123456789Z message...". The first
-	// space-separated token is always 30..35 chars for RFC3339Nano UTC.
 	for i := 0; i < len(line) && i < 36; i++ {
 		if line[i] == ' ' {
 			ts := line[:i]
@@ -77,10 +75,17 @@ func SplitLogTimestamp(line string) (string, string) {
 	return "", line
 }
 
-// DeploymentLogsArgs are the read parameters for a multi-pod aggregated
-// log stream backing a deployment. The same Container/TailLines/etc. apply
-// uniformly across all matched pods.
-type DeploymentLogsArgs struct {
+// PodAttribution identifies a streaming pod inside an aggregated workload
+// log stream. Node carries the pod's scheduled node name (empty for
+// not-yet-scheduled pods) and is what makes DaemonSet streams readable.
+type PodAttribution struct {
+	Name string `json:"name"`
+	Node string `json:"node"`
+}
+
+// WorkloadLogsArgs are the read parameters for an aggregated multi-pod
+// stream backing a controller (Deployment/StatefulSet/DaemonSet/Job).
+type WorkloadLogsArgs struct {
 	Cluster      clusters.Cluster
 	Namespace    string
 	Name         string
@@ -92,118 +97,126 @@ type DeploymentLogsArgs struct {
 	Timestamps   bool
 }
 
-// DeploymentLogSink receives streamed events from StreamDeploymentLogs.
-// Implementations must be safe for concurrent use — Line is invoked from
-// per-pod goroutines, PodSet from the Watch goroutine.
+// DeploymentLogsArgs is preserved as an alias for callers that pre-date
+// the multi-workload abstraction. New callers should use WorkloadLogsArgs.
+type DeploymentLogsArgs = WorkloadLogsArgs
+
+// DeploymentLogSink receives streamed events from any aggregated workload
+// log stream. Implementations must be safe for concurrent use — Line is
+// invoked from per-pod goroutines, PodSet from the Watch goroutine.
+//
+// (The name predates the multi-workload abstraction. Renaming would churn
+// the consumer side without behavioral change; left as-is for now.)
 type DeploymentLogSink interface {
-	// Line is called for each log line received. Pod is the source pod name;
-	// line is the raw text (still carrying the leading RFC3339Nano timestamp
-	// when Timestamps was true).
 	Line(pod, line string)
-	// PodSet is called whenever the streaming pod set changes — initial
-	// listing, pod added by Watch, pod removed by Watch.
-	PodSet(pods []string)
+	PodSet(pods []PodAttribution)
 }
 
-// StreamDeploymentLogs aggregates logs from every pod matching the
-// deployment's selector into a single sink. New pods that come up during
-// the stream (e.g. rolling restart) are automatically picked up via Watch;
-// terminating pods drop off when their log stream ends.
-//
-// The function blocks until ctx is cancelled or the Watch ends. When ctx
-// cancels, it waits for in-flight per-pod goroutines to drain before
-// returning.
-func StreamDeploymentLogs(ctx context.Context, p credentials.Provider, args DeploymentLogsArgs, sink DeploymentLogSink) error {
+// selectorFetcher retrieves a workload's pod-template label selector.
+// Used to keep streamWorkloadLogs generic across kinds.
+type selectorFetcher func(ctx context.Context, cs kubernetes.Interface, ns, name string) (*metav1.LabelSelector, error)
+
+// streamWorkloadLogs is the shared engine behind StreamDeploymentLogs and
+// the StatefulSet/DaemonSet/Job variants. It resolves the workload's pod
+// label selector via fetchSelector, then lists + watches matching pods
+// and fans their log streams into the sink.
+func streamWorkloadLogs(
+	ctx context.Context,
+	p credentials.Provider,
+	args WorkloadLogsArgs,
+	sink DeploymentLogSink,
+	fetchSelector selectorFetcher,
+) error {
 	cs, err := newClientFn(ctx, p, args.Cluster)
 	if err != nil {
 		return fmt.Errorf("build clientset: %w", err)
 	}
 
-	deploy, err := cs.AppsV1().Deployments(args.Namespace).Get(ctx, args.Name, metav1.GetOptions{})
+	rawSel, err := fetchSelector(ctx, cs, args.Namespace, args.Name)
 	if err != nil {
-		return fmt.Errorf("get deployment %s/%s: %w", args.Namespace, args.Name, err)
+		return fmt.Errorf("get workload %s/%s: %w", args.Namespace, args.Name, err)
 	}
-	if deploy.Spec.Selector == nil {
-		return fmt.Errorf("deployment %s/%s has no selector", args.Namespace, args.Name)
+	if rawSel == nil {
+		return fmt.Errorf("workload %s/%s has no selector", args.Namespace, args.Name)
 	}
-	selector, err := metav1.LabelSelectorAsSelector(deploy.Spec.Selector)
+	selector, err := metav1.LabelSelectorAsSelector(rawSel)
 	if err != nil {
-		return fmt.Errorf("invalid selector on deployment %s/%s: %w", args.Namespace, args.Name, err)
+		return fmt.Errorf("invalid selector on workload %s/%s: %w", args.Namespace, args.Name, err)
 	}
 	if selector.Empty() {
-		return fmt.Errorf("deployment %s/%s has empty selector", args.Namespace, args.Name)
+		return fmt.Errorf("workload %s/%s has empty selector", args.Namespace, args.Name)
 	}
 	selStr := selector.String()
 
 	list, err := cs.CoreV1().Pods(args.Namespace).List(ctx, metav1.ListOptions{LabelSelector: selStr})
 	if err != nil {
-		return fmt.Errorf("list pods for deployment %s/%s: %w", args.Namespace, args.Name, err)
+		return fmt.Errorf("list pods for workload %s/%s: %w", args.Namespace, args.Name, err)
 	}
 
-	// Track active per-pod streamers. Each entry's CancelFunc tears down
-	// its goroutine; goroutines also self-remove when their stream ends.
+	type streamerEntry struct {
+		cancel context.CancelFunc
+		node   string
+	}
 	var mu sync.Mutex
-	streamers := map[string]context.CancelFunc{}
+	streamers := map[string]streamerEntry{}
 	var wg sync.WaitGroup
 
-	currentPodNames := func() []string {
+	currentPodSet := func() []PodAttribution {
 		mu.Lock()
 		defer mu.Unlock()
-		out := make([]string, 0, len(streamers))
-		for name := range streamers {
-			out = append(out, name)
+		out := make([]PodAttribution, 0, len(streamers))
+		for name, e := range streamers {
+			out = append(out, PodAttribution{Name: name, Node: e.node})
 		}
-		sort.Strings(out)
+		sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 		return out
 	}
 
-	startStreamer := func(podName string) {
+	startStreamer := func(pod *corev1.Pod) {
 		mu.Lock()
-		if _, exists := streamers[podName]; exists {
+		if _, exists := streamers[pod.Name]; exists {
 			mu.Unlock()
 			return
 		}
 		streamerCtx, cancel := context.WithCancel(ctx)
-		streamers[podName] = cancel
+		streamers[pod.Name] = streamerEntry{cancel: cancel, node: pod.Spec.NodeName}
 		mu.Unlock()
 
 		wg.Add(1)
-		go func() {
+		go func(podName string) {
 			defer wg.Done()
 			streamSinglePodToSink(streamerCtx, cs, args, podName, sink)
 			mu.Lock()
-			if cancel, ok := streamers[podName]; ok {
-				cancel()
+			if e, ok := streamers[podName]; ok {
+				e.cancel()
 				delete(streamers, podName)
 			}
 			mu.Unlock()
-		}()
+		}(pod.Name)
 	}
 
 	stopStreamer := func(podName string) {
 		mu.Lock()
-		cancel, ok := streamers[podName]
+		e, ok := streamers[podName]
 		if ok {
 			delete(streamers, podName)
 		}
 		mu.Unlock()
-		if cancel != nil {
-			cancel()
+		if ok {
+			e.cancel()
 		}
 	}
 
-	for _, pod := range list.Items {
-		startStreamer(pod.Name)
+	for i := range list.Items {
+		startStreamer(&list.Items[i])
 	}
-	sink.PodSet(currentPodNames())
+	sink.PodSet(currentPodSet())
 
 	watcher, werr := cs.CoreV1().Pods(args.Namespace).Watch(ctx, metav1.ListOptions{
 		LabelSelector:   selStr,
 		ResourceVersion: list.ResourceVersion,
 	})
 	if werr != nil {
-		// Watch couldn't start; the initial pod set is still streaming.
-		// Block until ctx cancels, then drain.
 		<-ctx.Done()
 		wg.Wait()
 		return nil
@@ -217,8 +230,6 @@ func StreamDeploymentLogs(ctx context.Context, p credentials.Provider, args Depl
 			return nil
 		case event, ok := <-watcher.ResultChan():
 			if !ok {
-				// Watch closed (timeout, server hiccup). Initial streamers
-				// stay alive; user can reload to re-establish the watch.
 				<-ctx.Done()
 				wg.Wait()
 				return nil
@@ -229,11 +240,11 @@ func StreamDeploymentLogs(ctx context.Context, p credentials.Provider, args Depl
 			}
 			switch event.Type {
 			case watch.Added:
-				startStreamer(pod.Name)
-				sink.PodSet(currentPodNames())
+				startStreamer(pod)
+				sink.PodSet(currentPodSet())
 			case watch.Deleted:
 				stopStreamer(pod.Name)
-				sink.PodSet(currentPodNames())
+				sink.PodSet(currentPodSet())
 			}
 		}
 	}
@@ -241,9 +252,8 @@ func StreamDeploymentLogs(ctx context.Context, p credentials.Provider, args Depl
 
 // streamSinglePodToSink scans logs for one pod and forwards every line to
 // the sink. Returns silently on transient errors (pod not yet ready, just
-// terminated, etc.) — the caller will pick the pod up again via Watch if
-// it comes back.
-func streamSinglePodToSink(ctx context.Context, cs kubernetes.Interface, args DeploymentLogsArgs, podName string, sink DeploymentLogSink) {
+// terminated, etc.).
+func streamSinglePodToSink(ctx context.Context, cs kubernetes.Interface, args WorkloadLogsArgs, podName string, sink DeploymentLogSink) {
 	opts := &corev1.PodLogOptions{
 		Container:    args.Container,
 		Follow:       args.Follow,
@@ -268,4 +278,67 @@ func streamSinglePodToSink(ctx context.Context, cs kubernetes.Interface, args De
 			sink.Line(podName, scanner.Text())
 		}
 	}
+}
+
+// --- Public per-workload streamers ---
+
+// StreamDeploymentLogs aggregates logs from every pod matching the
+// deployment's selector into a single sink. New pods that come up during
+// the stream (e.g. rolling restart) are automatically picked up via Watch;
+// terminating pods drop off when their log stream ends.
+func StreamDeploymentLogs(ctx context.Context, p credentials.Provider, args WorkloadLogsArgs, sink DeploymentLogSink) error {
+	return streamWorkloadLogs(ctx, p, args, sink, fetchDeploymentSelector)
+}
+
+// StreamStatefulSetLogs is like StreamDeploymentLogs but resolves pods via
+// the StatefulSet's selector.
+func StreamStatefulSetLogs(ctx context.Context, p credentials.Provider, args WorkloadLogsArgs, sink DeploymentLogSink) error {
+	return streamWorkloadLogs(ctx, p, args, sink, fetchStatefulSetSelector)
+}
+
+// StreamDaemonSetLogs is like StreamDeploymentLogs but resolves pods via
+// the DaemonSet's selector. Useful for "show me all kube-proxy logs at once".
+func StreamDaemonSetLogs(ctx context.Context, p credentials.Provider, args WorkloadLogsArgs, sink DeploymentLogSink) error {
+	return streamWorkloadLogs(ctx, p, args, sink, fetchDaemonSetSelector)
+}
+
+// StreamJobLogs is like StreamDeploymentLogs but resolves pods via the
+// Job's selector. Captures both the live pod and any retried/completed
+// pods still readable via the kubelet.
+func StreamJobLogs(ctx context.Context, p credentials.Provider, args WorkloadLogsArgs, sink DeploymentLogSink) error {
+	return streamWorkloadLogs(ctx, p, args, sink, fetchJobSelector)
+}
+
+// --- Per-workload selector fetchers ---
+
+func fetchDeploymentSelector(ctx context.Context, cs kubernetes.Interface, ns, name string) (*metav1.LabelSelector, error) {
+	d, err := cs.AppsV1().Deployments(ns).Get(ctx, name, metav1.GetOptions{})
+	if err != nil {
+		return nil, err
+	}
+	return d.Spec.Selector, nil
+}
+
+func fetchStatefulSetSelector(ctx context.Context, cs kubernetes.Interface, ns, name string) (*metav1.LabelSelector, error) {
+	s, err := cs.AppsV1().StatefulSets(ns).Get(ctx, name, metav1.GetOptions{})
+	if err != nil {
+		return nil, err
+	}
+	return s.Spec.Selector, nil
+}
+
+func fetchDaemonSetSelector(ctx context.Context, cs kubernetes.Interface, ns, name string) (*metav1.LabelSelector, error) {
+	d, err := cs.AppsV1().DaemonSets(ns).Get(ctx, name, metav1.GetOptions{})
+	if err != nil {
+		return nil, err
+	}
+	return d.Spec.Selector, nil
+}
+
+func fetchJobSelector(ctx context.Context, cs kubernetes.Interface, ns, name string) (*metav1.LabelSelector, error) {
+	j, err := cs.BatchV1().Jobs(ns).Get(ctx, name, metav1.GetOptions{})
+	if err != nil {
+		return nil, err
+	}
+	return j.Spec.Selector, nil
 }

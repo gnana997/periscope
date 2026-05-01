@@ -1,11 +1,13 @@
-// Shared state shape + (de)serialization for the pod and deployment logs
+// Shared state shape + (de)serialization for the pod and workload logs
 // views. Both wrappers (in-tab local state, full-page URL state) read/write a
 // LogsViewState. The full-page wrapper round-trips through query params so
 // URLs are shareable.
 //
-// `podFilter` is only meaningful for deployment streams; pod streams ignore
-// it. It's part of the shared shape so the toolbar/state plumbing stays
-// uniform between the two variants.
+// `podFilter` is only meaningful for workload streams (deployment / sts /
+// ds / job); pod streams ignore it. It's part of the shared shape so the
+// toolbar/state plumbing stays uniform across variants.
+
+import type { WorkloadKind } from "./PodFilterStrip";
 
 export interface LogsViewState {
   container: string;
@@ -81,21 +83,35 @@ export function buildPodLogsPath(
   );
 }
 
-export function buildDeploymentLogsPath(
+const WORKLOAD_PATHS: Record<WorkloadKind, string> = {
+  deployment: "deployments",
+  statefulset: "statefulsets",
+  daemonset: "daemonsets",
+  job: "jobs",
+};
+
+export function buildWorkloadLogsPath(
+  kind: WorkloadKind,
   cluster: string,
   namespace: string,
   name: string,
   state: LogsViewState,
 ): string {
   const qs = stateToParams(state).toString();
+  const segment = WORKLOAD_PATHS[kind];
   return (
     `/clusters/${encodeURIComponent(cluster)}` +
-    `/deployments/${encodeURIComponent(namespace)}` +
+    `/${segment}/${encodeURIComponent(namespace)}` +
     `/${encodeURIComponent(name)}/logs` +
     (qs ? `?${qs}` : "")
   );
 }
 
-// Backwards-compatible alias for callers that pre-date the deployment
-// variant; new code should call buildPodLogsPath directly.
+// Backwards-compat aliases for callers that pre-date the multi-kind work.
 export const buildLogsPagePath = buildPodLogsPath;
+export const buildDeploymentLogsPath = (
+  cluster: string,
+  namespace: string,
+  name: string,
+  state: LogsViewState,
+) => buildWorkloadLogsPath("deployment", cluster, namespace, name, state);

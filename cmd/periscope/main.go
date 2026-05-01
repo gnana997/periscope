@@ -346,7 +346,13 @@ func main() {
 	mux.HandleFunc("GET /api/clusters/{cluster}/pods/{ns}/{name}/logs",
 		credentials.Wrap(factory, podLogsHandler(registry)))
 	mux.HandleFunc("GET /api/clusters/{cluster}/deployments/{ns}/{name}/logs",
-		credentials.Wrap(factory, deploymentLogsHandler(registry)))
+		credentials.Wrap(factory, workloadLogsHandler(registry, "deployment", k8s.StreamDeploymentLogs)))
+	mux.HandleFunc("GET /api/clusters/{cluster}/statefulsets/{ns}/{name}/logs",
+		credentials.Wrap(factory, workloadLogsHandler(registry, "statefulset", k8s.StreamStatefulSetLogs)))
+	mux.HandleFunc("GET /api/clusters/{cluster}/daemonsets/{ns}/{name}/logs",
+		credentials.Wrap(factory, workloadLogsHandler(registry, "daemonset", k8s.StreamDaemonSetLogs)))
+	mux.HandleFunc("GET /api/clusters/{cluster}/jobs/{ns}/{name}/logs",
+		credentials.Wrap(factory, workloadLogsHandler(registry, "job", k8s.StreamJobLogs)))
 
 	// --- Secret reveal endpoint (audit-logged, per-key) ---
 
@@ -657,14 +663,14 @@ func writeJSON(w http.ResponseWriter, status int, body any) {
 	_ = json.NewEncoder(w).Encode(body)
 }
 
-// deploymentEvent is an internal handle the deploymentLogsHandler uses to
-// fan in lines and pod-set updates from k8s.StreamDeploymentLogs onto the
+// deploymentEvent is an internal handle the workloadLogsHandler uses to
+// fan in lines and pod-set updates from any k8s.Stream*Logs into the
 // single goroutine that owns the SSE ResponseWriter.
 type deploymentEvent struct {
 	kind string // "line" | "podSet"
 	pod  string
 	line string
-	pods []string
+	pods []k8s.PodAttribution
 }
 
 // channelSink implements k8s.DeploymentLogSink by pushing into a buffered
@@ -681,24 +687,27 @@ func (s *channelSink) Line(pod, line string) {
 	case s.ch <- deploymentEvent{kind: "line", pod: pod, line: line}:
 	case <-s.ctx.Done():
 	default:
-		// Channel full; drop. Acceptable — the frontend ring buffer will
-		// continue, and over-driving log floods isn't a useful UX anyway.
+		// Channel full; drop. Acceptable — the frontend ring buffer
+		// continues, and over-driving log floods isn't useful UX anyway.
 	}
 }
 
-func (s *channelSink) PodSet(pods []string) {
+func (s *channelSink) PodSet(pods []k8s.PodAttribution) {
 	select {
 	case s.ch <- deploymentEvent{kind: "podSet", pods: pods}:
 	case <-s.ctx.Done():
 	}
 }
 
-// deploymentLogsHandler streams aggregated logs for every pod matching a
-// deployment's selector as Server-Sent Events. Same line shape as the
-// pod-logs handler but with a `p` field for per-pod attribution; pod-set
-// changes are emitted as `event: meta` so the frontend can update its
-// legend live.
-func deploymentLogsHandler(reg *clusters.Registry) credentials.Handler {
+// workloadStreamFn matches the signature of every k8s.Stream*Logs func.
+type workloadStreamFn func(ctx context.Context, p credentials.Provider, args k8s.WorkloadLogsArgs, sink k8s.DeploymentLogSink) error
+
+// workloadLogsHandler streams aggregated logs for every pod under a
+// controller (Deployment/StatefulSet/DaemonSet/Job) as Server-Sent Events.
+// Lines carry a `p` field for pod attribution; pod-set changes go out as
+// `event: meta` with name+node attribution so the frontend can color and
+// (for DaemonSets) display node-first.
+func workloadLogsHandler(reg *clusters.Registry, kind string, stream workloadStreamFn) credentials.Handler {
 	return func(w http.ResponseWriter, r *http.Request, p credentials.Provider) {
 		c, ok := reg.ByName(r.PathValue("cluster"))
 		if !ok {
@@ -712,7 +721,7 @@ func deploymentLogsHandler(reg *clusters.Registry) credentials.Handler {
 		}
 
 		q := r.URL.Query()
-		args := k8s.DeploymentLogsArgs{
+		args := k8s.WorkloadLogsArgs{
 			Cluster:    c,
 			Namespace:  r.PathValue("ns"),
 			Name:       r.PathValue("name"),
@@ -747,7 +756,7 @@ func deploymentLogsHandler(reg *clusters.Registry) credentials.Handler {
 		go func() {
 			defer close(streamDone)
 			defer close(eventCh)
-			streamErr = k8s.StreamDeploymentLogs(r.Context(), p, args, sink)
+			streamErr = stream(r.Context(), p, args, sink)
 		}()
 
 		heartbeat := time.NewTicker(15 * time.Second)
@@ -759,7 +768,7 @@ func deploymentLogsHandler(reg *clusters.Registry) credentials.Handler {
 			L string `json:"l"`
 		}
 		type metaPayload struct {
-			Pods []string `json:"pods"`
+			Pods []k8s.PodAttribution `json:"pods"`
 		}
 
 		for {
@@ -774,9 +783,10 @@ func deploymentLogsHandler(reg *clusters.Registry) credentials.Handler {
 				if !ok {
 					<-streamDone
 					if streamErr != nil && !errors.Is(streamErr, context.Canceled) {
-						slog.ErrorContext(r.Context(), "deployment log stream failed",
-							"err", streamErr, "cluster", c.Name,
-							"ns", args.Namespace, "name", args.Name, "actor", p.Actor())
+						slog.ErrorContext(r.Context(), "workload log stream failed",
+							"kind", kind, "err", streamErr,
+							"cluster", c.Name, "ns", args.Namespace,
+							"name", args.Name, "actor", p.Actor())
 						payload, _ := json.Marshal(map[string]string{"message": streamErr.Error()})
 						_, _ = fmt.Fprintf(w, "event: error\ndata: %s\n\n", payload)
 					} else {

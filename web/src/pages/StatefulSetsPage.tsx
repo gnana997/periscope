@@ -20,6 +20,7 @@ import { DetailPane } from "../components/detail/DetailPane";
 import { StatefulSetDescribe } from "../components/detail/describe/StatefulSetDescribe";
 import { YamlView } from "../components/detail/YamlView";
 import { EventsView } from "../components/detail/EventsView";
+import { WorkloadLogsTab } from "../components/logs/WorkloadLogsTab";
 import { NamespacePicker } from "../components/shell/NamespacePicker";
 import { cn } from "../lib/cn";
 
@@ -100,6 +101,7 @@ export function StatefulSetsPage({ cluster }: { cluster: string }) {
           { id: "describe", label: "describe", ready: true, content: <StatefulSetDescribe cluster={cluster} ns={selectedNs} name={selectedName} /> },
           { id: "yaml", label: "yaml", ready: true, content: <YamlView cluster={cluster} kind="statefulsets" ns={selectedNs} name={selectedName} /> },
           { id: "events", label: "events", ready: true, content: <EventsView cluster={cluster} kind="statefulsets" ns={selectedNs} name={selectedName} /> },
+          { id: "logs", label: "logs", ready: true, content: <WorkloadLogsTab kind="statefulset" cluster={cluster} ns={selectedNs} name={selectedName} /> },
         ]}
       />
     ) : null;
