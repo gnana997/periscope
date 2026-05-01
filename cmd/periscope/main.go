@@ -76,10 +76,22 @@ func main() {
 				return k8s.ListServices(ctx, p, k8s.ListServicesArgs{Cluster: c, Namespace: ns})
 			})))
 
+	mux.HandleFunc("GET /api/clusters/{cluster}/ingresses", credentials.Wrap(factory,
+		listResource(registry, "ingresses",
+			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, ns string) (k8s.IngressList, error) {
+				return k8s.ListIngresses(ctx, p, k8s.ListIngressesArgs{Cluster: c, Namespace: ns})
+			})))
+
 	mux.HandleFunc("GET /api/clusters/{cluster}/configmaps", credentials.Wrap(factory,
 		listResource(registry, "configmaps",
 			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, ns string) (k8s.ConfigMapList, error) {
 				return k8s.ListConfigMaps(ctx, p, k8s.ListConfigMapsArgs{Cluster: c, Namespace: ns})
+			})))
+
+	mux.HandleFunc("GET /api/clusters/{cluster}/secrets", credentials.Wrap(factory,
+		listResource(registry, "secrets",
+			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, ns string) (k8s.SecretList, error) {
+				return k8s.ListSecrets(ctx, p, k8s.ListSecretsArgs{Cluster: c, Namespace: ns})
 			})))
 
 	// --- GET (detail) endpoints ---
@@ -114,10 +126,22 @@ func main() {
 				return k8s.GetService(ctx, p, k8s.GetServiceArgs{Cluster: c, Namespace: ns, Name: name})
 			})))
 
+	mux.HandleFunc("GET /api/clusters/{cluster}/ingresses/{ns}/{name}", credentials.Wrap(factory,
+		detailHandler(registry, "ingress",
+			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, ns, name string) (k8s.IngressDetail, error) {
+				return k8s.GetIngress(ctx, p, k8s.GetIngressArgs{Cluster: c, Namespace: ns, Name: name})
+			})))
+
 	mux.HandleFunc("GET /api/clusters/{cluster}/configmaps/{ns}/{name}", credentials.Wrap(factory,
 		detailHandler(registry, "configmap",
 			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, ns, name string) (k8s.ConfigMapDetail, error) {
 				return k8s.GetConfigMap(ctx, p, k8s.GetConfigMapArgs{Cluster: c, Namespace: ns, Name: name})
+			})))
+
+	mux.HandleFunc("GET /api/clusters/{cluster}/secrets/{ns}/{name}", credentials.Wrap(factory,
+		detailHandler(registry, "secret",
+			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, ns, name string) (k8s.SecretDetail, error) {
+				return k8s.GetSecret(ctx, p, k8s.GetSecretArgs{Cluster: c, Namespace: ns, Name: name})
 			})))
 
 	// Namespaces are cluster-scoped: no {ns} segment.
@@ -159,10 +183,22 @@ func main() {
 				return k8s.GetServiceYAML(ctx, p, k8s.GetServiceArgs{Cluster: c, Namespace: ns, Name: name})
 			})))
 
+	mux.HandleFunc("GET /api/clusters/{cluster}/ingresses/{ns}/{name}/yaml", credentials.Wrap(factory,
+		yamlHandler(registry, "ingress",
+			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, ns, name string) (string, error) {
+				return k8s.GetIngressYAML(ctx, p, k8s.GetIngressArgs{Cluster: c, Namespace: ns, Name: name})
+			})))
+
 	mux.HandleFunc("GET /api/clusters/{cluster}/configmaps/{ns}/{name}/yaml", credentials.Wrap(factory,
 		yamlHandler(registry, "configmap",
 			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, ns, name string) (string, error) {
 				return k8s.GetConfigMapYAML(ctx, p, k8s.GetConfigMapArgs{Cluster: c, Namespace: ns, Name: name})
+			})))
+
+	mux.HandleFunc("GET /api/clusters/{cluster}/secrets/{ns}/{name}/yaml", credentials.Wrap(factory,
+		yamlHandler(registry, "secret",
+			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, ns, name string) (string, error) {
+				return k8s.GetSecretYAML(ctx, p, k8s.GetSecretArgs{Cluster: c, Namespace: ns, Name: name})
 			})))
 
 	mux.HandleFunc("GET /api/clusters/{cluster}/namespaces/{name}/yaml", credentials.Wrap(factory,
@@ -183,10 +219,19 @@ func main() {
 		credentials.Wrap(factory, eventsHandler(registry, "DaemonSet")))
 	mux.HandleFunc("GET /api/clusters/{cluster}/services/{ns}/{name}/events",
 		credentials.Wrap(factory, eventsHandler(registry, "Service")))
+	mux.HandleFunc("GET /api/clusters/{cluster}/ingresses/{ns}/{name}/events",
+		credentials.Wrap(factory, eventsHandler(registry, "Ingress")))
 	mux.HandleFunc("GET /api/clusters/{cluster}/configmaps/{ns}/{name}/events",
 		credentials.Wrap(factory, eventsHandler(registry, "ConfigMap")))
+	mux.HandleFunc("GET /api/clusters/{cluster}/secrets/{ns}/{name}/events",
+		credentials.Wrap(factory, eventsHandler(registry, "Secret")))
 	mux.HandleFunc("GET /api/clusters/{cluster}/namespaces/{name}/events",
 		credentials.Wrap(factory, eventsHandler(registry, "Namespace")))
+
+	// --- Secret reveal endpoint (audit-logged, per-key) ---
+
+	mux.HandleFunc("GET /api/clusters/{cluster}/secrets/{ns}/{name}/data/{key}",
+		credentials.Wrap(factory, secretRevealHandler(registry)))
 
 	port := os.Getenv("PORT")
 	if port == "" {
@@ -319,6 +364,36 @@ func eventsHandler(reg *clusters.Registry, kind string) credentials.Handler {
 			return
 		}
 		writeJSON(w, http.StatusOK, result)
+	}
+}
+
+// secretRevealHandler wraps GetSecretValue. Audit logging is performed
+// inside GetSecretValue itself so it's tied to the read action, not just
+// the HTTP request envelope.
+func secretRevealHandler(reg *clusters.Registry) credentials.Handler {
+	return func(w http.ResponseWriter, r *http.Request, p credentials.Provider) {
+		c, ok := reg.ByName(r.PathValue("cluster"))
+		if !ok {
+			http.Error(w, "cluster not found", http.StatusNotFound)
+			return
+		}
+		ns := r.PathValue("ns")
+		name := r.PathValue("name")
+		key := r.PathValue("key")
+		value, err := k8s.GetSecretValue(r.Context(), p, k8s.GetSecretValueArgs{
+			Cluster: c, Namespace: ns, Name: name, Key: key,
+		})
+		if err != nil {
+			slog.ErrorContext(r.Context(), "secret reveal failed",
+				"err", err, "cluster", c.Name, "ns", ns, "name", name, "key", key,
+				"actor", p.Actor())
+			http.Error(w, "operation failed", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.Header().Set("Cache-Control", "no-store")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(value)
 	}
 }
 

@@ -14,8 +14,10 @@ import { useTheme } from "./hooks/useTheme";
 import { ConfigMapsPage } from "./pages/ConfigMapsPage";
 import { DaemonSetsPage } from "./pages/DaemonSetsPage";
 import { DeploymentsPage } from "./pages/DeploymentsPage";
+import { IngressesPage } from "./pages/IngressesPage";
 import { NamespacesPage } from "./pages/NamespacesPage";
 import { PodsPage } from "./pages/PodsPage";
+import { SecretsPage } from "./pages/SecretsPage";
 import { ServicesPage } from "./pages/ServicesPage";
 import { StatefulSetsPage } from "./pages/StatefulSetsPage";
 
@@ -28,27 +30,14 @@ export default function App() {
       <Route path="/clusters/:cluster" element={<AppShell />}>
         <Route index element={<Navigate to="pods" replace />} />
         <Route path="pods" element={<WithCluster Page={PodsPage} />} />
-        <Route
-          path="deployments"
-          element={<WithCluster Page={DeploymentsPage} />}
-        />
-        <Route
-          path="statefulsets"
-          element={<WithCluster Page={StatefulSetsPage} />}
-        />
-        <Route
-          path="daemonsets"
-          element={<WithCluster Page={DaemonSetsPage} />}
-        />
+        <Route path="deployments" element={<WithCluster Page={DeploymentsPage} />} />
+        <Route path="statefulsets" element={<WithCluster Page={StatefulSetsPage} />} />
+        <Route path="daemonsets" element={<WithCluster Page={DaemonSetsPage} />} />
         <Route path="services" element={<WithCluster Page={ServicesPage} />} />
-        <Route
-          path="configmaps"
-          element={<WithCluster Page={ConfigMapsPage} />}
-        />
-        <Route
-          path="namespaces"
-          element={<WithCluster Page={NamespacesPage} />}
-        />
+        <Route path="ingresses" element={<WithCluster Page={IngressesPage} />} />
+        <Route path="configmaps" element={<WithCluster Page={ConfigMapsPage} />} />
+        <Route path="secrets" element={<WithCluster Page={SecretsPage} />} />
+        <Route path="namespaces" element={<WithCluster Page={NamespacesPage} />} />
       </Route>
       <Route path="*" element={<RootRedirect />} />
     </Routes>

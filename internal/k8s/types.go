@@ -238,3 +238,80 @@ type DaemonSetDetail struct {
 	Labels         map[string]string     `json:"labels,omitempty"`
 	Annotations    map[string]string     `json:"annotations,omitempty"`
 }
+
+// --- Secret ---
+//
+// Per GROUND_RULES + the v1 reveal-with-audit decision: SecretDetail does
+// NOT contain a `data` field. Anywhere. Adding one would require editing
+// this type — making it a deliberate, reviewable change rather than a
+// careless field addition. Reveal happens through a separate per-key
+// endpoint that audit-logs each access.
+
+type Secret struct {
+	Name      string    `json:"name"`
+	Namespace string    `json:"namespace"`
+	Type      string    `json:"type"`
+	KeyCount  int       `json:"keyCount"`
+	CreatedAt time.Time `json:"createdAt"`
+}
+
+type SecretList struct {
+	Secrets []Secret `json:"secrets"`
+}
+
+type SecretKey struct {
+	Name string `json:"name"`
+	Size int    `json:"size"` // bytes — metadata only, not the value
+}
+
+type SecretDetail struct {
+	Secret
+	Keys        []SecretKey       `json:"keys"`
+	Labels      map[string]string `json:"labels,omitempty"`
+	Annotations map[string]string `json:"annotations,omitempty"`
+	Immutable   bool              `json:"immutable,omitempty"`
+}
+
+// --- Ingress ---
+
+type Ingress struct {
+	Name      string    `json:"name"`
+	Namespace string    `json:"namespace"`
+	Class     string    `json:"class,omitempty"`
+	Hosts     []string  `json:"hosts"`
+	Address   string    `json:"address,omitempty"`
+	CreatedAt time.Time `json:"createdAt"`
+}
+
+type IngressList struct {
+	Ingresses []Ingress `json:"ingresses"`
+}
+
+type IngressBackend struct {
+	ServiceName string `json:"serviceName"`
+	ServicePort string `json:"servicePort"` // intstr stringified
+}
+
+type IngressPath struct {
+	Path     string         `json:"path"`
+	PathType string         `json:"pathType"`
+	Backend  IngressBackend `json:"backend"`
+}
+
+type IngressRule struct {
+	Host  string        `json:"host"` // empty for catch-all
+	Paths []IngressPath `json:"paths"`
+}
+
+type IngressTLS struct {
+	Hosts      []string `json:"hosts"`
+	SecretName string   `json:"secretName,omitempty"`
+}
+
+type IngressDetail struct {
+	Ingress
+	Rules       []IngressRule     `json:"rules"`
+	TLS         []IngressTLS      `json:"tls,omitempty"`
+	Labels      map[string]string `json:"labels,omitempty"`
+	Annotations map[string]string `json:"annotations,omitempty"`
+}

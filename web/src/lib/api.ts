@@ -7,10 +7,14 @@ import type {
   DeploymentDetail,
   DeploymentList,
   EventList,
+  IngressDetail,
+  IngressList,
   NamespaceDetail,
   NamespaceList,
   PodDetail,
   PodList,
+  SecretDetail,
+  SecretList,
   ServiceDetail,
   ServiceList,
   StatefulSetDetail,
@@ -76,7 +80,9 @@ export type YamlKind =
   | "statefulsets"
   | "daemonsets"
   | "services"
+  | "ingresses"
   | "configmaps"
+  | "secrets"
   | "namespaces";
 
 export const api = {
@@ -115,9 +121,19 @@ export const api = {
     return getJSON<ServiceList>(`/api/clusters/${enc(cluster)}/services${qs}`, signal);
   },
 
+  ingresses: (cluster: string, namespace?: string, signal?: AbortSignal) => {
+    const qs = namespace ? `?namespace=${enc(namespace)}` : "";
+    return getJSON<IngressList>(`/api/clusters/${enc(cluster)}/ingresses${qs}`, signal);
+  },
+
   configmaps: (cluster: string, namespace?: string, signal?: AbortSignal) => {
     const qs = namespace ? `?namespace=${enc(namespace)}` : "";
     return getJSON<ConfigMapList>(`/api/clusters/${enc(cluster)}/configmaps${qs}`, signal);
+  },
+
+  secrets: (cluster: string, namespace?: string, signal?: AbortSignal) => {
+    const qs = namespace ? `?namespace=${enc(namespace)}` : "";
+    return getJSON<SecretList>(`/api/clusters/${enc(cluster)}/secrets${qs}`, signal);
   },
 
   // --- GET (detail) ---
@@ -137,11 +153,32 @@ export const api = {
   getService: (c: string, ns: string, name: string, signal?: AbortSignal) =>
     getJSON<ServiceDetail>(nsURL(c, "services", ns, name), signal),
 
+  getIngress: (c: string, ns: string, name: string, signal?: AbortSignal) =>
+    getJSON<IngressDetail>(nsURL(c, "ingresses", ns, name), signal),
+
   getConfigMap: (c: string, ns: string, name: string, signal?: AbortSignal) =>
     getJSON<ConfigMapDetail>(nsURL(c, "configmaps", ns, name), signal),
 
+  getSecret: (c: string, ns: string, name: string, signal?: AbortSignal) =>
+    getJSON<SecretDetail>(nsURL(c, "secrets", ns, name), signal),
+
   getNamespace: (c: string, name: string, signal?: AbortSignal) =>
     getJSON<NamespaceDetail>(clusterScopedURL(c, "namespaces", name), signal),
+
+  // --- Secret reveal: per-key value, audit-logged server-side. ---
+  // Fetched on user click only. Never as part of any other endpoint.
+
+  getSecretValue: (
+    c: string,
+    ns: string,
+    name: string,
+    key: string,
+    signal?: AbortSignal,
+  ) =>
+    getText(
+      `/api/clusters/${enc(c)}/secrets/${enc(ns)}/${enc(name)}/data/${enc(key)}`,
+      signal,
+    ),
 
   // --- YAML ---
 

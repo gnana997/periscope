@@ -205,6 +205,49 @@ export interface ServiceDetail extends Service {
   annotations?: Record<string, string>;
 }
 
+// --- Ingress ---
+
+export interface Ingress {
+  name: string;
+  namespace: string;
+  class?: string;
+  hosts: string[];
+  address?: string;
+  createdAt: string;
+}
+
+export interface IngressList {
+  ingresses: Ingress[];
+}
+
+export interface IngressBackend {
+  serviceName: string;
+  servicePort: string;
+}
+
+export interface IngressPath {
+  path: string;
+  pathType: string;
+  backend: IngressBackend;
+}
+
+export interface IngressRule {
+  host: string;
+  paths: IngressPath[];
+}
+
+export interface IngressTLS {
+  hosts: string[];
+  secretName?: string;
+}
+
+export interface IngressDetail extends Ingress {
+  rules: IngressRule[];
+  tls?: IngressTLS[];
+  labels?: Record<string, string>;
+  annotations?: Record<string, string>;
+}
+
 // --- ConfigMap ---
 
 export interface ConfigMap {
@@ -223,6 +266,32 @@ export interface ConfigMapDetail extends ConfigMap {
   binaryDataKeys?: string[];
   labels?: Record<string, string>;
   annotations?: Record<string, string>;
+}
+
+// --- Secret (NEVER include data values in any DTO) ---
+
+export interface Secret {
+  name: string;
+  namespace: string;
+  type: string;
+  keyCount: number;
+  createdAt: string;
+}
+
+export interface SecretList {
+  secrets: Secret[];
+}
+
+export interface SecretKey {
+  name: string;
+  size: number; // bytes — metadata only
+}
+
+export interface SecretDetail extends Secret {
+  keys: SecretKey[];
+  labels?: Record<string, string>;
+  annotations?: Record<string, string>;
+  immutable?: boolean;
 }
 
 // --- Events ---
@@ -250,7 +319,9 @@ export type ResourceKind =
   | "statefulsets"
   | "daemonsets"
   | "services"
-  | "configmaps";
+  | "ingresses"
+  | "configmaps"
+  | "secrets";
 
 export type ResourceListResponse =
   | NamespaceList
@@ -259,4 +330,6 @@ export type ResourceListResponse =
   | StatefulSetList
   | DaemonSetList
   | ServiceList
-  | ConfigMapList;
+  | IngressList
+  | ConfigMapList
+  | SecretList;

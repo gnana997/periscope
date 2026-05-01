@@ -21,8 +21,6 @@ export type SoonResource =
   | "logs"
   | "exec"
   | "events"
-  | "ingresses"
-  | "secrets"
   | "jobs"
   | "cronjobs";
 
@@ -34,9 +32,9 @@ export const RESOURCES: ResourceMeta[] = [
   { id: "jobs",         label: "Jobs",         group: "Workloads",  ready: false },
   { id: "cronjobs",     label: "CronJobs",     group: "Workloads",  ready: false },
   { id: "services",     label: "Services",     group: "Networking", ready: true  },
-  { id: "ingresses",    label: "Ingresses",    group: "Networking", ready: false },
+  { id: "ingresses",    label: "Ingresses",    group: "Networking", ready: true  },
   { id: "configmaps",   label: "ConfigMaps",   group: "Config",     ready: true  },
-  { id: "secrets",      label: "Secrets",      group: "Config",     ready: false },
+  { id: "secrets",      label: "Secrets",      group: "Config",     ready: true  },
   { id: "namespaces",   label: "Namespaces",   group: "Cluster",    ready: true  },
   { id: "events",       label: "Events",       group: "Cluster",    ready: false },
 ];

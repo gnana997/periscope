@@ -1,14 +1,16 @@
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { api, type YamlKind } from "../lib/api";
 import type {
   ConfigMapDetail,
   DaemonSetDetail,
   DeploymentDetail,
   EventList,
+  IngressDetail,
   NamespaceDetail,
   PodDetail,
   ResourceKind,
   ResourceListResponse,
+  SecretDetail,
   ServiceDetail,
   StatefulSetDetail,
 } from "../lib/types";
@@ -36,8 +38,12 @@ export function useResource({ cluster, resource, namespace }: ResourceQueryArgs)
           return api.daemonsets(cluster!, namespace, signal);
         case "services":
           return api.services(cluster!, namespace, signal);
+        case "ingresses":
+          return api.ingresses(cluster!, namespace, signal);
         case "configmaps":
           return api.configmaps(cluster!, namespace, signal);
+        case "secrets":
+          return api.secrets(cluster!, namespace, signal);
       }
     },
     enabled: Boolean(cluster),
@@ -86,10 +92,26 @@ export function useServiceDetail(cluster: string, ns: string, name: string | nul
   });
 }
 
+export function useIngressDetail(cluster: string, ns: string, name: string | null) {
+  return useQuery<IngressDetail>({
+    queryKey: ["ingress-detail", cluster, ns, name],
+    queryFn: ({ signal }) => api.getIngress(cluster, ns, name!, signal),
+    enabled: Boolean(name),
+  });
+}
+
 export function useConfigMapDetail(cluster: string, ns: string, name: string | null) {
   return useQuery<ConfigMapDetail>({
     queryKey: ["configmap-detail", cluster, ns, name],
     queryFn: ({ signal }) => api.getConfigMap(cluster, ns, name!, signal),
+    enabled: Boolean(name),
+  });
+}
+
+export function useSecretDetail(cluster: string, ns: string, name: string | null) {
+  return useQuery<SecretDetail>({
+    queryKey: ["secret-detail", cluster, ns, name],
+    queryFn: ({ signal }) => api.getSecret(cluster, ns, name!, signal),
     enabled: Boolean(name),
   });
 }
@@ -99,6 +121,26 @@ export function useNamespaceDetail(cluster: string, name: string | null) {
     queryKey: ["namespace-detail", cluster, name],
     queryFn: ({ signal }) => api.getNamespace(cluster, name!, signal),
     enabled: Boolean(name),
+  });
+}
+
+// --- Secret reveal — mutation, NOT a query.
+// Modeled as a mutation so it only fires on explicit user action, never
+// preloads or revalidates on focus. Each call audit-logs server-side.
+
+export function useRevealSecretValue() {
+  return useMutation({
+    mutationFn: ({
+      cluster,
+      ns,
+      name,
+      key,
+    }: {
+      cluster: string;
+      ns: string;
+      name: string;
+      key: string;
+    }) => api.getSecretValue(cluster, ns, name, key),
   });
 }
 
