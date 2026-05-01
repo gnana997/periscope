@@ -6,6 +6,7 @@ require (
 	github.com/aws/aws-sdk-go-v2 v1.41.7
 	github.com/aws/aws-sdk-go-v2/config v1.32.17
 	github.com/aws/aws-sdk-go-v2/service/eks v1.82.2
+	github.com/go-chi/chi/v5 v5.2.5
 	gopkg.in/yaml.v3 v3.0.1
 	k8s.io/api v0.36.0
 	k8s.io/apimachinery v0.36.0

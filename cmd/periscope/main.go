@@ -12,8 +12,11 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/go-chi/chi/v5"
+
 	"github.com/gnana997/periscope/internal/clusters"
 	"github.com/gnana997/periscope/internal/credentials"
+	"github.com/gnana997/periscope/internal/httpx"
 	"github.com/gnana997/periscope/internal/k8s"
 )
 
@@ -35,19 +38,23 @@ func main() {
 		os.Exit(1)
 	}
 
-	mux := http.NewServeMux()
-	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
+	router := chi.NewRouter()
+	router.Use(httpx.RequestID)
+	router.Use(httpx.RealIP)
+	router.Use(httpx.Recoverer)
+	router.Use(httpx.AuditBegin)
+	router.Get("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))
 	})
-	mux.HandleFunc("GET /api/whoami", credentials.Wrap(factory, whoami))
-	mux.HandleFunc("GET /api/clusters", listClustersHandler(registry))
+	router.Get("/api/whoami", credentials.Wrap(factory, whoami))
+	router.Get("/api/clusters", listClustersHandler(registry))
 
 	// --- Overview / dashboard ---
 
-	mux.HandleFunc("GET /api/clusters/{cluster}/dashboard", credentials.Wrap(factory,
+	router.Get("/api/clusters/{cluster}/dashboard", credentials.Wrap(factory,
 		func(w http.ResponseWriter, r *http.Request, p credentials.Provider) {
-			c, ok := registry.ByName(r.PathValue("cluster"))
+			c, ok := registry.ByName(chi.URLParam(r, "cluster"))
 			if !ok {
 				http.Error(w, "cluster not found", http.StatusNotFound)
 				return
@@ -63,350 +70,350 @@ func main() {
 
 	// --- LIST endpoints ---
 
-	mux.HandleFunc("GET /api/clusters/{cluster}/nodes", credentials.Wrap(factory,
+	router.Get("/api/clusters/{cluster}/nodes", credentials.Wrap(factory,
 		listResource(registry, "nodes",
 			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, _ string) (k8s.NodeList, error) {
 				return k8s.ListNodes(ctx, p, k8s.ListNodesArgs{Cluster: c})
 			})))
 
-	mux.HandleFunc("GET /api/clusters/{cluster}/namespaces", credentials.Wrap(factory,
+	router.Get("/api/clusters/{cluster}/namespaces", credentials.Wrap(factory,
 		listResource(registry, "namespaces",
 			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, _ string) (k8s.NamespaceList, error) {
 				return k8s.ListNamespaces(ctx, p, k8s.ListNamespacesArgs{Cluster: c})
 			})))
 
-	mux.HandleFunc("GET /api/clusters/{cluster}/pods", credentials.Wrap(factory,
+	router.Get("/api/clusters/{cluster}/pods", credentials.Wrap(factory,
 		listResource(registry, "pods",
 			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, ns string) (k8s.PodList, error) {
 				return k8s.ListPods(ctx, p, k8s.ListPodsArgs{Cluster: c, Namespace: ns})
 			})))
 
-	mux.HandleFunc("GET /api/clusters/{cluster}/deployments", credentials.Wrap(factory,
+	router.Get("/api/clusters/{cluster}/deployments", credentials.Wrap(factory,
 		listResource(registry, "deployments",
 			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, ns string) (k8s.DeploymentList, error) {
 				return k8s.ListDeployments(ctx, p, k8s.ListDeploymentsArgs{Cluster: c, Namespace: ns})
 			})))
 
-	mux.HandleFunc("GET /api/clusters/{cluster}/statefulsets", credentials.Wrap(factory,
+	router.Get("/api/clusters/{cluster}/statefulsets", credentials.Wrap(factory,
 		listResource(registry, "statefulsets",
 			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, ns string) (k8s.StatefulSetList, error) {
 				return k8s.ListStatefulSets(ctx, p, k8s.ListStatefulSetsArgs{Cluster: c, Namespace: ns})
 			})))
 
-	mux.HandleFunc("GET /api/clusters/{cluster}/daemonsets", credentials.Wrap(factory,
+	router.Get("/api/clusters/{cluster}/daemonsets", credentials.Wrap(factory,
 		listResource(registry, "daemonsets",
 			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, ns string) (k8s.DaemonSetList, error) {
 				return k8s.ListDaemonSets(ctx, p, k8s.ListDaemonSetsArgs{Cluster: c, Namespace: ns})
 			})))
 
-	mux.HandleFunc("GET /api/clusters/{cluster}/services", credentials.Wrap(factory,
+	router.Get("/api/clusters/{cluster}/services", credentials.Wrap(factory,
 		listResource(registry, "services",
 			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, ns string) (k8s.ServiceList, error) {
 				return k8s.ListServices(ctx, p, k8s.ListServicesArgs{Cluster: c, Namespace: ns})
 			})))
 
-	mux.HandleFunc("GET /api/clusters/{cluster}/ingresses", credentials.Wrap(factory,
+	router.Get("/api/clusters/{cluster}/ingresses", credentials.Wrap(factory,
 		listResource(registry, "ingresses",
 			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, ns string) (k8s.IngressList, error) {
 				return k8s.ListIngresses(ctx, p, k8s.ListIngressesArgs{Cluster: c, Namespace: ns})
 			})))
 
-	mux.HandleFunc("GET /api/clusters/{cluster}/configmaps", credentials.Wrap(factory,
+	router.Get("/api/clusters/{cluster}/configmaps", credentials.Wrap(factory,
 		listResource(registry, "configmaps",
 			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, ns string) (k8s.ConfigMapList, error) {
 				return k8s.ListConfigMaps(ctx, p, k8s.ListConfigMapsArgs{Cluster: c, Namespace: ns})
 			})))
 
-	mux.HandleFunc("GET /api/clusters/{cluster}/secrets", credentials.Wrap(factory,
+	router.Get("/api/clusters/{cluster}/secrets", credentials.Wrap(factory,
 		listResource(registry, "secrets",
 			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, ns string) (k8s.SecretList, error) {
 				return k8s.ListSecrets(ctx, p, k8s.ListSecretsArgs{Cluster: c, Namespace: ns})
 			})))
 
-	mux.HandleFunc("GET /api/clusters/{cluster}/jobs", credentials.Wrap(factory,
+	router.Get("/api/clusters/{cluster}/jobs", credentials.Wrap(factory,
 		listResource(registry, "jobs",
 			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, ns string) (k8s.JobList, error) {
 				return k8s.ListJobs(ctx, p, k8s.ListJobsArgs{Cluster: c, Namespace: ns})
 			})))
 
-	mux.HandleFunc("GET /api/clusters/{cluster}/cronjobs", credentials.Wrap(factory,
+	router.Get("/api/clusters/{cluster}/cronjobs", credentials.Wrap(factory,
 		listResource(registry, "cronjobs",
 			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, ns string) (k8s.CronJobList, error) {
 				return k8s.ListCronJobs(ctx, p, k8s.ListCronJobsArgs{Cluster: c, Namespace: ns})
 			})))
 
-	mux.HandleFunc("GET /api/clusters/{cluster}/pvcs", credentials.Wrap(factory,
+	router.Get("/api/clusters/{cluster}/pvcs", credentials.Wrap(factory,
 		listResource(registry, "pvcs",
 			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, ns string) (k8s.PVCList, error) {
 				return k8s.ListPVCs(ctx, p, k8s.ListPVCsArgs{Cluster: c, Namespace: ns})
 			})))
 
-	mux.HandleFunc("GET /api/clusters/{cluster}/pvs", credentials.Wrap(factory,
+	router.Get("/api/clusters/{cluster}/pvs", credentials.Wrap(factory,
 		listResource(registry, "pvs",
 			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, _ string) (k8s.PVList, error) {
 				return k8s.ListPVs(ctx, p, k8s.ListPVsArgs{Cluster: c})
 			})))
 
-	mux.HandleFunc("GET /api/clusters/{cluster}/storageclasses", credentials.Wrap(factory,
+	router.Get("/api/clusters/{cluster}/storageclasses", credentials.Wrap(factory,
 		listResource(registry, "storageclasses",
 			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, _ string) (k8s.StorageClassList, error) {
 				return k8s.ListStorageClasses(ctx, p, k8s.ListStorageClassesArgs{Cluster: c})
 			})))
 
-	mux.HandleFunc("GET /api/clusters/{cluster}/roles", credentials.Wrap(factory,
+	router.Get("/api/clusters/{cluster}/roles", credentials.Wrap(factory,
 		listResource(registry, "roles",
 			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, ns string) (k8s.RoleList, error) {
 				return k8s.ListRoles(ctx, p, k8s.ListRolesArgs{Cluster: c, Namespace: ns})
 			})))
 
-	mux.HandleFunc("GET /api/clusters/{cluster}/clusterroles", credentials.Wrap(factory,
+	router.Get("/api/clusters/{cluster}/clusterroles", credentials.Wrap(factory,
 		listResource(registry, "clusterroles",
 			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, _ string) (k8s.ClusterRoleList, error) {
 				return k8s.ListClusterRoles(ctx, p, k8s.ListClusterRolesArgs{Cluster: c})
 			})))
 
-	mux.HandleFunc("GET /api/clusters/{cluster}/rolebindings", credentials.Wrap(factory,
+	router.Get("/api/clusters/{cluster}/rolebindings", credentials.Wrap(factory,
 		listResource(registry, "rolebindings",
 			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, ns string) (k8s.RoleBindingList, error) {
 				return k8s.ListRoleBindings(ctx, p, k8s.ListRoleBindingsArgs{Cluster: c, Namespace: ns})
 			})))
 
-	mux.HandleFunc("GET /api/clusters/{cluster}/clusterrolebindings", credentials.Wrap(factory,
+	router.Get("/api/clusters/{cluster}/clusterrolebindings", credentials.Wrap(factory,
 		listResource(registry, "clusterrolebindings",
 			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, _ string) (k8s.ClusterRoleBindingList, error) {
 				return k8s.ListClusterRoleBindings(ctx, p, k8s.ListClusterRoleBindingsArgs{Cluster: c})
 			})))
 
-	mux.HandleFunc("GET /api/clusters/{cluster}/serviceaccounts", credentials.Wrap(factory,
+	router.Get("/api/clusters/{cluster}/serviceaccounts", credentials.Wrap(factory,
 		listResource(registry, "serviceaccounts",
 			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, ns string) (k8s.ServiceAccountList, error) {
 				return k8s.ListServiceAccounts(ctx, p, k8s.ListServiceAccountsArgs{Cluster: c, Namespace: ns})
 			})))
 
-	mux.HandleFunc("GET /api/clusters/{cluster}/horizontalpodautoscalers", credentials.Wrap(factory,
+	router.Get("/api/clusters/{cluster}/horizontalpodautoscalers", credentials.Wrap(factory,
 		listResource(registry, "horizontalpodautoscalers",
 			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, ns string) (k8s.HPAList, error) {
 				return k8s.ListHPAs(ctx, p, k8s.ListHPAsArgs{Cluster: c, Namespace: ns})
 			})))
 
-	mux.HandleFunc("GET /api/clusters/{cluster}/poddisruptionbudgets", credentials.Wrap(factory,
+	router.Get("/api/clusters/{cluster}/poddisruptionbudgets", credentials.Wrap(factory,
 		listResource(registry, "poddisruptionbudgets",
 			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, ns string) (k8s.PDBList, error) {
 				return k8s.ListPDBs(ctx, p, k8s.ListPDBsArgs{Cluster: c, Namespace: ns})
 			})))
 
-	mux.HandleFunc("GET /api/clusters/{cluster}/replicasets", credentials.Wrap(factory,
+	router.Get("/api/clusters/{cluster}/replicasets", credentials.Wrap(factory,
 		listResource(registry, "replicasets",
 			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, ns string) (k8s.ReplicaSetList, error) {
 				return k8s.ListReplicaSets(ctx, p, k8s.ListReplicaSetsArgs{Cluster: c, Namespace: ns})
 			})))
 
-	mux.HandleFunc("GET /api/clusters/{cluster}/networkpolicies", credentials.Wrap(factory,
+	router.Get("/api/clusters/{cluster}/networkpolicies", credentials.Wrap(factory,
 		listResource(registry, "networkpolicies",
 			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, ns string) (k8s.NetworkPolicyList, error) {
 				return k8s.ListNetworkPolicies(ctx, p, k8s.ListNetworkPoliciesArgs{Cluster: c, Namespace: ns})
 			})))
 
-	mux.HandleFunc("GET /api/clusters/{cluster}/resourcequotas", credentials.Wrap(factory,
+	router.Get("/api/clusters/{cluster}/resourcequotas", credentials.Wrap(factory,
 		listResource(registry, "resourcequotas",
 			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, ns string) (k8s.ResourceQuotaList, error) {
 				return k8s.ListResourceQuotas(ctx, p, k8s.ListResourceQuotasArgs{Cluster: c, Namespace: ns})
 			})))
 
-	mux.HandleFunc("GET /api/clusters/{cluster}/limitranges", credentials.Wrap(factory,
+	router.Get("/api/clusters/{cluster}/limitranges", credentials.Wrap(factory,
 		listResource(registry, "limitranges",
 			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, ns string) (k8s.LimitRangeList, error) {
 				return k8s.ListLimitRanges(ctx, p, k8s.ListLimitRangesArgs{Cluster: c, Namespace: ns})
 			})))
 
-	mux.HandleFunc("GET /api/clusters/{cluster}/ingressclasses", credentials.Wrap(factory,
+	router.Get("/api/clusters/{cluster}/ingressclasses", credentials.Wrap(factory,
 		listResource(registry, "ingressclasses",
 			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, _ string) (k8s.IngressClassList, error) {
 				return k8s.ListIngressClasses(ctx, p, k8s.ListIngressClassesArgs{Cluster: c})
 			})))
 
-	mux.HandleFunc("GET /api/clusters/{cluster}/priorityclasses", credentials.Wrap(factory,
+	router.Get("/api/clusters/{cluster}/priorityclasses", credentials.Wrap(factory,
 		listResource(registry, "priorityclasses",
 			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, _ string) (k8s.PriorityClassList, error) {
 				return k8s.ListPriorityClasses(ctx, p, k8s.ListPriorityClassesArgs{Cluster: c})
 			})))
 
-	mux.HandleFunc("GET /api/clusters/{cluster}/runtimeclasses", credentials.Wrap(factory,
+	router.Get("/api/clusters/{cluster}/runtimeclasses", credentials.Wrap(factory,
 		listResource(registry, "runtimeclasses",
 			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, _ string) (k8s.RuntimeClassList, error) {
 				return k8s.ListRuntimeClasses(ctx, p, k8s.ListRuntimeClassesArgs{Cluster: c})
 			})))
 
-	mux.HandleFunc("GET /api/clusters/{cluster}/pods/{ns}/{name}", credentials.Wrap(factory,
+	router.Get("/api/clusters/{cluster}/pods/{ns}/{name}", credentials.Wrap(factory,
 		detailHandler(registry, "pod",
 			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, ns, name string) (k8s.PodDetail, error) {
 				return k8s.GetPod(ctx, p, k8s.GetPodArgs{Cluster: c, Namespace: ns, Name: name})
 			})))
 
-	mux.HandleFunc("GET /api/clusters/{cluster}/deployments/{ns}/{name}", credentials.Wrap(factory,
+	router.Get("/api/clusters/{cluster}/deployments/{ns}/{name}", credentials.Wrap(factory,
 		detailHandler(registry, "deployment",
 			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, ns, name string) (k8s.DeploymentDetail, error) {
 				return k8s.GetDeployment(ctx, p, k8s.GetDeploymentArgs{Cluster: c, Namespace: ns, Name: name})
 			})))
 
-	mux.HandleFunc("GET /api/clusters/{cluster}/statefulsets/{ns}/{name}", credentials.Wrap(factory,
+	router.Get("/api/clusters/{cluster}/statefulsets/{ns}/{name}", credentials.Wrap(factory,
 		detailHandler(registry, "statefulset",
 			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, ns, name string) (k8s.StatefulSetDetail, error) {
 				return k8s.GetStatefulSet(ctx, p, k8s.GetStatefulSetArgs{Cluster: c, Namespace: ns, Name: name})
 			})))
 
-	mux.HandleFunc("GET /api/clusters/{cluster}/daemonsets/{ns}/{name}", credentials.Wrap(factory,
+	router.Get("/api/clusters/{cluster}/daemonsets/{ns}/{name}", credentials.Wrap(factory,
 		detailHandler(registry, "daemonset",
 			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, ns, name string) (k8s.DaemonSetDetail, error) {
 				return k8s.GetDaemonSet(ctx, p, k8s.GetDaemonSetArgs{Cluster: c, Namespace: ns, Name: name})
 			})))
 
-	mux.HandleFunc("GET /api/clusters/{cluster}/services/{ns}/{name}", credentials.Wrap(factory,
+	router.Get("/api/clusters/{cluster}/services/{ns}/{name}", credentials.Wrap(factory,
 		detailHandler(registry, "service",
 			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, ns, name string) (k8s.ServiceDetail, error) {
 				return k8s.GetService(ctx, p, k8s.GetServiceArgs{Cluster: c, Namespace: ns, Name: name})
 			})))
 
-	mux.HandleFunc("GET /api/clusters/{cluster}/ingresses/{ns}/{name}", credentials.Wrap(factory,
+	router.Get("/api/clusters/{cluster}/ingresses/{ns}/{name}", credentials.Wrap(factory,
 		detailHandler(registry, "ingress",
 			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, ns, name string) (k8s.IngressDetail, error) {
 				return k8s.GetIngress(ctx, p, k8s.GetIngressArgs{Cluster: c, Namespace: ns, Name: name})
 			})))
 
-	mux.HandleFunc("GET /api/clusters/{cluster}/configmaps/{ns}/{name}", credentials.Wrap(factory,
+	router.Get("/api/clusters/{cluster}/configmaps/{ns}/{name}", credentials.Wrap(factory,
 		detailHandler(registry, "configmap",
 			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, ns, name string) (k8s.ConfigMapDetail, error) {
 				return k8s.GetConfigMap(ctx, p, k8s.GetConfigMapArgs{Cluster: c, Namespace: ns, Name: name})
 			})))
 
-	mux.HandleFunc("GET /api/clusters/{cluster}/secrets/{ns}/{name}", credentials.Wrap(factory,
+	router.Get("/api/clusters/{cluster}/secrets/{ns}/{name}", credentials.Wrap(factory,
 		detailHandler(registry, "secret",
 			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, ns, name string) (k8s.SecretDetail, error) {
 				return k8s.GetSecret(ctx, p, k8s.GetSecretArgs{Cluster: c, Namespace: ns, Name: name})
 			})))
 
-	mux.HandleFunc("GET /api/clusters/{cluster}/jobs/{ns}/{name}", credentials.Wrap(factory,
+	router.Get("/api/clusters/{cluster}/jobs/{ns}/{name}", credentials.Wrap(factory,
 		detailHandler(registry, "job",
 			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, ns, name string) (k8s.JobDetail, error) {
 				return k8s.GetJob(ctx, p, k8s.GetJobArgs{Cluster: c, Namespace: ns, Name: name})
 			})))
 
-	mux.HandleFunc("GET /api/clusters/{cluster}/cronjobs/{ns}/{name}", credentials.Wrap(factory,
+	router.Get("/api/clusters/{cluster}/cronjobs/{ns}/{name}", credentials.Wrap(factory,
 		detailHandler(registry, "cronjob",
 			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, ns, name string) (k8s.CronJobDetail, error) {
 				return k8s.GetCronJob(ctx, p, k8s.GetCronJobArgs{Cluster: c, Namespace: ns, Name: name})
 			})))
 
-	mux.HandleFunc("GET /api/clusters/{cluster}/pvcs/{ns}/{name}", credentials.Wrap(factory,
+	router.Get("/api/clusters/{cluster}/pvcs/{ns}/{name}", credentials.Wrap(factory,
 		detailHandler(registry, "pvc",
 			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, ns, name string) (k8s.PVCDetail, error) {
 				return k8s.GetPVC(ctx, p, k8s.GetPVCArgs{Cluster: c, Namespace: ns, Name: name})
 			})))
 
-	mux.HandleFunc("GET /api/clusters/{cluster}/roles/{ns}/{name}", credentials.Wrap(factory,
+	router.Get("/api/clusters/{cluster}/roles/{ns}/{name}", credentials.Wrap(factory,
 		detailHandler(registry, "role",
 			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, ns, name string) (k8s.RoleDetail, error) {
 				return k8s.GetRole(ctx, p, k8s.GetRoleArgs{Cluster: c, Namespace: ns, Name: name})
 			})))
 
-	mux.HandleFunc("GET /api/clusters/{cluster}/rolebindings/{ns}/{name}", credentials.Wrap(factory,
+	router.Get("/api/clusters/{cluster}/rolebindings/{ns}/{name}", credentials.Wrap(factory,
 		detailHandler(registry, "rolebinding",
 			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, ns, name string) (k8s.RoleBindingDetail, error) {
 				return k8s.GetRoleBinding(ctx, p, k8s.GetRoleBindingArgs{Cluster: c, Namespace: ns, Name: name})
 			})))
 
-	mux.HandleFunc("GET /api/clusters/{cluster}/serviceaccounts/{ns}/{name}", credentials.Wrap(factory,
+	router.Get("/api/clusters/{cluster}/serviceaccounts/{ns}/{name}", credentials.Wrap(factory,
 		detailHandler(registry, "serviceaccount",
 			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, ns, name string) (k8s.ServiceAccountDetail, error) {
 				return k8s.GetServiceAccount(ctx, p, k8s.GetServiceAccountArgs{Cluster: c, Namespace: ns, Name: name})
 			})))
 
-	mux.HandleFunc("GET /api/clusters/{cluster}/horizontalpodautoscalers/{ns}/{name}", credentials.Wrap(factory,
+	router.Get("/api/clusters/{cluster}/horizontalpodautoscalers/{ns}/{name}", credentials.Wrap(factory,
 		detailHandler(registry, "hpa",
 			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, ns, name string) (k8s.HPADetail, error) {
 				return k8s.GetHPA(ctx, p, k8s.GetHPAArgs{Cluster: c, Namespace: ns, Name: name})
 			})))
 
-	mux.HandleFunc("GET /api/clusters/{cluster}/poddisruptionbudgets/{ns}/{name}", credentials.Wrap(factory,
+	router.Get("/api/clusters/{cluster}/poddisruptionbudgets/{ns}/{name}", credentials.Wrap(factory,
 		detailHandler(registry, "pdb",
 			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, ns, name string) (k8s.PDBDetail, error) {
 				return k8s.GetPDB(ctx, p, k8s.GetPDBArgs{Cluster: c, Namespace: ns, Name: name})
 			})))
 
-	mux.HandleFunc("GET /api/clusters/{cluster}/replicasets/{ns}/{name}", credentials.Wrap(factory,
+	router.Get("/api/clusters/{cluster}/replicasets/{ns}/{name}", credentials.Wrap(factory,
 		detailHandler(registry, "replicaset",
 			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, ns, name string) (k8s.ReplicaSetDetail, error) {
 				return k8s.GetReplicaSet(ctx, p, k8s.GetReplicaSetArgs{Cluster: c, Namespace: ns, Name: name})
 			})))
 
-	mux.HandleFunc("GET /api/clusters/{cluster}/networkpolicies/{ns}/{name}", credentials.Wrap(factory,
+	router.Get("/api/clusters/{cluster}/networkpolicies/{ns}/{name}", credentials.Wrap(factory,
 		detailHandler(registry, "networkpolicy",
 			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, ns, name string) (k8s.NetworkPolicyDetail, error) {
 				return k8s.GetNetworkPolicy(ctx, p, k8s.GetNetworkPolicyArgs{Cluster: c, Namespace: ns, Name: name})
 			})))
 
-	mux.HandleFunc("GET /api/clusters/{cluster}/resourcequotas/{ns}/{name}", credentials.Wrap(factory,
+	router.Get("/api/clusters/{cluster}/resourcequotas/{ns}/{name}", credentials.Wrap(factory,
 		detailHandler(registry, "resourcequota",
 			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, ns, name string) (k8s.ResourceQuota, error) {
 				return k8s.GetResourceQuota(ctx, p, k8s.GetResourceQuotaArgs{Cluster: c, Namespace: ns, Name: name})
 			})))
 
-	mux.HandleFunc("GET /api/clusters/{cluster}/limitranges/{ns}/{name}", credentials.Wrap(factory,
+	router.Get("/api/clusters/{cluster}/limitranges/{ns}/{name}", credentials.Wrap(factory,
 		detailHandler(registry, "limitrange",
 			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, ns, name string) (k8s.LimitRangeDetail, error) {
 				return k8s.GetLimitRange(ctx, p, k8s.GetLimitRangeArgs{Cluster: c, Namespace: ns, Name: name})
 			})))
 
-	mux.HandleFunc("GET /api/clusters/{cluster}/ingressclasses/{name}", credentials.Wrap(factory,
+	router.Get("/api/clusters/{cluster}/ingressclasses/{name}", credentials.Wrap(factory,
 		detailHandler(registry, "ingressclass",
 			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, _, name string) (k8s.IngressClassDetail, error) {
 				return k8s.GetIngressClass(ctx, p, k8s.GetIngressClassArgs{Cluster: c, Name: name})
 			})))
 
-	mux.HandleFunc("GET /api/clusters/{cluster}/priorityclasses/{name}", credentials.Wrap(factory,
+	router.Get("/api/clusters/{cluster}/priorityclasses/{name}", credentials.Wrap(factory,
 		detailHandler(registry, "priorityclass",
 			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, _, name string) (k8s.PriorityClassDetail, error) {
 				return k8s.GetPriorityClass(ctx, p, k8s.GetPriorityClassArgs{Cluster: c, Name: name})
 			})))
 
-	mux.HandleFunc("GET /api/clusters/{cluster}/runtimeclasses/{name}", credentials.Wrap(factory,
+	router.Get("/api/clusters/{cluster}/runtimeclasses/{name}", credentials.Wrap(factory,
 		detailHandler(registry, "runtimeclass",
 			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, _, name string) (k8s.RuntimeClassDetail, error) {
 				return k8s.GetRuntimeClass(ctx, p, k8s.GetRuntimeClassArgs{Cluster: c, Name: name})
 			})))
 
 	// Nodes, Namespaces, PVs, and StorageClasses are cluster-scoped: no {ns} segment.
-	mux.HandleFunc("GET /api/clusters/{cluster}/nodes/{name}", credentials.Wrap(factory,
+	router.Get("/api/clusters/{cluster}/nodes/{name}", credentials.Wrap(factory,
 		detailHandler(registry, "node",
 			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, _, name string) (k8s.NodeDetail, error) {
 				return k8s.GetNode(ctx, p, k8s.GetNodeArgs{Cluster: c, Name: name})
 			})))
 
-	mux.HandleFunc("GET /api/clusters/{cluster}/namespaces/{name}", credentials.Wrap(factory,
+	router.Get("/api/clusters/{cluster}/namespaces/{name}", credentials.Wrap(factory,
 		detailHandler(registry, "namespace",
 			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, _, name string) (k8s.NamespaceDetail, error) {
 				return k8s.GetNamespace(ctx, p, k8s.GetNamespaceArgs{Cluster: c, Name: name})
 			})))
 
-	mux.HandleFunc("GET /api/clusters/{cluster}/pvs/{name}", credentials.Wrap(factory,
+	router.Get("/api/clusters/{cluster}/pvs/{name}", credentials.Wrap(factory,
 		detailHandler(registry, "pv",
 			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, _, name string) (k8s.PVDetail, error) {
 				return k8s.GetPV(ctx, p, k8s.GetPVArgs{Cluster: c, Name: name})
 			})))
 
-	mux.HandleFunc("GET /api/clusters/{cluster}/storageclasses/{name}", credentials.Wrap(factory,
+	router.Get("/api/clusters/{cluster}/storageclasses/{name}", credentials.Wrap(factory,
 		detailHandler(registry, "storageclass",
 			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, _, name string) (k8s.StorageClassDetail, error) {
 				return k8s.GetStorageClass(ctx, p, k8s.GetStorageClassArgs{Cluster: c, Name: name})
 			})))
 
-	mux.HandleFunc("GET /api/clusters/{cluster}/clusterroles/{name}", credentials.Wrap(factory,
+	router.Get("/api/clusters/{cluster}/clusterroles/{name}", credentials.Wrap(factory,
 		detailHandler(registry, "clusterrole",
 			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, _, name string) (k8s.ClusterRoleDetail, error) {
 				return k8s.GetClusterRole(ctx, p, k8s.GetClusterRoleArgs{Cluster: c, Name: name})
 			})))
 
-	mux.HandleFunc("GET /api/clusters/{cluster}/clusterrolebindings/{name}", credentials.Wrap(factory,
+	router.Get("/api/clusters/{cluster}/clusterrolebindings/{name}", credentials.Wrap(factory,
 		detailHandler(registry, "clusterrolebinding",
 			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, _, name string) (k8s.ClusterRoleBindingDetail, error) {
 				return k8s.GetClusterRoleBinding(ctx, p, k8s.GetClusterRoleBindingArgs{Cluster: c, Name: name})
@@ -414,13 +421,13 @@ func main() {
 
 	// --- Metrics endpoints ---
 
-	mux.HandleFunc("GET /api/clusters/{cluster}/nodes/{name}/metrics", credentials.Wrap(factory,
+	router.Get("/api/clusters/{cluster}/nodes/{name}/metrics", credentials.Wrap(factory,
 		detailHandler(registry, "node-metrics",
 			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, _, name string) (k8s.NodeMetrics, error) {
 				return k8s.GetNodeMetrics(ctx, p, k8s.GetNodeArgs{Cluster: c, Name: name})
 			})))
 
-	mux.HandleFunc("GET /api/clusters/{cluster}/pods/{ns}/{name}/metrics", credentials.Wrap(factory,
+	router.Get("/api/clusters/{cluster}/pods/{ns}/{name}/metrics", credentials.Wrap(factory,
 		detailHandler(registry, "pod-metrics",
 			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, ns, name string) (k8s.PodMetrics, error) {
 				return k8s.GetPodMetrics(ctx, p, k8s.GetPodArgs{Cluster: c, Namespace: ns, Name: name})
@@ -428,169 +435,169 @@ func main() {
 
 	// --- YAML endpoints ---
 
-	mux.HandleFunc("GET /api/clusters/{cluster}/pods/{ns}/{name}/yaml", credentials.Wrap(factory,
+	router.Get("/api/clusters/{cluster}/pods/{ns}/{name}/yaml", credentials.Wrap(factory,
 		yamlHandler(registry, "pod",
 			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, ns, name string) (string, error) {
 				return k8s.GetPodYAML(ctx, p, k8s.GetPodArgs{Cluster: c, Namespace: ns, Name: name})
 			})))
 
-	mux.HandleFunc("GET /api/clusters/{cluster}/deployments/{ns}/{name}/yaml", credentials.Wrap(factory,
+	router.Get("/api/clusters/{cluster}/deployments/{ns}/{name}/yaml", credentials.Wrap(factory,
 		yamlHandler(registry, "deployment",
 			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, ns, name string) (string, error) {
 				return k8s.GetDeploymentYAML(ctx, p, k8s.GetDeploymentArgs{Cluster: c, Namespace: ns, Name: name})
 			})))
 
-	mux.HandleFunc("GET /api/clusters/{cluster}/statefulsets/{ns}/{name}/yaml", credentials.Wrap(factory,
+	router.Get("/api/clusters/{cluster}/statefulsets/{ns}/{name}/yaml", credentials.Wrap(factory,
 		yamlHandler(registry, "statefulset",
 			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, ns, name string) (string, error) {
 				return k8s.GetStatefulSetYAML(ctx, p, k8s.GetStatefulSetArgs{Cluster: c, Namespace: ns, Name: name})
 			})))
 
-	mux.HandleFunc("GET /api/clusters/{cluster}/daemonsets/{ns}/{name}/yaml", credentials.Wrap(factory,
+	router.Get("/api/clusters/{cluster}/daemonsets/{ns}/{name}/yaml", credentials.Wrap(factory,
 		yamlHandler(registry, "daemonset",
 			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, ns, name string) (string, error) {
 				return k8s.GetDaemonSetYAML(ctx, p, k8s.GetDaemonSetArgs{Cluster: c, Namespace: ns, Name: name})
 			})))
 
-	mux.HandleFunc("GET /api/clusters/{cluster}/services/{ns}/{name}/yaml", credentials.Wrap(factory,
+	router.Get("/api/clusters/{cluster}/services/{ns}/{name}/yaml", credentials.Wrap(factory,
 		yamlHandler(registry, "service",
 			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, ns, name string) (string, error) {
 				return k8s.GetServiceYAML(ctx, p, k8s.GetServiceArgs{Cluster: c, Namespace: ns, Name: name})
 			})))
 
-	mux.HandleFunc("GET /api/clusters/{cluster}/ingresses/{ns}/{name}/yaml", credentials.Wrap(factory,
+	router.Get("/api/clusters/{cluster}/ingresses/{ns}/{name}/yaml", credentials.Wrap(factory,
 		yamlHandler(registry, "ingress",
 			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, ns, name string) (string, error) {
 				return k8s.GetIngressYAML(ctx, p, k8s.GetIngressArgs{Cluster: c, Namespace: ns, Name: name})
 			})))
 
-	mux.HandleFunc("GET /api/clusters/{cluster}/configmaps/{ns}/{name}/yaml", credentials.Wrap(factory,
+	router.Get("/api/clusters/{cluster}/configmaps/{ns}/{name}/yaml", credentials.Wrap(factory,
 		yamlHandler(registry, "configmap",
 			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, ns, name string) (string, error) {
 				return k8s.GetConfigMapYAML(ctx, p, k8s.GetConfigMapArgs{Cluster: c, Namespace: ns, Name: name})
 			})))
 
-	mux.HandleFunc("GET /api/clusters/{cluster}/secrets/{ns}/{name}/yaml", credentials.Wrap(factory,
+	router.Get("/api/clusters/{cluster}/secrets/{ns}/{name}/yaml", credentials.Wrap(factory,
 		yamlHandler(registry, "secret",
 			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, ns, name string) (string, error) {
 				return k8s.GetSecretYAML(ctx, p, k8s.GetSecretArgs{Cluster: c, Namespace: ns, Name: name})
 			})))
 
-	mux.HandleFunc("GET /api/clusters/{cluster}/jobs/{ns}/{name}/yaml", credentials.Wrap(factory,
+	router.Get("/api/clusters/{cluster}/jobs/{ns}/{name}/yaml", credentials.Wrap(factory,
 		yamlHandler(registry, "job",
 			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, ns, name string) (string, error) {
 				return k8s.GetJobYAML(ctx, p, k8s.GetJobArgs{Cluster: c, Namespace: ns, Name: name})
 			})))
 
-	mux.HandleFunc("GET /api/clusters/{cluster}/cronjobs/{ns}/{name}/yaml", credentials.Wrap(factory,
+	router.Get("/api/clusters/{cluster}/cronjobs/{ns}/{name}/yaml", credentials.Wrap(factory,
 		yamlHandler(registry, "cronjob",
 			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, ns, name string) (string, error) {
 				return k8s.GetCronJobYAML(ctx, p, k8s.GetCronJobArgs{Cluster: c, Namespace: ns, Name: name})
 			})))
 
-	mux.HandleFunc("GET /api/clusters/{cluster}/namespaces/{name}/yaml", credentials.Wrap(factory,
+	router.Get("/api/clusters/{cluster}/namespaces/{name}/yaml", credentials.Wrap(factory,
 		yamlHandler(registry, "namespace",
 			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, _, name string) (string, error) {
 				return k8s.GetNamespaceYAML(ctx, p, k8s.GetNamespaceArgs{Cluster: c, Name: name})
 			})))
 
-	mux.HandleFunc("GET /api/clusters/{cluster}/pvcs/{ns}/{name}/yaml", credentials.Wrap(factory,
+	router.Get("/api/clusters/{cluster}/pvcs/{ns}/{name}/yaml", credentials.Wrap(factory,
 		yamlHandler(registry, "pvc",
 			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, ns, name string) (string, error) {
 				return k8s.GetPVCYAML(ctx, p, k8s.GetPVCArgs{Cluster: c, Namespace: ns, Name: name})
 			})))
 
-	mux.HandleFunc("GET /api/clusters/{cluster}/pvs/{name}/yaml", credentials.Wrap(factory,
+	router.Get("/api/clusters/{cluster}/pvs/{name}/yaml", credentials.Wrap(factory,
 		yamlHandler(registry, "pv",
 			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, _, name string) (string, error) {
 				return k8s.GetPVYAML(ctx, p, k8s.GetPVArgs{Cluster: c, Name: name})
 			})))
 
-	mux.HandleFunc("GET /api/clusters/{cluster}/storageclasses/{name}/yaml", credentials.Wrap(factory,
+	router.Get("/api/clusters/{cluster}/storageclasses/{name}/yaml", credentials.Wrap(factory,
 		yamlHandler(registry, "storageclass",
 			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, _, name string) (string, error) {
 				return k8s.GetStorageClassYAML(ctx, p, k8s.GetStorageClassArgs{Cluster: c, Name: name})
 			})))
 
-	mux.HandleFunc("GET /api/clusters/{cluster}/roles/{ns}/{name}/yaml", credentials.Wrap(factory,
+	router.Get("/api/clusters/{cluster}/roles/{ns}/{name}/yaml", credentials.Wrap(factory,
 		yamlHandler(registry, "role",
 			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, ns, name string) (string, error) {
 				return k8s.GetRoleYAML(ctx, p, k8s.GetRoleArgs{Cluster: c, Namespace: ns, Name: name})
 			})))
 
-	mux.HandleFunc("GET /api/clusters/{cluster}/clusterroles/{name}/yaml", credentials.Wrap(factory,
+	router.Get("/api/clusters/{cluster}/clusterroles/{name}/yaml", credentials.Wrap(factory,
 		yamlHandler(registry, "clusterrole",
 			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, _, name string) (string, error) {
 				return k8s.GetClusterRoleYAML(ctx, p, k8s.GetClusterRoleArgs{Cluster: c, Name: name})
 			})))
 
-	mux.HandleFunc("GET /api/clusters/{cluster}/rolebindings/{ns}/{name}/yaml", credentials.Wrap(factory,
+	router.Get("/api/clusters/{cluster}/rolebindings/{ns}/{name}/yaml", credentials.Wrap(factory,
 		yamlHandler(registry, "rolebinding",
 			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, ns, name string) (string, error) {
 				return k8s.GetRoleBindingYAML(ctx, p, k8s.GetRoleBindingArgs{Cluster: c, Namespace: ns, Name: name})
 			})))
 
-	mux.HandleFunc("GET /api/clusters/{cluster}/clusterrolebindings/{name}/yaml", credentials.Wrap(factory,
+	router.Get("/api/clusters/{cluster}/clusterrolebindings/{name}/yaml", credentials.Wrap(factory,
 		yamlHandler(registry, "clusterrolebinding",
 			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, _, name string) (string, error) {
 				return k8s.GetClusterRoleBindingYAML(ctx, p, k8s.GetClusterRoleBindingArgs{Cluster: c, Name: name})
 			})))
 
-	mux.HandleFunc("GET /api/clusters/{cluster}/serviceaccounts/{ns}/{name}/yaml", credentials.Wrap(factory,
+	router.Get("/api/clusters/{cluster}/serviceaccounts/{ns}/{name}/yaml", credentials.Wrap(factory,
 		yamlHandler(registry, "serviceaccount",
 			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, ns, name string) (string, error) {
 				return k8s.GetServiceAccountYAML(ctx, p, k8s.GetServiceAccountArgs{Cluster: c, Namespace: ns, Name: name})
 			})))
 
-	mux.HandleFunc("GET /api/clusters/{cluster}/horizontalpodautoscalers/{ns}/{name}/yaml", credentials.Wrap(factory,
+	router.Get("/api/clusters/{cluster}/horizontalpodautoscalers/{ns}/{name}/yaml", credentials.Wrap(factory,
 		yamlHandler(registry, "hpa",
 			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, ns, name string) (string, error) {
 				return k8s.GetHPAYAML(ctx, p, k8s.GetHPAArgs{Cluster: c, Namespace: ns, Name: name})
 			})))
 
-	mux.HandleFunc("GET /api/clusters/{cluster}/poddisruptionbudgets/{ns}/{name}/yaml", credentials.Wrap(factory,
+	router.Get("/api/clusters/{cluster}/poddisruptionbudgets/{ns}/{name}/yaml", credentials.Wrap(factory,
 		yamlHandler(registry, "pdb",
 			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, ns, name string) (string, error) {
 				return k8s.GetPDBYAML(ctx, p, k8s.GetPDBArgs{Cluster: c, Namespace: ns, Name: name})
 			})))
 
-	mux.HandleFunc("GET /api/clusters/{cluster}/replicasets/{ns}/{name}/yaml", credentials.Wrap(factory,
+	router.Get("/api/clusters/{cluster}/replicasets/{ns}/{name}/yaml", credentials.Wrap(factory,
 		yamlHandler(registry, "replicaset",
 			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, ns, name string) (string, error) {
 				return k8s.GetReplicaSetYAML(ctx, p, k8s.GetReplicaSetArgs{Cluster: c, Namespace: ns, Name: name})
 			})))
 
-	mux.HandleFunc("GET /api/clusters/{cluster}/networkpolicies/{ns}/{name}/yaml", credentials.Wrap(factory,
+	router.Get("/api/clusters/{cluster}/networkpolicies/{ns}/{name}/yaml", credentials.Wrap(factory,
 		yamlHandler(registry, "networkpolicy",
 			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, ns, name string) (string, error) {
 				return k8s.GetNetworkPolicyYAML(ctx, p, k8s.GetNetworkPolicyArgs{Cluster: c, Namespace: ns, Name: name})
 			})))
 
-	mux.HandleFunc("GET /api/clusters/{cluster}/resourcequotas/{ns}/{name}/yaml", credentials.Wrap(factory,
+	router.Get("/api/clusters/{cluster}/resourcequotas/{ns}/{name}/yaml", credentials.Wrap(factory,
 		yamlHandler(registry, "resourcequota",
 			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, ns, name string) (string, error) {
 				return k8s.GetResourceQuotaYAML(ctx, p, k8s.GetResourceQuotaArgs{Cluster: c, Namespace: ns, Name: name})
 			})))
 
-	mux.HandleFunc("GET /api/clusters/{cluster}/limitranges/{ns}/{name}/yaml", credentials.Wrap(factory,
+	router.Get("/api/clusters/{cluster}/limitranges/{ns}/{name}/yaml", credentials.Wrap(factory,
 		yamlHandler(registry, "limitrange",
 			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, ns, name string) (string, error) {
 				return k8s.GetLimitRangeYAML(ctx, p, k8s.GetLimitRangeArgs{Cluster: c, Namespace: ns, Name: name})
 			})))
 
-	mux.HandleFunc("GET /api/clusters/{cluster}/ingressclasses/{name}/yaml", credentials.Wrap(factory,
+	router.Get("/api/clusters/{cluster}/ingressclasses/{name}/yaml", credentials.Wrap(factory,
 		yamlHandler(registry, "ingressclass",
 			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, _, name string) (string, error) {
 				return k8s.GetIngressClassYAML(ctx, p, k8s.GetIngressClassArgs{Cluster: c, Name: name})
 			})))
 
-	mux.HandleFunc("GET /api/clusters/{cluster}/priorityclasses/{name}/yaml", credentials.Wrap(factory,
+	router.Get("/api/clusters/{cluster}/priorityclasses/{name}/yaml", credentials.Wrap(factory,
 		yamlHandler(registry, "priorityclass",
 			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, _, name string) (string, error) {
 				return k8s.GetPriorityClassYAML(ctx, p, k8s.GetPriorityClassArgs{Cluster: c, Name: name})
 			})))
 
-	mux.HandleFunc("GET /api/clusters/{cluster}/runtimeclasses/{name}/yaml", credentials.Wrap(factory,
+	router.Get("/api/clusters/{cluster}/runtimeclasses/{name}/yaml", credentials.Wrap(factory,
 		yamlHandler(registry, "runtimeclass",
 			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, _, name string) (string, error) {
 				return k8s.GetRuntimeClassYAML(ctx, p, k8s.GetRuntimeClassArgs{Cluster: c, Name: name})
@@ -598,7 +605,7 @@ func main() {
 
 	// --- Cluster-wide events list ---
 
-	mux.HandleFunc("GET /api/clusters/{cluster}/events", credentials.Wrap(factory,
+	router.Get("/api/clusters/{cluster}/events", credentials.Wrap(factory,
 		listResource(registry, "events",
 			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, ns string) (k8s.ClusterEventList, error) {
 				return k8s.ListClusterEvents(ctx, p, k8s.ListClusterEventsArgs{Cluster: c, Namespace: ns})
@@ -606,64 +613,64 @@ func main() {
 
 	// --- Events endpoints (per object) ---
 
-	mux.HandleFunc("GET /api/clusters/{cluster}/pods/{ns}/{name}/events",
+	router.Get("/api/clusters/{cluster}/pods/{ns}/{name}/events",
 		credentials.Wrap(factory, eventsHandler(registry, "Pod")))
-	mux.HandleFunc("GET /api/clusters/{cluster}/deployments/{ns}/{name}/events",
+	router.Get("/api/clusters/{cluster}/deployments/{ns}/{name}/events",
 		credentials.Wrap(factory, eventsHandler(registry, "Deployment")))
-	mux.HandleFunc("GET /api/clusters/{cluster}/statefulsets/{ns}/{name}/events",
+	router.Get("/api/clusters/{cluster}/statefulsets/{ns}/{name}/events",
 		credentials.Wrap(factory, eventsHandler(registry, "StatefulSet")))
-	mux.HandleFunc("GET /api/clusters/{cluster}/daemonsets/{ns}/{name}/events",
+	router.Get("/api/clusters/{cluster}/daemonsets/{ns}/{name}/events",
 		credentials.Wrap(factory, eventsHandler(registry, "DaemonSet")))
-	mux.HandleFunc("GET /api/clusters/{cluster}/services/{ns}/{name}/events",
+	router.Get("/api/clusters/{cluster}/services/{ns}/{name}/events",
 		credentials.Wrap(factory, eventsHandler(registry, "Service")))
-	mux.HandleFunc("GET /api/clusters/{cluster}/ingresses/{ns}/{name}/events",
+	router.Get("/api/clusters/{cluster}/ingresses/{ns}/{name}/events",
 		credentials.Wrap(factory, eventsHandler(registry, "Ingress")))
-	mux.HandleFunc("GET /api/clusters/{cluster}/configmaps/{ns}/{name}/events",
+	router.Get("/api/clusters/{cluster}/configmaps/{ns}/{name}/events",
 		credentials.Wrap(factory, eventsHandler(registry, "ConfigMap")))
-	mux.HandleFunc("GET /api/clusters/{cluster}/secrets/{ns}/{name}/events",
+	router.Get("/api/clusters/{cluster}/secrets/{ns}/{name}/events",
 		credentials.Wrap(factory, eventsHandler(registry, "Secret")))
-	mux.HandleFunc("GET /api/clusters/{cluster}/jobs/{ns}/{name}/events",
+	router.Get("/api/clusters/{cluster}/jobs/{ns}/{name}/events",
 		credentials.Wrap(factory, eventsHandler(registry, "Job")))
-	mux.HandleFunc("GET /api/clusters/{cluster}/cronjobs/{ns}/{name}/events",
+	router.Get("/api/clusters/{cluster}/cronjobs/{ns}/{name}/events",
 		credentials.Wrap(factory, eventsHandler(registry, "CronJob")))
-	mux.HandleFunc("GET /api/clusters/{cluster}/namespaces/{name}/events",
+	router.Get("/api/clusters/{cluster}/namespaces/{name}/events",
 		credentials.Wrap(factory, eventsHandler(registry, "Namespace")))
-	mux.HandleFunc("GET /api/clusters/{cluster}/pvcs/{ns}/{name}/events",
+	router.Get("/api/clusters/{cluster}/pvcs/{ns}/{name}/events",
 		credentials.Wrap(factory, eventsHandler(registry, "PersistentVolumeClaim")))
-	mux.HandleFunc("GET /api/clusters/{cluster}/pvs/{name}/events",
+	router.Get("/api/clusters/{cluster}/pvs/{name}/events",
 		credentials.Wrap(factory, eventsHandler(registry, "PersistentVolume")))
-	mux.HandleFunc("GET /api/clusters/{cluster}/storageclasses/{name}/events",
+	router.Get("/api/clusters/{cluster}/storageclasses/{name}/events",
 		credentials.Wrap(factory, eventsHandler(registry, "StorageClass")))
 
 	// --- New Tier 1 + 2 events endpoints ---
-	mux.HandleFunc("GET /api/clusters/{cluster}/horizontalpodautoscalers/{ns}/{name}/events",
+	router.Get("/api/clusters/{cluster}/horizontalpodautoscalers/{ns}/{name}/events",
 		credentials.Wrap(factory, eventsHandler(registry, "HorizontalPodAutoscaler")))
-	mux.HandleFunc("GET /api/clusters/{cluster}/poddisruptionbudgets/{ns}/{name}/events",
+	router.Get("/api/clusters/{cluster}/poddisruptionbudgets/{ns}/{name}/events",
 		credentials.Wrap(factory, eventsHandler(registry, "PodDisruptionBudget")))
-	mux.HandleFunc("GET /api/clusters/{cluster}/replicasets/{ns}/{name}/events",
+	router.Get("/api/clusters/{cluster}/replicasets/{ns}/{name}/events",
 		credentials.Wrap(factory, eventsHandler(registry, "ReplicaSet")))
-	mux.HandleFunc("GET /api/clusters/{cluster}/networkpolicies/{ns}/{name}/events",
+	router.Get("/api/clusters/{cluster}/networkpolicies/{ns}/{name}/events",
 		credentials.Wrap(factory, eventsHandler(registry, "NetworkPolicy")))
-	mux.HandleFunc("GET /api/clusters/{cluster}/resourcequotas/{ns}/{name}/events",
+	router.Get("/api/clusters/{cluster}/resourcequotas/{ns}/{name}/events",
 		credentials.Wrap(factory, eventsHandler(registry, "ResourceQuota")))
-	mux.HandleFunc("GET /api/clusters/{cluster}/limitranges/{ns}/{name}/events",
+	router.Get("/api/clusters/{cluster}/limitranges/{ns}/{name}/events",
 		credentials.Wrap(factory, eventsHandler(registry, "LimitRange")))
 	// --- Logs (SSE streaming) endpoints ---
 
-	mux.HandleFunc("GET /api/clusters/{cluster}/pods/{ns}/{name}/logs",
+	router.Get("/api/clusters/{cluster}/pods/{ns}/{name}/logs",
 		credentials.Wrap(factory, podLogsHandler(registry)))
-	mux.HandleFunc("GET /api/clusters/{cluster}/deployments/{ns}/{name}/logs",
+	router.Get("/api/clusters/{cluster}/deployments/{ns}/{name}/logs",
 		credentials.Wrap(factory, workloadLogsHandler(registry, "deployment", k8s.StreamDeploymentLogs)))
-	mux.HandleFunc("GET /api/clusters/{cluster}/statefulsets/{ns}/{name}/logs",
+	router.Get("/api/clusters/{cluster}/statefulsets/{ns}/{name}/logs",
 		credentials.Wrap(factory, workloadLogsHandler(registry, "statefulset", k8s.StreamStatefulSetLogs)))
-	mux.HandleFunc("GET /api/clusters/{cluster}/daemonsets/{ns}/{name}/logs",
+	router.Get("/api/clusters/{cluster}/daemonsets/{ns}/{name}/logs",
 		credentials.Wrap(factory, workloadLogsHandler(registry, "daemonset", k8s.StreamDaemonSetLogs)))
-	mux.HandleFunc("GET /api/clusters/{cluster}/jobs/{ns}/{name}/logs",
+	router.Get("/api/clusters/{cluster}/jobs/{ns}/{name}/logs",
 		credentials.Wrap(factory, workloadLogsHandler(registry, "job", k8s.StreamJobLogs)))
 
 	// --- Secret reveal endpoint (audit-logged, per-key) ---
 
-	mux.HandleFunc("GET /api/clusters/{cluster}/secrets/{ns}/{name}/data/{key}",
+	router.Get("/api/clusters/{cluster}/secrets/{ns}/{name}/data/{key}",
 		credentials.Wrap(factory, secretRevealHandler(registry)))
 
 	port := os.Getenv("PORT")
@@ -672,7 +679,7 @@ func main() {
 	}
 	addr := ":" + port
 	slog.Info("periscope starting", "addr", addr, "clusters", len(registry.List()))
-	if err := http.ListenAndServe(addr, mux); err != nil {
+	if err := http.ListenAndServe(addr, router); err != nil {
 		slog.Error("server failed", "err", err)
 		os.Exit(1)
 	}
@@ -704,7 +711,7 @@ func listResource[Resp any](
 	op func(ctx context.Context, p credentials.Provider, c clusters.Cluster, ns string) (Resp, error),
 ) credentials.Handler {
 	return func(w http.ResponseWriter, r *http.Request, p credentials.Provider) {
-		c, ok := reg.ByName(r.PathValue("cluster"))
+		c, ok := reg.ByName(chi.URLParam(r, "cluster"))
 		if !ok {
 			http.Error(w, "cluster not found", http.StatusNotFound)
 			return
@@ -732,13 +739,13 @@ func detailHandler[Resp any](
 	op func(ctx context.Context, p credentials.Provider, c clusters.Cluster, ns, name string) (Resp, error),
 ) credentials.Handler {
 	return func(w http.ResponseWriter, r *http.Request, p credentials.Provider) {
-		c, ok := reg.ByName(r.PathValue("cluster"))
+		c, ok := reg.ByName(chi.URLParam(r, "cluster"))
 		if !ok {
 			http.Error(w, "cluster not found", http.StatusNotFound)
 			return
 		}
-		ns := r.PathValue("ns")
-		name := r.PathValue("name")
+		ns := chi.URLParam(r, "ns")
+		name := chi.URLParam(r, "name")
 		result, err := op(r.Context(), p, c, ns, name)
 		if err != nil {
 			if errors.Is(err, context.Canceled) {
@@ -761,13 +768,13 @@ func yamlHandler(
 	op func(ctx context.Context, p credentials.Provider, c clusters.Cluster, ns, name string) (string, error),
 ) credentials.Handler {
 	return func(w http.ResponseWriter, r *http.Request, p credentials.Provider) {
-		c, ok := reg.ByName(r.PathValue("cluster"))
+		c, ok := reg.ByName(chi.URLParam(r, "cluster"))
 		if !ok {
 			http.Error(w, "cluster not found", http.StatusNotFound)
 			return
 		}
-		ns := r.PathValue("ns")
-		name := r.PathValue("name")
+		ns := chi.URLParam(r, "ns")
+		name := chi.URLParam(r, "name")
 		result, err := op(r.Context(), p, c, ns, name)
 		if err != nil {
 			if errors.Is(err, context.Canceled) {
@@ -788,13 +795,13 @@ func yamlHandler(
 // eventsHandler wraps ListObjectEvents with a fixed Kind for the route.
 func eventsHandler(reg *clusters.Registry, kind string) credentials.Handler {
 	return func(w http.ResponseWriter, r *http.Request, p credentials.Provider) {
-		c, ok := reg.ByName(r.PathValue("cluster"))
+		c, ok := reg.ByName(chi.URLParam(r, "cluster"))
 		if !ok {
 			http.Error(w, "cluster not found", http.StatusNotFound)
 			return
 		}
-		ns := r.PathValue("ns")
-		name := r.PathValue("name")
+		ns := chi.URLParam(r, "ns")
+		name := chi.URLParam(r, "name")
 		result, err := k8s.ListObjectEvents(r.Context(), p, k8s.ListObjectEventsArgs{
 			Cluster: c, Kind: kind, Namespace: ns, Name: name,
 		})
@@ -817,14 +824,14 @@ func eventsHandler(reg *clusters.Registry, kind string) credentials.Handler {
 // the HTTP request envelope.
 func secretRevealHandler(reg *clusters.Registry) credentials.Handler {
 	return func(w http.ResponseWriter, r *http.Request, p credentials.Provider) {
-		c, ok := reg.ByName(r.PathValue("cluster"))
+		c, ok := reg.ByName(chi.URLParam(r, "cluster"))
 		if !ok {
 			http.Error(w, "cluster not found", http.StatusNotFound)
 			return
 		}
-		ns := r.PathValue("ns")
-		name := r.PathValue("name")
-		key := r.PathValue("key")
+		ns := chi.URLParam(r, "ns")
+		name := chi.URLParam(r, "name")
+		key := chi.URLParam(r, "key")
 		value, err := k8s.GetSecretValue(r.Context(), p, k8s.GetSecretValueArgs{
 			Cluster: c, Namespace: ns, Name: name, Key: key,
 		})
@@ -852,7 +859,7 @@ func secretRevealHandler(reg *clusters.Registry) credentials.Handler {
 // so reverse proxies don't sever idle connections during quiet periods.
 func podLogsHandler(reg *clusters.Registry) credentials.Handler {
 	return func(w http.ResponseWriter, r *http.Request, p credentials.Provider) {
-		c, ok := reg.ByName(r.PathValue("cluster"))
+		c, ok := reg.ByName(chi.URLParam(r, "cluster"))
 		if !ok {
 			http.Error(w, "cluster not found", http.StatusNotFound)
 			return
@@ -866,8 +873,8 @@ func podLogsHandler(reg *clusters.Registry) credentials.Handler {
 		q := r.URL.Query()
 		args := k8s.PodLogsArgs{
 			Cluster:    c,
-			Namespace:  r.PathValue("ns"),
-			Name:       r.PathValue("name"),
+			Namespace:  chi.URLParam(r, "ns"),
+			Name:       chi.URLParam(r, "name"),
 			Container:  q.Get("container"),
 			Previous:   q.Get("previous") == "true",
 			Follow:     q.Get("follow") != "false",
@@ -1016,7 +1023,7 @@ type workloadStreamFn func(ctx context.Context, p credentials.Provider, args k8s
 // (for DaemonSets) display node-first.
 func workloadLogsHandler(reg *clusters.Registry, kind string, stream workloadStreamFn) credentials.Handler {
 	return func(w http.ResponseWriter, r *http.Request, p credentials.Provider) {
-		c, ok := reg.ByName(r.PathValue("cluster"))
+		c, ok := reg.ByName(chi.URLParam(r, "cluster"))
 		if !ok {
 			http.Error(w, "cluster not found", http.StatusNotFound)
 			return
@@ -1030,8 +1037,8 @@ func workloadLogsHandler(reg *clusters.Registry, kind string, stream workloadStr
 		q := r.URL.Query()
 		args := k8s.WorkloadLogsArgs{
 			Cluster:    c,
-			Namespace:  r.PathValue("ns"),
-			Name:       r.PathValue("name"),
+			Namespace:  chi.URLParam(r, "ns"),
+			Name:       chi.URLParam(r, "name"),
 			Container:  q.Get("container"),
 			Previous:   q.Get("previous") == "true",
 			Follow:     q.Get("follow") != "false",
