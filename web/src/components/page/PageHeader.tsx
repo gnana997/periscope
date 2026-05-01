@@ -5,7 +5,7 @@ import { ThemeToggle } from "../shell/ThemeToggle";
 interface ActionChip {
   label: string;
   count: number;
-  tone: "red" | "yellow";
+  tone: "red" | "yellow" | "green";
   active: boolean;
   onClick: () => void;
 }
@@ -57,9 +57,13 @@ function Chip({ label, count, tone, active, onClick }: ActionChip) {
           ? active
             ? "border-red bg-red text-white"
             : "border-red/50 bg-red-soft text-red hover:border-red"
-          : active
-            ? "border-yellow bg-yellow text-white"
-            : "border-yellow/50 bg-yellow-soft text-yellow hover:border-yellow",
+          : tone === "green"
+            ? active
+              ? "border-green bg-green text-white"
+              : "border-green/50 bg-green-soft text-green hover:border-green"
+            : active
+              ? "border-yellow bg-yellow text-white"
+              : "border-yellow/50 bg-yellow-soft text-yellow hover:border-yellow",
       )}
       aria-pressed={active}
     >

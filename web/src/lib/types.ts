@@ -731,7 +731,16 @@ export type ResourceKind =
   | "clusterroles"
   | "rolebindings"
   | "clusterrolebindings"
-  | "serviceaccounts";
+  | "serviceaccounts"
+  | "horizontalpodautoscalers"
+  | "poddisruptionbudgets"
+  | "replicasets"
+  | "networkpolicies"
+  | "ingressclasses"
+  | "resourcequotas"
+  | "limitranges"
+  | "priorityclasses"
+  | "runtimeclasses";
 
 export type ResourceListResponse =
   | NodeList
@@ -754,4 +763,216 @@ export type ResourceListResponse =
   | ClusterRoleList
   | RoleBindingList
   | ClusterRoleBindingList
-  | ServiceAccountList;
+  | ServiceAccountList
+  | HPAList
+  | PDBList
+  | ReplicaSetList
+  | NetworkPolicyList
+  | IngressClassList
+  | ResourceQuotaList
+  | LimitRangeList
+  | PriorityClassList
+  | RuntimeClassList;
+
+// --- HPA ---
+
+export interface HPA {
+  name: string;
+  namespace: string;
+  createdAt: string;
+  target: string;
+  minReplicas: number;
+  maxReplicas: number;
+  currentReplicas: number;
+  desiredReplicas: number;
+  ready: boolean;
+}
+
+export interface HPAList {
+  hpas: HPA[];
+}
+
+export interface HPADetail extends HPA {
+  conditions?: DeploymentCondition[];
+  labels?: Record<string, string>;
+  annotations?: Record<string, string>;
+}
+
+// --- PodDisruptionBudget ---
+
+export interface PDB {
+  name: string;
+  namespace: string;
+  createdAt: string;
+  minAvailable: string;
+  maxUnavailable: string;
+  currentHealthy: number;
+  desiredHealthy: number;
+  expectedPods: number;
+  disruptionsAllowed: number;
+}
+
+export interface PDBList {
+  pdbs: PDB[];
+}
+
+export interface PDBDetail extends PDB {
+  selector: string;
+  labels?: Record<string, string>;
+  annotations?: Record<string, string>;
+}
+
+// --- ReplicaSet ---
+
+export interface ReplicaSet {
+  name: string;
+  namespace: string;
+  createdAt: string;
+  desired: number;
+  current: number;
+  ready: number;
+  owner: string;
+}
+
+export interface ReplicaSetList {
+  replicaSets: ReplicaSet[];
+}
+
+export interface ReplicaSetDetail extends ReplicaSet {
+  selector?: Record<string, string>;
+  labels?: Record<string, string>;
+  annotations?: Record<string, string>;
+  conditions?: DeploymentCondition[];
+}
+
+// --- NetworkPolicy ---
+
+export interface NetworkPolicyRule {
+  ports: string[];
+  peers: string[];
+}
+
+export interface NetworkPolicy {
+  name: string;
+  namespace: string;
+  createdAt: string;
+  podSelector: string;
+  policyTypes: string[];
+}
+
+export interface NetworkPolicyList {
+  networkPolicies: NetworkPolicy[];
+}
+
+export interface NetworkPolicyDetail extends NetworkPolicy {
+  ingressRules?: NetworkPolicyRule[];
+  egressRules?: NetworkPolicyRule[];
+  labels?: Record<string, string>;
+  annotations?: Record<string, string>;
+}
+
+// --- IngressClass ---
+
+export interface IngressClass {
+  name: string;
+  createdAt: string;
+  controller: string;
+  isDefault: boolean;
+}
+
+export interface IngressClassList {
+  ingressClasses: IngressClass[];
+}
+
+export interface IngressClassDetail extends IngressClass {
+  parameters: string;
+  labels?: Record<string, string>;
+  annotations?: Record<string, string>;
+}
+
+// --- ResourceQuota ---
+
+export interface QuotaEntry {
+  hard: string;
+  used: string;
+}
+
+export interface ResourceQuota {
+  name: string;
+  namespace: string;
+  createdAt: string;
+  items: Record<string, QuotaEntry>;
+}
+
+export interface ResourceQuotaList {
+  resourceQuotas: ResourceQuota[];
+}
+
+// --- LimitRange ---
+
+export interface LimitRangeItem {
+  type: string;
+  default?: Record<string, string>;
+  defaultRequest?: Record<string, string>;
+  max?: Record<string, string>;
+  min?: Record<string, string>;
+  maxLimitRequestRatio?: Record<string, string>;
+}
+
+export interface LimitRange {
+  name: string;
+  namespace: string;
+  createdAt: string;
+  limitCount: number;
+}
+
+export interface LimitRangeList {
+  limitRanges: LimitRange[];
+}
+
+export interface LimitRangeDetail extends LimitRange {
+  limits: LimitRangeItem[];
+  labels?: Record<string, string>;
+  annotations?: Record<string, string>;
+}
+
+// --- PriorityClass ---
+
+export interface PriorityClass {
+  name: string;
+  createdAt: string;
+  value: number;
+  globalDefault: boolean;
+  preemptionPolicy: string;
+}
+
+export interface PriorityClassList {
+  priorityClasses: PriorityClass[];
+}
+
+export interface PriorityClassDetail extends PriorityClass {
+  description: string;
+  labels?: Record<string, string>;
+  annotations?: Record<string, string>;
+}
+
+// --- RuntimeClass ---
+
+export interface RuntimeClass {
+  name: string;
+  createdAt: string;
+  handler: string;
+  cpuOverhead: string;
+  memoryOverhead: string;
+}
+
+export interface RuntimeClassList {
+  runtimeClasses: RuntimeClass[];
+}
+
+export interface RuntimeClassDetail extends RuntimeClass {
+  nodeSelector?: Record<string, string>;
+  tolerations?: string[];
+  labels?: Record<string, string>;
+  annotations?: Record<string, string>;
+}

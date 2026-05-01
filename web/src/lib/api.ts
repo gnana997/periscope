@@ -46,6 +46,24 @@ import type {
   StorageClassDetail,
   StorageClassList,
   Whoami,
+  HPADetail,
+  HPAList,
+  PDBDetail,
+  PDBList,
+  ReplicaSetDetail,
+  ReplicaSetList,
+  NetworkPolicyDetail,
+  NetworkPolicyList,
+  IngressClassDetail,
+  IngressClassList,
+  ResourceQuota,
+  ResourceQuotaList,
+  LimitRangeDetail,
+  LimitRangeList,
+  PriorityClassDetail,
+  PriorityClassList,
+  RuntimeClassDetail,
+  RuntimeClassList,
 } from "./types";
 
 class ApiError extends Error {
@@ -100,7 +118,7 @@ function clusterScopedURL(c: string, kind: string, name: string, suffix?: string
   return suffix ? `${base}/${suffix}` : base;
 }
 
-export type ClusterScopedKind = "namespaces" | "pvs" | "storageclasses" | "clusterroles" | "clusterrolebindings";
+export type ClusterScopedKind = "namespaces" | "pvs" | "storageclasses" | "clusterroles" | "clusterrolebindings" | "ingressclasses" | "priorityclasses" | "runtimeclasses";
 
 export type YamlKind =
   | "pods"
@@ -121,7 +139,16 @@ export type YamlKind =
   | "clusterroles"
   | "rolebindings"
   | "clusterrolebindings"
-  | "serviceaccounts";
+  | "serviceaccounts"
+  | "horizontalpodautoscalers"
+  | "poddisruptionbudgets"
+  | "replicasets"
+  | "networkpolicies"
+  | "ingressclasses"
+  | "resourcequotas"
+  | "limitranges"
+  | "priorityclasses"
+  | "runtimeclasses";
 
 export const api = {
   whoami: (signal?: AbortSignal) => getJSON<Whoami>("/api/whoami", signal),
@@ -263,11 +290,13 @@ export const api = {
     const qs = namespace ? `?namespace=${enc(namespace)}` : "";
     return getJSON<RoleList>(`/api/clusters/${enc(cluster)}/roles${qs}`, signal);
   },
+
   getRoles: (c: string, ns: string, name: string, signal?: AbortSignal) =>
     getJSON<RoleDetail>(nsURL(c, "roles", ns, name), signal),
 
   clusterRoles: (cluster: string, signal?: AbortSignal) =>
     getJSON<ClusterRoleList>(`/api/clusters/${enc(cluster)}/clusterroles`, signal),
+
   getClusterRole: (c: string, name: string, signal?: AbortSignal) =>
     getJSON<ClusterRoleDetail>(clusterScopedURL(c, "clusterroles", name), signal),
 
@@ -275,11 +304,13 @@ export const api = {
     const qs = namespace ? `?namespace=${enc(namespace)}` : "";
     return getJSON<RoleBindingList>(`/api/clusters/${enc(cluster)}/rolebindings${qs}`, signal);
   },
+
   getRoleBinding: (c: string, ns: string, name: string, signal?: AbortSignal) =>
     getJSON<RoleBindingDetail>(nsURL(c, "rolebindings", ns, name), signal),
 
   clusterRoleBindings: (cluster: string, signal?: AbortSignal) =>
     getJSON<ClusterRoleBindingList>(`/api/clusters/${enc(cluster)}/clusterrolebindings`, signal),
+
   getClusterRoleBinding: (c: string, name: string, signal?: AbortSignal) =>
     getJSON<ClusterRoleBindingDetail>(clusterScopedURL(c, "clusterrolebindings", name), signal),
 
@@ -287,6 +318,7 @@ export const api = {
     const qs = namespace ? `?namespace=${enc(namespace)}` : "";
     return getJSON<ServiceAccountList>(`/api/clusters/${enc(cluster)}/serviceaccounts${qs}`, signal);
   },
+
   getServiceAccount: (c: string, ns: string, name: string, signal?: AbortSignal) =>
     getJSON<ServiceAccountDetail>(nsURL(c, "serviceaccounts", ns, name), signal),
 
@@ -336,6 +368,75 @@ export const api = {
 
   clusterScopedEvents: (c: string, kind: ClusterScopedKind, name: string, signal?: AbortSignal) =>
     getJSON<EventList>(clusterScopedURL(c, kind, name, "events"), signal),
+
+  // --- Extras ---
+  horizontalPodAutoscalers: (cluster: string, namespace?: string, signal?: AbortSignal) => {
+    const qs = namespace ? `?namespace=${enc(namespace)}` : "";
+    return getJSON<HPAList>(`/api/clusters/${enc(cluster)}/horizontalpodautoscalers${qs}`, signal);
+  },
+
+  podDisruptionBudgets: (cluster: string, namespace?: string, signal?: AbortSignal) => {
+    const qs = namespace ? `?namespace=${enc(namespace)}` : "";
+    return getJSON<PDBList>(`/api/clusters/${enc(cluster)}/poddisruptionbudgets${qs}`, signal);
+  },
+
+  replicaSets: (cluster: string, namespace?: string, signal?: AbortSignal) => {
+    const qs = namespace ? `?namespace=${enc(namespace)}` : "";
+    return getJSON<ReplicaSetList>(`/api/clusters/${enc(cluster)}/replicasets${qs}`, signal);
+  },
+
+  networkPolicies: (cluster: string, namespace?: string, signal?: AbortSignal) => {
+    const qs = namespace ? `?namespace=${enc(namespace)}` : "";
+    return getJSON<NetworkPolicyList>(`/api/clusters/${enc(cluster)}/networkpolicies${qs}`, signal);
+  },
+
+  resourceQuotas: (cluster: string, namespace?: string, signal?: AbortSignal) => {
+    const qs = namespace ? `?namespace=${enc(namespace)}` : "";
+    return getJSON<ResourceQuotaList>(`/api/clusters/${enc(cluster)}/resourcequotas${qs}`, signal);
+  },
+
+  limitRanges: (cluster: string, namespace?: string, signal?: AbortSignal) => {
+    const qs = namespace ? `?namespace=${enc(namespace)}` : "";
+    return getJSON<LimitRangeList>(`/api/clusters/${enc(cluster)}/limitranges${qs}`, signal);
+  },
+
+  ingressClasses: (cluster: string, signal?: AbortSignal) =>
+    getJSON<IngressClassList>(`/api/clusters/${enc(cluster)}/ingressclasses`, signal),
+
+  priorityClasses: (cluster: string, signal?: AbortSignal) =>
+    getJSON<PriorityClassList>(`/api/clusters/${enc(cluster)}/priorityclasses`, signal),
+
+  runtimeClasses: (cluster: string, signal?: AbortSignal) =>
+    getJSON<RuntimeClassList>(`/api/clusters/${enc(cluster)}/runtimeclasses`, signal),
+
+
+  // --- Extras detail ---
+  getHPA: (c: string, ns: string, name: string, signal?: AbortSignal) =>
+    getJSON<HPADetail>(nsURL(c, "horizontalpodautoscalers", ns, name), signal),
+
+  getPDB: (c: string, ns: string, name: string, signal?: AbortSignal) =>
+    getJSON<PDBDetail>(nsURL(c, "poddisruptionbudgets", ns, name), signal),
+
+  getReplicaSet: (c: string, ns: string, name: string, signal?: AbortSignal) =>
+    getJSON<ReplicaSetDetail>(nsURL(c, "replicasets", ns, name), signal),
+
+  getNetworkPolicy: (c: string, ns: string, name: string, signal?: AbortSignal) =>
+    getJSON<NetworkPolicyDetail>(nsURL(c, "networkpolicies", ns, name), signal),
+
+  getResourceQuota: (c: string, ns: string, name: string, signal?: AbortSignal) =>
+    getJSON<ResourceQuota>(nsURL(c, "resourcequotas", ns, name), signal),
+
+  getLimitRange: (c: string, ns: string, name: string, signal?: AbortSignal) =>
+    getJSON<LimitRangeDetail>(nsURL(c, "limitranges", ns, name), signal),
+
+  getIngressClass: (c: string, name: string, signal?: AbortSignal) =>
+    getJSON<IngressClassDetail>(clusterScopedURL(c, "ingressclasses", name), signal),
+
+  getPriorityClass: (c: string, name: string, signal?: AbortSignal) =>
+    getJSON<PriorityClassDetail>(clusterScopedURL(c, "priorityclasses", name), signal),
+
+  getRuntimeClass: (c: string, name: string, signal?: AbortSignal) =>
+    getJSON<RuntimeClassDetail>(clusterScopedURL(c, "runtimeclasses", name), signal),
 };
 
 export { ApiError };

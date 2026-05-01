@@ -40,6 +40,15 @@ import { DeploymentLogsPage } from "./pages/DeploymentLogsPage";
 import { StatefulSetLogsPage } from "./pages/StatefulSetLogsPage";
 import { DaemonSetLogsPage } from "./pages/DaemonSetLogsPage";
 import { JobLogsPage } from "./pages/JobLogsPage";
+import { HorizontalPodAutoscalersPage } from "./pages/HorizontalPodAutoscalersPage";
+import { PodDisruptionBudgetsPage } from "./pages/PodDisruptionBudgetsPage";
+import { ReplicaSetsPage } from "./pages/ReplicaSetsPage";
+import { NetworkPoliciesPage } from "./pages/NetworkPoliciesPage";
+import { IngressClassesPage } from "./pages/IngressClassesPage";
+import { ResourceQuotasPage } from "./pages/ResourceQuotasPage";
+import { LimitRangesPage } from "./pages/LimitRangesPage";
+import { PriorityClassesPage } from "./pages/PriorityClassesPage";
+import { RuntimeClassesPage } from "./pages/RuntimeClassesPage";
 
 export default function App() {
   useTheme();
@@ -71,6 +80,15 @@ export default function App() {
         <Route path="rolebindings" element={<WithCluster Page={RoleBindingsPage} />} />
         <Route path="clusterrolebindings" element={<WithCluster Page={ClusterRoleBindingsPage} />} />
         <Route path="serviceaccounts" element={<WithCluster Page={ServiceAccountsPage} />} />
+        <Route path="horizontalpodautoscalers" element={<WithCluster Page={HorizontalPodAutoscalersPage} />} />
+        <Route path="poddisruptionbudgets" element={<WithCluster Page={PodDisruptionBudgetsPage} />} />
+        <Route path="replicasets" element={<WithCluster Page={ReplicaSetsPage} />} />
+        <Route path="networkpolicies" element={<WithCluster Page={NetworkPoliciesPage} />} />
+        <Route path="ingressclasses" element={<WithCluster Page={IngressClassesPage} />} />
+        <Route path="resourcequotas" element={<WithCluster Page={ResourceQuotasPage} />} />
+        <Route path="limitranges" element={<WithCluster Page={LimitRangesPage} />} />
+        <Route path="priorityclasses" element={<WithCluster Page={PriorityClassesPage} />} />
+        <Route path="runtimeclasses" element={<WithCluster Page={RuntimeClassesPage} />} />
         <Route path="pods/:ns/:name/logs" element={<WithCluster Page={PodLogsPage} />} />
         <Route path="deployments/:ns/:name/logs" element={<WithCluster Page={DeploymentLogsPage} />} />
         <Route path="statefulsets/:ns/:name/logs" element={<WithCluster Page={StatefulSetLogsPage} />} />

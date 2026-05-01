@@ -183,7 +183,59 @@ func main() {
 				return k8s.ListServiceAccounts(ctx, p, k8s.ListServiceAccountsArgs{Cluster: c, Namespace: ns})
 			})))
 
-	// --- GET (detail) endpoints ---
+	mux.HandleFunc("GET /api/clusters/{cluster}/horizontalpodautoscalers", credentials.Wrap(factory,
+		listResource(registry, "horizontalpodautoscalers",
+			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, ns string) (k8s.HPAList, error) {
+				return k8s.ListHPAs(ctx, p, k8s.ListHPAsArgs{Cluster: c, Namespace: ns})
+			})))
+
+	mux.HandleFunc("GET /api/clusters/{cluster}/poddisruptionbudgets", credentials.Wrap(factory,
+		listResource(registry, "poddisruptionbudgets",
+			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, ns string) (k8s.PDBList, error) {
+				return k8s.ListPDBs(ctx, p, k8s.ListPDBsArgs{Cluster: c, Namespace: ns})
+			})))
+
+	mux.HandleFunc("GET /api/clusters/{cluster}/replicasets", credentials.Wrap(factory,
+		listResource(registry, "replicasets",
+			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, ns string) (k8s.ReplicaSetList, error) {
+				return k8s.ListReplicaSets(ctx, p, k8s.ListReplicaSetsArgs{Cluster: c, Namespace: ns})
+			})))
+
+	mux.HandleFunc("GET /api/clusters/{cluster}/networkpolicies", credentials.Wrap(factory,
+		listResource(registry, "networkpolicies",
+			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, ns string) (k8s.NetworkPolicyList, error) {
+				return k8s.ListNetworkPolicies(ctx, p, k8s.ListNetworkPoliciesArgs{Cluster: c, Namespace: ns})
+			})))
+
+	mux.HandleFunc("GET /api/clusters/{cluster}/resourcequotas", credentials.Wrap(factory,
+		listResource(registry, "resourcequotas",
+			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, ns string) (k8s.ResourceQuotaList, error) {
+				return k8s.ListResourceQuotas(ctx, p, k8s.ListResourceQuotasArgs{Cluster: c, Namespace: ns})
+			})))
+
+	mux.HandleFunc("GET /api/clusters/{cluster}/limitranges", credentials.Wrap(factory,
+		listResource(registry, "limitranges",
+			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, ns string) (k8s.LimitRangeList, error) {
+				return k8s.ListLimitRanges(ctx, p, k8s.ListLimitRangesArgs{Cluster: c, Namespace: ns})
+			})))
+
+	mux.HandleFunc("GET /api/clusters/{cluster}/ingressclasses", credentials.Wrap(factory,
+		listResource(registry, "ingressclasses",
+			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, _ string) (k8s.IngressClassList, error) {
+				return k8s.ListIngressClasses(ctx, p, k8s.ListIngressClassesArgs{Cluster: c})
+			})))
+
+	mux.HandleFunc("GET /api/clusters/{cluster}/priorityclasses", credentials.Wrap(factory,
+		listResource(registry, "priorityclasses",
+			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, _ string) (k8s.PriorityClassList, error) {
+				return k8s.ListPriorityClasses(ctx, p, k8s.ListPriorityClassesArgs{Cluster: c})
+			})))
+
+	mux.HandleFunc("GET /api/clusters/{cluster}/runtimeclasses", credentials.Wrap(factory,
+		listResource(registry, "runtimeclasses",
+			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, _ string) (k8s.RuntimeClassList, error) {
+				return k8s.ListRuntimeClasses(ctx, p, k8s.ListRuntimeClassesArgs{Cluster: c})
+			})))
 
 	mux.HandleFunc("GET /api/clusters/{cluster}/pods/{ns}/{name}", credentials.Wrap(factory,
 		detailHandler(registry, "pod",
@@ -267,6 +319,60 @@ func main() {
 		detailHandler(registry, "serviceaccount",
 			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, ns, name string) (k8s.ServiceAccountDetail, error) {
 				return k8s.GetServiceAccount(ctx, p, k8s.GetServiceAccountArgs{Cluster: c, Namespace: ns, Name: name})
+			})))
+
+	mux.HandleFunc("GET /api/clusters/{cluster}/horizontalpodautoscalers/{ns}/{name}", credentials.Wrap(factory,
+		detailHandler(registry, "hpa",
+			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, ns, name string) (k8s.HPADetail, error) {
+				return k8s.GetHPA(ctx, p, k8s.GetHPAArgs{Cluster: c, Namespace: ns, Name: name})
+			})))
+
+	mux.HandleFunc("GET /api/clusters/{cluster}/poddisruptionbudgets/{ns}/{name}", credentials.Wrap(factory,
+		detailHandler(registry, "pdb",
+			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, ns, name string) (k8s.PDBDetail, error) {
+				return k8s.GetPDB(ctx, p, k8s.GetPDBArgs{Cluster: c, Namespace: ns, Name: name})
+			})))
+
+	mux.HandleFunc("GET /api/clusters/{cluster}/replicasets/{ns}/{name}", credentials.Wrap(factory,
+		detailHandler(registry, "replicaset",
+			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, ns, name string) (k8s.ReplicaSetDetail, error) {
+				return k8s.GetReplicaSet(ctx, p, k8s.GetReplicaSetArgs{Cluster: c, Namespace: ns, Name: name})
+			})))
+
+	mux.HandleFunc("GET /api/clusters/{cluster}/networkpolicies/{ns}/{name}", credentials.Wrap(factory,
+		detailHandler(registry, "networkpolicy",
+			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, ns, name string) (k8s.NetworkPolicyDetail, error) {
+				return k8s.GetNetworkPolicy(ctx, p, k8s.GetNetworkPolicyArgs{Cluster: c, Namespace: ns, Name: name})
+			})))
+
+	mux.HandleFunc("GET /api/clusters/{cluster}/resourcequotas/{ns}/{name}", credentials.Wrap(factory,
+		detailHandler(registry, "resourcequota",
+			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, ns, name string) (k8s.ResourceQuota, error) {
+				return k8s.GetResourceQuota(ctx, p, k8s.GetResourceQuotaArgs{Cluster: c, Namespace: ns, Name: name})
+			})))
+
+	mux.HandleFunc("GET /api/clusters/{cluster}/limitranges/{ns}/{name}", credentials.Wrap(factory,
+		detailHandler(registry, "limitrange",
+			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, ns, name string) (k8s.LimitRangeDetail, error) {
+				return k8s.GetLimitRange(ctx, p, k8s.GetLimitRangeArgs{Cluster: c, Namespace: ns, Name: name})
+			})))
+
+	mux.HandleFunc("GET /api/clusters/{cluster}/ingressclasses/{name}", credentials.Wrap(factory,
+		detailHandler(registry, "ingressclass",
+			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, _, name string) (k8s.IngressClassDetail, error) {
+				return k8s.GetIngressClass(ctx, p, k8s.GetIngressClassArgs{Cluster: c, Name: name})
+			})))
+
+	mux.HandleFunc("GET /api/clusters/{cluster}/priorityclasses/{name}", credentials.Wrap(factory,
+		detailHandler(registry, "priorityclass",
+			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, _, name string) (k8s.PriorityClassDetail, error) {
+				return k8s.GetPriorityClass(ctx, p, k8s.GetPriorityClassArgs{Cluster: c, Name: name})
+			})))
+
+	mux.HandleFunc("GET /api/clusters/{cluster}/runtimeclasses/{name}", credentials.Wrap(factory,
+		detailHandler(registry, "runtimeclass",
+			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, _, name string) (k8s.RuntimeClassDetail, error) {
+				return k8s.GetRuntimeClass(ctx, p, k8s.GetRuntimeClassArgs{Cluster: c, Name: name})
 			})))
 
 	// Nodes, Namespaces, PVs, and StorageClasses are cluster-scoped: no {ns} segment.
@@ -436,6 +542,60 @@ func main() {
 				return k8s.GetServiceAccountYAML(ctx, p, k8s.GetServiceAccountArgs{Cluster: c, Namespace: ns, Name: name})
 			})))
 
+	mux.HandleFunc("GET /api/clusters/{cluster}/horizontalpodautoscalers/{ns}/{name}/yaml", credentials.Wrap(factory,
+		yamlHandler(registry, "hpa",
+			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, ns, name string) (string, error) {
+				return k8s.GetHPAYAML(ctx, p, k8s.GetHPAArgs{Cluster: c, Namespace: ns, Name: name})
+			})))
+
+	mux.HandleFunc("GET /api/clusters/{cluster}/poddisruptionbudgets/{ns}/{name}/yaml", credentials.Wrap(factory,
+		yamlHandler(registry, "pdb",
+			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, ns, name string) (string, error) {
+				return k8s.GetPDBYAML(ctx, p, k8s.GetPDBArgs{Cluster: c, Namespace: ns, Name: name})
+			})))
+
+	mux.HandleFunc("GET /api/clusters/{cluster}/replicasets/{ns}/{name}/yaml", credentials.Wrap(factory,
+		yamlHandler(registry, "replicaset",
+			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, ns, name string) (string, error) {
+				return k8s.GetReplicaSetYAML(ctx, p, k8s.GetReplicaSetArgs{Cluster: c, Namespace: ns, Name: name})
+			})))
+
+	mux.HandleFunc("GET /api/clusters/{cluster}/networkpolicies/{ns}/{name}/yaml", credentials.Wrap(factory,
+		yamlHandler(registry, "networkpolicy",
+			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, ns, name string) (string, error) {
+				return k8s.GetNetworkPolicyYAML(ctx, p, k8s.GetNetworkPolicyArgs{Cluster: c, Namespace: ns, Name: name})
+			})))
+
+	mux.HandleFunc("GET /api/clusters/{cluster}/resourcequotas/{ns}/{name}/yaml", credentials.Wrap(factory,
+		yamlHandler(registry, "resourcequota",
+			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, ns, name string) (string, error) {
+				return k8s.GetResourceQuotaYAML(ctx, p, k8s.GetResourceQuotaArgs{Cluster: c, Namespace: ns, Name: name})
+			})))
+
+	mux.HandleFunc("GET /api/clusters/{cluster}/limitranges/{ns}/{name}/yaml", credentials.Wrap(factory,
+		yamlHandler(registry, "limitrange",
+			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, ns, name string) (string, error) {
+				return k8s.GetLimitRangeYAML(ctx, p, k8s.GetLimitRangeArgs{Cluster: c, Namespace: ns, Name: name})
+			})))
+
+	mux.HandleFunc("GET /api/clusters/{cluster}/ingressclasses/{name}/yaml", credentials.Wrap(factory,
+		yamlHandler(registry, "ingressclass",
+			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, _, name string) (string, error) {
+				return k8s.GetIngressClassYAML(ctx, p, k8s.GetIngressClassArgs{Cluster: c, Name: name})
+			})))
+
+	mux.HandleFunc("GET /api/clusters/{cluster}/priorityclasses/{name}/yaml", credentials.Wrap(factory,
+		yamlHandler(registry, "priorityclass",
+			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, _, name string) (string, error) {
+				return k8s.GetPriorityClassYAML(ctx, p, k8s.GetPriorityClassArgs{Cluster: c, Name: name})
+			})))
+
+	mux.HandleFunc("GET /api/clusters/{cluster}/runtimeclasses/{name}/yaml", credentials.Wrap(factory,
+		yamlHandler(registry, "runtimeclass",
+			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, _, name string) (string, error) {
+				return k8s.GetRuntimeClassYAML(ctx, p, k8s.GetRuntimeClassArgs{Cluster: c, Name: name})
+			})))
+
 	// --- Cluster-wide events list ---
 
 	mux.HandleFunc("GET /api/clusters/{cluster}/events", credentials.Wrap(factory,
@@ -475,6 +635,19 @@ func main() {
 	mux.HandleFunc("GET /api/clusters/{cluster}/storageclasses/{name}/events",
 		credentials.Wrap(factory, eventsHandler(registry, "StorageClass")))
 
+	// --- New Tier 1 + 2 events endpoints ---
+	mux.HandleFunc("GET /api/clusters/{cluster}/horizontalpodautoscalers/{ns}/{name}/events",
+		credentials.Wrap(factory, eventsHandler(registry, "HorizontalPodAutoscaler")))
+	mux.HandleFunc("GET /api/clusters/{cluster}/poddisruptionbudgets/{ns}/{name}/events",
+		credentials.Wrap(factory, eventsHandler(registry, "PodDisruptionBudget")))
+	mux.HandleFunc("GET /api/clusters/{cluster}/replicasets/{ns}/{name}/events",
+		credentials.Wrap(factory, eventsHandler(registry, "ReplicaSet")))
+	mux.HandleFunc("GET /api/clusters/{cluster}/networkpolicies/{ns}/{name}/events",
+		credentials.Wrap(factory, eventsHandler(registry, "NetworkPolicy")))
+	mux.HandleFunc("GET /api/clusters/{cluster}/resourcequotas/{ns}/{name}/events",
+		credentials.Wrap(factory, eventsHandler(registry, "ResourceQuota")))
+	mux.HandleFunc("GET /api/clusters/{cluster}/limitranges/{ns}/{name}/events",
+		credentials.Wrap(factory, eventsHandler(registry, "LimitRange")))
 	// --- Logs (SSE streaming) endpoints ---
 
 	mux.HandleFunc("GET /api/clusters/{cluster}/pods/{ns}/{name}/logs",

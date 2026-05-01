@@ -28,6 +28,15 @@ import type {
   ServiceDetail,
   StatefulSetDetail,
   StorageClassDetail,
+  HPADetail,
+  PDBDetail,
+  ReplicaSetDetail,
+  NetworkPolicyDetail,
+  IngressClassDetail,
+  ResourceQuota,
+  LimitRangeDetail,
+  PriorityClassDetail,
+  RuntimeClassDetail,
 } from "../lib/types";
 
 interface ResourceQueryArgs {
@@ -83,6 +92,24 @@ export function useResource({ cluster, resource, namespace }: ResourceQueryArgs)
           return api.clusterRoleBindings(cluster!, signal);
         case "serviceaccounts":
           return api.serviceAccounts(cluster!, namespace, signal);
+        case "horizontalpodautoscalers":
+          return api.horizontalPodAutoscalers(cluster!, namespace, signal);
+        case "poddisruptionbudgets":
+          return api.podDisruptionBudgets(cluster!, namespace, signal);
+        case "replicasets":
+          return api.replicaSets(cluster!, namespace, signal);
+        case "networkpolicies":
+          return api.networkPolicies(cluster!, namespace, signal);
+        case "ingressclasses":
+          return api.ingressClasses(cluster!, signal);
+        case "resourcequotas":
+          return api.resourceQuotas(cluster!, namespace, signal);
+        case "limitranges":
+          return api.limitRanges(cluster!, namespace, signal);
+        case "priorityclasses":
+          return api.priorityClasses(cluster!, signal);
+        case "runtimeclasses":
+          return api.runtimeClasses(cluster!, signal);
         default:
           throw new Error(`Unknown resource kind: ${resource}`);
       }
@@ -272,7 +299,7 @@ export function useYaml(
   return useQuery<string>({
     queryKey: ["yaml", cluster, kind, ns, name],
     queryFn: ({ signal }) =>
-      (["namespaces", "pvs", "storageclasses", "clusterroles", "clusterrolebindings"] as ClusterScopedKind[]).includes(kind as ClusterScopedKind)
+      (["namespaces", "pvs", "storageclasses", "clusterroles", "clusterrolebindings", "ingressclasses", "priorityclasses", "runtimeclasses"] as ClusterScopedKind[]).includes(kind as ClusterScopedKind)
         ? api.clusterScopedYaml(cluster, kind as ClusterScopedKind, name!, signal)
         : api.yaml(cluster, kind as Exclude<YamlKind, ClusterScopedKind>, ns, name!, signal),
     enabled: enabled && Boolean(name),
@@ -343,9 +370,83 @@ export function useObjectEvents(
   return useQuery<EventList>({
     queryKey: ["events", cluster, kind, ns, name],
     queryFn: ({ signal }) =>
-      (["namespaces", "pvs", "storageclasses", "clusterroles", "clusterrolebindings"] as ClusterScopedKind[]).includes(kind as ClusterScopedKind)
+      (["namespaces", "pvs", "storageclasses", "clusterroles", "clusterrolebindings", "ingressclasses", "priorityclasses", "runtimeclasses"] as ClusterScopedKind[]).includes(kind as ClusterScopedKind)
         ? api.clusterScopedEvents(cluster, kind as ClusterScopedKind, name!, signal)
         : api.events(cluster, kind as Exclude<YamlKind, ClusterScopedKind>, ns, name!, signal),
     enabled: enabled && Boolean(name),
+  });
+}
+
+// --- Extras detail hooks ---
+
+export function useHPADetail(cluster: string, ns: string, name: string | null) {
+  return useQuery<HPADetail>({
+    queryKey: ["hpa-detail", cluster, ns, name],
+    queryFn: ({ signal }) => api.getHPA(cluster, ns, name!, signal),
+    enabled: Boolean(name),
+  });
+}
+
+export function usePDBDetail(cluster: string, ns: string, name: string | null) {
+  return useQuery<PDBDetail>({
+    queryKey: ["pdb-detail", cluster, ns, name],
+    queryFn: ({ signal }) => api.getPDB(cluster, ns, name!, signal),
+    enabled: Boolean(name),
+  });
+}
+
+export function useReplicaSetDetail(cluster: string, ns: string, name: string | null) {
+  return useQuery<ReplicaSetDetail>({
+    queryKey: ["replicaset-detail", cluster, ns, name],
+    queryFn: ({ signal }) => api.getReplicaSet(cluster, ns, name!, signal),
+    enabled: Boolean(name),
+  });
+}
+
+export function useNetworkPolicyDetail(cluster: string, ns: string, name: string | null) {
+  return useQuery<NetworkPolicyDetail>({
+    queryKey: ["networkpolicy-detail", cluster, ns, name],
+    queryFn: ({ signal }) => api.getNetworkPolicy(cluster, ns, name!, signal),
+    enabled: Boolean(name),
+  });
+}
+
+export function useIngressClassDetail(cluster: string, name: string | null) {
+  return useQuery<IngressClassDetail>({
+    queryKey: ["ingressclass-detail", cluster, name],
+    queryFn: ({ signal }) => api.getIngressClass(cluster, name!, signal),
+    enabled: Boolean(name),
+  });
+}
+
+export function useResourceQuotaDetail(cluster: string, ns: string, name: string | null) {
+  return useQuery<ResourceQuota>({
+    queryKey: ["resourcequota-detail", cluster, ns, name],
+    queryFn: ({ signal }) => api.getResourceQuota(cluster, ns, name!, signal),
+    enabled: Boolean(name),
+  });
+}
+
+export function useLimitRangeDetail(cluster: string, ns: string, name: string | null) {
+  return useQuery<LimitRangeDetail>({
+    queryKey: ["limitrange-detail", cluster, ns, name],
+    queryFn: ({ signal }) => api.getLimitRange(cluster, ns, name!, signal),
+    enabled: Boolean(name),
+  });
+}
+
+export function usePriorityClassDetail(cluster: string, name: string | null) {
+  return useQuery<PriorityClassDetail>({
+    queryKey: ["priorityclass-detail", cluster, name],
+    queryFn: ({ signal }) => api.getPriorityClass(cluster, name!, signal),
+    enabled: Boolean(name),
+  });
+}
+
+export function useRuntimeClassDetail(cluster: string, name: string | null) {
+  return useQuery<RuntimeClassDetail>({
+    queryKey: ["runtimeclass-detail", cluster, name],
+    queryFn: ({ signal }) => api.getRuntimeClass(cluster, name!, signal),
+    enabled: Boolean(name),
   });
 }

@@ -744,3 +744,214 @@ type ClusterSummary struct {
 	CPUPercent        float64 `json:"cpuPercent,omitempty"`
 	MemoryPercent     float64 `json:"memoryPercent,omitempty"`
 }
+
+// --- HPA ---
+
+type HPA struct {
+	Name            string `json:"name"`
+	Namespace       string `json:"namespace"`
+	CreatedAt time.Time `json:"createdAt"`
+	Target          string `json:"target"`
+	MinReplicas     int32  `json:"minReplicas"`
+	MaxReplicas     int32  `json:"maxReplicas"`
+	CurrentReplicas int32  `json:"currentReplicas"`
+	DesiredReplicas int32  `json:"desiredReplicas"`
+	Ready           bool   `json:"ready"`
+}
+
+type HPAList struct {
+	HPAs []HPA `json:"hpas"`
+}
+
+type HPADetail struct {
+	HPA
+	Conditions  []DeploymentCondition `json:"conditions,omitempty"`
+	Labels      map[string]string     `json:"labels,omitempty"`
+	Annotations map[string]string     `json:"annotations,omitempty"`
+}
+
+// --- PodDisruptionBudget ---
+
+type PDB struct {
+	Name               string `json:"name"`
+	Namespace          string `json:"namespace"`
+	CreatedAt time.Time `json:"createdAt"`
+	MinAvailable       string `json:"minAvailable"`
+	MaxUnavailable     string `json:"maxUnavailable"`
+	CurrentHealthy     int32  `json:"currentHealthy"`
+	DesiredHealthy     int32  `json:"desiredHealthy"`
+	ExpectedPods       int32  `json:"expectedPods"`
+	DisruptionsAllowed int32  `json:"disruptionsAllowed"`
+}
+
+type PDBList struct {
+	PDBs []PDB `json:"pdbs"`
+}
+
+type PDBDetail struct {
+	PDB
+	Selector    string            `json:"selector"`
+	Labels      map[string]string `json:"labels,omitempty"`
+	Annotations map[string]string `json:"annotations,omitempty"`
+}
+
+// --- ReplicaSet ---
+
+type ReplicaSet struct {
+	Name      string `json:"name"`
+	Namespace string `json:"namespace"`
+	CreatedAt time.Time `json:"createdAt"`
+	Desired   int32  `json:"desired"`
+	Current   int32  `json:"current"`
+	Ready     int32  `json:"ready"`
+	Owner     string `json:"owner"`
+}
+
+type ReplicaSetList struct {
+	ReplicaSets []ReplicaSet `json:"replicaSets"`
+}
+
+type ReplicaSetDetail struct {
+	ReplicaSet
+	Selector    map[string]string     `json:"selector,omitempty"`
+	Labels      map[string]string     `json:"labels,omitempty"`
+	Annotations map[string]string     `json:"annotations,omitempty"`
+	Conditions  []DeploymentCondition `json:"conditions,omitempty"`
+}
+
+// --- NetworkPolicy ---
+
+type NetworkPolicyRule struct {
+	Ports []string `json:"ports"`
+	Peers []string `json:"peers"`
+}
+
+type NetworkPolicy struct {
+	Name        string   `json:"name"`
+	Namespace   string   `json:"namespace"`
+	CreatedAt time.Time `json:"createdAt"`
+	PodSelector string   `json:"podSelector"`
+	PolicyTypes []string `json:"policyTypes"`
+}
+
+type NetworkPolicyList struct {
+	NetworkPolicies []NetworkPolicy `json:"networkPolicies"`
+}
+
+type NetworkPolicyDetail struct {
+	NetworkPolicy
+	IngressRules []NetworkPolicyRule `json:"ingressRules,omitempty"`
+	EgressRules  []NetworkPolicyRule `json:"egressRules,omitempty"`
+	Labels       map[string]string   `json:"labels,omitempty"`
+	Annotations  map[string]string   `json:"annotations,omitempty"`
+}
+
+// --- IngressClass ---
+
+type IngressClass struct {
+	Name       string `json:"name"`
+	CreatedAt time.Time `json:"createdAt"`
+	Controller string `json:"controller"`
+	IsDefault  bool   `json:"isDefault"`
+}
+
+type IngressClassList struct {
+	IngressClasses []IngressClass `json:"ingressClasses"`
+}
+
+type IngressClassDetail struct {
+	IngressClass
+	Parameters  string            `json:"parameters"`
+	Labels      map[string]string `json:"labels,omitempty"`
+	Annotations map[string]string `json:"annotations,omitempty"`
+}
+
+// --- ResourceQuota ---
+
+type QuotaEntry struct {
+	Hard string `json:"hard"`
+	Used string `json:"used"`
+}
+
+type ResourceQuota struct {
+	Name      string                `json:"name"`
+	Namespace string                `json:"namespace"`
+	CreatedAt time.Time `json:"createdAt"`
+	Items     map[string]QuotaEntry `json:"items"`
+}
+
+type ResourceQuotaList struct {
+	ResourceQuotas []ResourceQuota `json:"resourceQuotas"`
+}
+
+// --- LimitRange ---
+
+type LimitRangeItem struct {
+	Type                 string            `json:"type"`
+	Default              map[string]string `json:"default,omitempty"`
+	DefaultRequest       map[string]string `json:"defaultRequest,omitempty"`
+	Max                  map[string]string `json:"max,omitempty"`
+	Min                  map[string]string `json:"min,omitempty"`
+	MaxLimitRequestRatio map[string]string `json:"maxLimitRequestRatio,omitempty"`
+}
+
+type LimitRange struct {
+	Name       string `json:"name"`
+	Namespace  string `json:"namespace"`
+	CreatedAt time.Time `json:"createdAt"`
+	LimitCount int    `json:"limitCount"`
+}
+
+type LimitRangeList struct {
+	LimitRanges []LimitRange `json:"limitRanges"`
+}
+
+type LimitRangeDetail struct {
+	LimitRange
+	Limits      []LimitRangeItem  `json:"limits"`
+	Labels      map[string]string `json:"labels,omitempty"`
+	Annotations map[string]string `json:"annotations,omitempty"`
+}
+
+// --- PriorityClass ---
+
+type PriorityClass struct {
+	Name             string `json:"name"`
+	CreatedAt time.Time `json:"createdAt"`
+	Value            int32  `json:"value"`
+	GlobalDefault    bool   `json:"globalDefault"`
+	PreemptionPolicy string `json:"preemptionPolicy"`
+}
+
+type PriorityClassList struct {
+	PriorityClasses []PriorityClass `json:"priorityClasses"`
+}
+
+type PriorityClassDetail struct {
+	PriorityClass
+	Description string            `json:"description"`
+	Labels      map[string]string `json:"labels,omitempty"`
+	Annotations map[string]string `json:"annotations,omitempty"`
+}
+
+// --- RuntimeClass ---
+
+type RuntimeClass struct {
+	Name           string `json:"name"`
+	CreatedAt time.Time `json:"createdAt"`
+	Handler        string `json:"handler"`
+	CPUOverhead    string `json:"cpuOverhead"`
+	MemoryOverhead string `json:"memoryOverhead"`
+}
+
+type RuntimeClassList struct {
+	RuntimeClasses []RuntimeClass `json:"runtimeClasses"`
+}
+
+type RuntimeClassDetail struct {
+	RuntimeClass
+	NodeSelector map[string]string `json:"nodeSelector,omitempty"`
+	Tolerations  []string          `json:"tolerations,omitempty"`
+	Labels       map[string]string `json:"labels,omitempty"`
+	Annotations  map[string]string `json:"annotations,omitempty"`
+}
