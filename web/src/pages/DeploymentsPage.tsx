@@ -21,6 +21,7 @@ import {
 import { DetailPane } from "../components/detail/DetailPane";
 import { DeploymentDescribe } from "../components/detail/describe/DeploymentDescribe";
 import { YamlView } from "../components/detail/YamlView";
+import { ResourceActions } from "../components/edit/ResourceActions";
 import { EventsView } from "../components/detail/EventsView";
 import { WorkloadLogsTab } from "../components/logs/WorkloadLogsTab";
 import { NamespacePicker } from "../components/shell/NamespacePicker";
@@ -105,6 +106,22 @@ export function DeploymentsPage({ cluster }: { cluster: string }) {
           { id: "events", label: "events", ready: true, content: <EventsView cluster={cluster} kind="deployments" ns={selectedNs} name={selectedName} /> },
           { id: "logs", label: "logs", ready: true, content: <WorkloadLogsTab kind="deployment" cluster={cluster} ns={selectedNs} name={selectedName} /> },
         ]}
+        actions={
+          <ResourceActions
+            cluster={cluster}
+            yamlKind="deployments"
+            resource={{
+              cluster,
+              group: "apps",
+              version: "v1",
+              resource: "deployments",
+              namespace: selectedNs,
+              name: selectedName,
+              kind: "Deployment",
+            }}
+            onDeleted={() => setMany({ sel: null, selNs: null, tab: null })}
+          />
+        }
       />
     ) : null;
 

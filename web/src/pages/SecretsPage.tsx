@@ -17,6 +17,7 @@ import {
 import { DetailPane } from "../components/detail/DetailPane";
 import { SecretDescribe } from "../components/detail/describe/SecretDescribe";
 import { YamlView } from "../components/detail/YamlView";
+import { ResourceActions } from "../components/edit/ResourceActions";
 import { EventsView } from "../components/detail/EventsView";
 import { NamespacePicker } from "../components/shell/NamespacePicker";
 
@@ -91,6 +92,22 @@ export function SecretsPage({ cluster }: { cluster: string }) {
           { id: "yaml", label: "yaml", ready: true, content: <YamlView cluster={cluster} kind="secrets" ns={selectedNs} name={selectedName} /> },
           { id: "events", label: "events", ready: true, content: <EventsView cluster={cluster} kind="secrets" ns={selectedNs} name={selectedName} /> },
         ]}
+        actions={
+          <ResourceActions
+            cluster={cluster}
+            yamlKind="secrets"
+            resource={{
+              cluster,
+              group: "",
+              version: "v1",
+              resource: "secrets",
+              namespace: selectedNs,
+              name: selectedName,
+              kind: "Secret",
+            }}
+            onDeleted={() => setMany({ sel: null, selNs: null, tab: null })}
+          />
+        }
       />
     ) : null;
 

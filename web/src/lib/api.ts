@@ -514,6 +514,126 @@ export const api = {
 
   getRuntimeClass: (c: string, name: string, signal?: AbortSignal) =>
     getJSON<RuntimeClassDetail>(clusterScopedURL(c, "runtimeclasses", name), signal),
+
+  // ----- PR-D: write actions -----------------------------------------------
+  //
+  // Generic resource mutation endpoints. Group "" (core API) is sent as
+  // literal "core" in the URL because URL segments can't be empty. Match
+  // the backend handler in cmd/periscope/main.go.
+
+  applyResource: (
+    args: {
+      cluster: string;
+      group: string;
+      version: string;
+      resource: string;
+      namespace?: string;
+      name: string;
+      yaml: string;
+      dryRun?: boolean;
+      force?: boolean;
+    },
+    signal?: AbortSignal,
+  ) => applyResourceFetch(args, signal),
+
+  deleteResource: (
+    args: {
+      cluster: string;
+      group: string;
+      version: string;
+      resource: string;
+      namespace?: string;
+      name: string;
+    },
+    signal?: AbortSignal,
+  ) => deleteResourceFetch(args, signal),
+
+  revealSecretKey: (
+    c: string,
+    ns: string,
+    name: string,
+    key: string,
+    signal?: AbortSignal,
+  ) => getText(nsURL(c, "secrets", ns, name, `data/${enc(key)}`), signal),
 };
+
+// --- write helpers (kept out of `api` block so the call sites stay readable) ---
+
+function resourceURL(args: {
+  cluster: string;
+  group: string;
+  version: string;
+  resource: string;
+  namespace?: string;
+  name: string;
+}): string {
+  const group = args.group === "" ? "core" : args.group;
+  const base = `/api/clusters/${enc(args.cluster)}/resources/${enc(group)}/${enc(args.version)}/${enc(args.resource)}`;
+  return args.namespace
+    ? `${base}/${enc(args.namespace)}/${enc(args.name)}`
+    : `${base}/${enc(args.name)}`;
+}
+
+export interface ApplyResult {
+  object: Record<string, unknown>;
+  dryRun: boolean;
+}
+
+async function applyResourceFetch(
+  args: {
+    cluster: string;
+    group: string;
+    version: string;
+    resource: string;
+    namespace?: string;
+    name: string;
+    yaml: string;
+    dryRun?: boolean;
+    force?: boolean;
+  },
+  signal?: AbortSignal,
+): Promise<ApplyResult> {
+  const params = new URLSearchParams();
+  if (args.dryRun) params.set("dryRun", "true");
+  if (args.force) params.set("force", "true");
+  const url = resourceURL(args) + (params.toString() ? `?${params.toString()}` : "");
+  const res = await fetch(url, {
+    method: "PATCH",
+    signal,
+    headers: {
+      "Content-Type": "application/yaml",
+      Accept: "application/json",
+    },
+    body: args.yaml,
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new ApiError(`${res.status} ${res.statusText} on ${url}`, res.status, text);
+  }
+  return (await res.json()) as ApplyResult;
+}
+
+async function deleteResourceFetch(
+  args: {
+    cluster: string;
+    group: string;
+    version: string;
+    resource: string;
+    namespace?: string;
+    name: string;
+  },
+  signal?: AbortSignal,
+): Promise<void> {
+  const url = resourceURL(args);
+  const res = await fetch(url, {
+    method: "DELETE",
+    signal,
+    headers: { Accept: "application/json" },
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new ApiError(`${res.status} ${res.statusText} on ${url}`, res.status, text);
+  }
+}
 
 export { ApiError };

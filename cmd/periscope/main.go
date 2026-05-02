@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"os"
@@ -793,6 +794,34 @@ func main() {
 	router.Get("/api/clusters/{cluster}/secrets/{ns}/{name}/data/{key}",
 		credentials.Wrap(factory, secretRevealHandler(registry)))
 
+	// --- Generic resource mutation endpoints (PR-D) ---
+	//
+	// One pair of routes covers every editable resource — Pod, Deployment,
+	// ConfigMap, your CRDs, all of them. The handler dispatches via the
+	// dynamic client, so adding new resource types is zero new code.
+	//
+	// Group "core" maps to the empty K8s API group (kubectl api-resources
+	// shows "" for v1 resources; we use a literal "core" in the URL because
+	// URL segments can't be empty). Namespaced and cluster-scoped have
+	// separate route patterns because chi doesn't allow optional URL params.
+	router.Patch("/api/clusters/{cluster}/resources/{group}/{version}/{resource}/{ns}/{name}",
+		credentials.Wrap(factory, applyResourceHandler(registry)))
+	router.Patch("/api/clusters/{cluster}/resources/{group}/{version}/{resource}/{name}",
+		credentials.Wrap(factory, applyResourceHandler(registry)))
+	router.Delete("/api/clusters/{cluster}/resources/{group}/{version}/{resource}/{ns}/{name}",
+		credentials.Wrap(factory, deleteResourceHandler(registry)))
+	router.Delete("/api/clusters/{cluster}/resources/{group}/{version}/{resource}/{name}",
+		credentials.Wrap(factory, deleteResourceHandler(registry)))
+
+	// --- Resource meta (resourceVersion + generation + managedFields) ---
+	// Drives the inline editor's per-field ownership badges and (Phase 3)
+	// drift detection. Separate from the YAML GET because formatYAML strips
+	// managedFields for display; the editor needs them out-of-band.
+	router.Get("/api/clusters/{cluster}/resources/{group}/{version}/{resource}/{ns}/{name}/meta",
+		credentials.Wrap(factory, metaResourceHandler(registry)))
+	router.Get("/api/clusters/{cluster}/resources/{group}/{version}/{resource}/{name}/meta",
+		credentials.Wrap(factory, metaResourceHandler(registry)))
+
 	// --- Pod exec (interactive shell, WebSocket) — RFC 0001 ---
 	execSessions := execsess.NewRegistry()
 	execPolicy := k8s.NewPolicy(k8s.PolicyConfig{}) // defaults: 3 WS fails / 30m SPDY pin
@@ -984,6 +1013,180 @@ func eventsHandler(reg *clusters.Registry, kind string) credentials.Handler {
 		}
 		writeJSON(w, http.StatusOK, result)
 	}
+}
+
+// applyResourceHandler is the HTTP front-end of k8s.ApplyResource. It
+// reads the YAML body, dispatches to the dynamic client under the
+// caller's impersonated identity, and returns the post-apply state as
+// JSON. Both namespaced and cluster-scoped routes share this handler;
+// chi.URLParam("ns") returns "" for the cluster-scoped variant, which
+// is exactly what ApplyResource expects.
+//
+// Query params:
+//   - dryRun=true  → run as ?dryRun=All (no commit, returns the would-be state)
+//   - force=true   → resolve field-manager conflicts (caller opts in,
+//     usually on the second attempt after a 409)
+//
+// Group "core" in the URL is normalised to the empty string before
+// reaching ApplyResource, mirroring how K8s itself models the v1 group.
+func applyResourceHandler(reg *clusters.Registry) credentials.Handler {
+	return func(w http.ResponseWriter, r *http.Request, p credentials.Provider) {
+		c, ok := reg.ByName(chi.URLParam(r, "cluster"))
+		if !ok {
+			http.Error(w, "cluster not found", http.StatusNotFound)
+			return
+		}
+		group := chi.URLParam(r, "group")
+		if group == "core" {
+			group = ""
+		}
+		body, err := readApplyBody(r)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		args := k8s.ApplyResourceArgs{
+			Cluster:   c,
+			Group:     group,
+			Version:   chi.URLParam(r, "version"),
+			Resource:  chi.URLParam(r, "resource"),
+			Namespace: chi.URLParam(r, "ns"),
+			Name:      chi.URLParam(r, "name"),
+			Body:      body,
+			DryRun:    r.URL.Query().Get("dryRun") == "true",
+			Force:     r.URL.Query().Get("force") == "true",
+		}
+		result, err := k8s.ApplyResource(r.Context(), p, args)
+		if err != nil {
+			if errors.Is(err, context.Canceled) {
+				return
+			}
+			slog.ErrorContext(r.Context(), "apply resource failed",
+				"err", err, "cluster", c.Name,
+				"group", args.Group, "version", args.Version, "resource", args.Resource,
+				"ns", args.Namespace, "name", args.Name,
+				"dryRun", args.DryRun, "force", args.Force,
+				"actor", p.Actor())
+			// L1/L2 errors don't satisfy kerrors.* so they default to 500;
+			// detect our own error prefix and surface as 400 instead so
+			// the SPA can show "your YAML was malformed" rather than a
+			// generic backend error.
+			status := httpStatusFor(err)
+			if strings.HasPrefix(err.Error(), "apply: ") {
+				status = http.StatusBadRequest
+			}
+			http.Error(w, err.Error(), status)
+			return
+		}
+		// Audit-trail write: tied to the action, not the request envelope.
+		// When the audit DB ships, this becomes a structured row.
+		slog.InfoContext(r.Context(), "resource applied",
+			"actor", p.Actor(), "cluster", c.Name,
+			"group", args.Group, "version", args.Version, "resource", args.Resource,
+			"ns", args.Namespace, "name", args.Name,
+			"dryRun", args.DryRun, "force", args.Force)
+		writeJSON(w, http.StatusOK, result)
+	}
+}
+
+// deleteResourceHandler is the symmetric DELETE entry point. Same
+// route-param handling as applyResourceHandler. Audit-logged.
+func deleteResourceHandler(reg *clusters.Registry) credentials.Handler {
+	return func(w http.ResponseWriter, r *http.Request, p credentials.Provider) {
+		c, ok := reg.ByName(chi.URLParam(r, "cluster"))
+		if !ok {
+			http.Error(w, "cluster not found", http.StatusNotFound)
+			return
+		}
+		group := chi.URLParam(r, "group")
+		if group == "core" {
+			group = ""
+		}
+		args := k8s.DeleteResourceArgs{
+			Cluster:   c,
+			Group:     group,
+			Version:   chi.URLParam(r, "version"),
+			Resource:  chi.URLParam(r, "resource"),
+			Namespace: chi.URLParam(r, "ns"),
+			Name:      chi.URLParam(r, "name"),
+		}
+		if err := k8s.DeleteResource(r.Context(), p, args); err != nil {
+			if errors.Is(err, context.Canceled) {
+				return
+			}
+			slog.ErrorContext(r.Context(), "delete resource failed",
+				"err", err, "cluster", c.Name,
+				"group", args.Group, "version", args.Version, "resource", args.Resource,
+				"ns", args.Namespace, "name", args.Name, "actor", p.Actor())
+			http.Error(w, err.Error(), httpStatusFor(err))
+			return
+		}
+		slog.InfoContext(r.Context(), "resource deleted",
+			"actor", p.Actor(), "cluster", c.Name,
+			"group", args.Group, "version", args.Version, "resource", args.Resource,
+			"ns", args.Namespace, "name", args.Name)
+		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
+// metaResourceHandler returns resourceVersion, generation, and
+// managedFields for the resource at the URL ref. Used by the inline
+// editor to render per-field ownership badges and (Phase 3) drift
+// detection. Same chi.URLParam shape as applyResourceHandler so the
+// SPA reuses its resourceURL builder.
+//
+// Not audit-logged: this is a read of metadata the user already had
+// access to via the YAML GET. RBAC: same as the apiserver's "get"
+// verb on the resource (apiserver enforces).
+func metaResourceHandler(reg *clusters.Registry) credentials.Handler {
+	return func(w http.ResponseWriter, r *http.Request, p credentials.Provider) {
+		c, ok := reg.ByName(chi.URLParam(r, "cluster"))
+		if !ok {
+			http.Error(w, "cluster not found", http.StatusNotFound)
+			return
+		}
+		group := chi.URLParam(r, "group")
+		if group == "core" {
+			group = ""
+		}
+		args := k8s.MetaArgs{
+			Cluster:   c,
+			Group:     group,
+			Version:   chi.URLParam(r, "version"),
+			Resource:  chi.URLParam(r, "resource"),
+			Namespace: chi.URLParam(r, "ns"),
+			Name:      chi.URLParam(r, "name"),
+		}
+		result, err := k8s.GetResourceMeta(r.Context(), p, args)
+		if err != nil {
+			if errors.Is(err, context.Canceled) {
+				return
+			}
+			slog.ErrorContext(r.Context(), "meta operation failed",
+				"err", err, "cluster", c.Name,
+				"group", args.Group, "version", args.Version, "resource", args.Resource,
+				"ns", args.Namespace, "name", args.Name, "actor", p.Actor())
+			http.Error(w, err.Error(), httpStatusFor(err))
+			return
+		}
+		writeJSON(w, http.StatusOK, result)
+	}
+}
+
+// readApplyBody pulls the YAML body off the request, capping the read
+// at MaxApplyBytes+1 so a deliberately oversized payload returns a
+// clean 400 rather than streaming megabytes into memory. The +1 byte
+// is the sentinel: if the LimitReader fills, we know the payload was
+// at least cap+1 bytes long (over the limit).
+func readApplyBody(r *http.Request) ([]byte, error) {
+	body, err := io.ReadAll(io.LimitReader(r.Body, int64(k8s.MaxApplyBytes)+1))
+	if err != nil {
+		return nil, fmt.Errorf("read body: %w", err)
+	}
+	if len(body) > k8s.MaxApplyBytes {
+		return nil, fmt.Errorf("body exceeds %d bytes", k8s.MaxApplyBytes)
+	}
+	return body, nil
 }
 
 // secretRevealHandler wraps GetSecretValue. Audit logging is performed

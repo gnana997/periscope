@@ -23,6 +23,7 @@ import { DetailPane } from "../components/detail/DetailPane";
 import { PodDescribe } from "../components/detail/describe/PodDescribe";
 import { OpenShellButton } from "../components/exec/OpenShellButton";
 import { YamlView } from "../components/detail/YamlView";
+import { ResourceActions } from "../components/edit/ResourceActions";
 import { EventsView } from "../components/detail/EventsView";
 import { PodLogsTab } from "../components/logs/PodLogsTab";
 import { NamespacePicker } from "../components/shell/NamespacePicker";
@@ -162,10 +163,26 @@ export function PodsPage({ cluster }: { cluster: string }) {
           },
         ]}
         actions={
-          <OpenShellButton
+          <ResourceActions
             cluster={cluster}
-            namespace={selectedNs}
-            pod={selectedName}
+            yamlKind="pods"
+            resource={{
+              cluster,
+              group: "",
+              version: "v1",
+              resource: "pods",
+              namespace: selectedNs,
+              name: selectedName,
+              kind: "Pod",
+            }}
+            onDeleted={() => setParam("sel", null)}
+            trailing={
+              <OpenShellButton
+                cluster={cluster}
+                namespace={selectedNs}
+                pod={selectedName}
+              />
+            }
           />
         }
       />
