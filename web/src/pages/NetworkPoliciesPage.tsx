@@ -7,7 +7,7 @@ import { PageHeader } from "../components/page/PageHeader";
 import { FilterStrip } from "../components/page/FilterStrip";
 import { SplitPane } from "../components/page/SplitPane";
 import { DataTable, type Column } from "../components/table/DataTable";
-import { EmptyState, ErrorState, LoadingState } from "../components/table/states";
+import { EmptyState, ErrorState, ForbiddenState, LoadingState, isForbidden } from "../components/table/states";
 import { DetailPane } from "../components/detail/DetailPane";
 import { NetworkPolicyDescribe } from "../components/detail/describe/NetworkPolicyDescribe";
 import { YamlView } from "../components/detail/YamlView";
@@ -83,7 +83,7 @@ export function NetworkPoliciesPage({ cluster }: { cluster: string }) {
         storageKey="periscope.detailWidth.v4"
         left={
           query.isLoading ? <LoadingState resource="networkpolicies" /> :
-          query.isError ? <ErrorState title="couldn't reach the cluster" message={(query.error as Error).message} /> :
+          query.isError ? isForbidden(query.error) ? <ForbiddenState resource="networkpolicies" /> : isForbidden(query.error) ? <ForbiddenState resource="networkpolicies" /> : <ErrorState title="couldn't reach the cluster" message={(query.error as Error).message} /> :
           filtered.length === 0 ? <EmptyState resource="networkpolicies" namespace={namespace} /> :
           <DataTable<NetworkPolicy>
             columns={columns}

@@ -1,0 +1,243 @@
+# Periscope — default values.
+#
+# See docs/setup/deploy.md for the walkthrough and docs/setup/{auth0,okta}.md
+# for filling in the .auth.oidc block per IdP.
+
+# -----------------------------------------------------------------------------
+# Image
+# -----------------------------------------------------------------------------
+image:
+  repository: ghcr.io/gnana997/periscope
+  # Defaults to .Chart.AppVersion if empty.
+  tag: ""
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+
+# Single-replica is the supported v1 topology — the in-memory session
+# store is per-replica. HA support lands in v1.x.
+replicaCount: 1
+
+# -----------------------------------------------------------------------------
+# Service account
+# -----------------------------------------------------------------------------
+serviceAccount:
+  create: true
+  # If empty, a name is derived from the release name.
+  name: ""
+  # IRSA path: set the role-arn annotation here.
+  # annotations:
+  #   eks.amazonaws.com/role-arn: arn:aws:iam::111111111111:role/periscope-base
+  annotations: {}
+
+# Pod Identity path (preferred for new EKS deployments). When true, no
+# IRSA annotation is rendered on the SA — you create the association
+# out-of-band:
+#
+#   aws eks create-pod-identity-association \
+#     --cluster-name <hosting-cluster> \
+#     --namespace <release-namespace> \
+#     --service-account <sa-name> \
+#     --role-arn arn:aws:iam::111111111111:role/periscope-base
+podIdentity:
+  enabled: false
+
+# -----------------------------------------------------------------------------
+# Auth (OIDC) — written verbatim into a ConfigMap as auth.yaml.
+# -----------------------------------------------------------------------------
+# Paste the contents of examples/config/auth.yaml.{auth0,okta} here
+# (without the top-level YAML doc separators) and fill in your tenant
+# specifics. The clientSecret should reference one of the secret modes
+# below (default: ${OIDC_CLIENT_SECRET} env var, sourced from the
+# Secret you bring or the chart renders).
+auth:
+  oidc:
+    issuer: ""
+    clientID: ""
+    # When secrets.mode is one of [existing|plain|external], leave this
+    # as ${OIDC_CLIENT_SECRET}. When secrets.mode=native, set this
+    # directly to e.g. aws-secretsmanager://periscope/oidc#client_secret.
+    clientSecret: ${OIDC_CLIENT_SECRET}
+    redirectURL: ""
+    scopes: [openid, profile, email, offline_access]
+    # Set for Auth0 if you registered an API; empty for Okta and most
+    # other IdPs.
+    audience: ""
+    postLogoutRedirect: ""
+
+  session:
+    cookieName: periscope_session
+    idleTimeout: 30m
+    absoluteTimeout: 8h
+    # cookieDomain: ""
+
+  authorization:
+    # K8s authorization mode: shared (default) | tier | raw.
+    # See RFC 0002 §4 and docs/setup/cluster-rbac.md for the comparison.
+    mode: shared
+
+    # tier-mode only — map IdP groups to one of: read / triage / write / maintain / admin.
+    # Reuse existing IdP groups; you don't need to create periscope-named ones.
+    groupTiers: {}
+    #  SRE-Platform:        admin
+    #  SRE-OnCall:          triage
+    #  Backend-TeamLeads:   maintain
+    #  Engineering-All:     write
+    #  Contractors:         read
+
+    # tier-mode only — applied when a user matches no listed group.
+    # "" = deny (the user cannot access the platform).
+    defaultTier: ""
+
+    # raw-mode only — prefix prepended to each impersonated group.
+    groupPrefix: "periscope:"
+
+    # IdP token claim that holds the groups list.
+    # Auth0 needs a namespaced custom claim like https://periscope/groups.
+    # Okta exposes "groups" natively.
+    groupsClaim: groups
+
+    # Gate (all modes): empty list = any authenticated user is allowed.
+    allowedGroups: []
+  dev:
+    subject: dev@local
+    email: dev@local
+    groups: [dev]
+
+# -----------------------------------------------------------------------------
+# Clusters registry — written verbatim into a ConfigMap as clusters.yaml.
+# See examples/config/clusters.yaml for a fuller example with multiple
+# backends.
+# -----------------------------------------------------------------------------
+clusters: []
+# - name: prod-eu-west-1
+#   backend: eks
+#   region: eu-west-1
+#   arn: arn:aws:eks:eu-west-1:222222222222:cluster/prod-eu-west-1
+
+# -----------------------------------------------------------------------------
+# Secrets — how the OIDC client secret reaches the pod.
+#
+# Pick one mode:
+#   existing  Recommended default. You apply the Secret out-of-band; the
+#             chart references it.
+#   plain     Quick start / demo. The chart renders a kind: Secret with
+#             stringData from values. Secret value lives in your values
+#             file — fine for kind/minikube, never for prod.
+#   external  External Secrets Operator. The chart renders an
+#             ExternalSecret pointing at your SecretStore /
+#             ClusterSecretStore. ESO syncs the value into a K8s Secret
+#             that the Deployment then references.
+#   native    No K8s Secret at all. Periscope's resolver fetches from
+#             AWS Secrets Manager / SSM at startup using Pod Identity /
+#             IRSA. Set .auth.oidc.clientSecret to e.g.
+#             aws-secretsmanager://periscope/oidc#client_secret.
+# -----------------------------------------------------------------------------
+secrets:
+  mode: existing
+
+  existing:
+    # Name of the pre-applied Secret. The Deployment mounts the value
+    # at the env-var name `key`.
+    name: periscope-oidc
+    key: OIDC_CLIENT_SECRET
+
+  plain:
+    # Raw client secret. Used only when mode=plain.
+    clientSecret: ""
+
+  external:
+    # External Secrets Operator (https://external-secrets.io). Renders
+    # an ExternalSecret of api version external-secrets.io/v1.
+    storeName: ""
+    storeKind: ClusterSecretStore   # or SecretStore
+    refreshInterval: 1h
+    # The remote secret's path/name in the upstream store (e.g. the
+    # Secrets Manager secret ID, or the SSM parameter name).
+    remoteKey: ""
+    # Optional: when the remote value is JSON-shaped, the JSON key to
+    # extract. Leave empty for a raw scalar.
+    remoteProperty: ""
+
+  native:
+    # No fields. Just point .auth.oidc.clientSecret at an
+    # aws-secretsmanager:// or aws-ssm:// URL.
+    enabled: true
+
+# -----------------------------------------------------------------------------
+# Extra env (rarely needed)
+# -----------------------------------------------------------------------------
+env: []
+
+# -----------------------------------------------------------------------------
+# Service
+# -----------------------------------------------------------------------------
+service:
+  type: ClusterIP
+  port: 8080
+
+# -----------------------------------------------------------------------------
+# Ingress
+# -----------------------------------------------------------------------------
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  host: ""
+  path: /
+  pathType: Prefix
+  tls:
+    enabled: false
+    secretName: ""
+
+# -----------------------------------------------------------------------------
+# Pod / container specs
+# -----------------------------------------------------------------------------
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi
+
+podAnnotations: {}
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 65532
+  runAsGroup: 65532
+  fsGroup: 65532
+  seccompProfile:
+    type: RuntimeDefault
+
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: [ALL]
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+# -----------------------------------------------------------------------------
+# Per-cluster RBAC manifests (tier mode)
+#
+# When authorization.mode=tier, you apply a small set of RBAC manifests
+# to EACH managed cluster (the chart renders them when clusterRBAC.enabled=true).
+# These bind the periscope-tier:* groups to standard ClusterRoles and grant
+# Periscope's pod principal the impersonate verb.
+#
+# Render and apply per cluster:
+#   helm template periscope ./deploy/helm/periscope --values my-values.yaml \
+#     --show-only templates/cluster-rbac.yaml \
+#     | kubectl --context <managed-cluster> apply -f -
+# -----------------------------------------------------------------------------
+clusterRBAC:
+  enabled: false
+
+  # The K8s group your EKS Access Entry binds Periscope's pod
+  # principal to on each managed cluster. The chart-rendered
+  # ClusterRoleBinding for periscope-impersonator references this name.
+  bridgeGroup: periscope-bridge

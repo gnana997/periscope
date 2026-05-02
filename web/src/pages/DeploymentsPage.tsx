@@ -14,6 +14,8 @@ import {
 import {
   EmptyState,
   ErrorState,
+  ForbiddenState,
+  isForbidden,
   LoadingState,
 } from "../components/table/states";
 import { DetailPane } from "../components/detail/DetailPane";
@@ -131,7 +133,7 @@ export function DeploymentsPage({ cluster }: { cluster: string }) {
           query.isLoading ? (
             <LoadingState resource="deployments" />
           ) : query.isError ? (
-            <ErrorState title="couldn't reach the cluster" message={(query.error as Error).message} />
+            isForbidden(query.error) ? <ForbiddenState resource="deployments" /> : isForbidden(query.error) ? <ForbiddenState resource="deployments" /> : <ErrorState title="couldn't reach the cluster" message={(query.error as Error).message} />
           ) : filtered.length === 0 ? (
             <EmptyState resource="deployments" namespace={namespace} />
           ) : (

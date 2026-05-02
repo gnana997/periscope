@@ -31,7 +31,7 @@ import (
 //	    &tty=true|false              (optional; default true)
 //
 // Audit: emits structured slog records on session_start and session_end with
-// category=audit. See RFC 0001 §10 for the schema.
+// category=audit. See RFC 0001 10 for the schema.
 //
 // PR4 additions:
 //   - Per-cluster Exec config (clusters.Cluster.Exec) overrides global
@@ -303,7 +303,7 @@ func originPatterns() []string {
 }
 
 // k8sIdentityLabel returns the audit-friendly identity tag described in
-// RFC 0001 §10. v1 only knows two shapes; v2 will inject the IDC ARN here.
+// RFC 0001 10. v1 only knows two shapes; v2 will inject the IDC ARN here.
 func k8sIdentityLabel(c clusters.Cluster) string {
 	switch c.Backend {
 	case clusters.BackendKubeconfig:

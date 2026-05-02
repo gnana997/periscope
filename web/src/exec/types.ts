@@ -1,7 +1,7 @@
 /**
  * Wire types for the pod-exec WebSocket protocol.
  *
- * Browser ↔ Periscope (RFC 0001 §6):
+ * Browser ↔ Periscope (RFC 0001 6):
  *   binary frames  →  stdin (in)  / stdout+stderr merged (out)
  *   text frames    →  JSON control messages
  */

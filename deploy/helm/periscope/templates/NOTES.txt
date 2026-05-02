@@ -1,0 +1,40 @@
+Periscope is installed.
+
+  Release: {{ .Release.Name }}
+  Namespace: {{ .Release.Namespace }}
+  Auth mode: {{ if .Values.auth.oidc.issuer }}oidc ({{ .Values.auth.oidc.issuer }}){{ else }}dev (no oidc.issuer set — anyone hitting the dashboard becomes "{{ .Values.auth.dev.subject }}"){{ end }}
+  Secret mode: {{ .Values.secrets.mode }}
+
+{{- if eq .Values.secrets.mode "existing" }}
+
+  ⚠ secrets.mode=existing requires that the Secret already exists:
+    kubectl -n {{ .Release.Namespace }} get secret {{ .Values.secrets.existing.name }}
+  If it doesn't, the Pod will CrashLoopBackOff until you apply it. Example:
+    kubectl -n {{ .Release.Namespace }} create secret generic {{ .Values.secrets.existing.name }} \
+      --from-literal=OIDC_CLIENT_SECRET='<your client secret>'
+{{- end }}
+
+{{- if .Values.podIdentity.enabled }}
+
+  ⚠ Pod Identity association is created out-of-band. Run once:
+    aws eks create-pod-identity-association \
+      --cluster-name <hosting-cluster> \
+      --namespace {{ .Release.Namespace }} \
+      --service-account {{ include "periscope.serviceAccountName" . }} \
+      --role-arn arn:aws:iam::<acct-id>:role/periscope-base
+{{- end }}
+
+To reach Periscope:
+{{- if .Values.ingress.enabled }}
+
+  Ingress: https://{{ .Values.ingress.host }}{{ .Values.ingress.path }}
+
+  Make sure {{ .Values.auth.oidc.redirectURL }} matches the IdP's allowed callback URLs.
+{{- else }}
+
+  No Ingress is configured. Port-forward for now:
+    kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "periscope.fullname" . }} 8080:{{ .Values.service.port }}
+  then open http://localhost:8080/.
+{{- end }}
+
+Health: kubectl -n {{ .Release.Namespace }} exec deploy/{{ include "periscope.fullname" . }} -- wget -qO- http://localhost:{{ .Values.service.port }}/healthz

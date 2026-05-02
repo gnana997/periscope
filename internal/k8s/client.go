@@ -59,7 +59,7 @@ func defaultNewMetricsClient(ctx context.Context, p credentials.Provider, c clus
 func buildRestConfig(ctx context.Context, p credentials.Provider, c clusters.Cluster) (*rest.Config, error) {
 	switch c.Backend {
 	case clusters.BackendKubeconfig:
-		return buildKubeconfigRestConfig(c)
+		return buildKubeconfigRestConfig(p, c)
 	case clusters.BackendEKS, "":
 		return buildEKSRestConfig(ctx, p, c)
 	default:
@@ -94,16 +94,18 @@ func buildEKSRestConfig(ctx context.Context, p credentials.Provider, c clusters.
 		return nil, err
 	}
 
-	return &rest.Config{
+	cfg := &rest.Config{
 		Host:        *out.Cluster.Endpoint,
 		BearerToken: token,
 		TLSClientConfig: rest.TLSClientConfig{
 			CAData: caPEM,
 		},
-	}, nil
+	}
+	applyImpersonation(cfg, p)
+	return cfg, nil
 }
 
-func buildKubeconfigRestConfig(c clusters.Cluster) (*rest.Config, error) {
+func buildKubeconfigRestConfig(p credentials.Provider, c clusters.Cluster) (*rest.Config, error) {
 	cfg, err := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(
 		&clientcmd.ClientConfigLoadingRules{ExplicitPath: c.KubeconfigPath},
 		&clientcmd.ConfigOverrides{CurrentContext: c.KubeconfigContext},
@@ -111,5 +113,20 @@ func buildKubeconfigRestConfig(c clusters.Cluster) (*rest.Config, error) {
 	if err != nil {
 		return nil, fmt.Errorf("load kubeconfig %q: %w", c.KubeconfigPath, err)
 	}
+	applyImpersonation(cfg, p)
 	return cfg, nil
+}
+
+// applyImpersonation copies the Provider's impersonation strings
+// onto the rest.Config. No-op when impersonation is unset (shared
+// mode), so the call site is safe to make unconditionally.
+func applyImpersonation(cfg *rest.Config, p credentials.Provider) {
+	imp := p.Impersonation()
+	if imp.IsZero() {
+		return
+	}
+	cfg.Impersonate = rest.ImpersonationConfig{
+		UserName: imp.UserName,
+		Groups:   append([]string(nil), imp.Groups...),
+	}
 }

@@ -1,0 +1,76 @@
+# Auth0 — Periscope auth.yaml
+#
+# Fill in the four `<…>` placeholders, set OIDC_CLIENT_SECRET in the
+# pod's environment (or pick a different secret scheme below), and run:
+#
+#   PERISCOPE_AUTH_FILE=examples/config/auth.yaml.auth0 \
+#   OIDC_CLIENT_SECRET=… \
+#   go run ./cmd/periscope
+#
+# See docs/setup/auth0.md for the click-by-click tenant setup that
+# produces these values.
+
+oidc:
+  # Auth0 issuer is your tenant URL with a trailing slash.
+  # Example: https://acme.us.auth0.com/
+  issuer: https://<your-tenant>.<region>.auth0.com/
+
+  # Found at: Applications → your app → Settings → Basic Information.
+  clientID: <your-application-client-id>
+
+  # Secret reference. Schemes:
+  #   ${ENV_VAR}                                — env var on the periscope process
+  #   file:///path/to/secret                    — file contents (ESO / CSI mounts)
+  #   aws-secretsmanager://name[#json-key]      — AWS Secrets Manager
+  #   aws-ssm:///path/to/parameter              — AWS SSM Parameter Store SecureString
+  clientSecret: ${OIDC_CLIENT_SECRET}
+
+  redirectURL: https://<your-host>/api/auth/callback
+
+  scopes: [openid, profile, email, offline_access]
+
+  # Auth0-specific: set this to the Identifier of your Auth0 API resource
+  # if you want a JWT access token (otherwise Auth0 issues an opaque token).
+  # Empty is fine for v1 since BFF mode doesn't use the access token from
+  # the SPA.
+  audience: ""
+
+  postLogoutRedirect: https://<your-host>/api/auth/loggedout
+
+session:
+  cookieName: periscope_session
+  idleTimeout: 30m
+  absoluteTimeout: 8h
+  # cookieDomain: <your-host>   # optional; default = host-only
+
+authorization:
+  # K8s authorization mode: shared (default) | tier | raw.
+  # See docs/setup/cluster-rbac.md.
+  moe: shared
+
+  # tier-mode only — map your existing Auth0 groups to one of
+  # read / triage / write / maintain / admin. Leave empty in
+  # shared / raw modes.
+  groupTiers: {}
+  #   SRE-Platform:  admin
+  #   Engineers:     write
+
+  # tier-mode only. "" = users in no listed group are denied.
+  defaultTier: ""
+
+  # raw-mode only — prefix prepended to each impersonated group.
+  groupPrefix: "periscope:"
+
+  # Auth0 doesn't ship a `groups` claim by default. Add a Post-Login
+  # Action that sets a namespaced custom claim (see docs/setup/auth0.md
+  # §6) and point groupsClaim at the same name here.
+  groupsClaim: https://periscope/groups
+
+  # Empty list = any authenticated user is allowed. Tighten in prod.
+  allowedGroups: [periscope-users]
+
+# Only consulted in dev mode (PERISCOPE_AUTH_MODE=dev or no auth file).
+dev:
+  subject: dev@local
+  email: dev@local
+  groups: [dev]

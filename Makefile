@@ -1,8 +1,18 @@
-.PHONY: build backend frontend frontend-build tidy clean dev help
+.PHONY: build backend frontend frontend-build tidy clean dev help image kind-load helm-lint helm-template test
 
-# Production: build frontend, then Go binary that embeds web/dist
+# Image / kind defaults — override on the CLI: `make image TAG=v0.2`
+IMAGE     ?= periscope
+TAG       ?= dev
+KIND_NAME ?= certwatch
+COMMIT    := $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
+VERSION   ?= $(TAG)
+
+# Production: build frontend, then Go binary that embeds web/dist via
+# the `embed` build tag (internal/spa/embed_on.go).
 build: frontend-build
-	go build -o bin/periscope ./cmd/periscope
+	rm -rf internal/spa/dist
+	cp -r web/dist internal/spa/dist
+	go build -tags embed -o bin/periscope ./cmd/periscope
 
 # Run the Go backend (port 8080)
 backend:
@@ -16,12 +26,41 @@ frontend:
 frontend-build:
 	cd web && npm run build
 
+test:
+	go test ./...
+
+image:
+	docker build \
+	  --build-arg VERSION=$(VERSION) \
+	  --build-arg COMMIT=$(COMMIT) \
+	  -t $(IMAGE):$(TAG) \
+	  .
+
+kind-load: image
+	kind load docker-image $(IMAGE):$(TAG) --name $(KIND_NAME)
+
+helm-lint:
+	helm lint ./deploy/helm/periscope
+
+# Render the chart with the local image tag + a stub Auth0 config so
+# you can eyeball the output without filling in real values.
+helm-template:
+	helm template periscope ./deploy/helm/periscope \
+	  --namespace periscope \
+	  --set image.repository=$(IMAGE) \
+	  --set image.tag=$(TAG) \
+	  --set image.pullPolicy=IfNotPresent \
+	  --set auth.oidc.issuer=https://example.auth0.com/ \
+	  --set auth.oidc.clientID=test \
+	  --set auth.oidc.redirectURL=http://localhost:5173/api/auth/callback \
+	  --set auth.oidc.postLogoutRedirect=http://localhost:5173/api/auth/loggedout
+
 tidy:
 	go mod tidy
 	cd web && npm install
 
 clean:
-	rm -rf bin/ web/dist/ web/node_modules/
+	rm -rf bin/ web/dist/ web/node_modules/ internal/spa/dist/*
 
 help:
 	@echo "Run 'make backend' and 'make frontend' in separate terminals during dev."

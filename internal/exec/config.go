@@ -23,7 +23,7 @@ type Config struct {
 	MaxSessionsTotal   int
 }
 
-// Defaults from RFC 0001 §11. Operator-tunable thresholds, not security-
+// Defaults from RFC 0001 11. Operator-tunable thresholds, not security-
 // critical bounds — values outside the conservative range still produce a
 // working session, just with less typical behavior.
 const (

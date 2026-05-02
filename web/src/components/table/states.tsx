@@ -78,6 +78,48 @@ export function ErrorState({
   );
 }
 
+/**
+ * ForbiddenState — rendered when a list/detail call returns 403.
+ * Calmer than ErrorState (no red triangle); points the user at their
+ * cluster admin since Periscope-the-app cannot grant K8s perms.
+ */
+export function ForbiddenState({
+  resource,
+  message,
+}: {
+  resource: string;
+  message?: string;
+}) {
+  return (
+    <div className="flex flex-1 flex-col items-center justify-center gap-3 px-6 py-16 text-center">
+      <div className="flex size-9 items-center justify-center rounded-full bg-yellow-soft text-yellow">
+        <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden>
+          <path d="M11 7V5a3 3 0 10-6 0v2H4v7h8V7h-1zM6.5 5a1.5 1.5 0 113 0v2h-3V5z" fill="currentColor" />
+        </svg>
+      </div>
+      <h3 className="text-[14px] font-medium text-ink">access denied</h3>
+      <p className="max-w-md text-[12.5px] text-ink-muted">
+        Your role doesn't allow listing{" "}
+        <span className="font-mono">{resource}</span> here.
+      </p>
+      {message ? (
+        <p className="max-w-md font-mono text-[11px] text-ink-faint">{message}</p>
+      ) : null}
+      <p className="max-w-md text-[11.5px] text-ink-faint">
+        Contact your cluster admin if you think this is wrong.
+      </p>
+    </div>
+  );
+}
+
+// isForbidden detects whether an error from getJSON represents
+// a 403 response. The api wrapper preserves status on ApiError.
+export function isForbidden(err: unknown): boolean {
+  if (!err || typeof err !== "object") return false;
+  const status = (err as { status?: unknown }).status;
+  return status === 403;
+}
+
 export function NoClustersState() {
   return (
     <div className="flex flex-1 flex-col items-center justify-center gap-4 px-6 py-16 text-center">

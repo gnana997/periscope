@@ -22,3 +22,7 @@ web/.vite/
 # Local cluster registry (operator-specific, not committed)
 /clusters.yaml
 /clusters.local.yaml
+
+# Local-only filled auth config (template is my-auth.yaml.template)
+my-auth.yaml
+my-clusters.yaml

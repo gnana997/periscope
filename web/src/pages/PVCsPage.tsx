@@ -13,7 +13,7 @@ import { DetailPane } from "../components/detail/DetailPane";
 import { YamlView } from "../components/detail/YamlView";
 import { EventsView } from "../components/detail/EventsView";
 import { PVCDescribe } from "../components/detail/describe/PVCDescribe";
-import { EmptyState, ErrorState, LoadingState } from "../components/table/states";
+import { EmptyState, ErrorState, ForbiddenState, LoadingState, isForbidden } from "../components/table/states";
 import type { RowTint } from "../components/table/DataTable";
 
 const PVC_STATUS_OPTIONS = ["Bound", "Pending", "Lost"];
@@ -116,7 +116,7 @@ export function PVCsPage({ cluster }: { cluster: string }) {
           query.isLoading ? (
             <LoadingState resource="pvcs" />
           ) : query.isError ? (
-            <ErrorState title="couldn't reach the cluster" message={(query.error as Error).message} />
+            isForbidden(query.error) ? <ForbiddenState resource="pvcs" /> : isForbidden(query.error) ? <ForbiddenState resource="pvcs" /> : <ErrorState title="couldn't reach the cluster" message={(query.error as Error).message} />
           ) : filtered.length === 0 ? (
             <EmptyState resource="pvcs" namespace={namespace} />
           ) : (

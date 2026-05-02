@@ -10,6 +10,8 @@ import { DataTable, type Column } from "../components/table/DataTable";
 import {
   EmptyState,
   ErrorState,
+  ForbiddenState,
+  isForbidden,
   LoadingState,
 } from "../components/table/states";
 import { DetailPane } from "../components/detail/DetailPane";
@@ -108,7 +110,7 @@ export function ServicesPage({ cluster }: { cluster: string }) {
           query.isLoading ? (
             <LoadingState resource="services" />
           ) : query.isError ? (
-            <ErrorState title="couldn't reach the cluster" message={(query.error as Error).message} />
+            isForbidden(query.error) ? <ForbiddenState resource="services" /> : isForbidden(query.error) ? <ForbiddenState resource="services" /> : <ErrorState title="couldn't reach the cluster" message={(query.error as Error).message} />
           ) : filtered.length === 0 ? (
             <EmptyState resource="services" namespace={namespace} />
           ) : (

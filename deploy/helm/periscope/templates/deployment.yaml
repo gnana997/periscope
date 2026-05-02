@@ -1,0 +1,107 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "periscope.fullname" . }}
+  labels:
+    {{- include "periscope.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  strategy:
+    type: Recreate   # in-memory session store; no overlap during rollouts
+  selector:
+    matchLabels:
+      {{- include "periscope.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "periscope.selectorLabels" . | nindent 8 }}
+      annotations:
+        # Roll the pod whenever the auth or clusters ConfigMap changes.
+        checksum/auth: {{ include (print $.Template.BasePath "/configmap-auth.yaml") . | sha256sum }}
+        checksum/clusters: {{ include (print $.Template.BasePath "/configmap-clusters.yaml") . | sha256sum }}
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      serviceAccountName: {{ include "periscope.serviceAccountName" . }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: periscope
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.service.port }}
+              protocol: TCP
+          env:
+            - name: PORT
+              value: {{ .Values.service.port | quote }}
+            - name: PERISCOPE_AUTH_FILE
+              value: /etc/periscope/auth.yaml
+            - name: PERISCOPE_CLUSTERS_FILE
+              value: /etc/periscope/clusters.yaml
+            {{- /*
+              When mode != native, the OIDC client secret is sourced
+              from a K8s Secret. The auth.yaml clientSecret references
+              ${OIDC_CLIENT_SECRET}, which the resolver expands at
+              startup using this env var.
+            */}}
+            {{- if ne .Values.secrets.mode "native" }}
+            - name: OIDC_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "periscope.secretName" . }}
+                  key: {{ include "periscope.secretKey" . }}
+            {{- end }}
+            {{- with .Values.env }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          volumeMounts:
+            - name: config
+              mountPath: /etc/periscope
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 2
+            periodSeconds: 10
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+      volumes:
+        - name: config
+          projected:
+            sources:
+              - configMap:
+                  name: {{ include "periscope.fullname" . }}-auth
+              - configMap:
+                  name: {{ include "periscope.fullname" . }}-clusters
+        - name: tmp
+          emptyDir: {}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

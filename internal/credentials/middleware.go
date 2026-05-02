@@ -1,6 +1,7 @@
 package credentials
 
 import (
+	"context"
 	"log/slog"
 	"net/http"
 )
@@ -15,7 +16,7 @@ type Handler func(http.ResponseWriter, *http.Request, Provider)
 // build a Provider return 500.
 func Wrap(factory Factory, h Handler) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		session := sessionFromRequest(r)
+		session := SessionFromContext(r.Context())
 		p, err := factory.For(r.Context(), session)
 		if err != nil {
 			slog.ErrorContext(r.Context(), "credentials.For failed",
@@ -27,9 +28,26 @@ func Wrap(factory Factory, h Handler) http.HandlerFunc {
 	}
 }
 
-// sessionFromRequest extracts the authenticated Session from the request.
-// v1 stub: returns a fixed local-dev session. Replace when Okta OIDC
-// middleware lands.
-func sessionFromRequest(_ *http.Request) Session {
-	return Session{Subject: "dev@local"}
+type ctxKey int
+
+const sessionKey ctxKey = 1
+
+// WithSession plants a Session on the request context. Called by the
+// auth middleware once it has resolved the user from the cookie.
+//
+// The Session here is the *identity* slice — Subject/Email/Groups —
+// not credentials. Tokens never reach this layer; the AWS provider is
+// resolved separately through the Factory.
+func WithSession(ctx context.Context, s Session) context.Context {
+	return context.WithValue(ctx, sessionKey, s)
+}
+
+// SessionFromContext returns the Session attached by WithSession, or
+// the zero value if none is present. A zero Session has Subject ==
+// "anonymous" so audit lines never read empty.
+func SessionFromContext(ctx context.Context) Session {
+	if v, ok := ctx.Value(sessionKey).(Session); ok {
+		return v
+	}
+	return Session{Subject: "anonymous"}
 }

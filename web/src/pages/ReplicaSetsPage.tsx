@@ -6,7 +6,7 @@ import { ageFrom, nameMatches } from "../lib/format";
 import { cn } from "../lib/cn";
 import { PageHeader } from "../components/page/PageHeader";
 import { SplitPane } from "../components/page/SplitPane";
-import { EmptyState, ErrorState, LoadingState } from "../components/table/states";
+import { EmptyState, ErrorState, ForbiddenState, LoadingState, isForbidden } from "../components/table/states";
 import { DetailPane } from "../components/detail/DetailPane";
 import { ReplicaSetDescribe } from "../components/detail/describe/ReplicaSetDescribe";
 import { YamlView } from "../components/detail/YamlView";
@@ -209,7 +209,7 @@ export function ReplicaSetsPage({ cluster }: { cluster: string }) {
         storageKey="periscope.detailWidth.v4"
         left={
           query.isLoading ? <LoadingState resource="replicasets" /> :
-          query.isError ? <ErrorState title="couldn't reach the cluster" message={(query.error as Error).message} /> :
+          query.isError ? isForbidden(query.error) ? <ForbiddenState resource="replicasets" /> : isForbidden(query.error) ? <ForbiddenState resource="replicasets" /> : <ErrorState title="couldn't reach the cluster" message={(query.error as Error).message} /> :
           filtered.length === 0 ? <EmptyState resource="replicasets" namespace={namespace} /> :
           groupedList
         }

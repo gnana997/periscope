@@ -55,8 +55,11 @@ import { ExecPage } from "./pages/ExecPage";
 import { ExecSessionsProvider } from "./exec/ExecSessionsContext";
 import { Drawer } from "./exec/Drawer";
 import { SearchPalette } from "./components/search/SearchPalette";
+import { useAuth } from "./auth/AuthContext";
+import { LoginScreen } from "./auth/LoginScreen";
 
 export default function App() {
+  const { user, isLoading } = useAuth();
   const [searchOpen, setSearchOpen] = useState(false);
 
   // Global Cmd+K / Ctrl+K opens the search palette. Capture phase +
@@ -77,6 +80,17 @@ export default function App() {
   }, []);
 
   useTheme();
+
+  if (isLoading) {
+    return (
+      <div className="flex h-full items-center justify-center bg-bg">
+        <span aria-hidden className="block size-3.5 animate-spin rounded-full border-[1.5px] border-border-strong border-t-accent" />
+      </div>
+    );
+  }
+  if (!user) {
+    return <LoginScreen />;
+  }
 
   return (
     <ExecSessionsProvider>

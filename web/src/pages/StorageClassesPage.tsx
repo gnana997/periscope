@@ -11,7 +11,7 @@ import { DetailPane } from "../components/detail/DetailPane";
 import { YamlView } from "../components/detail/YamlView";
 import { EventsView } from "../components/detail/EventsView";
 import { StorageClassDescribe } from "../components/detail/describe/StorageClassDescribe";
-import { EmptyState, ErrorState, LoadingState } from "../components/table/states";
+import { EmptyState, ErrorState, ForbiddenState, LoadingState, isForbidden } from "../components/table/states";
 
 export function StorageClassesPage({ cluster }: { cluster: string }) {
   const [params, setParams] = useSearchParams();
@@ -89,7 +89,7 @@ export function StorageClassesPage({ cluster }: { cluster: string }) {
           query.isLoading ? (
             <LoadingState resource="storageclasses" />
           ) : query.isError ? (
-            <ErrorState title="couldn't reach the cluster" message={(query.error as Error).message} />
+            isForbidden(query.error) ? <ForbiddenState resource="storageclasses" /> : isForbidden(query.error) ? <ForbiddenState resource="storageclasses" /> : <ErrorState title="couldn't reach the cluster" message={(query.error as Error).message} />
           ) : filtered.length === 0 ? (
             <EmptyState resource="storageclasses" namespace={null} />
           ) : (

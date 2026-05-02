@@ -15,11 +15,15 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/gnana997/periscope/internal/auth"
+	"github.com/gnana997/periscope/internal/authz"
 	"github.com/gnana997/periscope/internal/clusters"
 	"github.com/gnana997/periscope/internal/credentials"
 	execsess "github.com/gnana997/periscope/internal/exec"
 	"github.com/gnana997/periscope/internal/httpx"
 	"github.com/gnana997/periscope/internal/k8s"
+	"github.com/gnana997/periscope/internal/secrets"
+	"github.com/gnana997/periscope/internal/spa"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -29,7 +33,7 @@ func main() {
 
 	ctx := context.Background()
 
-	factory, err := credentials.NewSharedIrsaFactory(ctx)
+	factory, err := credentials.NewSharedIrsaFactory(ctx, nil)
 	if err != nil {
 		slog.Error("failed to initialize credentials factory", "err", err)
 		os.Exit(1)
@@ -41,11 +45,64 @@ func main() {
 		os.Exit(1)
 	}
 
+	authCfg, err := auth.Load(os.Getenv("PERISCOPE_AUTH_FILE"))
+	if err != nil {
+		slog.Error("auth config", "err", err)
+		os.Exit(1)
+	}
+	slog.Info("auth", "mode", authCfg.Mode)
+
+	resolver := secrets.NewResolver(factory.AWSConfig())
+	if err := auth.ResolveSecrets(ctx, &authCfg, resolver); err != nil {
+		slog.Error("auth secrets", "err", err)
+		os.Exit(1)
+	}
+
+	// Build the authz mode resolver from the loaded auth config and
+	// attach it to the credentials factory. Done after ResolveSecrets
+	// so the auth config is fully realized; done after factory
+	// construction so the secrets resolver could use the same AWS
+	// config without circular bootstrapping.
+	authzResolver, err := authz.NewResolver(authz.Config{
+		Mode:          authz.Mode(authCfg.Authorization.Mode),
+		GroupTiers:    authCfg.Authorization.GroupTiers,
+		DefaultTier:   authCfg.Authorization.DefaultTier,
+		GroupPrefix:   authCfg.Authorization.GroupPrefix,
+		GroupsClaim:   authCfg.Authorization.GroupsClaim,
+		AllowedGroups: authCfg.Authorization.AllowedGroups,
+	})
+	if err != nil {
+		slog.Error("authz resolver", "err", err)
+		os.Exit(1)
+	}
+	factory.AttachResolver(authzResolver)
+	slog.Info("authz", "mode", authzResolver.Mode())
+
+	var authClient *auth.OIDCClient
+	if authCfg.Mode == auth.ModeOIDC {
+		authClient, err = auth.NewOIDCClient(ctx, authCfg.OIDC, authCfg.Authorization.GroupsClaim)
+		if err != nil {
+			slog.Error("oidc discovery", "err", err)
+			os.Exit(1)
+		}
+	}
+	sessionStore := auth.NewMemoryStore()
+	go sessionStore.Run(ctx)
+
+	var authMW func(http.Handler) http.Handler
+	if authCfg.Mode == auth.ModeOIDC {
+		authMW = auth.Middleware(authClient, sessionStore, authCfg)
+	} else {
+		authMW = auth.DevMiddleware(authCfg)
+	}
+
 	router := chi.NewRouter()
 	router.Use(httpx.RequestID)
 	router.Use(httpx.RealIP)
 	router.Use(httpx.Recoverer)
 	router.Use(httpx.AuditBegin)
+	router.Use(authMW)
+	auth.RegisterRoutes(router, authClient, sessionStore, authCfg, authzResolver)
 	router.Get("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))
@@ -737,20 +794,19 @@ func main() {
 		credentials.Wrap(factory, secretRevealHandler(registry)))
 
 	// --- Pod exec (interactive shell, WebSocket) — RFC 0001 ---
-	// Behind a feature flag for PR1; enable with PERISCOPE_FEATURE_EXEC=1.
 	execSessions := execsess.NewRegistry()
 	execPolicy := k8s.NewPolicy(k8s.PolicyConfig{}) // defaults: 3 WS fails / 30m SPDY pin
-	if os.Getenv("PERISCOPE_FEATURE_EXEC") == "1" {
-		router.Get("/api/clusters/{cluster}/pods/{ns}/{name}/exec",
-			credentials.Wrap(factory, execHandler(registry, execSessions, execPolicy)))
-		slog.Info("feature flag", "feature", "exec", "enabled", true)
-		if os.Getenv("PERISCOPE_PROBE_CLUSTERS_ON_BOOT") == "1" {
-			go probeClustersOnBoot(ctx, factory, registry, execPolicy)
-		}
+	router.Get("/api/clusters/{cluster}/pods/{ns}/{name}/exec",
+		credentials.Wrap(factory, execHandler(registry, execSessions, execPolicy)))
+	if os.Getenv("PERISCOPE_PROBE_CLUSTERS_ON_BOOT") == "1" {
+		go probeClustersOnBoot(ctx, factory, registry, execPolicy)
+	}
+
+	if h := spa.Handler(); h != nil {
+		router.NotFound(h.ServeHTTP)
+		slog.Info("spa", "embedded", true)
 	} else {
-		_ = execSessions
-		_ = execPolicy
-		slog.Info("feature flag", "feature", "exec", "enabled", false)
+		slog.Info("spa", "embedded", false)
 	}
 
 	port := os.Getenv("PORT")

@@ -10,6 +10,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 
 	"github.com/gnana997/periscope/internal/clusters"
+	"github.com/gnana997/periscope/internal/credentials"
 )
 
 // stubProvider is a credentials.Provider with hardcoded credentials,
@@ -26,6 +27,8 @@ func (stubProvider) Retrieve(_ context.Context) (aws.Credentials, error) {
 }
 
 func (stubProvider) Actor() string { return "test@example.com" }
+
+func (stubProvider) Impersonation() credentials.ImpersonationConfig { return credentials.ImpersonationConfig{} }
 
 func TestMintEKSToken_format(t *testing.T) {
 	c := clusters.Cluster{

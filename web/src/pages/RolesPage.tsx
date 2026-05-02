@@ -7,7 +7,7 @@ import { PageHeader } from "../components/page/PageHeader";
 import { FilterStrip } from "../components/page/FilterStrip";
 import { SplitPane } from "../components/page/SplitPane";
 import { DataTable, type Column } from "../components/table/DataTable";
-import { EmptyState, ErrorState, LoadingState } from "../components/table/states";
+import { EmptyState, ErrorState, ForbiddenState, LoadingState, isForbidden } from "../components/table/states";
 import { DetailPane } from "../components/detail/DetailPane";
 import { RoleDescribe } from "../components/detail/describe/RoleDescribe";
 import { YamlView } from "../components/detail/YamlView";
@@ -80,7 +80,7 @@ export function RolesPage({ cluster }: { cluster: string }) {
         storageKey="periscope.detailWidth.v4"
         left={
           query.isLoading ? <LoadingState resource="roles" /> :
-          query.isError ? <ErrorState title="couldn't reach the cluster" message={(query.error as Error).message} /> :
+          query.isError ? isForbidden(query.error) ? <ForbiddenState resource="roles" /> : isForbidden(query.error) ? <ForbiddenState resource="roles" /> : <ErrorState title="couldn't reach the cluster" message={(query.error as Error).message} /> :
           filtered.length === 0 ? <EmptyState resource="roles" namespace={namespace} /> :
           <DataTable<Role>
             columns={columns}

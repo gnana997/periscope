@@ -12,7 +12,7 @@ import { DetailPane } from "../components/detail/DetailPane";
 import { YamlView } from "../components/detail/YamlView";
 import { EventsView } from "../components/detail/EventsView";
 import { PVDescribe } from "../components/detail/describe/PVDescribe";
-import { EmptyState, ErrorState, LoadingState } from "../components/table/states";
+import { EmptyState, ErrorState, ForbiddenState, LoadingState, isForbidden } from "../components/table/states";
 import type { RowTint } from "../components/table/DataTable";
 
 const PV_STATUS_OPTIONS = ["Available", "Bound", "Released", "Failed"];
@@ -109,7 +109,7 @@ export function PVsPage({ cluster }: { cluster: string }) {
           query.isLoading ? (
             <LoadingState resource="pvs" />
           ) : query.isError ? (
-            <ErrorState title="couldn't reach the cluster" message={(query.error as Error).message} />
+            isForbidden(query.error) ? <ForbiddenState resource="pvs" /> : isForbidden(query.error) ? <ForbiddenState resource="pvs" /> : <ErrorState title="couldn't reach the cluster" message={(query.error as Error).message} />
           ) : filtered.length === 0 ? (
             <EmptyState resource="pvs" namespace={null} />
           ) : (

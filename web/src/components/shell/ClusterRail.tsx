@@ -1,8 +1,7 @@
-import { useQuery } from "@tanstack/react-query";
 import { useNavigate, useParams } from "react-router-dom";
 import { useClusters } from "../../hooks/useClusters";
-import { api } from "../../lib/api";
 import { cn } from "../../lib/cn";
+import { UserMenu } from "./UserMenu";
 import type { Cluster } from "../../lib/types";
 
 // ClusterRail is the leftmost vertical bar — Slack/Discord style. Each
@@ -37,7 +36,7 @@ export function ClusterRail() {
             ))}
       </div>
       <div className="shrink-0 pt-2">
-        <UserAvatar />
+        <UserMenu />
       </div>
     </aside>
   );
@@ -80,23 +79,6 @@ function ClusterPill({
   );
 }
 
-function UserAvatar() {
-  const { data } = useQuery({
-    queryKey: ["whoami"],
-    queryFn: ({ signal }) => api.whoami(signal),
-  });
-  const actor = data?.actor ?? "—";
-  const initials = userInitials(actor);
-  return (
-    <div
-      title={actor}
-      aria-label={actor}
-      className="flex size-9 items-center justify-center rounded-full bg-accent text-[11px] font-semibold text-white"
-    >
-      {initials}
-    </div>
-  );
-}
 
 // Pulls 2–3 letters out of a cluster name for the pill label. Hyphen/dot/
 // underscore-segmented names use the leading char of each segment (so
@@ -113,10 +95,3 @@ function clusterInitials(name: string): string {
   return name.slice(0, 3).toUpperCase();
 }
 
-function userInitials(actor: string): string {
-  if (!actor || actor === "—") return "·";
-  const parts = actor.split(/[@.\s]/).filter(Boolean);
-  if (parts.length === 0) return actor[0]?.toUpperCase() ?? "·";
-  if (parts.length === 1) return parts[0]!.slice(0, 2).toUpperCase();
-  return (parts[0]![0] + parts[1]![0]).toUpperCase();
-}

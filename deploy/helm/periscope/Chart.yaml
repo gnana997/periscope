@@ -1,0 +1,22 @@
+apiVersion: v2
+name: periscope
+description: |
+  Periscope — a keyless-auth EKS dashboard. OIDC login (Auth0 / Okta /
+  any compliant IdP) + Pod Identity / IRSA for AWS access. No long-lived
+  AWS credentials in the pod, no kubeconfigs with embedded creds on the
+  laptop.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+keywords:
+  - kubernetes
+  - eks
+  - dashboard
+  - oidc
+  - irsa
+  - pod-identity
+home: https://github.com/gnana997/periscope
+sources:
+  - https://github.com/gnana997/periscope
+maintainers:
+  - name: gnana997

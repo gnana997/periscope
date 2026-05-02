@@ -1,0 +1,54 @@
+# Periscope cluster registry. Point PERISCOPE_CLUSTERS_FILE at this
+# (or its rendered ConfigMap inside the pod).
+#
+# Two backends:
+#   eks         — talk to an EKS cluster via STS AssumeRole + EKS bearer token
+#   kubeconfig  — talk to any K8s cluster via a kubeconfig file (good for
+#                 local dev with kind/minikube and for non-AWS clusters)
+#
+# v1 audit identity comes from the OIDC `sub`; AWS principal is the
+# Periscope pod's role (Pod Identity / IRSA), optionally chained
+# through `assumeRoleArn` on a per-cluster basis.
+
+clusters:
+  # ------------------------------------------------------------------
+  # EKS — production cluster in another account, accessed via AssumeRole
+  # ------------------------------------------------------------------
+  - name: prod-eu-west-1
+    backend: eks
+    region: eu-west-1
+    arn: arn:aws:eks:eu-west-1:222222222222:cluster/prod-eu-west-1
+
+    # Optional. When set, Periscope assumes this role using its base
+    # credentials, then mints an EKS bearer token from the assumed
+    # role. The role must (a) trust the periscope-base role in account
+    # 111111111111 and (b) have an EKS Access Entry on prod-eu-west-1
+    # bound to a Kubernetes group with the right RBAC.
+    #
+    # Setting AssumeRoleArn (PR-B) is forthcoming; included here so
+    # config files written today survive the upgrade unchanged.
+    # assumeRoleArn: arn:aws:iam::222222222222:role/periscope-prod-readonly
+    # externalID: optional-shared-secret
+    # sessionDurationSeconds: 3600
+
+    # Optional: per-cluster pod-exec overrides. Defaults are sane.
+    # exec:
+    #   enabled: true
+    #   serverIdleSeconds: 1800
+    #   maxSessionsPerUser: 2
+
+  # ------------------------------------------------------------------
+  # EKS — same-account cluster, no AssumeRole hop
+  # ------------------------------------------------------------------
+  - name: staging-us-east-1
+    backend: eks
+    region: us-east-1
+    arn: arn:aws:eks:us-east-1:111111111111:cluster/staging-us-east-1
+
+  # ------------------------------------------------------------------
+  # Local dev — kind cluster via the developer's kubeconfig
+  # ------------------------------------------------------------------
+  - name: kind-local
+    backend: kubeconfig
+    kubeconfigPath: /home/you/.kube/config
+    kubeconfigContext: kind-local

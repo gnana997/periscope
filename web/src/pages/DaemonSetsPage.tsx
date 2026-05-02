@@ -14,6 +14,8 @@ import {
 import {
   EmptyState,
   ErrorState,
+  ForbiddenState,
+  isForbidden,
   LoadingState,
 } from "../components/table/states";
 import { DetailPane } from "../components/detail/DetailPane";
@@ -144,7 +146,7 @@ export function DaemonSetsPage({ cluster }: { cluster: string }) {
           query.isLoading ? (
             <LoadingState resource="daemonsets" />
           ) : query.isError ? (
-            <ErrorState title="couldn't reach the cluster" message={(query.error as Error).message} />
+            isForbidden(query.error) ? <ForbiddenState resource="daemonsets" /> : isForbidden(query.error) ? <ForbiddenState resource="daemonsets" /> : <ErrorState title="couldn't reach the cluster" message={(query.error as Error).message} />
           ) : filtered.length === 0 ? (
             <EmptyState resource="daemonsets" namespace={namespace} />
           ) : (

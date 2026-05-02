@@ -14,6 +14,8 @@ import {
 import {
   EmptyState,
   ErrorState,
+  ForbiddenState,
+  isForbidden,
   LoadingState,
 } from "../components/table/states";
 import { DetailPane } from "../components/detail/DetailPane";
@@ -131,7 +133,7 @@ export function StatefulSetsPage({ cluster }: { cluster: string }) {
           query.isLoading ? (
             <LoadingState resource="statefulsets" />
           ) : query.isError ? (
-            <ErrorState title="couldn't reach the cluster" message={(query.error as Error).message} />
+            isForbidden(query.error) ? <ForbiddenState resource="statefulsets" /> : isForbidden(query.error) ? <ForbiddenState resource="statefulsets" /> : <ErrorState title="couldn't reach the cluster" message={(query.error as Error).message} />
           ) : filtered.length === 0 ? (
             <EmptyState resource="statefulsets" namespace={namespace} />
           ) : (

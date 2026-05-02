@@ -18,7 +18,7 @@ import (
 
 // Session orchestration for one exec stream.
 //
-// Wire format on the browser-facing WebSocket (see RFC 0001 §6):
+// Wire format on the browser-facing WebSocket (see RFC 0001 6):
 //
 //	binary frames  →  stdin (in)  /  merged stdout+stderr (out)
 //	text frames    →  JSON control messages
@@ -90,7 +90,7 @@ func Run(ctx context.Context, ws *websocket.Conn, p credentials.Provider, params
 
 	// lastActivity is the unix-nano timestamp of the most recent stdin
 	// byte received OR stdout byte sent. Heartbeat ping/pong does NOT
-	// reset it (RFC 0001 §7 — "a session with no terminal output is not
+	// reset it (RFC 0001 7 — "a session with no terminal output is not
 	// active just because it's holding a connection").
 	startedAt := time.Now()
 	var lastActivity atomic.Int64
@@ -231,7 +231,7 @@ func Run(ctx context.Context, ws *websocket.Conn, p credentials.Provider, params
 	})
 
 	// Run the exec stream. Stdout and Stderr point at the same pipe so the
-	// browser sees a single merged stream (RFC §6).
+	// browser sees a single merged stream (RFC 6).
 	result, execErr := k8s.ExecPod(sessionCtx, p, k8s.ExecPodArgs{
 		Cluster:      params.Cluster,
 		Namespace:    params.Namespace,

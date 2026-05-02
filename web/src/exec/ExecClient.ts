@@ -13,7 +13,7 @@ import type {
  * TypeScript with no React dependency; the React layer subscribes via the
  * .on*() listeners.
  *
- * Wire format (RFC 0001 §6):
+ * Wire format (RFC 0001 6):
  *   binary frames  →  stdin (out)  /  stdout+stderr merged (in)
  *   text frames    →  JSON control envelopes
  *

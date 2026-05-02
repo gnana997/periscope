@@ -1,0 +1,57 @@
+# Periscope auth configuration. Copy to auth.yaml and point
+# PERISCOPE_AUTH_FILE at it to enable OIDC-backed login. Works with
+# any OIDC-compliant IdP (Auth0, Okta, Azure AD / Entra, Google, Keycloak).
+#
+# When PERISCOPE_AUTH_FILE is unset, Periscope runs in dev mode: every
+# request is treated as a fixed dev user. Useful for local development;
+# never appropriate for shared deployments.
+
+# Pick one (or leave unset to infer from oidc.issuer):
+#   PERISCOPE_AUTH_MODE=oidc  → require all the oidc.* fields below
+#   PERISCOPE_AUTH_MODE=dev   → ignore the oidc block, use dev block
+
+oidc:
+  # Auth0 example:  https://your-tenant.us.auth0.com/
+  # Okta example:   https://your-tenant.okta.com/oauth2/default
+  # Entra example:  https://login.microsoftonline.com/{tenant-id}/v2.0
+  issuer: https://your-tenant.us.auth0.com/
+
+  clientID: your-application-client-id
+
+  # Secret reference. Supported schemes:
+  #   ${ENV_VAR}                                — env var on the periscope process
+  #   file:///path/to/secret                    — file contents (ESO / CSI driver mounts)
+  #   aws-secretsmanager://name                 — AWS Secrets Manager
+  #   aws-secretsmanager://name#json-key        — AWS Secrets Manager (key out of JSON)
+  #   aws-ssm:///path/to/parameter              — AWS SSM Parameter Store SecureString
+  # Plain literal string is allowed but discouraged.
+  clientSecret: ${OIDC_CLIENT_SECRET}
+
+  redirectURL: https://periscope.your-corp.com/api/auth/callback
+  scopes: [openid, profile, email, offline_access]
+
+  # Auth0-only: the API audience identifier you registered. Empty for
+  # Okta / Entra / most other IdPs (BFF doesn't use the access token).
+  audience: ""
+
+  postLogoutRedirect: https://periscope.your-corp.com/api/auth/loggedout
+
+session:
+  cookieName: periscope_session
+  idleTimeout: 30m
+  absoluteTimeout: 8h
+  # cookieDomain: periscope.your-corp.com   # optional; default = host-only
+
+authorization:
+  # Empty list = any authenticated user is allowed.
+  # For Auth0 you'll typically configure an Action that adds a
+  # namespaced groups claim, e.g. https://periscope/groups, then
+  # set groupsClaim below to match.
+  allowedGroups: [periscope-users, sre-team]
+  groupsClaim: groups
+
+# Only consulted in dev mode.
+dev:
+  subject: dev@local
+  email: dev@local
+  groups: [dev]

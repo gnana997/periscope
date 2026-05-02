@@ -7,7 +7,7 @@ import { PageHeader } from "../components/page/PageHeader";
 import { FilterStrip } from "../components/page/FilterStrip";
 import { SplitPane } from "../components/page/SplitPane";
 import { DataTable, type Column } from "../components/table/DataTable";
-import { EmptyState, ErrorState, LoadingState } from "../components/table/states";
+import { EmptyState, ErrorState, ForbiddenState, LoadingState, isForbidden } from "../components/table/states";
 import { DetailPane } from "../components/detail/DetailPane";
 import { ServiceAccountDescribe } from "../components/detail/describe/ServiceAccountDescribe";
 import { YamlView } from "../components/detail/YamlView";
@@ -80,7 +80,7 @@ export function ServiceAccountsPage({ cluster }: { cluster: string }) {
         storageKey="periscope.detailWidth.v4"
         left={
           query.isLoading ? <LoadingState resource="serviceaccounts" /> :
-          query.isError ? <ErrorState title="couldn't reach the cluster" message={(query.error as Error).message} /> :
+          query.isError ? isForbidden(query.error) ? <ForbiddenState resource="serviceaccounts" /> : isForbidden(query.error) ? <ForbiddenState resource="serviceaccounts" /> : <ErrorState title="couldn't reach the cluster" message={(query.error as Error).message} /> :
           filtered.length === 0 ? <EmptyState resource="serviceaccounts" namespace={namespace} /> :
           <DataTable<ServiceAccount>
             columns={columns}

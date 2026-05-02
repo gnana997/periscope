@@ -14,6 +14,8 @@ import {
 import {
   EmptyState,
   ErrorState,
+  ForbiddenState,
+  isForbidden,
   LoadingState,
 } from "../components/table/states";
 import { DetailPane } from "../components/detail/DetailPane";
@@ -191,7 +193,7 @@ export function JobsPage({ cluster }: { cluster: string }) {
           query.isLoading ? (
             <LoadingState resource="jobs" />
           ) : query.isError ? (
-            <ErrorState title="couldn't reach the cluster" message={(query.error as Error).message} />
+            isForbidden(query.error) ? <ForbiddenState resource="jobs" /> : isForbidden(query.error) ? <ForbiddenState resource="jobs" /> : <ErrorState title="couldn't reach the cluster" message={(query.error as Error).message} />
           ) : filtered.length === 0 ? (
             <EmptyState resource="jobs" namespace={namespace} />
           ) : (

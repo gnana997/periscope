@@ -70,7 +70,7 @@ interface ExecSessionsContextValue {
 // this window, the user has to click reconnect on the banner.
 const AUTO_RESTART_WINDOW_MS = 60_000;
 // How long the tab can stay hidden before we voluntarily close live
-// sessions (RFC 0001 §7).
+// sessions (RFC 0001 7).
 const VISIBILITY_HIDE_LIMIT_MS = 5 * 60_000;
 
 interface VisibilityRecent {
@@ -516,7 +516,7 @@ export function ExecSessionsProvider({ children }: { children: ReactNode }) {
 export function useExecSessions(): ExecSessionsContextValue {
   // React 19's `use()` reads context with the same semantics as
   // useContext but is allowed inside conditionals and loops, so it's the
-  // forward-looking choice for new code (RFC 0001 §7 and the
+  // forward-looking choice for new code (RFC 0001 7 and the
   // react-doctor recommendation).
   const v = use(Ctx);
   if (!v) {

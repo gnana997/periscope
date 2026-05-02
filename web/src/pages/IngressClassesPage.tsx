@@ -7,7 +7,7 @@ import { cn } from "../lib/cn";
 import { PageHeader } from "../components/page/PageHeader";
 import { SplitPane } from "../components/page/SplitPane";
 import { DataTable, type Column } from "../components/table/DataTable";
-import { EmptyState, ErrorState, LoadingState } from "../components/table/states";
+import { EmptyState, ErrorState, ForbiddenState, LoadingState, isForbidden } from "../components/table/states";
 import { DetailPane } from "../components/detail/DetailPane";
 import { IngressClassDescribe } from "../components/detail/describe/IngressClassDescribe";
 import { YamlView } from "../components/detail/YamlView";
@@ -99,7 +99,7 @@ export function IngressClassesPage({ cluster }: { cluster: string }) {
         storageKey="periscope.detailWidth.v4"
         left={
           query.isLoading ? <LoadingState resource="ingressclasses" /> :
-          query.isError ? <ErrorState title="couldn't reach the cluster" message={(query.error as Error).message} /> :
+          query.isError ? isForbidden(query.error) ? <ForbiddenState resource="ingressclasses" /> : isForbidden(query.error) ? <ForbiddenState resource="ingressclasses" /> : <ErrorState title="couldn't reach the cluster" message={(query.error as Error).message} /> :
           filtered.length === 0 ? <EmptyState resource="ingressclasses" namespace={null} /> :
           <DataTable<IngressClass>
             columns={columns}

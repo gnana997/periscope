@@ -15,6 +15,8 @@ import { PhaseTag, phaseTone } from "../components/table/StatusDot";
 import {
   EmptyState,
   ErrorState,
+  ForbiddenState,
+  isForbidden,
   LoadingState,
 } from "../components/table/states";
 import { DetailPane } from "../components/detail/DetailPane";
@@ -201,7 +203,7 @@ export function PodsPage({ cluster }: { cluster: string }) {
           podsQuery.isLoading ? (
             <LoadingState resource="pods" />
           ) : podsQuery.isError ? (
-            <ErrorState title="couldn't reach the cluster" message={(podsQuery.error as Error).message} />
+            isForbidden(podsQuery.error) ? <ForbiddenState resource="pods" /> : <ErrorState title="couldn't reach the cluster" message={(podsQuery.error as Error).message} />
           ) : filtered.length === 0 ? (
             <EmptyState resource="pods" namespace={namespace} />
           ) : (

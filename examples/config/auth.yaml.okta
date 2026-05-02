@@ -1,0 +1,77 @@
+# Okta — Periscope auth.yaml
+#
+# Fill in the four `<…>` placeholders, set OIDC_CLIENT_SECRET in the
+# pod's environment (or pick a different secret scheme below), and run:
+#
+#   PERISCOPE_AUTH_FILE=examples/config/auth.yaml.okta \
+#   OIDC_CLIENT_SECRET=… \
+#   go run ./cmd/periscope
+#
+# See docs/setup/okta.md for the click-by-click org setup that produces
+# these values.
+
+oidc:
+  # Okta issuer is your authorization server URL. The `default` AS is
+  # available on every Okta org; custom AS resources live at the same
+  # path with a different name.
+  # Example: https://acme.okta.com/oauth2/default
+  issuer: https://<your-org>.okta.com/oauth2/<auth-server>
+
+  # Found at: Applications → your app → General → Client Credentials.
+  clientID: <your-application-client-id>
+
+  # Secret reference. Schemes:
+  #   ${ENV_VAR}                                — env var on the periscope process
+  #   file:///path/to/secret                    — file contents (ESO / CSI mounts)
+  #   aws-secretsmanager://name[#json-key]      — AWS Secrets Manager
+  #   aws-ssm:///path/to/parameter              — AWS SSM Parameter Store SecureString
+  clientSecret: ${OIDC_CLIENT_SECRET}
+
+  redirectURL: https://<your-host>/api/auth/callback
+
+  # Include the `groups` scope so Okta returns the claim. Some
+  # authorization-server configs require the scope to be allowed
+  # explicitly — see docs/setup/okta.md 5.
+  scopes: [openid, profile, email, offline_access, groups]
+
+  # Okta doesn't need an audience. Leave empty.
+  audience: ""
+
+  postLogoutRedirect: https://<your-host>/api/auth/loggedout
+
+session:
+  cookieName: periscope_session
+  idleTimeout: 30m
+  absoluteTimeout: 8h
+  # cookieDomain: <your-host>   # optional; default = host-only
+
+authorization:
+  # K8s authorization mode: shared (default) | tier | raw.
+  # See docs/setup/cluster-rbac.md.
+  mode: shared
+
+  # tier-mode only — map your existing Okta groups to one of
+  # read / triage / write / maintain / admin.
+  groupTiers: {}
+  #   SRE-Platform:  admin
+  #   Engineers:     write
+
+  # tier-mode only. "" = users in no listed group are denied.
+  defaultTier: ""
+
+  # raw-mode only — prefix prepended to each impersonated group.
+  groupPrefix: "periscope:"
+
+  # Okta exposes the `groups` claim natively once you add the claim
+  # filter at Security → API → Authorization Servers → your AS →
+  # Claims (see docs/setup/okta.md §5).
+  groupsClaim: groups
+
+  # Empty list = any authenticated user is allowed. Tighten in prod.
+  allowedGroups: [periscope-users]
+
+# Only consulted in dev mode (PERISCOPE_AUTH_MODE=dev or no auth file).
+dev:
+  subject: dev@local
+  email: dev@local
+  groups: [dev]

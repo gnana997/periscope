@@ -184,7 +184,7 @@ type ExecPodArgs struct {
     Stdout        io.Writer
     Stderr        io.Writer        // may equal Stdout when merged
     TerminalSize  <-chan remotecommand.TerminalSize  // nil if no TTY
-    Policy        ExecutorPolicy   // injected; see §8
+    Policy        ExecutorPolicy   // injected; see 8
 }
 
 type ExecResult struct {
@@ -203,7 +203,7 @@ MCP transport instead of an HTTP WebSocket.
 goroutines: stdin pump, stdout pump, idle tracker, heartbeat, control-frame router.
 Wires the streams between the browser WebSocket and `ExecPod`.
 
-**`internal/exec/policy.go`** — per-cluster circuit breaker (see §8).
+**`internal/exec/policy.go`** — per-cluster circuit breaker (see 8).
 
 **`internal/exec/registry.go`** — in-memory session registry for cap enforcement and
 admin "kill session" later. Keyed by `actor.sub`. No persistence in v1.
@@ -726,7 +726,7 @@ The feature is complete (v1) when:
 6. Per-cluster circuit breaker pins a SPDY-only cluster after the configured
    threshold and self-recovers when the apiserver supports v5 again.
 7. Every session start and end emits a structured audit record with the schema in
-   §10. Stdin payload appears in zero log lines under any test.
+   10. Stdin payload appears in zero log lines under any test.
 8. Concurrent session caps are enforced; the user-facing message lists active
    sessions with disconnect buttons.
 9. Distroless container produces `E_NO_SHELL`, not a hung connection or stack

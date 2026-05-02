@@ -14,6 +14,8 @@ import { StatusDot } from "../components/table/StatusDot";
 import {
   EmptyState,
   ErrorState,
+  ForbiddenState,
+  isForbidden,
   LoadingState,
 } from "../components/table/states";
 import { DetailPane } from "../components/detail/DetailPane";
@@ -183,7 +185,7 @@ export function NodesPage({ cluster }: { cluster: string }) {
           query.isLoading ? (
             <LoadingState resource="nodes" />
           ) : query.isError ? (
-            <ErrorState title="couldn't reach the cluster" message={(query.error as Error).message} />
+            isForbidden(query.error) ? <ForbiddenState resource="nodes" /> : isForbidden(query.error) ? <ForbiddenState resource="nodes" /> : <ErrorState title="couldn't reach the cluster" message={(query.error as Error).message} />
           ) : filtered.length === 0 ? (
             <EmptyState resource="nodes" namespace={null} />
           ) : (
