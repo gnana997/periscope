@@ -1,6 +1,7 @@
 package exec
 
 import (
+	"strings"
 	"context"
 	"encoding/json"
 	"errors"
@@ -260,7 +261,17 @@ func Run(ctx context.Context, ws *websocket.Conn, p credentials.Provider, params
 	// almost certainly means the container has no shell on PATH. Surface
 	// it as a friendlier error frame so the UI can render a helpful
 	// message instead of a confusing "exit 127".
-	if override == nil && execErr == nil && shouldFlagNoShell(result, stats, elapsed) {
+	if override == nil && execErr != nil && isForbiddenErr(execErr) {
+		_ = writeControl(sessionCtx, ws, controlFrame{
+			Type:      "error",
+			Code:      "E_FORBIDDEN",
+			Message:   "your role does not allow exec into this pod. contact your cluster admin.",
+			Retryable: false,
+		})
+		setOverride("forbidden")
+		override = closeOverride.Load()
+		result.Reason = "forbidden"
+	} else 	if override == nil && execErr == nil && shouldFlagNoShell(result, stats, elapsed) {
 		_ = writeControl(sessionCtx, ws, controlFrame{
 			Type:      "error",
 			Code:      "E_NO_SHELL",
@@ -378,8 +389,27 @@ func closedFrame(r k8s.ExecResult, err error, override *string) controlFrame {
 		frame.Reason = "client"
 	case errors.Is(err, context.DeadlineExceeded):
 		frame.Reason = "deadline"
+	case isForbiddenErr(err):
+		frame.Reason = "forbidden"
+		frame.Message = "your role does not allow exec into this pod. contact your cluster admin."
 	default:
+		frame.Reason = "server_error"
 		frame.Reason = "server_error"
 	}
 	return frame
+}
+
+// isForbiddenErr reports whether err carries the apiserver's
+// "forbidden" signal. The exec path doesn't get a typed
+// kerrors.StatusError back from client-go's executor.Stream — only a
+// wrapped string — so we sniff the message. False positives are
+// unlikely; the substring is stable across K8s versions.
+func isForbiddenErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "is forbidden:") ||
+		strings.Contains(msg, "forbidden: User \"") ||
+		strings.Contains(msg, "Status Code: 403")
 }

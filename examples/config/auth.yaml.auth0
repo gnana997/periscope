@@ -63,7 +63,7 @@ authorization:
 
   # Auth0 doesn't ship a `groups` claim by default. Add a Post-Login
   # Action that sets a namespaced custom claim (see docs/setup/auth0.md
-  # §6) and point groupsClaim at the same name here.
+  # 6) and point groupsClaim at the same name here.
   groupsClaim: https://periscope/groups
 
   # Empty list = any authenticated user is allowed. Tighten in prod.

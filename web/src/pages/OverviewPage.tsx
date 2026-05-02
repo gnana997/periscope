@@ -1,6 +1,6 @@
 import { useNavigate } from "react-router-dom";
 import { useClusterSummary, useClusterEvents } from "../hooks/useResource";
-import { CircularGauge, CircularGaugeSkeleton } from "../components/ui/CircularGauge";
+import { CircularGauge } from "../components/ui/CircularGauge";
 import { ThemeToggle } from "../components/shell/ThemeToggle";
 import { ageFrom } from "../lib/format";
 import { cn } from "../lib/cn";
@@ -73,30 +73,26 @@ export function OverviewPage({ cluster }: { cluster: string }) {
           <Card title="CPU">
             {data.metricsAvailable === false ? (
               <MetricsNudgeInline />
-            ) : data.metricsAvailable && data.cpuPercent != null ? (
+            ) : data.metricsAvailable ? (
               <CircularGauge
                 percent={data.cpuPercent ?? null}
                 label=""
                 usageLabel={data.cpuUsed ?? "—"}
                 totalLabel={data.cpuAllocatable}
               />
-            ) : (
-              <CircularGaugeSkeleton label="" />
-            )}
+            ) : null}
           </Card>
           <Card title="Memory">
             {data.metricsAvailable === false ? (
               <MetricsNudgeInline />
-            ) : data.metricsAvailable && data.memoryPercent != null ? (
+            ) : data.metricsAvailable ? (
               <CircularGauge
                 percent={data.memoryPercent ?? null}
                 label=""
                 usageLabel={data.memoryUsed ?? "—"}
                 totalLabel={data.memoryAllocatable}
               />
-            ) : (
-              <CircularGaugeSkeleton label="" />
-            )}
+            ) : null}
           </Card>
           {/* B. Pod phase distribution */}
           <Card title="Pods">
@@ -216,6 +212,9 @@ function ClusterIdentityBanner({
   data: ClusterSummary;
 }) {
   const nodesReady = data.nodeReadyCount === data.nodeCount;
+  const nodesForbidden = data.accessibility?.nodes === "forbidden";
+  const nodesUnavailable = data.accessibility?.nodes === "unavailable";
+  const namespacesForbidden = data.accessibility?.namespaces === "forbidden";
   return (
     <div className="sticky top-0 z-20 flex items-start justify-between border-b border-border bg-bg/80 px-6 py-5 backdrop-blur-md">
       <div className="min-w-0 flex-1">
@@ -228,15 +227,27 @@ function ClusterIdentityBanner({
           <span>{data.provider}</span>
           <span>·</span>
           <span>
-            <span
-              className={cn(
-                "tabular-nums",
-                nodesReady ? "text-green" : "text-red",
-              )}
-            >
-              {data.nodeReadyCount}
-            </span>
-            <span className="text-ink-faint">/{data.nodeCount}</span> nodes
+            {nodesForbidden ? (
+              <span className="text-ink-faint italic" title="your role doesn't allow listing nodes">
+                node access restricted
+              </span>
+            ) : nodesUnavailable ? (
+              <span className="text-yellow" title="could not reach the apiserver for nodes">
+                nodes unavailable
+              </span>
+            ) : (
+              <>
+                <span
+                  className={cn(
+                    "tabular-nums",
+                    nodesReady ? "text-green" : "text-red",
+                  )}
+                >
+                  {data.nodeReadyCount}
+                </span>
+                <span className="text-ink-faint">/{data.nodeCount}</span> nodes
+              </>
+            )}
           </span>
           <span>·</span>
           <span>
@@ -254,10 +265,21 @@ function ClusterIdentityBanner({
           </span>
           <span>·</span>
           <span>
-            <span className="tabular-nums text-ink-muted">
-              {data.namespaceCount}
-            </span>{" "}
-            namespaces
+            {namespacesForbidden ? (
+              <span
+                className="italic text-ink-faint"
+                title="your role doesn't allow listing namespaces"
+              >
+                namespace access restricted
+              </span>
+            ) : (
+              <>
+                <span className="tabular-nums text-ink-muted">
+                  {data.namespaceCount}
+                </span>{" "}
+                namespaces
+              </>
+            )}
           </span>
         </div>
       </div>
@@ -515,6 +537,9 @@ function TopPodList({
               >
                 {p.percent.toFixed(0)}%
               </span>
+            )}
+            {(p.percent == null || p.percent < 0) && (
+              <span aria-hidden className="w-12 shrink-0" />
             )}
           </button>
         </li>

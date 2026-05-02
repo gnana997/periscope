@@ -739,6 +739,14 @@ type ClusterSummary struct {
 	CPUAllocatable    string  `json:"cpuAllocatable"`
 	MemoryAllocatable string  `json:"memoryAllocatable"`
 	MetricsAvailable  bool    `json:"metricsAvailable"`
+	// Accessibility surfaces, per-resource, whether the cluster
+	// summary could collect that data. Three states per field:
+	//   "ok"          — the call succeeded (or 0 was the real answer)
+	//   "forbidden"   — the actor's K8s RBAC denied the list call
+	//   "unavailable" — anything else (apiserver down, server error)
+	// SPA + future MCP agents read this to differentiate "empty" from
+	// "hidden by RBAC" before reporting numbers to the user.
+	Accessibility AccessibilityMap `json:"accessibility"`
 	CPUUsed           string  `json:"cpuUsed,omitempty"`
 	MemoryUsed        string  `json:"memoryUsed,omitempty"`
 	CPUPercent        float64 `json:"cpuPercent,omitempty"`
@@ -1038,4 +1046,24 @@ type RuntimeClassDetail struct {
 	Tolerations  []string          `json:"tolerations,omitempty"`
 	Labels       map[string]string `json:"labels,omitempty"`
 	Annotations  map[string]string `json:"annotations,omitempty"`
+}
+
+// AccessStatus is the per-resource access state on a ClusterSummary.
+// Three values; treat anything else as "unavailable" for safety.
+type AccessStatus string
+
+const (
+	AccessOK          AccessStatus = "ok"
+	AccessForbidden   AccessStatus = "forbidden"
+	AccessUnavailable AccessStatus = "unavailable"
+)
+
+// AccessibilityMap reports the per-resource fetch outcomes used to
+// build a ClusterSummary. New fields can be added without breaking
+// the SPA — unrecognized ones surface as "unknown" via JSON.
+type AccessibilityMap struct {
+	Nodes      AccessStatus `json:"nodes"`
+	Pods       AccessStatus `json:"pods"`
+	Namespaces AccessStatus `json:"namespaces"`
+	Metrics    AccessStatus `json:"metrics"`
 }

@@ -44,17 +44,17 @@ type Config struct {
 }
 
 type OIDCConfig struct {
-	Issuer             string   `yaml:"issuer"`
-	ClientID           string   `yaml:"clientID"`
-	ClientSecret       string   `yaml:"clientSecret"`
-	RedirectURL        string   `yaml:"redirectURL"`
-	Scopes             []string `yaml:"scopes"`
-	Audience           string   `yaml:"audience"`
+	Issuer       string   `yaml:"issuer"`
+	ClientID     string   `yaml:"clientID"`
+	ClientSecret string   `yaml:"clientSecret"`
+	RedirectURL  string   `yaml:"redirectURL"`
+	Scopes       []string `yaml:"scopes"`
+	Audience     string   `yaml:"audience"`
 	// ProviderName is the human-friendly IdP label shown on the SPA
 	// LoginScreen ("sign in with auth0"). Optional — auto-detected
 	// from the issuer URL when empty.
-	ProviderName string `yaml:"providerName"`
-	PostLogoutRedirect string   `yaml:"postLogoutRedirect"`
+	ProviderName       string `yaml:"providerName"`
+	PostLogoutRedirect string `yaml:"postLogoutRedirect"`
 }
 
 type SessionConfig struct {
@@ -66,7 +66,7 @@ type SessionConfig struct {
 
 type AuthorizationConfig struct {
 	// Mode picks the K8s authorization strategy.
-	// One of: shared (default) | tier | raw. See RFC 0002 §4.
+	// One of: shared (default) | tier | raw. See RFC 0002 4.
 	Mode string `yaml:"mode"`
 
 	// AllowedGroups gates Periscope access. Empty list = any
@@ -168,7 +168,6 @@ func Load(path string) (Config, error) {
 	if cfg.Authorization.GroupsClaim == "" {
 		cfg.Authorization.GroupsClaim = "groups"
 	}
-
 
 	if cfg.Mode == "" {
 		if cfg.OIDC.Issuer != "" {

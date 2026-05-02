@@ -122,7 +122,7 @@ func main() {
 			summary, err := k8s.GetClusterSummary(r.Context(), p, k8s.GetClusterSummaryArgs{Cluster: c})
 			if err != nil {
 				slog.Error("cluster summary", "cluster", c.Name, "err", err)
-				http.Error(w, err.Error(), http.StatusInternalServerError)
+				http.Error(w, err.Error(), httpStatusFor(err))
 				return
 			}
 			writeJSON(w, http.StatusOK, summary)
@@ -156,7 +156,7 @@ func main() {
 			})
 			if err != nil {
 				slog.Error("search", "cluster", c.Name, "err", err)
-				http.Error(w, err.Error(), http.StatusInternalServerError)
+				http.Error(w, err.Error(), httpStatusFor(err))
 				return
 			}
 			writeJSON(w, http.StatusOK, results)
@@ -173,7 +173,7 @@ func main() {
 			result, err := k8s.ListCRDs(r.Context(), p, c)
 			if err != nil {
 				slog.Error("list CRDs", "cluster", c.Name, "err", err)
-				http.Error(w, err.Error(), http.StatusInternalServerError)
+				http.Error(w, err.Error(), httpStatusFor(err))
 				return
 			}
 			writeJSON(w, http.StatusOK, result)
@@ -891,7 +891,7 @@ func listResource[Resp any](
 			slog.ErrorContext(r.Context(), "list operation failed",
 				"resource", resource, "err", err,
 				"cluster", c.Name, "actor", p.Actor())
-			http.Error(w, "operation failed", http.StatusInternalServerError)
+			http.Error(w, "operation failed", httpStatusFor(err))
 			return
 		}
 		writeJSON(w, http.StatusOK, result)
@@ -921,7 +921,7 @@ func detailHandler[Resp any](
 			slog.ErrorContext(r.Context(), "get operation failed",
 				"resource", resource, "err", err,
 				"cluster", c.Name, "ns", ns, "name", name, "actor", p.Actor())
-			http.Error(w, "operation failed", http.StatusInternalServerError)
+			http.Error(w, "operation failed", httpStatusFor(err))
 			return
 		}
 		writeJSON(w, http.StatusOK, result)
@@ -950,7 +950,7 @@ func yamlHandler(
 			slog.ErrorContext(r.Context(), "yaml operation failed",
 				"resource", resource, "err", err,
 				"cluster", c.Name, "ns", ns, "name", name, "actor", p.Actor())
-			http.Error(w, "operation failed", http.StatusInternalServerError)
+			http.Error(w, "operation failed", httpStatusFor(err))
 			return
 		}
 		w.Header().Set("Content-Type", "application/yaml; charset=utf-8")
@@ -979,7 +979,7 @@ func eventsHandler(reg *clusters.Registry, kind string) credentials.Handler {
 			slog.ErrorContext(r.Context(), "events operation failed",
 				"kind", kind, "err", err,
 				"cluster", c.Name, "ns", ns, "name", name, "actor", p.Actor())
-			http.Error(w, "operation failed", http.StatusInternalServerError)
+			http.Error(w, "operation failed", httpStatusFor(err))
 			return
 		}
 		writeJSON(w, http.StatusOK, result)
@@ -1009,7 +1009,7 @@ func secretRevealHandler(reg *clusters.Registry) credentials.Handler {
 			slog.ErrorContext(r.Context(), "secret reveal failed",
 				"err", err, "cluster", c.Name, "ns", ns, "name", name, "key", key,
 				"actor", p.Actor())
-			http.Error(w, "operation failed", http.StatusInternalServerError)
+			http.Error(w, "operation failed", httpStatusFor(err))
 			return
 		}
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
@@ -1430,7 +1430,7 @@ func customResourceListHandler(reg *clusters.Registry) credentials.Handler {
 		result, err := k8s.ListCustomResources(r.Context(), p, ref)
 		if err != nil {
 			slog.Error("list custom resources", "cluster", c.Name, "gvr", ref.Group+"/"+ref.Version+"/"+ref.Plural, "err", err)
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			http.Error(w, err.Error(), httpStatusFor(err))
 			return
 		}
 		writeJSON(w, http.StatusOK, result)
@@ -1449,7 +1449,7 @@ func customResourceDetailHandler(reg *clusters.Registry) credentials.Handler {
 		result, err := k8s.GetCustomResource(r.Context(), p, ref)
 		if err != nil {
 			slog.Error("get custom resource", "cluster", c.Name, "name", ref.Name, "err", err)
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			http.Error(w, err.Error(), httpStatusFor(err))
 			return
 		}
 		writeJSON(w, http.StatusOK, result)
@@ -1468,7 +1468,7 @@ func customResourceYAMLHandler(reg *clusters.Registry) credentials.Handler {
 		yaml, err := k8s.GetCustomResourceYAML(r.Context(), p, ref)
 		if err != nil {
 			slog.Error("get custom resource yaml", "cluster", c.Name, "name", ref.Name, "err", err)
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			http.Error(w, err.Error(), httpStatusFor(err))
 			return
 		}
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
@@ -1502,7 +1502,7 @@ func customResourceEventsHandler(reg *clusters.Registry) credentials.Handler {
 		})
 		if err != nil {
 			slog.Error("get custom resource events", "cluster", c.Name, "name", ref.Name, "err", err)
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			http.Error(w, err.Error(), httpStatusFor(err))
 			return
 		}
 		writeJSON(w, http.StatusOK, events)

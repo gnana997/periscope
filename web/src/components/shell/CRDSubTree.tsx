@@ -62,7 +62,7 @@ function groupByAPIGroup(crds: CRD[]): APIGroupSection[] {
 }
 
 export function CRDSubTree({ cluster }: { cluster: string }) {
-  const { data, isLoading, isError } = useCRDs(cluster);
+  const { data, isLoading, isError, error } = useCRDs(cluster);
   const [openGroups, setOpenGroups] = useState<Set<string>>(readOpenGroups);
   const location = useLocation();
 
@@ -111,8 +111,24 @@ export function CRDSubTree({ cluster }: { cluster: string }) {
     );
   }
   if (isError) {
+    const forbidden =
+      typeof error === "object" &&
+      error !== null &&
+      (error as { status?: unknown }).status === 403;
     return (
-      <div className="px-3 py-1 text-[11px] text-red">CRDs unavailable</div>
+      <div
+        className={cn(
+          "px-3 py-1 text-[11px] italic",
+          forbidden ? "text-ink-faint" : "text-red",
+        )}
+        title={
+          forbidden
+            ? "your role doesn't allow listing CRDs"
+            : (error as Error)?.message ?? "CRDs unavailable"
+        }
+      >
+        {forbidden ? "no access to CRDs" : "CRDs unavailable"}
+      </div>
     );
   }
   if (groups.length === 0) {

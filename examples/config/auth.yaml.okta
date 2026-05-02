@@ -64,7 +64,7 @@ authorization:
 
   # Okta exposes the `groups` claim natively once you add the claim
   # filter at Security → API → Authorization Servers → your AS →
-  # Claims (see docs/setup/okta.md §5).
+  # Claims (see docs/setup/okta.md 5).
   groupsClaim: groups
 
   # Empty list = any authenticated user is allowed. Tighten in prod.

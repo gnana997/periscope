@@ -758,6 +758,12 @@ export interface ClusterSummary {
   cpuAllocatable: string;
   memoryAllocatable: string;
   metricsAvailable: boolean;
+  accessibility: {
+    nodes: AccessStatus;
+    pods: AccessStatus;
+    namespaces: AccessStatus;
+    metrics: AccessStatus;
+  };
   cpuUsed?: string;
   memoryUsed?: string;
   cpuPercent?: number;
@@ -1140,3 +1146,5 @@ export interface RuntimeClassDetail extends RuntimeClass {
   labels?: Record<string, string>;
   annotations?: Record<string, string>;
 }
+
+export type AccessStatus = "ok" | "forbidden" | "unavailable";

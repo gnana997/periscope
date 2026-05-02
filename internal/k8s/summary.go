@@ -1,6 +1,7 @@
 package k8s
 
 import (
+	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	"context"
 	"fmt"
 	"sort"
@@ -52,6 +53,16 @@ const topPodsLimit = 5
 // wall-clock roundtrip. Failure of an optional fetch (workload kinds,
 // metrics-server, PV/PVC) degrades that section silently rather than
 // blanking the whole page.
+// fillOKAccessibility marks any unset Accessibility field as ok.
+// Called at the end of GetClusterSummary so success paths don't have
+// to set it explicitly inside every goroutine.
+func fillOKAccessibility(s *ClusterSummary) {
+	if s.Accessibility.Nodes == "" { s.Accessibility.Nodes = AccessOK }
+	if s.Accessibility.Pods == "" { s.Accessibility.Pods = AccessOK }
+	if s.Accessibility.Namespaces == "" { s.Accessibility.Namespaces = AccessOK }
+	if s.Accessibility.Metrics == "" { s.Accessibility.Metrics = AccessOK }
+}
+
 func GetClusterSummary(ctx context.Context, p credentials.Provider, args GetClusterSummaryArgs) (ClusterSummary, error) {
 	cs, err := newClientFn(ctx, p, args.Cluster)
 	if err != nil {
@@ -92,7 +103,10 @@ func GetClusterSummary(ctx context.Context, p credentials.Provider, args GetClus
 		defer wg.Done()
 		ns, err := cs.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
 		if err != nil {
-			return // degrade — node card just renders zeros
+			mu.Lock()
+			summary.Accessibility.Nodes = classifyAccess(err)
+			mu.Unlock()
+			return
 		}
 		ready := 0
 		var cpu, mem int64
@@ -119,6 +133,9 @@ func GetClusterSummary(ctx context.Context, p credentials.Provider, args GetClus
 		defer wg.Done()
 		ps, err := cs.CoreV1().Pods("").List(ctx, metav1.ListOptions{})
 		if err != nil {
+			mu.Lock()
+			summary.Accessibility.Pods = classifyAccess(err)
+			mu.Unlock()
 			return
 		}
 		podList = ps
@@ -136,6 +153,9 @@ func GetClusterSummary(ctx context.Context, p credentials.Provider, args GetClus
 		defer wg.Done()
 		ns, err := cs.CoreV1().Namespaces().List(ctx, metav1.ListOptions{})
 		if err != nil {
+			mu.Lock()
+			summary.Accessibility.Namespaces = classifyAccess(err)
+			mu.Unlock()
 			return
 		}
 		mu.Lock()
@@ -286,22 +306,29 @@ func GetClusterSummary(ctx context.Context, p credentials.Provider, args GetClus
 	}()
 
 	wg.Wait()
+	fillOKAccessibility(&summary)
 
 	// --- Metrics-server (cluster-wide CPU/memory + top pods) -----------
 	// Sequential after the parallel section so we have nodeList /
 	// podList for percentage math against allocatable + per-pod limits.
 	mc, err := newMetricsClientFn(ctx, p, args.Cluster)
 	if err != nil {
-		// Provider built no metrics client (e.g. RBAC denies) — leave
 		// MetricsAvailable=false and skip.
+		// Provider built no metrics client (e.g. RBAC denies) — record
+		// the access reason and surface the legacy MetricsAvailable bool.
+		summary.Accessibility.Metrics = classifyAccess(err)
+		summary.MetricsAvailable = false
 		return summary, nil
 	}
 	nodeMetrics, err := mc.MetricsV1beta1().NodeMetricses().List(ctx, metav1.ListOptions{})
 	if err != nil {
 		if isMetricsUnavailable(err) {
+			summary.Accessibility.Metrics = AccessUnavailable
 			summary.MetricsAvailable = false
 			return summary, nil
 		}
+		summary.Accessibility.Metrics = classifyAccess(err)
+		summary.MetricsAvailable = false
 		return summary, nil
 	}
 	var usedCPU, usedMem int64
@@ -310,6 +337,7 @@ func GetClusterSummary(ctx context.Context, p credentials.Provider, args GetClus
 		usedMem += nm.Usage.Memory().Value()
 	}
 	summary.MetricsAvailable = true
+	summary.Accessibility.Metrics = AccessOK
 	summary.CPUUsed = formatCPU(usedCPU)
 	summary.MemoryUsed = formatMemory(usedMem)
 	if totalCPUMillis > 0 {
@@ -569,3 +597,15 @@ func providerLabel(backend string) string {
 	}
 }
 
+
+// classifyAccess maps a list-call error to the AccessStatus value
+// to record on the ClusterSummary. nil err → AccessOK.
+func classifyAccess(err error) AccessStatus {
+	if err == nil {
+		return AccessOK
+	}
+	if k8serrors.IsForbidden(err) {
+		return AccessForbidden
+	}
+	return AccessUnavailable
+}

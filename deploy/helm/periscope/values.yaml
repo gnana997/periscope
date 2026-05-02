@@ -73,7 +73,7 @@ auth:
 
   authorization:
     # K8s authorization mode: shared (default) | tier | raw.
-    # See RFC 0002 §4 and docs/setup/cluster-rbac.md for the comparison.
+    # See RFC 0002 4 and docs/setup/cluster-rbac.md for the comparison.
     mode: shared
 
     # tier-mode only — map IdP groups to one of: read / triage / write / maintain / admin.

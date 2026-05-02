@@ -1,7 +1,7 @@
 {{- if .Values.clusterRBAC.enabled -}}
 {{- /*
   cluster-rbac.yaml — per-cluster RBAC manifests for tier-mode
-  impersonation (RFC 0002 §7.6). When tier mode is active, apply this
+  impersonation (RFC 0002 7.6). When tier mode is active, apply this
   rendered set to EACH cluster Periscope manages:
       helm template periscope . --values my-values.yaml \
         --show-only templates/cluster-rbac.yaml \

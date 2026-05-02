@@ -4,7 +4,7 @@ import { useCRDs } from "../hooks/useResource";
 import { ageFrom, nameMatches } from "../lib/format";
 import { cn } from "../lib/cn";
 import { PageHeader } from "../components/page/PageHeader";
-import { ErrorState, LoadingState } from "../components/table/states";
+import { ErrorState, ForbiddenState, LoadingState, isForbidden } from "../components/table/states";
 import type { CRD } from "../lib/types";
 
 /**
@@ -93,10 +93,14 @@ export function CRDsPage({ cluster }: { cluster: string }) {
         {isLoading ? (
           <LoadingState resource="custom resource definitions" />
         ) : isError ? (
+          isForbidden(error) ? (
+            <ForbiddenState resource="custom resource definitions" />
+          ) : (
           <ErrorState
             title="couldn't load CRDs"
             message={(error as Error)?.message ?? "unknown"}
           />
+          )
         ) : grouped.length === 0 ? (
           <div className="flex h-full items-center justify-center px-6 text-center">
             <div>

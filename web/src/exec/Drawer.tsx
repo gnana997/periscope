@@ -449,6 +449,11 @@ function SessionBanner({ session }: { session: ExecSessionMeta }) {
   const showNoShell =
     session.status === "error" && session.errorCode === "E_NO_SHELL";
 
+  // Forbidden error: K8s rejected the exec upgrade because the user's
+  // role lacks pods/exec. Tier-mode read/write users hit this on Ctrl+E.
+  const showForbidden =
+    session.status === "error" && session.errorCode === "E_FORBIDDEN";
+
   // Reconnect-failed (gave up after MAX_RECONNECT_ATTEMPTS).
   const showGivenUp =
     session.status === "error" &&
@@ -457,7 +462,7 @@ function SessionBanner({ session }: { session: ExecSessionMeta }) {
 
   const showReconnecting = session.status === "reconnecting";
 
-  if (!showIdleWarn && !showNoShell && !showGivenUp && !showReconnecting) {
+  if (!showIdleWarn && !showNoShell && !showForbidden && !showGivenUp && !showReconnecting) {
     return null;
   }
 
@@ -487,6 +492,18 @@ function SessionBanner({ session }: { session: ExecSessionMeta }) {
         <BannerButton onClick={() => closeSession(session.id)}>
           close
         </BannerButton>
+      </BannerShell>
+    );
+  }
+
+  if (showForbidden) {
+    return (
+      <BannerShell tone="red" instant>
+        <span>
+          {session.errorMessage ??
+            "your role does not allow exec into this pod. contact your cluster admin."}
+        </span>
+        <BannerButton onClick={() => closeSession(session.id)}>close</BannerButton>
       </BannerShell>
     );
   }
