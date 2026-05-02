@@ -21,6 +21,7 @@ import {
 import { DetailPane } from "../components/detail/DetailPane";
 import { NamespaceDescribe } from "../components/detail/describe/NamespaceDescribe";
 import { YamlView } from "../components/detail/YamlView";
+import { useEditorDirty } from "../hooks/useEditorDirty";
 import { EventsView } from "../components/detail/EventsView";
 import { cn } from "../lib/cn";
 
@@ -65,6 +66,8 @@ export function NamespacesPage({ cluster }: { cluster: string }) {
 
   // Namespaces are cluster-scoped — pass empty ns string to YamlView/EventsView,
   // and the DescribeRouter calls useNamespaceDetail (no ns param).
+  const editFlag = useEditorDirty(cluster, "namespaces", undefined, selectedName);
+
   const detail = selectedName ? (
     <DetailPane
       title={selectedName}
@@ -74,7 +77,7 @@ export function NamespacesPage({ cluster }: { cluster: string }) {
       onClose={() => setMany({ sel: null, tab: null })}
       tabs={[
         { id: "describe", label: "describe", ready: true, content: <NamespaceDescribe cluster={cluster} name={selectedName} /> },
-        { id: "yaml", label: "yaml", ready: true, content: <YamlView cluster={cluster} kind="namespaces" ns="" name={selectedName} /> },
+        { id: "yaml", label: "yaml", ready: true, content: <YamlView cluster={cluster} kind="namespaces" ns="" name={selectedName} />, dirty: editFlag.dirty },
         { id: "events", label: "events", ready: true, content: <EventsView cluster={cluster} kind="namespaces" ns="" name={selectedName} /> },
       ]}
     />

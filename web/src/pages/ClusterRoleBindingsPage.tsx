@@ -10,6 +10,7 @@ import { EmptyState, ErrorState, ForbiddenState, LoadingState, isForbidden } fro
 import { DetailPane } from "../components/detail/DetailPane";
 import { ClusterRoleBindingDescribe } from "../components/detail/describe/ClusterRoleBindingDescribe";
 import { YamlView } from "../components/detail/YamlView";
+import { useEditorDirty } from "../hooks/useEditorDirty";
 import { cn } from "../lib/cn";
 
 export function ClusterRoleBindingsPage({ cluster }: { cluster: string }) {
@@ -48,6 +49,8 @@ export function ClusterRoleBindingsPage({ cluster }: { cluster: string }) {
     { key: "age", header: "age", weight: 0.8, align: "right", cellClassName: "font-mono text-ink-muted", accessor: (r) => ageFrom(r.createdAt) },
   ];
 
+  const editFlag = useEditorDirty(cluster, "clusterrolebindings", undefined, selectedName);
+
   const detail = selectedName ? (
     <DetailPane
       title={selectedName}
@@ -57,7 +60,7 @@ export function ClusterRoleBindingsPage({ cluster }: { cluster: string }) {
       onClose={() => setMany({ sel: null, tab: null })}
       tabs={[
         { id: "describe", label: "describe", ready: true, content: <ClusterRoleBindingDescribe cluster={cluster} name={selectedName} /> },
-        { id: "yaml", label: "yaml", ready: true, content: <YamlView cluster={cluster} kind="clusterrolebindings" ns="" name={selectedName} /> },
+        { id: "yaml", label: "yaml", ready: true, content: <YamlView cluster={cluster} kind="clusterrolebindings" ns="" name={selectedName} />, dirty: editFlag.dirty },
       ]}
     />
   ) : null;

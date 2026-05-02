@@ -21,6 +21,7 @@ import {
 import { DetailPane } from "../components/detail/DetailPane";
 import { JobDescribe } from "../components/detail/describe/JobDescribe";
 import { YamlView } from "../components/detail/YamlView";
+import { useEditorDirty } from "../hooks/useEditorDirty";
 import { EventsView } from "../components/detail/EventsView";
 import { WorkloadLogsTab } from "../components/logs/WorkloadLogsTab";
 import { NamespacePicker } from "../components/shell/NamespacePicker";
@@ -144,6 +145,8 @@ export function JobsPage({ cluster }: { cluster: string }) {
     return null;
   };
 
+  const editFlag = useEditorDirty(cluster, "jobs", selectedNs ?? undefined, selectedName);
+
   const detail =
     selectedNs && selectedName ? (
       <DetailPane
@@ -154,7 +157,7 @@ export function JobsPage({ cluster }: { cluster: string }) {
         onClose={() => setMany({ sel: null, selNs: null, tab: null })}
         tabs={[
           { id: "describe", label: "describe", ready: true, content: <JobDescribe cluster={cluster} ns={selectedNs} name={selectedName} /> },
-          { id: "yaml", label: "yaml", ready: true, content: <YamlView cluster={cluster} kind="jobs" ns={selectedNs} name={selectedName} /> },
+          { id: "yaml", label: "yaml", ready: true, content: <YamlView cluster={cluster} kind="jobs" ns={selectedNs} name={selectedName} />, dirty: editFlag.dirty },
           { id: "events", label: "events", ready: true, content: <EventsView cluster={cluster} kind="jobs" ns={selectedNs} name={selectedName} /> },
           { id: "logs", label: "logs", ready: true, content: <WorkloadLogsTab kind="job" cluster={cluster} ns={selectedNs} name={selectedName} /> },
         ]}

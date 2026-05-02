@@ -11,6 +11,7 @@ import { EmptyState, ErrorState, ForbiddenState, LoadingState, isForbidden } fro
 import { DetailPane } from "../components/detail/DetailPane";
 import { NetworkPolicyDescribe } from "../components/detail/describe/NetworkPolicyDescribe";
 import { YamlView } from "../components/detail/YamlView";
+import { useEditorDirty } from "../hooks/useEditorDirty";
 import { EventsView } from "../components/detail/EventsView";
 import { NamespacePicker } from "../components/shell/NamespacePicker";
 
@@ -55,6 +56,8 @@ export function NetworkPoliciesPage({ cluster }: { cluster: string }) {
 
   const selectedKey = selectedNs && selectedName ? `${selectedNs}/${selectedName}` : null;
 
+  const editFlag = useEditorDirty(cluster, "networkpolicies", selectedNs ?? undefined, selectedName);
+
   const detail =
     selectedNs && selectedName ? (
       <DetailPane
@@ -65,7 +68,7 @@ export function NetworkPoliciesPage({ cluster }: { cluster: string }) {
         onClose={() => setMany({ sel: null, selNs: null, tab: null })}
         tabs={[
           { id: "describe", label: "describe", ready: true, content: <NetworkPolicyDescribe cluster={cluster} ns={selectedNs} name={selectedName} /> },
-          { id: "yaml", label: "yaml", ready: true, content: <YamlView cluster={cluster} kind="networkpolicies" ns={selectedNs} name={selectedName} /> },
+          { id: "yaml", label: "yaml", ready: true, content: <YamlView cluster={cluster} kind="networkpolicies" ns={selectedNs} name={selectedName} />, dirty: editFlag.dirty },
           { id: "events", label: "events", ready: true, content: <EventsView cluster={cluster} kind="networkpolicies" ns={selectedNs} name={selectedName} /> },
         ]}
       />

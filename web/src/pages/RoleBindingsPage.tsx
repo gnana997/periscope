@@ -11,6 +11,7 @@ import { EmptyState, ErrorState, ForbiddenState, LoadingState, isForbidden } fro
 import { DetailPane } from "../components/detail/DetailPane";
 import { RoleBindingDescribe } from "../components/detail/describe/RoleBindingDescribe";
 import { YamlView } from "../components/detail/YamlView";
+import { useEditorDirty } from "../hooks/useEditorDirty";
 import { NamespacePicker } from "../components/shell/NamespacePicker";
 
 export function RoleBindingsPage({ cluster }: { cluster: string }) {
@@ -54,6 +55,8 @@ export function RoleBindingsPage({ cluster }: { cluster: string }) {
 
   const selectedKey = selectedNs && selectedName ? `${selectedNs}/${selectedName}` : null;
 
+  const editFlag = useEditorDirty(cluster, "rolebindings", selectedNs ?? undefined, selectedName);
+
   const detail =
     selectedNs && selectedName ? (
       <DetailPane
@@ -64,7 +67,7 @@ export function RoleBindingsPage({ cluster }: { cluster: string }) {
         onClose={() => setMany({ sel: null, selNs: null, tab: null })}
         tabs={[
           { id: "describe", label: "describe", ready: true, content: <RoleBindingDescribe cluster={cluster} ns={selectedNs} name={selectedName} /> },
-          { id: "yaml", label: "yaml", ready: true, content: <YamlView cluster={cluster} kind="rolebindings" ns={selectedNs} name={selectedName} /> },
+          { id: "yaml", label: "yaml", ready: true, content: <YamlView cluster={cluster} kind="rolebindings" ns={selectedNs} name={selectedName} />, dirty: editFlag.dirty },
         ]}
       />
     ) : null;

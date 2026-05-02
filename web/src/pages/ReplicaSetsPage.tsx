@@ -10,6 +10,7 @@ import { EmptyState, ErrorState, ForbiddenState, LoadingState, isForbidden } fro
 import { DetailPane } from "../components/detail/DetailPane";
 import { ReplicaSetDescribe } from "../components/detail/describe/ReplicaSetDescribe";
 import { YamlView } from "../components/detail/YamlView";
+import { useEditorDirty } from "../hooks/useEditorDirty";
 import { EventsView } from "../components/detail/EventsView";
 import { NamespacePicker } from "../components/shell/NamespacePicker";
 
@@ -125,6 +126,8 @@ export function ReplicaSetsPage({ cluster }: { cluster: string }) {
   const selectedKey = selectedNs && selectedName ? `${selectedNs}/${selectedName}` : null;
   const selectRS = (rs: ReplicaSet) => setMany({ sel: rs.name, selNs: rs.namespace, tab: "describe" });
 
+  const editFlag = useEditorDirty(cluster, "replicasets", selectedNs ?? undefined, selectedName);
+
   const detail =
     selectedNs && selectedName ? (
       <DetailPane
@@ -135,7 +138,7 @@ export function ReplicaSetsPage({ cluster }: { cluster: string }) {
         onClose={() => setMany({ sel: null, selNs: null, tab: null })}
         tabs={[
           { id: "describe", label: "describe", ready: true, content: <ReplicaSetDescribe cluster={cluster} ns={selectedNs} name={selectedName} /> },
-          { id: "yaml", label: "yaml", ready: true, content: <YamlView cluster={cluster} kind="replicasets" ns={selectedNs} name={selectedName} /> },
+          { id: "yaml", label: "yaml", ready: true, content: <YamlView cluster={cluster} kind="replicasets" ns={selectedNs} name={selectedName} />, dirty: editFlag.dirty },
           { id: "events", label: "events", ready: true, content: <EventsView cluster={cluster} kind="replicasets" ns={selectedNs} name={selectedName} /> },
         ]}
       />

@@ -21,6 +21,7 @@ import {
 import { DetailPane } from "../components/detail/DetailPane";
 import { StatefulSetDescribe } from "../components/detail/describe/StatefulSetDescribe";
 import { YamlView } from "../components/detail/YamlView";
+import { useEditorDirty } from "../hooks/useEditorDirty";
 import { EventsView } from "../components/detail/EventsView";
 import { WorkloadLogsTab } from "../components/logs/WorkloadLogsTab";
 import { NamespacePicker } from "../components/shell/NamespacePicker";
@@ -91,6 +92,8 @@ export function StatefulSetsPage({ cluster }: { cluster: string }) {
     return null;
   };
 
+  const editFlag = useEditorDirty(cluster, "statefulsets", selectedNs ?? undefined, selectedName);
+
   const detail =
     selectedNs && selectedName ? (
       <DetailPane
@@ -101,7 +104,7 @@ export function StatefulSetsPage({ cluster }: { cluster: string }) {
         onClose={() => setMany({ sel: null, selNs: null, tab: null })}
         tabs={[
           { id: "describe", label: "describe", ready: true, content: <StatefulSetDescribe cluster={cluster} ns={selectedNs} name={selectedName} /> },
-          { id: "yaml", label: "yaml", ready: true, content: <YamlView cluster={cluster} kind="statefulsets" ns={selectedNs} name={selectedName} /> },
+          { id: "yaml", label: "yaml", ready: true, content: <YamlView cluster={cluster} kind="statefulsets" ns={selectedNs} name={selectedName} />, dirty: editFlag.dirty },
           { id: "events", label: "events", ready: true, content: <EventsView cluster={cluster} kind="statefulsets" ns={selectedNs} name={selectedName} /> },
           { id: "logs", label: "logs", ready: true, content: <WorkloadLogsTab kind="statefulset" cluster={cluster} ns={selectedNs} name={selectedName} /> },
         ]}

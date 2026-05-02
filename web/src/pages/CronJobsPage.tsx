@@ -22,6 +22,7 @@ import {
 import { DetailPane } from "../components/detail/DetailPane";
 import { CronJobDescribe } from "../components/detail/describe/CronJobDescribe";
 import { YamlView } from "../components/detail/YamlView";
+import { useEditorDirty } from "../hooks/useEditorDirty";
 import { EventsView } from "../components/detail/EventsView";
 import { NamespacePicker } from "../components/shell/NamespacePicker";
 
@@ -128,6 +129,8 @@ export function CronJobsPage({ cluster }: { cluster: string }) {
     return null;
   };
 
+  const editFlag = useEditorDirty(cluster, "cronjobs", selectedNs ?? undefined, selectedName);
+
   const detail =
     selectedNs && selectedName ? (
       <DetailPane
@@ -138,7 +141,7 @@ export function CronJobsPage({ cluster }: { cluster: string }) {
         onClose={() => setMany({ sel: null, selNs: null, tab: null })}
         tabs={[
           { id: "describe", label: "describe", ready: true, content: <CronJobDescribe cluster={cluster} ns={selectedNs} name={selectedName} /> },
-          { id: "yaml", label: "yaml", ready: true, content: <YamlView cluster={cluster} kind="cronjobs" ns={selectedNs} name={selectedName} /> },
+          { id: "yaml", label: "yaml", ready: true, content: <YamlView cluster={cluster} kind="cronjobs" ns={selectedNs} name={selectedName} />, dirty: editFlag.dirty },
           { id: "events", label: "events", ready: true, content: <EventsView cluster={cluster} kind="cronjobs" ns={selectedNs} name={selectedName} /> },
         ]}
       />

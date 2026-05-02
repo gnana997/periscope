@@ -10,6 +10,7 @@ import { DataTable, type Column } from "../components/table/DataTable";
 import { PhaseTag } from "../components/table/StatusDot";
 import { DetailPane } from "../components/detail/DetailPane";
 import { YamlView } from "../components/detail/YamlView";
+import { useEditorDirty } from "../hooks/useEditorDirty";
 import { EventsView } from "../components/detail/EventsView";
 import { PVDescribe } from "../components/detail/describe/PVDescribe";
 import { EmptyState, ErrorState, ForbiddenState, LoadingState, isForbidden } from "../components/table/states";
@@ -65,6 +66,8 @@ export function PVsPage({ cluster }: { cluster: string }) {
   const rowTint = (p: PV): RowTint =>
     p.status === "Failed" ? "red" : p.status === "Released" ? "yellow" : null;
 
+  const editFlag = useEditorDirty(cluster, "pvs", undefined, selectedName);
+
   const detail = selectedName ? (
     <DetailPane
       title={selectedName}
@@ -74,7 +77,7 @@ export function PVsPage({ cluster }: { cluster: string }) {
       onClose={() => setMany({ sel: null, tab: null })}
       tabs={[
         { id: "describe", label: "describe", ready: true, content: <PVDescribe cluster={cluster} name={selectedName} /> },
-        { id: "yaml", label: "yaml", ready: true, content: <YamlView cluster={cluster} kind="pvs" ns="" name={selectedName} /> },
+        { id: "yaml", label: "yaml", ready: true, content: <YamlView cluster={cluster} kind="pvs" ns="" name={selectedName} />, dirty: editFlag.dirty },
         { id: "events", label: "events", ready: true, content: <EventsView cluster={cluster} kind="pvs" ns="" name={selectedName} /> },
       ]}
     />

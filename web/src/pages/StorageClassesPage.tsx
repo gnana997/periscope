@@ -9,6 +9,7 @@ import { SplitPane } from "../components/page/SplitPane";
 import { DataTable, type Column } from "../components/table/DataTable";
 import { DetailPane } from "../components/detail/DetailPane";
 import { YamlView } from "../components/detail/YamlView";
+import { useEditorDirty } from "../hooks/useEditorDirty";
 import { EventsView } from "../components/detail/EventsView";
 import { StorageClassDescribe } from "../components/detail/describe/StorageClassDescribe";
 import { EmptyState, ErrorState, ForbiddenState, LoadingState, isForbidden } from "../components/table/states";
@@ -52,6 +53,8 @@ export function StorageClassesPage({ cluster }: { cluster: string }) {
     { key: "age", header: "age", weight: 0.5, align: "right", cellClassName: "font-mono text-ink-muted", accessor: (s) => ageFrom(s.createdAt) },
   ];
 
+  const editFlag = useEditorDirty(cluster, "storageclasses", undefined, selectedName);
+
   const detail = selectedName ? (
     <DetailPane
       title={selectedName}
@@ -61,7 +64,7 @@ export function StorageClassesPage({ cluster }: { cluster: string }) {
       onClose={() => setMany({ sel: null, tab: null })}
       tabs={[
         { id: "describe", label: "describe", ready: true, content: <StorageClassDescribe cluster={cluster} name={selectedName} /> },
-        { id: "yaml", label: "yaml", ready: true, content: <YamlView cluster={cluster} kind="storageclasses" ns="" name={selectedName} /> },
+        { id: "yaml", label: "yaml", ready: true, content: <YamlView cluster={cluster} kind="storageclasses" ns="" name={selectedName} />, dirty: editFlag.dirty },
         { id: "events", label: "events", ready: true, content: <EventsView cluster={cluster} kind="storageclasses" ns="" name={selectedName} /> },
       ]}
     />

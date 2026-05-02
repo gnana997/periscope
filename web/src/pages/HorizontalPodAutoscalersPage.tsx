@@ -12,6 +12,7 @@ import { EmptyState, ErrorState, ForbiddenState, LoadingState, isForbidden } fro
 import { DetailPane } from "../components/detail/DetailPane";
 import { HPADescribe } from "../components/detail/describe/HPADescribe";
 import { YamlView } from "../components/detail/YamlView";
+import { useEditorDirty } from "../hooks/useEditorDirty";
 import { EventsView } from "../components/detail/EventsView";
 import { NamespacePicker } from "../components/shell/NamespacePicker";
 
@@ -67,6 +68,8 @@ export function HorizontalPodAutoscalersPage({ cluster }: { cluster: string }) {
 
   const selectedKey = selectedNs && selectedName ? `${selectedNs}/${selectedName}` : null;
 
+  const editFlag = useEditorDirty(cluster, "horizontalpodautoscalers", selectedNs ?? undefined, selectedName);
+
   const detail =
     selectedNs && selectedName ? (
       <DetailPane
@@ -77,7 +80,7 @@ export function HorizontalPodAutoscalersPage({ cluster }: { cluster: string }) {
         onClose={() => setMany({ sel: null, selNs: null, tab: null })}
         tabs={[
           { id: "describe", label: "describe", ready: true, content: <HPADescribe cluster={cluster} ns={selectedNs} name={selectedName} /> },
-          { id: "yaml", label: "yaml", ready: true, content: <YamlView cluster={cluster} kind="horizontalpodautoscalers" ns={selectedNs} name={selectedName} /> },
+          { id: "yaml", label: "yaml", ready: true, content: <YamlView cluster={cluster} kind="horizontalpodautoscalers" ns={selectedNs} name={selectedName} />, dirty: editFlag.dirty },
           { id: "events", label: "events", ready: true, content: <EventsView cluster={cluster} kind="horizontalpodautoscalers" ns={selectedNs} name={selectedName} /> },
         ]}
       />

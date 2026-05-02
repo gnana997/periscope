@@ -11,6 +11,7 @@ import { EmptyState, ErrorState, ForbiddenState, LoadingState, isForbidden } fro
 import { DetailPane } from "../components/detail/DetailPane";
 import { RoleDescribe } from "../components/detail/describe/RoleDescribe";
 import { YamlView } from "../components/detail/YamlView";
+import { useEditorDirty } from "../hooks/useEditorDirty";
 import { NamespacePicker } from "../components/shell/NamespacePicker";
 
 export function RolesPage({ cluster }: { cluster: string }) {
@@ -53,6 +54,8 @@ export function RolesPage({ cluster }: { cluster: string }) {
 
   const selectedKey = selectedNs && selectedName ? `${selectedNs}/${selectedName}` : null;
 
+  const editFlag = useEditorDirty(cluster, "roles", selectedNs ?? undefined, selectedName);
+
   const detail =
     selectedNs && selectedName ? (
       <DetailPane
@@ -63,7 +66,7 @@ export function RolesPage({ cluster }: { cluster: string }) {
         onClose={() => setMany({ sel: null, selNs: null, tab: null })}
         tabs={[
           { id: "describe", label: "describe", ready: true, content: <RoleDescribe cluster={cluster} ns={selectedNs} name={selectedName} /> },
-          { id: "yaml", label: "yaml", ready: true, content: <YamlView cluster={cluster} kind="roles" ns={selectedNs} name={selectedName} /> },
+          { id: "yaml", label: "yaml", ready: true, content: <YamlView cluster={cluster} kind="roles" ns={selectedNs} name={selectedName} />, dirty: editFlag.dirty },
         ]}
       />
     ) : null;

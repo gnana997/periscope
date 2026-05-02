@@ -11,6 +11,7 @@ import { EmptyState, ErrorState, ForbiddenState, LoadingState, isForbidden } fro
 import { DetailPane } from "../components/detail/DetailPane";
 import { IngressClassDescribe } from "../components/detail/describe/IngressClassDescribe";
 import { YamlView } from "../components/detail/YamlView";
+import { useEditorDirty } from "../hooks/useEditorDirty";
 
 export function IngressClassesPage({ cluster }: { cluster: string }) {
   const [params, setParams] = useSearchParams();
@@ -58,6 +59,8 @@ export function IngressClassesPage({ cluster }: { cluster: string }) {
     { key: "age", header: "age", weight: 0.8, align: "right", cellClassName: "font-mono text-ink-muted", accessor: (r) => ageFrom(r.createdAt) },
   ];
 
+  const editFlag = useEditorDirty(cluster, "ingressclasses", undefined, selectedName);
+
   const detail = selectedName ? (
     <DetailPane
       title={selectedName}
@@ -67,7 +70,7 @@ export function IngressClassesPage({ cluster }: { cluster: string }) {
       onClose={() => setMany({ sel: null, tab: null })}
       tabs={[
         { id: "describe", label: "describe", ready: true, content: <IngressClassDescribe cluster={cluster} name={selectedName} /> },
-        { id: "yaml", label: "yaml", ready: true, content: <YamlView cluster={cluster} kind="ingressclasses" ns="" name={selectedName} /> },
+        { id: "yaml", label: "yaml", ready: true, content: <YamlView cluster={cluster} kind="ingressclasses" ns="" name={selectedName} />, dirty: editFlag.dirty },
       ]}
     />
   ) : null;

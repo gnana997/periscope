@@ -11,6 +11,7 @@ import { DataTable, type Column } from "../components/table/DataTable";
 import { PhaseTag } from "../components/table/StatusDot";
 import { DetailPane } from "../components/detail/DetailPane";
 import { YamlView } from "../components/detail/YamlView";
+import { useEditorDirty } from "../hooks/useEditorDirty";
 import { EventsView } from "../components/detail/EventsView";
 import { PVCDescribe } from "../components/detail/describe/PVCDescribe";
 import { EmptyState, ErrorState, ForbiddenState, LoadingState, isForbidden } from "../components/table/states";
@@ -70,6 +71,8 @@ export function PVCsPage({ cluster }: { cluster: string }) {
   const rowTint = (p: PVC): RowTint =>
     p.status === "Lost" ? "red" : p.status === "Pending" ? "yellow" : null;
 
+  const editFlag = useEditorDirty(cluster, "pvcs", selectedNs ?? undefined, selectedName);
+
   const detail =
     selectedNs && selectedName ? (
       <DetailPane
@@ -80,7 +83,7 @@ export function PVCsPage({ cluster }: { cluster: string }) {
         onClose={() => setMany({ sel: null, selNs: null, tab: null })}
         tabs={[
           { id: "describe", label: "describe", ready: true, content: <PVCDescribe cluster={cluster} ns={selectedNs} name={selectedName} /> },
-          { id: "yaml", label: "yaml", ready: true, content: <YamlView cluster={cluster} kind="pvcs" ns={selectedNs} name={selectedName} /> },
+          { id: "yaml", label: "yaml", ready: true, content: <YamlView cluster={cluster} kind="pvcs" ns={selectedNs} name={selectedName} />, dirty: editFlag.dirty },
           { id: "events", label: "events", ready: true, content: <EventsView cluster={cluster} kind="pvcs" ns={selectedNs} name={selectedName} /> },
         ]}
       />

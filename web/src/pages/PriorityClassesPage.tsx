@@ -11,6 +11,7 @@ import { EmptyState, ErrorState, ForbiddenState, LoadingState, isForbidden } fro
 import { DetailPane } from "../components/detail/DetailPane";
 import { PriorityClassDescribe } from "../components/detail/describe/PriorityClassDescribe";
 import { YamlView } from "../components/detail/YamlView";
+import { useEditorDirty } from "../hooks/useEditorDirty";
 
 export function PriorityClassesPage({ cluster }: { cluster: string }) {
   const [params, setParams] = useSearchParams();
@@ -59,6 +60,8 @@ export function PriorityClassesPage({ cluster }: { cluster: string }) {
     { key: "age", header: "age", weight: 0.8, align: "right", cellClassName: "font-mono text-ink-muted", accessor: (r) => ageFrom(r.createdAt) },
   ];
 
+  const editFlag = useEditorDirty(cluster, "priorityclasses", undefined, selectedName);
+
   const detail = selectedName ? (
     <DetailPane
       title={selectedName}
@@ -68,7 +71,7 @@ export function PriorityClassesPage({ cluster }: { cluster: string }) {
       onClose={() => setMany({ sel: null, tab: null })}
       tabs={[
         { id: "describe", label: "describe", ready: true, content: <PriorityClassDescribe cluster={cluster} name={selectedName} /> },
-        { id: "yaml", label: "yaml", ready: true, content: <YamlView cluster={cluster} kind="priorityclasses" ns="" name={selectedName} /> },
+        { id: "yaml", label: "yaml", ready: true, content: <YamlView cluster={cluster} kind="priorityclasses" ns="" name={selectedName} />, dirty: editFlag.dirty },
       ]}
     />
   ) : null;

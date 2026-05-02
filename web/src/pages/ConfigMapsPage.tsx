@@ -17,6 +17,7 @@ import {
 import { DetailPane } from "../components/detail/DetailPane";
 import { ConfigMapDescribe } from "../components/detail/describe/ConfigMapDescribe";
 import { YamlView } from "../components/detail/YamlView";
+import { useEditorDirty } from "../hooks/useEditorDirty";
 import { EventsView } from "../components/detail/EventsView";
 import { NamespacePicker } from "../components/shell/NamespacePicker";
 
@@ -66,6 +67,8 @@ export function ConfigMapsPage({ cluster }: { cluster: string }) {
     { key: "age", header: "age", weight: 0.5, align: "right", cellClassName: "font-mono text-ink-muted", accessor: (c) => ageFrom(c.createdAt) },
   ];
 
+  const editFlag = useEditorDirty(cluster, "configmaps", selectedNs ?? undefined, selectedName);
+
   const detail =
     selectedNs && selectedName ? (
       <DetailPane
@@ -76,7 +79,7 @@ export function ConfigMapsPage({ cluster }: { cluster: string }) {
         onClose={() => setMany({ sel: null, selNs: null, tab: null })}
         tabs={[
           { id: "describe", label: "describe", ready: true, content: <ConfigMapDescribe cluster={cluster} ns={selectedNs} name={selectedName} /> },
-          { id: "yaml", label: "yaml", ready: true, content: <YamlView cluster={cluster} kind="configmaps" ns={selectedNs} name={selectedName} /> },
+          { id: "yaml", label: "yaml", ready: true, content: <YamlView cluster={cluster} kind="configmaps" ns={selectedNs} name={selectedName} />, dirty: editFlag.dirty },
           { id: "events", label: "events", ready: true, content: <EventsView cluster={cluster} kind="configmaps" ns={selectedNs} name={selectedName} /> },
         ]}
       />
