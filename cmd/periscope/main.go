@@ -822,6 +822,16 @@ func main() {
 	router.Get("/api/clusters/{cluster}/resources/{group}/{version}/{resource}/{name}/meta",
 		credentials.Wrap(factory, metaResourceHandler(registry)))
 
+	// --- OpenAPI v3 schema proxy ---
+	// Lazy per-group-version fetch, in-memory cached per (cluster, path).
+	// Powers monaco-yaml schema validation/autocomplete/hover in the SPA
+	// editor. Always exact for the user's actual cluster — handles version
+	// drift across the fleet (1.28–1.36) and CRD schemas for free.
+	router.Get("/api/clusters/{cluster}/openapi/v3",
+		credentials.Wrap(factory, openAPIHandler(registry)))
+	router.Get("/api/clusters/{cluster}/openapi/v3/*",
+		credentials.Wrap(factory, openAPIHandler(registry)))
+
 	// --- Pod exec (interactive shell, WebSocket) — RFC 0001 ---
 	execSessions := execsess.NewRegistry()
 	execPolicy := k8s.NewPolicy(k8s.PolicyConfig{}) // defaults: 3 WS fails / 30m SPDY pin
@@ -1126,6 +1136,44 @@ func deleteResourceHandler(reg *clusters.Registry) credentials.Handler {
 			"group", args.Group, "version", args.Version, "resource", args.Resource,
 			"ns", args.Namespace, "name", args.Name)
 		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
+// openAPIHandler proxies the cluster's apiserver /openapi/v3 (and
+// sub-paths) through to the SPA, with in-memory caching. The wildcard
+// route uses chi's "*" param so the single handler covers both the
+// discovery doc (no suffix) and per-group fetches like apis/apps/v1.
+//
+// Not audit-logged: schemas are public-info-viewer reads; no mutation
+// happens here. Cache-Control is set so the browser can also short-
+// circuit subsequent loads within a session.
+func openAPIHandler(reg *clusters.Registry) credentials.Handler {
+	return func(w http.ResponseWriter, r *http.Request, p credentials.Provider) {
+		c, ok := reg.ByName(chi.URLParam(r, "cluster"))
+		if !ok {
+			http.Error(w, "cluster not found", http.StatusNotFound)
+			return
+		}
+		path := chi.URLParam(r, "*")
+		result, err := k8s.GetOpenAPI(r.Context(), p, k8s.OpenAPIArgs{
+			Cluster: c,
+			Path:    path,
+		})
+		if err != nil {
+			if errors.Is(err, context.Canceled) {
+				return
+			}
+			slog.ErrorContext(r.Context(), "openapi fetch failed",
+				"err", err, "cluster", c.Name, "path", path, "actor", p.Actor())
+			http.Error(w, err.Error(), httpStatusFor(err))
+			return
+		}
+		w.Header().Set("Content-Type", result.ContentType)
+		// SPA-side react-query also caches; this layer is for browser
+		// caching across react-query rehydrations and reloads.
+		w.Header().Set("Cache-Control", "private, max-age=3600")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(result.Body)
 	}
 }
 
