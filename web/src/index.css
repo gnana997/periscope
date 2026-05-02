@@ -138,3 +138,23 @@ pre,
     opacity: 1;
   }
 }
+
+/* Owner-glyph margin — colored 4px bars in Monaco's gutter showing
+   which K8s SSA field manager owns each line. Categories map to the
+   accent palette also used in ConflictResolutionView's manager
+   badges (kept in sync with managerColorClass in lib/managers.ts). */
+.glyph-owner {
+  width: 4px !important;
+  margin-left: 4px;
+  height: 100%;
+}
+.glyph-owner--gitops     { background: #6b21a8; }
+.glyph-owner--controller { background: #1e40af; }
+.glyph-owner--helm       { background: #0f766e; }
+.glyph-owner--human      { background: var(--green); }
+.glyph-owner--periscope  { background: var(--accent); }
+.glyph-owner--unknown    { background: var(--ink-faint); }
+
+.dark .glyph-owner--gitops     { background: #a78bfa; }
+.dark .glyph-owner--controller { background: #60a5fa; }
+.dark .glyph-owner--helm       { background: #5eead4; }

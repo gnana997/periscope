@@ -1,6 +1,8 @@
 package main
 
 import (
+	"encoding/json"
+	"errors"
 	"net/http"
 
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
@@ -32,4 +34,20 @@ func httpStatusFor(err error) int {
 		return http.StatusBadRequest
 	}
 	return http.StatusInternalServerError
+}
+
+// writeAPIError surfaces a kerrors.StatusError as the structured
+// metav1.Status JSON the SPA needs (details.causes[] for field-level
+// 409 conflict resolution). Falls back to plain text for non-Status
+// errors so existing clients stay compatible.
+func writeAPIError(w http.ResponseWriter, err error, status int) {
+	var se *kerrors.StatusError
+	if errors.As(err, &se) {
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.WriteHeader(status)
+		_ = json.NewEncoder(w).Encode(&se.ErrStatus)
+		return
+	}
+	http.Error(w, err.Error(), status)
 }

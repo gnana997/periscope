@@ -1085,7 +1085,7 @@ func applyResourceHandler(reg *clusters.Registry) credentials.Handler {
 			if strings.HasPrefix(err.Error(), "apply: ") {
 				status = http.StatusBadRequest
 			}
-			http.Error(w, err.Error(), status)
+			writeAPIError(w, err, status)
 			return
 		}
 		// Audit-trail write: tied to the action, not the request envelope.

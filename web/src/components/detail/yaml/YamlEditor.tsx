@@ -39,6 +39,13 @@ import {
   modelURIForResource,
   parseIdentityFromYaml,
 } from "../../../lib/k8sSchema";
+import { classifyManager } from "../../../lib/managers";
+import {
+  parseManagedFields,
+  pathToManager,
+  normalizeStatusFieldPath,
+} from "../../../lib/managedFields";
+import { pathForLine } from "../../../lib/yamlPath";
 import {
   currentMonacoTheme,
   ensureMonacoConfigured,
@@ -46,7 +53,7 @@ import {
   registerSchema,
   useMonacoTheme,
 } from "../../../lib/monacoSetup";
-import { useOpenAPISchema, useYaml } from "../../../hooks/useResource";
+import { useOpenAPISchema, useResourceMeta, useYaml } from "../../../hooks/useResource";
 import { usePublishEditorDirty } from "../../../hooks/useEditorDirty";
 import {
   buildMinimalSSA,
@@ -60,7 +67,8 @@ import { ActionBar, type ApplyState } from "./ActionBar";
 import { ProblemsStrip } from "./ProblemsStrip";
 import { ApplyErrorBanner } from "./ApplyErrorBanner";
 import { showToast } from "../../../lib/toastBus";
-import { ConflictBanner } from "./ConflictBanner";
+import { ConflictResolutionView, type FieldConflict, type Resolution } from "./ConflictResolutionView";
+import { TakeoverDialog } from "./TakeoverDialog";
 import { InlineDiff } from "./InlineDiff";
 import { PatchPreviewDrawer } from "./PatchPreviewDrawer";
 import { DetailError, DetailLoading } from "../states";
@@ -117,6 +125,10 @@ function Editor({ cluster, yamlKind, resource, pristine }: EditorProps) {
   const [errorCount, setErrorCount] = useState(0);
   const [firstError, setFirstError] = useState<{ message: string; line: number } | null>(null);
   const [showPatch, setShowPatch] = useState(false);
+  const [conflicts, setConflicts] = useState<FieldConflict[]>([]);
+  const [resolutions, setResolutions] = useState<Map<string, Resolution>>(new Map());
+  const [showTakeover, setShowTakeover] = useState(false);
+  const ownerDecorationsRef = useRef<string[]>([]);
   const [patchDrawerWidth, setPatchDrawerWidth] = useState<number>(() => {
     if (typeof window === "undefined") return 420;
     const stored = window.localStorage.getItem("periscope.patchDrawerWidth");
@@ -199,6 +211,76 @@ function Editor({ cluster, yamlKind, resource, pristine }: EditorProps) {
     Boolean(gvk),
   );
 
+  // Resource metadata (managedFields + resourceVersion). Drives the
+  // owner-glyph margin; also used by Phase 3 drift detection.
+  const metaQuery = useResourceMeta(
+    cluster,
+    {
+      group: resource.group,
+      version: resource.version,
+      resource: resource.resource,
+      namespace: resource.namespace,
+      name: resource.name,
+    },
+    true,
+  );
+
+  // ----- Conflict / glyph helpers -----
+
+  // opPathToString matches the dotted form pathForLine emits:
+  //   spec.containers[name=nginx].image
+  // (no leading dot, brackets glued to parent).
+  const opPathToString = useCallback((segments: Op["path"]): string => {
+    const parts: string[] = [];
+    for (const seg of segments) {
+      if (typeof seg === "string") parts.push(seg);
+      else if ("idx" in seg) parts.push(`[${seg.idx}]`);
+      else {
+        const [k, v] = Object.entries(seg)[0];
+        parts.push(`[${k}=${v}]`);
+      }
+    }
+    return parts.join(".").replace(/\.\[/g, "[");
+  }, []);
+
+  // parseConflictCauses extracts field-level conflicts from a 409
+  // Status response. Apiserver shape:
+  //   { details: { causes: [{ reason, message: 'conflict with "X" using ...', field: ".spec.replicas" }] } }
+  const parseConflictCauses = useCallback(
+    (bodyText: string | undefined, currentOps: Op[]): FieldConflict[] => {
+      if (!bodyText) return [];
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(bodyText);
+      } catch {
+        return [];
+      }
+      const status = parsed as { details?: { causes?: Array<{ reason?: string; message?: string; field?: string }> } };
+      const causes = status?.details?.causes;
+      if (!Array.isArray(causes)) return [];
+
+      const out: FieldConflict[] = [];
+      for (const cause of causes) {
+        if (cause.reason !== "FieldManagerConflict") continue;
+        const path = normalizeStatusFieldPath(cause.field ?? "");
+        const m = (cause.message ?? "").match(/conflict with "([^"]+)"/);
+        const manager = m ? m[1] : "unknown";
+        // Pull "mine" value from the current ops list if we have it.
+        let mine: string | undefined;
+        for (const op of currentOps) {
+          if (opPathToString(op.path) === path && (op.op === "replace" || op.op === "add")) {
+            mine = String((op as { value: unknown }).value);
+            break;
+          }
+        }
+        out.push({ path, manager, mine });
+      }
+      return out;
+    },
+    [opPathToString],
+  );
+
+
   // Editor mount — create model with cluster-scoped URI so monaco-yaml's
   // fileMatch can route validation correctly when the schema arrives.
   useEffect(() => {
@@ -238,7 +320,7 @@ function Editor({ cluster, yamlKind, resource, pristine }: EditorProps) {
       cursorSmoothCaretAnimation: "on",
       renderLineHighlight: "all",
       renderWhitespace: "selection",
-      glyphMargin: false, // Phase 2 turns this on for ownership badges
+      glyphMargin: true,
       folding: true,
       foldingStrategy: "indentation",
       showFoldingControls: "mouseover",
@@ -301,6 +383,56 @@ function Editor({ cluster, yamlKind, resource, pristine }: EditorProps) {
     registerSchema(config);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [schemaQuery.data, gvk?.group, gvk?.version, gvk?.kind]);
+
+  // Owner-glyph margin: paint a colored 4px bar in the gutter for
+  // every line whose YAML path is in metadata.managedFields, owned by
+  // a manager other than periscope-spa. Hover the gutter to see who
+  // owns that field. Reruns when meta refreshes (e.g. after an apply).
+  useEffect(() => {
+    const editor = editorRef.current;
+    if (!editor) return;
+    const model = editor.getModel();
+    if (!model) {
+      ownerDecorationsRef.current = editor.deltaDecorations(ownerDecorationsRef.current, []);
+      return;
+    }
+    if (!metaQuery.data) {
+      ownerDecorationsRef.current = editor.deltaDecorations(ownerDecorationsRef.current, []);
+      return;
+    }
+    const owners = parseManagedFields(metaQuery.data.managedFields).filter(
+      (o) => o.manager !== "periscope-spa",
+    );
+    if (owners.length === 0) {
+      ownerDecorationsRef.current = editor.deltaDecorations(ownerDecorationsRef.current, []);
+      return;
+    }
+    const ownerMap = pathToManager(owners);
+
+    const decorations: monaco.editor.IModelDeltaDecoration[] = [];
+    for (let i = 1; i <= model.getLineCount(); i++) {
+      const path = pathForLine(model, i);
+      if (!path) continue;
+      const manager = ownerMap.get(path);
+      if (!manager) continue;
+      const cat = classifyManager(manager).category;
+      decorations.push({
+        range: new monaco.Range(i, 1, i, 1),
+        options: {
+          glyphMarginClassName: `glyph-owner glyph-owner--${cat.toLowerCase()}`,
+          glyphMarginHoverMessage: {
+            value: `**owned by \`${manager}\`** *(${cat})*\n\n${classifyManager(manager).consequence}`,
+          },
+        },
+      });
+    }
+    ownerDecorationsRef.current = editor.deltaDecorations(
+      ownerDecorationsRef.current,
+      decorations,
+    );
+    // Also re-run on currentYaml changes — line numbers shift as user edits.
+  }, [metaQuery.data, currentYaml]);
+
 
   // Schema status — drives the ActionBar pill. "loading" while fetching,
   // "loaded" once registered with monaco-yaml, "missing" for CRDs whose
@@ -424,13 +556,33 @@ function Editor({ cluster, yamlKind, resource, pristine }: EditorProps) {
         const apiErr = e instanceof ApiError ? e : null;
         const status = apiErr?.status;
         const message = apiErr?.bodyText || (e as Error)?.message || "apply failed";
+        if (status === 409) {
+          // Phase 2: parse field-level conflicts. If we got at least
+          // one cause we recognise, switch to the resolution view.
+          // If parsing fails (older apiserver, weird response shape),
+          // fall back to the generic error chip.
+          const parsed = parseConflictCauses(apiErr?.bodyText, ops);
+          if (parsed.length > 0) {
+            setConflicts(parsed);
+            setResolutions(new Map());
+            setApplyState({ kind: "idle" });
+            setMode("conflict");
+            return;
+          }
+        }
         setApplyState({ kind: "error", message });
-        if (status === 409) setMode("conflict");
       }
     },
-    [identity, opsForCurrentBuffer, resource, cluster, yamlKind, qc, setParams],
+    // ops captured intentionally — we want the snapshot at apply time, not
+    // the latest after the user edits while waiting for the response
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [identity, opsForCurrentBuffer, resource, cluster, yamlKind, qc, setParams, parseConflictCauses, ops],
   );
 
+  // Apply with per-field resolutions from ConflictResolutionView. Filter
+  // out ops the user chose to "revert" (those won't be sent — apiserver
+  // keeps the manager's value), then apply with force=true if any
+  // remaining ops were "keep mine" (we're seizing ownership of those).
   // Cancel — drops ?edit=1 (and aborts any running apply)
   const onCancel = useCallback(() => {
     abortRef.current?.abort();
@@ -443,6 +595,139 @@ function Editor({ cluster, yamlKind, resource, pristine }: EditorProps) {
       { replace: true },
     );
   }, [setParams]);
+
+  const runApplyResolved = useCallback(async () => {
+    if (!identity) return;
+    const allOps = opsForCurrentBuffer();
+
+    // Filter: drop revert-mine fields from the patch entirely.
+    const filteredOps = allOps.filter((op) => {
+      const p = opPathToString(op.path);
+      return resolutions.get(p) !== "revert";
+    });
+
+    // If everything was reverted, there's nothing to send. Treat as
+    // "user is done" and drop ?edit=1 (no-op apply).
+    if (filteredOps.length === 0) {
+      onCancel();
+      return;
+    }
+
+    let body: string;
+    try {
+      body = buildMinimalSSA(filteredOps, identity);
+    } catch (e) {
+      setApplyState({ kind: "error", message: (e as Error).message });
+      return;
+    }
+
+    abortRef.current?.abort();
+    const ac = new AbortController();
+    abortRef.current = ac;
+
+    const args = {
+      cluster: resource.cluster,
+      group: resource.group,
+      version: resource.version,
+      resource: resource.resource,
+      namespace: resource.namespace,
+      name: resource.name,
+      yaml: body,
+    };
+    const force = [...resolutions.values()].some((r) => r === "keep");
+
+    try {
+      setApplyState({ kind: "applying" });
+      await api.applyResource({ ...args, dryRun: false, force }, ac.signal);
+      setApplyState({ kind: "success" });
+      qc.invalidateQueries({ queryKey: [yamlKind] });
+      qc.invalidateQueries({
+        queryKey: ["yaml", cluster, yamlKind, resource.namespace ?? "", resource.name],
+      });
+      qc.invalidateQueries({
+        queryKey: [`${singularize(yamlKind)}-detail`, cluster, resource.namespace ?? "", resource.name],
+      });
+      qc.invalidateQueries({
+        queryKey: ["events", cluster, yamlKind, resource.namespace ?? "", resource.name],
+      });
+      qc.invalidateQueries({
+        queryKey: ["meta", cluster, resource.group, resource.version, resource.resource, resource.namespace ?? "", resource.name],
+      });
+      setShowTakeover(false);
+      setConflicts([]);
+      setResolutions(new Map());
+      setTimeout(() => {
+        setParams((prev) => {
+          const next = new URLSearchParams(prev);
+          next.delete("edit");
+          return next;
+        }, { replace: true });
+      }, 400);
+    } catch (e) {
+      if (ac.signal.aborted) return;
+      const apiErr = e instanceof ApiError ? e : null;
+      const message = apiErr?.bodyText || (e as Error)?.message || "apply failed";
+      setApplyState({ kind: "error", message });
+      setShowTakeover(false);
+    }
+  }, [identity, opsForCurrentBuffer, resolutions, opPathToString, resource, cluster, yamlKind, qc, setParams, onCancel]);
+
+  // Standalone dry-run (the "dry-run" button in ActionBar). Same 409
+  // handling as runApply — if the dry-run hits a field-manager
+  // conflict, populate conflicts state + switch to ConflictResolutionView
+  // so the user can resolve per-field. Without this, dry-run 409 used
+  // to fall through to the generic ApplyErrorBanner with raw text.
+  const runDryRun = useCallback(async () => {
+    if (!identity) return;
+    const currentOps = opsForCurrentBuffer();
+    if (currentOps.length === 0) return;
+    let body: string;
+    try {
+      body = buildMinimalSSA(currentOps, identity);
+    } catch (e) {
+      setApplyState({ kind: "error", message: (e as Error).message });
+      return;
+    }
+    abortRef.current?.abort();
+    const ac = new AbortController();
+    abortRef.current = ac;
+    try {
+      setApplyState({ kind: "dryRunning" });
+      await api.applyResource(
+        {
+          cluster: resource.cluster,
+          group: resource.group,
+          version: resource.version,
+          resource: resource.resource,
+          namespace: resource.namespace,
+          name: resource.name,
+          yaml: body,
+          dryRun: true,
+        },
+        ac.signal,
+      );
+      setApplyState({ kind: "success" });
+      setTimeout(() => setApplyState({ kind: "idle" }), 1500);
+    } catch (e) {
+      if (ac.signal.aborted) return;
+      const apiErr = e instanceof ApiError ? e : null;
+      const status = apiErr?.status;
+      const message = apiErr?.bodyText || (e as Error)?.message || "dry-run failed";
+      if (status === 409) {
+        const parsed = parseConflictCauses(apiErr?.bodyText, currentOps);
+        if (parsed.length > 0) {
+          setConflicts(parsed);
+          setResolutions(new Map());
+          setApplyState({ kind: "idle" });
+          setMode("conflict");
+          return;
+        }
+      }
+      setApplyState({ kind: "error", message });
+    }
+  }, [identity, opsForCurrentBuffer, resource, parseConflictCauses]);
+
+
 
   // Keyboard shortcuts on the editor instance (Monaco's preferred
   // mechanism — captures inside the editor surface).
@@ -510,21 +795,52 @@ function Editor({ cluster, yamlKind, resource, pristine }: EditorProps) {
 
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-col">
-      {mode === "conflict" && applyState.kind === "error" && (
-        <ConflictBanner
-          message={applyState.message}
-          onForce={() => {
-            setMode("edit");
-            void runApply(true);
+      {mode === "conflict" ? (
+        <ConflictResolutionView
+          conflicts={conflicts}
+          resolutions={resolutions}
+          onResolve={(path, choice) => {
+            setResolutions((prev) => {
+              const next = new Map(prev);
+              if (choice === null) next.delete(path);
+              else next.set(path, choice);
+              return next;
+            });
           }}
-          onCancel={() => {
+          onJumpTo={(path) => {
+            // Drop into edit mode, focus the first line whose path matches.
+            setMode("edit");
+            const editor = editorRef.current;
+            if (!editor) return;
+            const model = editor.getModel();
+            if (!model) return;
+            for (let i = 1; i <= model.getLineCount(); i++) {
+              if (pathForLine(model, i) === path) {
+                editor.revealLineInCenter(i);
+                editor.setPosition({ lineNumber: i, column: 1 });
+                editor.focus();
+                return;
+              }
+            }
+          }}
+          onBackToEdit={() => {
             setMode("edit");
             setApplyState({ kind: "idle" });
           }}
+          onApply={() => {
+            // If any field is "keep mine", show takeover dialog first.
+            const anyKeep = [...resolutions.values()].some((r) => r === "keep");
+            if (anyKeep) {
+              setShowTakeover(true);
+            } else {
+              void runApplyResolved();
+            }
+          }}
+          busy={applyState.kind === "applying" || applyState.kind === "dryRunning"}
         />
-      )}
+      ) : null}
 
-      <div className="relative flex min-h-0 min-w-0 flex-1">
+      <div className={cn("relative flex min-h-0 min-w-0 flex-1", mode === "conflict" && "hidden")}>
         <div className={cn("relative min-h-0 min-w-0 flex-1", mode === "diff" && "hidden")}>
           <div ref={containerRef} className="h-full min-h-0" />
         </div>
@@ -579,50 +895,24 @@ function Editor({ cluster, yamlKind, resource, pristine }: EditorProps) {
         schemaState={schemaState}
         onCancel={onCancel}
         onTogglePatch={() => setShowPatch((s) => !s)}
-        onDryRun={async () => {
-          if (!identity) return;
-          const ops = opsForCurrentBuffer();
-          if (ops.length === 0) return;
-          let body: string;
-          try {
-            body = buildMinimalSSA(ops, identity);
-          } catch (e) {
-            setApplyState({ kind: "error", message: (e as Error).message });
-            return;
-          }
-          abortRef.current?.abort();
-          const ac = new AbortController();
-          abortRef.current = ac;
-          try {
-            setApplyState({ kind: "dryRunning" });
-            await api.applyResource(
-              {
-                cluster: resource.cluster,
-                group: resource.group,
-                version: resource.version,
-                resource: resource.resource,
-                namespace: resource.namespace,
-                name: resource.name,
-                yaml: body,
-                dryRun: true,
-              },
-              ac.signal,
-            );
-            setApplyState({ kind: "success" });
-            setTimeout(() => setApplyState({ kind: "idle" }), 1500);
-          } catch (e) {
-            if (ac.signal.aborted) return;
-            const apiErr = e instanceof ApiError ? e : null;
-            setApplyState({
-              kind: "error",
-              message: apiErr?.bodyText || (e as Error)?.message || "dry-run failed",
-            });
-          }
-        }}
+        onDryRun={() => void runDryRun()}
         onToggleDiff={() => setMode((m) => (m === "diff" ? "edit" : "diff"))}
         onApply={() => void runApply(false)}
         onJumpToError={onJumpToError}
       />
+
+      {showTakeover && (
+        <TakeoverDialog
+          fields={conflicts
+            .filter((c) => resolutions.get(c.path) === "keep")
+            .map((c) => ({ path: c.path, manager: c.manager }))}
+          onCancel={() => setShowTakeover(false)}
+          onConfirm={() => {
+            setShowTakeover(false);
+            void runApplyResolved();
+          }}
+        />
+      )}
     </div>
   );
 }
