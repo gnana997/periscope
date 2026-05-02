@@ -9,6 +9,9 @@ export interface DetailTab {
   /** Rendered when this tab is active. Only the active tab's content
    *  mounts, so each tab's queries are lazy. */
   content?: ReactNode;
+  /** When true the tab label gets an accent dot prefix — used by
+   *  the YAML tab to flag unsaved edits ("yaml*"). */
+  dirty?: boolean;
 }
 
 interface DetailPaneProps {
@@ -63,7 +66,11 @@ export function DetailPane({
               t.ready && activeTab !== t.id && "text-ink-muted hover:text-ink",
             )}
           >
+            {t.dirty && (
+              <span className="size-1.5 rounded-full bg-accent" aria-hidden />
+            )}
             {t.label}
+            {t.dirty && <span aria-hidden>*</span>}
             {!t.ready && (
               <span className="rounded-sm border border-border px-1 py-px text-[8.5px] uppercase tracking-[0.06em]">
                 Soon

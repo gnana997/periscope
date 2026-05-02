@@ -11,7 +11,7 @@
 
 import { useEffect, useState } from "react";
 import { ApiError, api } from "../../lib/api";
-import type { ResourceRef } from "./EditResourceModal";
+import type { ResourceRef } from "../../lib/api";
 
 interface DeleteResourceModalProps {
   resourceRef: ResourceRef;

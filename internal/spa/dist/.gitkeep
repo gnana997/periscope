@@ -1,3 +1,0 @@
-# Placeholder so `go build -tags embed` doesn't fail when no frontend
-# build has been copied here yet. The Docker build replaces the
-# directory contents with web/dist before compiling.

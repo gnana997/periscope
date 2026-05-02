@@ -23,6 +23,7 @@ import { DetailPane } from "../components/detail/DetailPane";
 import { PodDescribe } from "../components/detail/describe/PodDescribe";
 import { OpenShellButton } from "../components/exec/OpenShellButton";
 import { YamlView } from "../components/detail/YamlView";
+import { useEditorDirty } from "../hooks/useEditorDirty";
 import { ResourceActions } from "../components/edit/ResourceActions";
 import { EventsView } from "../components/detail/EventsView";
 import { PodLogsTab } from "../components/logs/PodLogsTab";
@@ -128,6 +129,8 @@ export function PodsPage({ cluster }: { cluster: string }) {
     return null;
   };
 
+  const editFlag = useEditorDirty(cluster, "pods", selectedNs ?? undefined, selectedName);
+
   const detail =
     selectedNs && selectedName ? (
       <DetailPane
@@ -148,6 +151,7 @@ export function PodsPage({ cluster }: { cluster: string }) {
             label: "yaml",
             ready: true,
             content: <YamlView cluster={cluster} kind="pods" ns={selectedNs} name={selectedName} />,
+            dirty: editFlag.dirty,
           },
           {
             id: "events",

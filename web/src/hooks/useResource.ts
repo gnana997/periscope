@@ -1,5 +1,5 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { api, type ClusterScopedKind, type YamlKind } from "../lib/api";
+import { api, type ClusterScopedKind, type OpenAPIDoc, type ResourceMeta, type YamlKind } from "../lib/api";
 import type {
   ClusterEventList,
   ClusterRoleBindingDetail,
@@ -306,6 +306,64 @@ export function useYaml(
   });
 }
 
+
+// --- Resource meta (managedFields + resourceVersion + generation) ---
+
+export function useResourceMeta(
+  cluster: string,
+  resource: { group: string; version: string; resource: string; namespace?: string; name: string } | null,
+  enabled: boolean,
+) {
+  return useQuery<ResourceMeta>({
+    queryKey: [
+      "meta",
+      cluster,
+      resource?.group,
+      resource?.version,
+      resource?.resource,
+      resource?.namespace ?? "",
+      resource?.name,
+    ],
+    queryFn: ({ signal }) =>
+      api.getMeta(
+        {
+          cluster,
+          group: resource!.group,
+          version: resource!.version,
+          resource: resource!.resource,
+          namespace: resource!.namespace,
+          name: resource!.name,
+        },
+        signal,
+      ),
+    enabled: enabled && Boolean(resource && resource.name),
+    // managedFields changes constantly under controllers — refetch on
+    // each editor open. Don't auto-refetch on focus (already paying the
+    // round trip on remount).
+    staleTime: 0,
+    refetchOnWindowFocus: false,
+  });
+}
+
+// --- OpenAPI v3 schema (per group/version) ---
+
+export function useOpenAPISchema(
+  cluster: string,
+  group: string,
+  version: string,
+  enabled: boolean,
+) {
+  return useQuery<OpenAPIDoc>({
+    queryKey: ["openapi", cluster, group, version],
+    queryFn: ({ signal }) => api.getOpenAPISchema(cluster, group, version, signal),
+    enabled: enabled && Boolean(cluster && version),
+    // Schemas only change on cluster upgrade — and a backend restart
+    // flushes the server-side cache too. Cache forever client-side.
+    staleTime: Infinity,
+    gcTime: Infinity,
+    refetchOnWindowFocus: false,
+  });
+}
 // --- Cluster overview ---
 
 export function useClusterSummary(cluster: string) {

@@ -31,6 +31,23 @@ function configureQuietWS(proxy: ProxyOptions["configure"]) {
 }
 
 export default defineConfig({
+  // Monaco editor worker is loaded as ES module via ?worker import in
+  // src/lib/monacoSetup.ts. ESM workers + optimizeDeps.exclude keep us
+  // off vite-plugin-monaco-editor (stale, fights Vite 8) and prevent
+  // Vite from pre-bundling Monaco into a CJS shim that fails as a worker.
+  worker: { format: "iife" },
+  optimizeDeps: {
+    exclude: ["monaco-editor"],
+    include: [
+      // monaco-yaml + its transitive deps use CommonJS in places
+      // (path-browserify, vscode-uri); pre-bundle so Vite converts
+      // them to ESM and the YAML worker can actually load them.
+      "monaco-yaml",
+      "vscode-languageserver-textdocument",
+      "vscode-uri",
+      "path-browserify",
+    ],
+  },
   plugins: [react(), tailwindcss()],
   server: {
     port: 5173,

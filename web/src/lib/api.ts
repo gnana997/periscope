@@ -548,6 +548,30 @@ export const api = {
     signal?: AbortSignal,
   ) => deleteResourceFetch(args, signal),
 
+
+  // Resource meta — managedFields + resourceVersion + generation.
+  // Drives glyph-margin owner badges; cached via useResourceMeta.
+  getMeta: (
+    args: {
+      cluster: string;
+      group: string;
+      version: string;
+      resource: string;
+      namespace?: string;
+      name: string;
+    },
+    signal?: AbortSignal,
+  ) => getJSON<ResourceMeta>(metaURL(args), signal),
+
+  // OpenAPI v3 schema for a (group, version) — proxied from the cluster's
+  // apiserver. Returns the full OpenAPI doc; consumers extract the
+  // matching schema via lib/k8sSchema.findSchemaForGVK.
+  getOpenAPISchema: (
+    cluster: string,
+    group: string,
+    version: string,
+    signal?: AbortSignal,
+  ) => getJSON<OpenAPIDoc>(openAPIURL(cluster, group, version), signal),
   revealSecretKey: (
     c: string,
     ns: string,
@@ -574,10 +598,87 @@ function resourceURL(args: {
     : `${base}/${enc(args.name)}`;
 }
 
+function metaURL(args: {
+  cluster: string;
+  group: string;
+  version: string;
+  resource: string;
+  namespace?: string;
+  name: string;
+}): string {
+  return resourceURL(args) + "/meta";
+}
+
+// openAPIURL routes core (group="") to /openapi/v3/api/{version} and
+// grouped resources to /openapi/v3/apis/{group}/{version} — matching
+// the apiserver's own OpenAPI v3 path scheme.
+function openAPIURL(cluster: string, group: string, version: string): string {
+  const base = `/api/clusters/${enc(cluster)}/openapi/v3`;
+  if (group === "") return `${base}/api/${enc(version)}`;
+  return `${base}/apis/${enc(group)}/${enc(version)}`;
+}
+
 export interface ApplyResult {
   object: Record<string, unknown>;
   dryRun: boolean;
 }
+
+// ResourceRef identifies a single K8s resource by URL parts. Shared
+// between the YAML editor (PR4) and the legacy modal (kept until PR5);
+// kind is optional and used only as a human label in titles.
+export interface ResourceRef {
+  cluster: string;
+  group: string; // "" for core (Pod, Service, ConfigMap, Secret, …)
+  version: string; // "v1", "apps/v1" already split → version = "v1"
+  resource: string; // plural URL segment, e.g. "pods", "deployments"
+  namespace?: string;
+  name: string;
+  kind?: string;
+}
+
+// ResourceMeta is the JSON returned by GET .../resources/.../meta.
+// Drives glyph-margin owner badges in the editor (PR4) and drift
+// detection (Phase 3).
+export interface ResourceMeta {
+  resourceVersion: string;
+  generation: number;
+  managedFields: ManagedFieldsEntry[];
+}
+
+// ManagedFieldsEntry mirrors the K8s metav1.ManagedFieldsEntry shape.
+// Only the fields the SPA actually reads are typed; the rest passes
+// through as `unknown` for forward-compatibility.
+export interface ManagedFieldsEntry {
+  manager: string;
+  operation: "Apply" | "Update";
+  apiVersion: string;
+  fieldsType?: "FieldsV1";
+  fieldsV1?: Record<string, unknown>;
+  time?: string;
+  subresource?: string;
+}
+
+// OpenAPIDoc is the apiserver's /openapi/v3/{group}/{version} response.
+// We type only the bits the editor inspects (components.schemas with
+// the K8s GVK extension); everything else is preserved as unknown so
+// the OpenAPI doc can be passed straight to monaco-yaml's $ref resolver.
+export interface OpenAPIDoc {
+  openapi?: string;
+  components?: {
+    schemas?: Record<string, OpenAPISchema>;
+  };
+  [key: string]: unknown;
+}
+
+export interface OpenAPISchema {
+  "x-kubernetes-group-version-kind"?: Array<{
+    group: string;
+    version: string;
+    kind: string;
+  }>;
+  [key: string]: unknown;
+}
+
 
 async function applyResourceFetch(
   args: {

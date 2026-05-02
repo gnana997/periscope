@@ -54,6 +54,7 @@ import { CustomResourcesPage } from "./pages/CustomResourcesPage";
 import { ExecPage } from "./pages/ExecPage";
 import { ExecSessionsProvider } from "./exec/ExecSessionsContext";
 import { Drawer } from "./exec/Drawer";
+import { Toaster } from "./lib/toast";
 import { SearchPalette } from "./components/search/SearchPalette";
 import { useAuth } from "./auth/AuthContext";
 import { LoginScreen } from "./auth/LoginScreen";
@@ -145,6 +146,7 @@ export default function App() {
       </div>
       <SearchPalette open={searchOpen} onClose={() => setSearchOpen(false)} />
       <Drawer />
+      <Toaster />
     </div>
     </ExecSessionsProvider>
   );
