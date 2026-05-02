@@ -74,12 +74,18 @@ export function CRDSubTree({ cluster }: { cluster: string }) {
   // Auto-expand the API group containing the active route. e.g. when
   // the user lands on /customresources/cert-manager.io/v1/certificates
   // we open cert-manager.io so they can see siblings.
+  // Auto-expand the API group of the currently-routed CRD so the
+  // sibling list is visible. Fires only on path change — user toggles
+  // (close) between path changes are honoured. Deriving openGroups
+  // during render would break that: the URL-active group would re-add
+  // itself on every render and the user could never close it.
   useEffect(() => {
     const m = location.pathname.match(
       /\/customresources\/([^/]+)\/[^/]+\/[^/]+/,
     );
     if (!m) return;
     const activeGroup = decodeURIComponent(m[1]);
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setOpenGroups((prev) => {
       if (prev.has(activeGroup)) return prev;
       return new Set([...prev, activeGroup]);

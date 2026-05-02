@@ -3,7 +3,7 @@
 // as a component-only file (eslint react-refresh/only-export-components).
 
 import { useContext } from "react";
-import { AuthContext, type AuthContextValue } from "./AuthContext";
+import { AuthContext, type AuthContextValue } from "./authContext";
 
 export function useAuth(): AuthContextValue {
   const v = useContext(AuthContext);

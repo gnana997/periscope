@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import { useParams } from "react-router-dom";
 import { cn } from "../lib/cn";
+import { useNow } from "../hooks/useNow";
 import { useExecSessions } from "./useExecSessions";
 import { Tab } from "./Tab";
 import { TerminalLazy as Terminal } from "./TerminalLazy";
@@ -39,11 +40,11 @@ const IS_MAC =
   typeof navigator !== "undefined" &&
   /mac|iphone|ipad|ipod/i.test(navigator.platform);
 
-function statusPill(s: ExecSessionMeta) {
+function statusPill(s: ExecSessionMeta, now: number) {
   const uptime =
     s.closedAt != null
       ? Math.max(0, Math.floor((s.closedAt - s.createdAt) / 1000))
-      : Math.max(0, Math.floor((Date.now() - s.createdAt) / 1000));
+      : Math.max(0, Math.floor((now - s.createdAt) / 1000));
   const m = Math.floor(uptime / 60);
   const sec = uptime % 60;
   const time = `${String(m).padStart(2, "0")}:${String(sec).padStart(2, "0")}`;
@@ -91,13 +92,7 @@ export function Drawer() {
   const params = useParams<{ cluster?: string }>();
 
   const [infoOpen, setInfoOpen] = useState(false);
-  const [, force] = useState(0);
-
-  // Tick once a second so status-pill uptime updates.
-  useEffect(() => {
-    const id = window.setInterval(() => force((n) => n + 1), 1000);
-    return () => window.clearInterval(id);
-  }, []);
+  const now = useNow();
 
   // --- drag-to-resize ---------------------------------------------------
   // Both pointermove + pointerup are scoped to a per-drag AbortController,
@@ -148,7 +143,7 @@ export function Drawer() {
     : sessions.find((s) => s.id === activeSessionId) ??
       sessions[sessions.length - 1];
   const activeClient = active ? getClient(active.id) : null;
-  const pill = active ? statusPill(active) : null;
+  const pill = active ? statusPill(active, now) : null;
   const closeable =
     active && active.status !== "closed" && active.status !== "error";
 
@@ -424,6 +419,7 @@ function Field({ k, v }: { k: string; v: string }) {
 // elapse before status flips back. No JS timer juggling.
 function SessionBanner({ session }: { session: ExecSessionMeta }) {
   const { reconnectNow, giveUpReconnect, closeSession } = useExecSessions();
+  const now = useNow();
 
   // Idle-warn banner — server told us inactivity will close the session.
   // Render while we're still inside the warning window. Show even when
@@ -435,7 +431,7 @@ function SessionBanner({ session }: { session: ExecSessionMeta }) {
   const showIdleWarn =
     session.status === "connected" &&
     idleWarnUntil > 0 &&
-    Date.now() < idleWarnUntil;
+    now < idleWarnUntil;
 
   // No-shell error: backend marked the close with a friendlier code.
   const showNoShell =
@@ -461,7 +457,7 @@ function SessionBanner({ session }: { session: ExecSessionMeta }) {
   if (showIdleWarn) {
     const secondsLeft = Math.max(
       1,
-      Math.ceil((idleWarnUntil - Date.now()) / 1000),
+      Math.ceil((idleWarnUntil - now) / 1000),
     );
     return (
       <BannerShell tone="yellow" instant>

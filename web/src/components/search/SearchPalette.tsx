@@ -73,12 +73,18 @@ export function SearchPalette({
   const inputRef = useRef<HTMLInputElement | null>(null);
   const listRef = useRef<HTMLUListElement | null>(null);
 
+  // When the palette closes we reset the internal buffer so the next
+  // open is fresh. The reset has to happen here rather than in the
+  // close button because `open` is controlled by the parent and may
+  // flip via Esc / outside-click handlers we don't own.
   useEffect(() => {
     if (!open) {
+      /* eslint-disable react-hooks/set-state-in-effect */
       setQuery("");
       setDebounced("");
       setActiveIndex(0);
       setFocused(false);
+      /* eslint-enable react-hooks/set-state-in-effect */
     } else {
       queueMicrotask(() => inputRef.current?.focus());
     }
@@ -99,7 +105,13 @@ export function SearchPalette({
 
   const results = useMemo(() => data?.results ?? [], [data]);
 
+  // Reset highlight to the top result whenever the result set changes
+  // (new query OR same query with different result count). activeIndex
+  // is also written by arrow-key navigation, so it has to be state;
+  // deriving it during render isn't viable without losing keyboard
+  // selection across re-fetches.
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setActiveIndex(0);
   }, [results.length, debounced]);
 

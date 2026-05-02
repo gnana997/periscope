@@ -1,7 +1,11 @@
-import { useEffect, useState } from "react";
 import { cn } from "../lib/cn";
+import { useNow } from "../hooks/useNow";
 import { clusterStripeColor } from "./clusterColor";
 import type { ExecSessionMeta } from "./types";
+
+// How long after a stdout burst the status dot stays "lit" before
+// dimming back to the resting opacity.
+const PULSE_MS = 600;
 
 interface TabProps {
   session: ExecSessionMeta;
@@ -34,30 +38,22 @@ function formatUptime(ms: number): string {
 }
 
 export function Tab({ session, active, onFocus, onClose }: TabProps) {
-  // Pulse the status dot for ~600ms after each stdout burst.
-  const [pulse, setPulse] = useState(false);
-  useEffect(() => {
-    if (session.status !== "connected") {
-      setPulse(false);
-      return;
-    }
-    setPulse(true);
-    const t = window.setTimeout(() => setPulse(false), 600);
-    return () => window.clearTimeout(t);
-  }, [session.lastActivityAt, session.status]);
+  // Wall-clock tick: 250ms while connected so the pulse window
+  // resolves smoothly; 1s otherwise (only the closed-state uptime
+  // tooltip needs that, and even that is static once closedAt is set).
+  const now = useNow(session.status === "connected" ? 250 : 1000);
 
-  // Re-render once a second so the uptime in the tooltip stays fresh.
-  const [, force] = useState(0);
-  useEffect(() => {
-    if (session.status !== "connected") return;
-    const id = window.setInterval(() => force((n) => n + 1), 1000);
-    return () => window.clearInterval(id);
-  }, [session.status]);
+  // Pulse derives from "did stdout arrive within the last PULSE_MS?".
+  // Pure render — no state, no effect.
+  const pulse =
+    session.status === "connected" &&
+    session.lastActivityAt != null &&
+    now - session.lastActivityAt < PULSE_MS;
 
   const stripe = clusterStripeColor(session.cluster);
   const uptime = session.closedAt
     ? formatUptime(session.closedAt - session.createdAt)
-    : formatUptime(Date.now() - session.createdAt);
+    : formatUptime(now - session.createdAt);
 
   return (
     <button

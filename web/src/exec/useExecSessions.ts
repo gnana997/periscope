@@ -3,7 +3,7 @@
 // that file component-only (eslint react-refresh/only-export-components).
 
 import { use } from "react";
-import { ExecSessionsCtx, type ExecSessionsContextValue } from "./ExecSessionsContext";
+import { ExecSessionsCtx, type ExecSessionsContextValue } from "./execSessionsCtx";
 
 export function useExecSessions(): ExecSessionsContextValue {
   // React 19's `use()` reads context with the same semantics as

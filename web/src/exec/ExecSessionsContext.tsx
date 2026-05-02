@@ -1,5 +1,4 @@
 import {
-  createContext,
   useCallback,
   useEffect,
   useMemo,
@@ -39,30 +38,10 @@ export type OpenSessionResult =
   | { ok: true; session: ExecSessionMeta }
   | { ok: false; reason: "cap_reached" | "exists"; existingId?: string };
 
-interface DrawerState {
-  /** Drawer expanded vs collapsed. Hidden when sessions.length === 0. */
-  open: boolean;
-  /** Pixels. Min 160, max 80% viewport. */
-  height: number;
-}
+import type { DrawerState, ExecSessionsContextValue } from "./execSessionsCtx";
+import { ExecSessionsCtx } from "./execSessionsCtx";
 
-export interface ExecSessionsContextValue {
-  sessions: ExecSessionMeta[];
-  activeSessionId: string | null;
-  drawer: DrawerState;
-  openSession: (input: OpenSessionInput) => OpenSessionResult;
-  focusSession: (id: string) => void;
-  closeSession: (id: string) => void;
-  setDrawerOpen: (open: boolean) => void;
-  setDrawerHeight: (height: number) => void;
-  toggleDrawer: () => void;
-  /** Look up the live ExecClient for rendering a Terminal. */
-  getClient: (id: string) => ExecClient | null;
-  /** Banner action: skip reconnect backoff and try now. */
-  reconnectNow: (id: string) => void;
-  /** Banner action: abandon reconnection — flips status to error. */
-  giveUpReconnect: (id: string) => void;
-}
+export type { DrawerState, ExecSessionsContextValue } from "./execSessionsCtx";
 
 // Visibility-close window: any session closed by the visibility timer
 // within this many ms of the user returning is auto-restarted. Beyond
@@ -76,8 +55,6 @@ interface VisibilityRecent {
   params: OpenSessionInput;
   closedAt: number;
 }
-
-export const ExecSessionsCtx = createContext<ExecSessionsContextValue | null>(null);
 
 function loadDrawerState(): DrawerState {
   let height = 320;
@@ -466,17 +443,35 @@ export function ExecSessionsProvider({ children }: { children: ReactNode }) {
 
   // Refs that mirror the live values for use inside the visibility
   // listener (which must not re-bind on every render).
+  //
+  // Updates are committed in useEffect rather than during render —
+  // react-hooks/refs flags ref writes during render. The trade-off:
+  // refs are briefly stale between render and effect commit. That's
+  // safe here because every reader is an event handler (visibility,
+  // auto-remove timer) that fires well after a render has settled.
   const sessionsRef = useRef(sessions);
-  sessionsRef.current = sessions;
   const openSessionRef = useRef(openSession);
-  openSessionRef.current = openSession;
   // closeSessionRef is read by the auto-remove timer wired in
   // openSession's client.onClosed callback. Using a ref instead of
   // capturing closeSession directly keeps the timer's reference
   // current — closeSession is recreated on every render and the
   // closure captured at session-open time would be stale otherwise.
   const closeSessionRef = useRef(closeSession);
-  closeSessionRef.current = closeSession;
+  // The new react-hooks rules are in mutual tension here:
+  //   - react-hooks/refs: don't write *.current = ... during render
+  //   - react-hooks/immutability: don't write *.current = ... in an
+  //     effect when the same value is read by another (earlier-source)
+  //     effect — even when those reads execute *temporally later*,
+  //     inside async event callbacks (websocket close, visibility timer)
+  // useEffectEvent will subsume this when stable in a future React
+  // release; until then the latest-closure-via-ref pattern is the
+  // canonical way to bridge stable callbacks and live state.
+  // eslint-disable-next-line react-hooks/immutability
+  useEffect(() => { sessionsRef.current = sessions; }, [sessions]);
+  // eslint-disable-next-line react-hooks/immutability
+  useEffect(() => { openSessionRef.current = openSession; }, [openSession]);
+  // eslint-disable-next-line react-hooks/immutability
+  useEffect(() => { closeSessionRef.current = closeSession; }, [closeSession]);
 
   const value = useMemo<ExecSessionsContextValue>(
     () => ({

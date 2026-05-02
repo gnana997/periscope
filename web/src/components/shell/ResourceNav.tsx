@@ -40,10 +40,14 @@ export function ResourceNav() {
 
   const [openGroups, setOpenGroups] = useState<Set<ResourceGroup>>(readOpenGroups);
 
-  // Auto-expand the group of the active route when navigating
+  // Auto-expand the group of the active route when navigating. Same
+  // rationale as CRDSubTree: deriving from the URL each render would
+  // make user-toggled-close stick only until the next render. The
+  // effect runs only on path change so user toggles persist.
   useEffect(() => {
     const active = groupForPath(location.pathname);
     if (active) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setOpenGroups((prev) => {
         if (prev.has(active)) return prev;
         return new Set([...prev, active]);

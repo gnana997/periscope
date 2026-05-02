@@ -126,6 +126,13 @@ export function useLogStream(config: LogStreamConfig): UseLogStreamResult {
       flushTimer = window.setTimeout(flush, FLUSH_INTERVAL_MS);
     };
 
+    // Resubscribe-reset: clear the previous stream's accumulated state
+    // before opening the next SSE connection. This is the canonical
+    // "subscribe + sync" pattern — the resubscribe IS the side effect
+    // and the state must be cleared as part of it. Deriving from
+    // config wouldn't work: the buffer is append-only and represents
+    // history, not a derivation of inputs.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setLines([]);
     setStatus("connecting");
     setError(undefined);
