@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { cn } from "../../lib/cn";
 import { usePodDetail } from "../../hooks/useResource";
 import { useClusters } from "../../hooks/useClusters";
-import { useExecSessions } from "../../exec/ExecSessionsContext";
+import { useExecSessions } from "../../exec/useExecSessions";
 import { CapReachedDialog } from "../../exec/CapReachedDialog";
 
 /**

@@ -6,11 +6,13 @@ import { ageFrom, nameMatches } from "../lib/format";
 import { PageHeader } from "../components/page/PageHeader";
 import { SplitPane } from "../components/page/SplitPane";
 import { DataTable, type Column } from "../components/table/DataTable";
-import { EmptyState, ErrorState, ForbiddenState, LoadingState, isForbidden } from "../components/table/states";
+import { EmptyState, ErrorState, ForbiddenState, LoadingState } from "../components/table/states";
+import { isForbidden } from "../components/table/isForbidden";
 import { DetailPane } from "../components/detail/DetailPane";
 import { ClusterRoleDescribe } from "../components/detail/describe/ClusterRoleDescribe";
 import { YamlView } from "../components/detail/YamlView";
 import { useEditorDirty } from "../hooks/useEditorDirty";
+import { ResourceActions } from "../components/edit/ResourceActions";
 import { cn } from "../lib/cn";
 
 export function ClusterRolesPage({ cluster }: { cluster: string }) {
@@ -36,7 +38,7 @@ export function ClusterRolesPage({ cluster }: { cluster: string }) {
   };
 
   const query = useResource({ cluster, resource: "clusterroles" });
-  const all = ((query.data as ClusterRoleList | undefined)?.clusterRoles ?? []) as ClusterRole[];
+  const all = useMemo<ClusterRole[]>(() => (query.data as ClusterRoleList | undefined)?.clusterRoles ?? [], [query.data]);
   const filtered = useMemo(
     () => (search ? all.filter((r) => nameMatches(r.name, search)) : all),
     [all, search],
@@ -61,6 +63,15 @@ export function ClusterRolesPage({ cluster }: { cluster: string }) {
         { id: "describe", label: "describe", ready: true, content: <ClusterRoleDescribe cluster={cluster} name={selectedName} /> },
         { id: "yaml", label: "yaml", ready: true, content: <YamlView cluster={cluster} kind="clusterroles" ns="" name={selectedName} />, dirty: editFlag.dirty },
       ]}
+      actions={
+        <ResourceActions
+          cluster={cluster}
+          yamlKind="clusterroles"
+          namespace={null}
+          name={selectedName}
+          onDeleted={() => setParam("sel", null)}
+        />
+      }
     />
   ) : null;
 

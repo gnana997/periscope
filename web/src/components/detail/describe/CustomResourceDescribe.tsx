@@ -1049,6 +1049,7 @@ function omitKey<K extends string>(
   obj: Record<string, unknown>,
   key: K,
 ): Record<string, unknown> {
-  const { [key]: _omit, ...rest } = obj;
+  const rest = { ...obj };
+  delete rest[key as string];
   return rest;
 }

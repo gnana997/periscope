@@ -7,11 +7,13 @@ import { PageHeader } from "../components/page/PageHeader";
 import { FilterStrip } from "../components/page/FilterStrip";
 import { SplitPane } from "../components/page/SplitPane";
 import { DataTable, type Column } from "../components/table/DataTable";
-import { EmptyState, ErrorState, ForbiddenState, LoadingState, isForbidden } from "../components/table/states";
+import { EmptyState, ErrorState, ForbiddenState, LoadingState } from "../components/table/states";
+import { isForbidden } from "../components/table/isForbidden";
 import { DetailPane } from "../components/detail/DetailPane";
 import { RoleBindingDescribe } from "../components/detail/describe/RoleBindingDescribe";
 import { YamlView } from "../components/detail/YamlView";
 import { useEditorDirty } from "../hooks/useEditorDirty";
+import { ResourceActions } from "../components/edit/ResourceActions";
 import { NamespacePicker } from "../components/shell/NamespacePicker";
 
 export function RoleBindingsPage({ cluster }: { cluster: string }) {
@@ -39,7 +41,7 @@ export function RoleBindingsPage({ cluster }: { cluster: string }) {
   };
 
   const query = useResource({ cluster, resource: "rolebindings", namespace: namespace ?? undefined });
-  const all = ((query.data as RoleBindingList | undefined)?.roleBindings ?? []) as RoleBinding[];
+  const all = useMemo<RoleBinding[]>(() => (query.data as RoleBindingList | undefined)?.roleBindings ?? [], [query.data]);
   const filtered = useMemo(
     () => (search ? all.filter((r) => nameMatches(r.name, search)) : all),
     [all, search],
@@ -69,6 +71,15 @@ export function RoleBindingsPage({ cluster }: { cluster: string }) {
           { id: "describe", label: "describe", ready: true, content: <RoleBindingDescribe cluster={cluster} ns={selectedNs} name={selectedName} /> },
           { id: "yaml", label: "yaml", ready: true, content: <YamlView cluster={cluster} kind="rolebindings" ns={selectedNs} name={selectedName} />, dirty: editFlag.dirty },
         ]}
+        actions={
+          <ResourceActions
+            cluster={cluster}
+            yamlKind="rolebindings"
+            namespace={selectedNs}
+            name={selectedName}
+            onDeleted={() => setParam("sel", null)}
+          />
+        }
       />
     ) : null;
 

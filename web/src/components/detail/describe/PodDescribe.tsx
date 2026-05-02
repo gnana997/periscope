@@ -10,10 +10,8 @@ import {
   MetaPills,
   SectionTitle,
   StatStrip,
-  phaseStatTone,
-  readyStatTone,
-  restartStatTone,
 } from "./shared";
+import { phaseStatTone, readyStatTone, restartStatTone } from "./tones";
 import type { ContainerMetrics, ContainerStatus } from "../../../lib/types";
 
 export function PodDescribe({

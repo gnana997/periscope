@@ -101,13 +101,13 @@ export function CustomResourcesPage({ cluster }: { cluster: string }) {
     isClusterScoped ? undefined : namespace ?? undefined,
   );
 
-  const all: CustomResource[] = listQuery.data?.items ?? [];
+  const all = useMemo<CustomResource[]>(() => listQuery.data?.items ?? [], [listQuery.data]);
   const filtered = useMemo(
     () => (search ? all.filter((r) => nameMatches(r.name, search)) : all),
     [all, search],
   );
 
-  const printerColumns = listQuery.data?.columns ?? [];
+  const printerColumns = useMemo(() => listQuery.data?.columns ?? [], [listQuery.data]);
 
   // Build DataTable columns from printer-column definitions plus the
   // standard Name + Namespace + Age columns we always inject. Dynamic

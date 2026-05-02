@@ -1,5 +1,5 @@
 import { cn } from "../lib/cn";
-import { useExecSessions } from "./ExecSessionsContext";
+import { useExecSessions } from "./useExecSessions";
 import { clusterStripeColor } from "./clusterColor";
 import type { ExecSessionMeta, SessionStatus } from "./types";
 

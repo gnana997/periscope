@@ -1,7 +1,6 @@
 import {
   createContext,
   useCallback,
-  useContext,
   useEffect,
   useMemo,
   useState,
@@ -9,7 +8,7 @@ import {
 } from "react";
 import type { AuthUser } from "./types";
 
-interface AuthContextValue {
+export interface AuthContextValue {
   user: AuthUser | null;
   isLoading: boolean;
   error: string | null;
@@ -23,7 +22,7 @@ interface AuthContextValue {
   refresh: () => Promise<void>;
 }
 
-const AuthContext = createContext<AuthContextValue | null>(null);
+export const AuthContext = createContext<AuthContextValue | null>(null);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
@@ -76,12 +75,4 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
-}
-
-export function useAuth(): AuthContextValue {
-  const v = useContext(AuthContext);
-  if (!v) {
-    throw new Error("useAuth must be used inside <AuthProvider>");
-  }
-  return v;
 }

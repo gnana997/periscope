@@ -15,13 +15,14 @@ import {
   EmptyState,
   ErrorState,
   ForbiddenState,
-  isForbidden,
   LoadingState,
 } from "../components/table/states";
+import { isForbidden } from "../components/table/isForbidden";
 import { DetailPane } from "../components/detail/DetailPane";
 import { DaemonSetDescribe } from "../components/detail/describe/DaemonSetDescribe";
 import { YamlView } from "../components/detail/YamlView";
 import { useEditorDirty } from "../hooks/useEditorDirty";
+import { ResourceActions } from "../components/edit/ResourceActions";
 import { EventsView } from "../components/detail/EventsView";
 import { WorkloadLogsTab } from "../components/logs/WorkloadLogsTab";
 import { NamespacePicker } from "../components/shell/NamespacePicker";
@@ -56,8 +57,7 @@ export function DaemonSetsPage({ cluster }: { cluster: string }) {
     resource: "daemonsets",
     namespace: namespace ?? undefined,
   });
-  const all =
-    ((query.data as DaemonSetList | undefined)?.daemonSets ?? []) as DaemonSet[];
+  const all = useMemo<DaemonSet[]>(() => (query.data as DaemonSetList | undefined)?.daemonSets ?? [], [query.data]);
   const filtered = useMemo(
     () => (search ? all.filter((d) => nameMatches(d.name, search)) : all),
     [all, search],
@@ -121,6 +121,15 @@ export function DaemonSetsPage({ cluster }: { cluster: string }) {
           { id: "events", label: "events", ready: true, content: <EventsView cluster={cluster} kind="daemonsets" ns={selectedNs} name={selectedName} /> },
           { id: "logs", label: "logs", ready: true, content: <WorkloadLogsTab kind="daemonset" cluster={cluster} ns={selectedNs} name={selectedName} /> },
         ]}
+        actions={
+          <ResourceActions
+            cluster={cluster}
+            yamlKind="daemonsets"
+            namespace={selectedNs}
+            name={selectedName}
+            onDeleted={() => setParam("sel", null)}
+          />
+        }
       />
     ) : null;
 

@@ -347,6 +347,12 @@ function Editor({ cluster, yamlKind, resource, pristine }: EditorProps) {
       setCurrentYaml(editor.getValue());
     });
 
+    // Fire once if the *pristine* (unedited) buffer has validation
+    // markers — almost always indicates a strip/schema mismatch on
+    // our side rather than user error. Surfaces in DevTools so we can
+    // diagnose "I opened the editor and it already shows errors"
+    // reports without the user having to dig.
+    let pristineWarned = false;
     const markersSub = monaco.editor.onDidChangeMarkers((uris) => {
       if (!uris.some((u) => u.toString() === uri.toString())) return;
       const marks = monaco.editor.getModelMarkers({ resource: uri });
@@ -355,6 +361,21 @@ function Editor({ cluster, yamlKind, resource, pristine }: EditorProps) {
       const sorted = [...errs].sort((a, b) => a.startLineNumber - b.startLineNumber);
       const first = sorted[0];
       setFirstError(first ? { message: first.message, line: first.startLineNumber } : null);
+
+      if (
+        !pristineWarned &&
+        errs.length > 0 &&
+        editor.getValue() === pristine
+      ) {
+        pristineWarned = true;
+        console.warn(
+          `[periscope] pristine YAML has ${errs.length} validation marker(s) before any edit — likely a strip/schema mismatch. Examples:`,
+          sorted.slice(0, 3).map((m) => ({
+            line: m.startLineNumber,
+            message: m.message,
+          })),
+        );
+      }
     });
 
     return () => {
@@ -922,35 +943,77 @@ function Editor({ cluster, yamlKind, resource, pristine }: EditorProps) {
    before it becomes the pristine buffer. yamlPatch.computeOps
    also strips metadata at diff time; this is purely a *display*
    concern (don't show the user a wall of `managedFields:`).
+
+   Critical: scalars like `uid:`, `resourceVersion:`, `generation:`
+   only get stripped when they are *direct children of the
+   top-level metadata block*. Without that scope check, the K8s
+   schema validator complains about ownerReferences[].uid being
+   missing (it's required there) — same scalar name, different
+   semantics depending on parent.
    ============================================================ */
 function stripForEdit(yaml: string): string {
   if (!yaml.includes("managedFields:") && !yaml.includes("status:")) {
     return yaml;
   }
+  const META_SCALARS = new Set([
+    "uid",
+    "resourceVersion",
+    "generation",
+    "creationTimestamp",
+  ]);
   const lines = yaml.split("\n");
   const out: string[] = [];
   let skipUntilDedentTo: number | null = null;
+  // Indent of the `metadata:` block when we're inside it; null otherwise.
+  // We're "inside metadata" while subsequent lines indent deeper than
+  // metadataAt, and we leave when we hit a line at metadataAt or shallower.
+  let metadataAt: number | null = null;
+
   for (const line of lines) {
     const indent = line.search(/\S/);
+
+    // Active block-skip (continuing to drop a managedFields/status block)
     if (skipUntilDedentTo !== null) {
       if (indent === -1 || indent > skipUntilDedentTo) continue;
       skipUntilDedentTo = null;
     }
+
+    // Track entry/exit of the top-level metadata block by indent.
+    if (metadataAt !== null && indent !== -1 && indent <= metadataAt) {
+      metadataAt = null;
+    }
+
     const trimmed = line.trimStart();
+
+    // status: and managedFields: are server-only blocks. Strip them
+    // wherever they appear at the top level (managedFields lives in
+    // metadata, status at root). The block-skip catches the children.
     if (
-      trimmed.startsWith("managedFields:") ||
       trimmed.startsWith("status:") ||
-      trimmed.startsWith("resourceVersion:") ||
-      trimmed.startsWith("uid:") ||
-      trimmed.startsWith("generation:") ||
-      trimmed.startsWith("creationTimestamp:")
+      trimmed.startsWith("managedFields:")
     ) {
       const isBlock = !trimmed.includes(":") || /:\s*$/.test(trimmed);
-      if (isBlock) {
-        skipUntilDedentTo = indent;
-      }
+      if (isBlock) skipUntilDedentTo = indent;
       continue;
     }
+
+    // Direct metadata-scalar strip — only inside metadata: block, only
+    // for the four well-known server-managed scalars.
+    if (metadataAt !== null && indent === metadataAt + 2) {
+      const colonIdx = trimmed.indexOf(":");
+      const key = colonIdx > 0 ? trimmed.slice(0, colonIdx) : trimmed;
+      if (META_SCALARS.has(key)) {
+        const isBlock = /:\s*$/.test(trimmed);
+        if (isBlock) skipUntilDedentTo = indent;
+        continue;
+      }
+    }
+
+    // Note we entered metadata: (after deciding not to strip this line).
+    if (trimmed.startsWith("metadata:") && indent !== -1) {
+      metadataAt = indent;
+    }
+
     out.push(line);
   }
   return out.join("\n");

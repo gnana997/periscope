@@ -56,7 +56,7 @@ import { ExecSessionsProvider } from "./exec/ExecSessionsContext";
 import { Drawer } from "./exec/Drawer";
 import { Toaster } from "./lib/toast";
 import { SearchPalette } from "./components/search/SearchPalette";
-import { useAuth } from "./auth/AuthContext";
+import { useAuth } from "./auth/useAuth";
 import { LoginScreen } from "./auth/LoginScreen";
 
 export default function App() {

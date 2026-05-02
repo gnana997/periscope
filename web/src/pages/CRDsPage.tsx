@@ -4,7 +4,8 @@ import { useCRDs } from "../hooks/useResource";
 import { ageFrom, nameMatches } from "../lib/format";
 import { cn } from "../lib/cn";
 import { PageHeader } from "../components/page/PageHeader";
-import { ErrorState, ForbiddenState, LoadingState, isForbidden } from "../components/table/states";
+import { ErrorState, ForbiddenState, LoadingState } from "../components/table/states";
+import { isForbidden } from "../components/table/isForbidden";
 import type { CRD } from "../lib/types";
 
 /**
@@ -24,7 +25,7 @@ export function CRDsPage({ cluster }: { cluster: string }) {
   const navigate = useNavigate();
 
   const { data, isLoading, isError, error } = useCRDs(cluster);
-  const crds = data?.crds ?? [];
+  const crds = useMemo(() => data?.crds ?? [], [data]);
 
   const filtered = useMemo(() => {
     if (!search) return crds;

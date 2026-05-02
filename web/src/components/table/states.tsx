@@ -112,14 +112,6 @@ export function ForbiddenState({
   );
 }
 
-// isForbidden detects whether an error from getJSON represents
-// a 403 response. The api wrapper preserves status on ApiError.
-export function isForbidden(err: unknown): boolean {
-  if (!err || typeof err !== "object") return false;
-  const status = (err as { status?: unknown }).status;
-  return status === 403;
-}
-
 export function NoClustersState() {
   return (
     <div className="flex flex-1 flex-col items-center justify-center gap-4 px-6 py-16 text-center">

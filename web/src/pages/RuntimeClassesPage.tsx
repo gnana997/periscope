@@ -7,11 +7,13 @@ import { cn } from "../lib/cn";
 import { PageHeader } from "../components/page/PageHeader";
 import { SplitPane } from "../components/page/SplitPane";
 import { DataTable, type Column } from "../components/table/DataTable";
-import { EmptyState, ErrorState, ForbiddenState, LoadingState, isForbidden } from "../components/table/states";
+import { EmptyState, ErrorState, ForbiddenState, LoadingState } from "../components/table/states";
+import { isForbidden } from "../components/table/isForbidden";
 import { DetailPane } from "../components/detail/DetailPane";
 import { RuntimeClassDescribe } from "../components/detail/describe/RuntimeClassDescribe";
 import { YamlView } from "../components/detail/YamlView";
 import { useEditorDirty } from "../hooks/useEditorDirty";
+import { ResourceActions } from "../components/edit/ResourceActions";
 
 export function RuntimeClassesPage({ cluster }: { cluster: string }) {
   const [params, setParams] = useSearchParams();
@@ -36,7 +38,7 @@ export function RuntimeClassesPage({ cluster }: { cluster: string }) {
   };
 
   const query = useResource({ cluster, resource: "runtimeclasses" });
-  const all = ((query.data as RuntimeClassList | undefined)?.runtimeClasses ?? []) as RuntimeClass[];
+  const all = useMemo<RuntimeClass[]>(() => (query.data as RuntimeClassList | undefined)?.runtimeClasses ?? [], [query.data]);
   const filtered = useMemo(
     () => (search ? all.filter((r) => nameMatches(r.name, search)) : all),
     [all, search],
@@ -63,6 +65,15 @@ export function RuntimeClassesPage({ cluster }: { cluster: string }) {
         { id: "describe", label: "describe", ready: true, content: <RuntimeClassDescribe cluster={cluster} name={selectedName} /> },
         { id: "yaml", label: "yaml", ready: true, content: <YamlView cluster={cluster} kind="runtimeclasses" ns="" name={selectedName} />, dirty: editFlag.dirty },
       ]}
+      actions={
+        <ResourceActions
+          cluster={cluster}
+          yamlKind="runtimeclasses"
+          namespace={null}
+          name={selectedName}
+          onDeleted={() => setParam("sel", null)}
+        />
+      }
     />
   ) : null;
 

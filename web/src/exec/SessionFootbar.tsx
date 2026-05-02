@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { cn } from "../lib/cn";
-import { useExecSessions } from "./ExecSessionsContext";
+import { useExecSessions } from "./useExecSessions";
 import { usePodDetail } from "../hooks/useResource";
 import type { ContainerStatus } from "../lib/types";
 import type { ExecSessionMeta } from "./types";

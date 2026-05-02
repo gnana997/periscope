@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
 import { cn } from "../lib/cn";
-import { useExecSessions } from "./ExecSessionsContext";
+import { useExecSessions } from "./useExecSessions";
 import { Tab } from "./Tab";
 import { TerminalLazy as Terminal } from "./TerminalLazy";
 import { CollapsedBar } from "./CollapsedBar";
@@ -100,45 +100,37 @@ export function Drawer() {
   }, []);
 
   // --- drag-to-resize ---------------------------------------------------
-  const dragStateRef = useRef<{ startY: number; startH: number } | null>(null);
-
-  const onDragMove = useCallback(
-    (e: PointerEvent) => {
-      const st = dragStateRef.current;
-      if (!st) return;
-      // The drawer grows by moving the top edge UP, so subtract.
-      const next = st.startH + (st.startY - e.clientY);
-      setDrawerHeight(next);
-    },
-    [setDrawerHeight],
-  );
-
-  const stopDrag = useCallback(() => {
-    dragStateRef.current = null;
-    window.removeEventListener("pointermove", onDragMove);
-    window.removeEventListener("pointerup", stopDrag);
-    // Batched cleanup via removeProperty so we don't issue two sequential
-    // style writes (react-doctor performance finding) and don't clobber
-    // any unrelated inline styles set elsewhere.
-    document.body.style.removeProperty("cursor");
-    document.body.style.removeProperty("user-select");
-  }, [onDragMove]);
-
+  // Both pointermove + pointerup are scoped to a per-drag AbortController,
+  // so cleanup is a single ac.abort() — no self-referencing useCallback,
+  // no lingering listeners if the component unmounts mid-drag.
   const startDrag = useCallback(
     (e: React.PointerEvent) => {
-      dragStateRef.current = { startY: e.clientY, startH: drawer.height };
+      const startY = e.clientY;
+      const startH = drawer.height;
+      const ac = new AbortController();
+
+      const handleMove = (ev: PointerEvent) => {
+        // The drawer grows by moving the top edge UP, so subtract.
+        setDrawerHeight(startH + (startY - ev.clientY));
+      };
+      const handleStop = () => {
+        ac.abort();
+        // Batched cleanup via removeProperty so we don't issue two
+        // sequential style writes (react-doctor performance finding)
+        // and don't clobber unrelated inline styles set elsewhere.
+        document.body.style.removeProperty("cursor");
+        document.body.style.removeProperty("user-select");
+      };
+
       // Single setProperty call vs two style assignments. The browser
       // batches inside setProperty itself; the goal is one observable
       // write per drag-start.
-      document.body.style.setProperty(
-        "cursor",
-        "ns-resize",
-      );
+      document.body.style.setProperty("cursor", "ns-resize");
       document.body.style.setProperty("user-select", "none");
-      window.addEventListener("pointermove", onDragMove);
-      window.addEventListener("pointerup", stopDrag);
+      window.addEventListener("pointermove", handleMove, { signal: ac.signal });
+      window.addEventListener("pointerup", handleStop, { signal: ac.signal });
     },
-    [drawer.height, onDragMove, stopDrag],
+    [drawer.height, setDrawerHeight],
   );
   // ---------------------------------------------------------------------
 

@@ -97,7 +97,7 @@ export function SearchPalette({
     staleTime: 5_000,
   });
 
-  const results = data?.results ?? [];
+  const results = useMemo(() => data?.results ?? [], [data]);
 
   useEffect(() => {
     setActiveIndex(0);

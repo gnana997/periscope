@@ -11,14 +11,15 @@ import {
   type Column,
   type RowTint,
 } from "../components/table/DataTable";
-import { PhaseTag, phaseTone } from "../components/table/StatusDot";
+import { PhaseTag } from "../components/table/StatusDot";
+import { phaseTone } from "../components/table/phaseTone";
 import {
   EmptyState,
   ErrorState,
   ForbiddenState,
-  isForbidden,
   LoadingState,
 } from "../components/table/states";
+import { isForbidden } from "../components/table/isForbidden";
 import { DetailPane } from "../components/detail/DetailPane";
 import { PodDescribe } from "../components/detail/describe/PodDescribe";
 import { OpenShellButton } from "../components/exec/OpenShellButton";
@@ -61,7 +62,10 @@ export function PodsPage({ cluster }: { cluster: string }) {
     namespace: namespace ?? undefined,
   });
 
-  const allPods = ((podsQuery.data as PodList | undefined)?.pods ?? []) as Pod[];
+  const allPods = useMemo<Pod[]>(
+    () => (podsQuery.data as PodList | undefined)?.pods ?? [],
+    [podsQuery.data],
+  );
 
   const failing = useMemo(
     () =>
@@ -170,15 +174,8 @@ export function PodsPage({ cluster }: { cluster: string }) {
           <ResourceActions
             cluster={cluster}
             yamlKind="pods"
-            resource={{
-              cluster,
-              group: "",
-              version: "v1",
-              resource: "pods",
-              namespace: selectedNs,
-              name: selectedName,
-              kind: "Pod",
-            }}
+            namespace={selectedNs}
+            name={selectedName}
             onDeleted={() => setParam("sel", null)}
             trailing={
               <OpenShellButton

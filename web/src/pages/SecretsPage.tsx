@@ -11,9 +11,9 @@ import {
   EmptyState,
   ErrorState,
   ForbiddenState,
-  isForbidden,
   LoadingState,
 } from "../components/table/states";
+import { isForbidden } from "../components/table/isForbidden";
 import { DetailPane } from "../components/detail/DetailPane";
 import { SecretDescribe } from "../components/detail/describe/SecretDescribe";
 import { YamlView } from "../components/detail/YamlView";
@@ -56,8 +56,7 @@ export function SecretsPage({ cluster }: { cluster: string }) {
     resource: "secrets",
     namespace: namespace ?? undefined,
   });
-  const all =
-    ((query.data as SecretList | undefined)?.secrets ?? []) as Secret[];
+  const all = useMemo<Secret[]>(() => (query.data as SecretList | undefined)?.secrets ?? [], [query.data]);
   const filtered = useMemo(
     () => (search ? all.filter((s) => nameMatches(s.name, search)) : all),
     [all, search],
@@ -99,15 +98,8 @@ export function SecretsPage({ cluster }: { cluster: string }) {
           <ResourceActions
             cluster={cluster}
             yamlKind="secrets"
-            resource={{
-              cluster,
-              group: "",
-              version: "v1",
-              resource: "secrets",
-              namespace: selectedNs,
-              name: selectedName,
-              kind: "Secret",
-            }}
+            namespace={selectedNs}
+            name={selectedName}
             onDeleted={() => setMany({ sel: null, selNs: null, tab: null })}
           />
         }

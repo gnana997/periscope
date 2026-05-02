@@ -15,9 +15,9 @@ import {
   EmptyState,
   ErrorState,
   ForbiddenState,
-  isForbidden,
   LoadingState,
 } from "../components/table/states";
+import { isForbidden } from "../components/table/isForbidden";
 import { DetailPane } from "../components/detail/DetailPane";
 import { NodeDescribe } from "../components/detail/describe/NodeDescribe";
 import { cn } from "../lib/cn";
@@ -61,8 +61,7 @@ export function NodesPage({ cluster }: { cluster: string }) {
   };
 
   const query = useResource({ cluster, resource: "nodes" });
-  const all =
-    ((query.data as NodeList | undefined)?.nodes ?? []) as Node[];
+  const all = useMemo<Node[]>(() => (query.data as NodeList | undefined)?.nodes ?? [], [query.data]);
   const filtered = useMemo(
     () => (search ? all.filter((n) => nameMatches(n.name, search)) : all),
     [all, search],

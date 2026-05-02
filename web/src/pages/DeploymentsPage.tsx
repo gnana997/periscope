@@ -15,9 +15,9 @@ import {
   EmptyState,
   ErrorState,
   ForbiddenState,
-  isForbidden,
   LoadingState,
 } from "../components/table/states";
+import { isForbidden } from "../components/table/isForbidden";
 import { DetailPane } from "../components/detail/DetailPane";
 import { DeploymentDescribe } from "../components/detail/describe/DeploymentDescribe";
 import { YamlView } from "../components/detail/YamlView";
@@ -57,8 +57,7 @@ export function DeploymentsPage({ cluster }: { cluster: string }) {
     resource: "deployments",
     namespace: namespace ?? undefined,
   });
-  const all =
-    ((query.data as DeploymentList | undefined)?.deployments ?? []) as Deployment[];
+  const all = useMemo<Deployment[]>(() => (query.data as DeploymentList | undefined)?.deployments ?? [], [query.data]);
   const filtered = useMemo(
     () => (search ? all.filter((d) => nameMatches(d.name, search)) : all),
     [all, search],
@@ -113,15 +112,8 @@ export function DeploymentsPage({ cluster }: { cluster: string }) {
           <ResourceActions
             cluster={cluster}
             yamlKind="deployments"
-            resource={{
-              cluster,
-              group: "apps",
-              version: "v1",
-              resource: "deployments",
-              namespace: selectedNs,
-              name: selectedName,
-              kind: "Deployment",
-            }}
+            namespace={selectedNs}
+            name={selectedName}
             onDeleted={() => setMany({ sel: null, selNs: null, tab: null })}
           />
         }

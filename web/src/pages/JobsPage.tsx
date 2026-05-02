@@ -15,13 +15,14 @@ import {
   EmptyState,
   ErrorState,
   ForbiddenState,
-  isForbidden,
   LoadingState,
 } from "../components/table/states";
+import { isForbidden } from "../components/table/isForbidden";
 import { DetailPane } from "../components/detail/DetailPane";
 import { JobDescribe } from "../components/detail/describe/JobDescribe";
 import { YamlView } from "../components/detail/YamlView";
 import { useEditorDirty } from "../hooks/useEditorDirty";
+import { ResourceActions } from "../components/edit/ResourceActions";
 import { EventsView } from "../components/detail/EventsView";
 import { WorkloadLogsTab } from "../components/logs/WorkloadLogsTab";
 import { NamespacePicker } from "../components/shell/NamespacePicker";
@@ -82,7 +83,7 @@ export function JobsPage({ cluster }: { cluster: string }) {
     resource: "jobs",
     namespace: namespace ?? undefined,
   });
-  const all = ((query.data as JobList | undefined)?.jobs ?? []) as Job[];
+  const all = useMemo<Job[]>(() => (query.data as JobList | undefined)?.jobs ?? [], [query.data]);
 
   const failing = all.filter((j) => j.status === "Failed").length;
   const running = all.filter((j) => j.status === "Running").length;
@@ -161,6 +162,15 @@ export function JobsPage({ cluster }: { cluster: string }) {
           { id: "events", label: "events", ready: true, content: <EventsView cluster={cluster} kind="jobs" ns={selectedNs} name={selectedName} /> },
           { id: "logs", label: "logs", ready: true, content: <WorkloadLogsTab kind="job" cluster={cluster} ns={selectedNs} name={selectedName} /> },
         ]}
+        actions={
+          <ResourceActions
+            cluster={cluster}
+            yamlKind="jobs"
+            namespace={selectedNs}
+            name={selectedName}
+            onDeleted={() => setParam("sel", null)}
+          />
+        }
       />
     ) : null;
 

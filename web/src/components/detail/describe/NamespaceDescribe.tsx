@@ -1,7 +1,8 @@
 import { useNamespaceDetail } from "../../../hooks/useResource";
 import { ageFrom } from "../../../lib/format";
 import { DetailError, DetailLoading } from "../states";
-import { MetaPills, SectionTitle, StatStrip, phaseStatTone } from "./shared";
+import { phaseStatTone } from "./tones";
+import { MetaPills, SectionTitle, StatStrip } from "./shared";
 
 export function NamespaceDescribe({
   cluster,

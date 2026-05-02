@@ -77,6 +77,10 @@ export function LogStream(props: LogStreamProps) {
     return out;
   }, [filteredLines, search]);
 
+  // TanStack Virtual returns functions that the React Compiler can't
+  // safely memoize; the warning is informational and doesn't apply
+  // since useVirtualizer manages its own internal stability.
+  // eslint-disable-next-line react-hooks/incompatible-library
   const virtualizer = useVirtualizer({
     count: rows.length,
     getScrollElement: () => parentRef.current,
@@ -114,7 +118,7 @@ export function LogStream(props: LogStreamProps) {
     if (!el) return;
     el.addEventListener("scroll", recomputeAtBottom);
     return () => el.removeEventListener("scroll", recomputeAtBottom);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
   }, []);
 
   // Detect user-initiated scroll input synchronously, before the resulting
@@ -165,7 +169,7 @@ export function LogStream(props: LogStreamProps) {
     // recompute even if no scroll event fires (matters when initial lines
     // overflow the viewport before the user has interacted).
     recomputeAtBottom();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
   }, [rows.length, follow, virtualizer]);
 
   const jumpToBottom = () => {

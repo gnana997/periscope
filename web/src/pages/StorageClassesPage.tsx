@@ -10,9 +10,11 @@ import { DataTable, type Column } from "../components/table/DataTable";
 import { DetailPane } from "../components/detail/DetailPane";
 import { YamlView } from "../components/detail/YamlView";
 import { useEditorDirty } from "../hooks/useEditorDirty";
+import { ResourceActions } from "../components/edit/ResourceActions";
 import { EventsView } from "../components/detail/EventsView";
 import { StorageClassDescribe } from "../components/detail/describe/StorageClassDescribe";
-import { EmptyState, ErrorState, ForbiddenState, LoadingState, isForbidden } from "../components/table/states";
+import { EmptyState, ErrorState, ForbiddenState, LoadingState } from "../components/table/states";
+import { isForbidden } from "../components/table/isForbidden";
 
 export function StorageClassesPage({ cluster }: { cluster: string }) {
   const [params, setParams] = useSearchParams();
@@ -37,7 +39,7 @@ export function StorageClassesPage({ cluster }: { cluster: string }) {
   };
 
   const query = useResource({ cluster, resource: "storageclasses" });
-  const all = ((query.data as StorageClassList | undefined)?.storageClasses ?? []) as StorageClass[];
+  const all = useMemo<StorageClass[]>(() => (query.data as StorageClassList | undefined)?.storageClasses ?? [], [query.data]);
 
   const filtered = useMemo(
     () => (search ? all.filter((s) => nameMatches(s.name, search)) : all),
@@ -67,6 +69,15 @@ export function StorageClassesPage({ cluster }: { cluster: string }) {
         { id: "yaml", label: "yaml", ready: true, content: <YamlView cluster={cluster} kind="storageclasses" ns="" name={selectedName} />, dirty: editFlag.dirty },
         { id: "events", label: "events", ready: true, content: <EventsView cluster={cluster} kind="storageclasses" ns="" name={selectedName} /> },
       ]}
+      actions={
+        <ResourceActions
+          cluster={cluster}
+          yamlKind="storageclasses"
+          namespace={null}
+          name={selectedName}
+          onDeleted={() => setParam("sel", null)}
+        />
+      }
     />
   ) : null;
 

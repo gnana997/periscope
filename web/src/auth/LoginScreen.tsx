@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useAuth } from "./AuthContext";
+import { useAuth } from "./useAuth";
 
 /**
  * LoginScreen — pre-auth landing page in OIDC mode.

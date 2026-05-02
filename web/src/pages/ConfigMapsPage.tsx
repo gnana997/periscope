@@ -11,13 +11,14 @@ import {
   EmptyState,
   ErrorState,
   ForbiddenState,
-  isForbidden,
   LoadingState,
 } from "../components/table/states";
+import { isForbidden } from "../components/table/isForbidden";
 import { DetailPane } from "../components/detail/DetailPane";
 import { ConfigMapDescribe } from "../components/detail/describe/ConfigMapDescribe";
 import { YamlView } from "../components/detail/YamlView";
 import { useEditorDirty } from "../hooks/useEditorDirty";
+import { ResourceActions } from "../components/edit/ResourceActions";
 import { EventsView } from "../components/detail/EventsView";
 import { NamespacePicker } from "../components/shell/NamespacePicker";
 
@@ -50,8 +51,7 @@ export function ConfigMapsPage({ cluster }: { cluster: string }) {
     resource: "configmaps",
     namespace: namespace ?? undefined,
   });
-  const all =
-    ((query.data as ConfigMapList | undefined)?.configMaps ?? []) as ConfigMap[];
+  const all = useMemo<ConfigMap[]>(() => (query.data as ConfigMapList | undefined)?.configMaps ?? [], [query.data]);
   const filtered = useMemo(
     () => (search ? all.filter((c) => nameMatches(c.name, search)) : all),
     [all, search],
@@ -82,6 +82,15 @@ export function ConfigMapsPage({ cluster }: { cluster: string }) {
           { id: "yaml", label: "yaml", ready: true, content: <YamlView cluster={cluster} kind="configmaps" ns={selectedNs} name={selectedName} />, dirty: editFlag.dirty },
           { id: "events", label: "events", ready: true, content: <EventsView cluster={cluster} kind="configmaps" ns={selectedNs} name={selectedName} /> },
         ]}
+        actions={
+          <ResourceActions
+            cluster={cluster}
+            yamlKind="configmaps"
+            namespace={selectedNs}
+            name={selectedName}
+            onDeleted={() => setParam("sel", null)}
+          />
+        }
       />
     ) : null;
 

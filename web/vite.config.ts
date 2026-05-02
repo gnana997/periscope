@@ -2,29 +2,48 @@ import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import type { ProxyOptions } from "vite";
+import type { ClientRequest, IncomingMessage } from "node:http";
+import type { Socket } from "node:net";
 
 const backend = process.env.PERISCOPE_BACKEND_URL ?? "http://localhost:8088";
 
-// eslint-disable-next-line no-console
+ 
 console.log(`[periscope] proxying /api and /healthz → ${backend}`);
 
 // quietProxyErrors swallows the noise emitted when a websocket peer
 // disconnects mid-write (EPIPE / ECONNRESET). Both are normal when an
 // exec session ends or a tab refreshes, but Vite logs them as proxy
 // errors which buries real signal.
+type HttpProxyServer = {
+  on(
+    event: "error",
+    fn: (err: NodeJS.ErrnoException) => void,
+  ): HttpProxyServer;
+  on(
+    event: "proxyReqWs",
+    fn: (proxyReq: ClientRequest) => void,
+  ): HttpProxyServer;
+  on(
+    event: "proxyResWs",
+    fn: (res: IncomingMessage, socket: Socket) => void,
+  ): HttpProxyServer;
+};
+
 function configureQuietWS(proxy: ProxyOptions["configure"]) {
-  return (server: any, options: any) => {
-    proxy?.(server, options);
+  return (server: HttpProxyServer, options: ProxyOptions) => {
+    (proxy as ((s: HttpProxyServer, o: ProxyOptions) => void) | undefined)?.(
+      server,
+      options,
+    );
     const swallow = (err: NodeJS.ErrnoException) => {
       if (err && (err.code === "EPIPE" || err.code === "ECONNRESET")) return;
-      // eslint-disable-next-line no-console
       console.error("[periscope] proxy error:", err);
     };
     server.on("error", swallow);
-    server.on("proxyReqWs", (proxyReq: any) => {
+    server.on("proxyReqWs", (proxyReq) => {
       proxyReq.on("error", swallow);
     });
-    server.on("proxyResWs", (_res: any, socket: any) => {
+    server.on("proxyResWs", (_res, socket) => {
       socket.on("error", swallow);
     });
   };

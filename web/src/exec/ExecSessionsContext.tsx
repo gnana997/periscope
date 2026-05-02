@@ -1,6 +1,5 @@
 import {
   createContext,
-  use,
   useCallback,
   useEffect,
   useMemo,
@@ -47,7 +46,7 @@ interface DrawerState {
   height: number;
 }
 
-interface ExecSessionsContextValue {
+export interface ExecSessionsContextValue {
   sessions: ExecSessionMeta[];
   activeSessionId: string | null;
   drawer: DrawerState;
@@ -78,7 +77,7 @@ interface VisibilityRecent {
   closedAt: number;
 }
 
-const Ctx = createContext<ExecSessionsContextValue | null>(null);
+export const ExecSessionsCtx = createContext<ExecSessionsContextValue | null>(null);
 
 function loadDrawerState(): DrawerState {
   let height = 320;
@@ -442,7 +441,7 @@ export function ExecSessionsProvider({ children }: { children: ReactNode }) {
     // We deliberately don't depend on sessions / openSession here; the
     // refs below capture the latest values without causing the listener
     // to re-bind on every state change.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
   }, []);
 
   // Auto-collapse when the session count drops from positive to zero.
@@ -510,17 +509,5 @@ export function ExecSessionsProvider({ children }: { children: ReactNode }) {
     ],
   );
 
-  return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
-}
-
-export function useExecSessions(): ExecSessionsContextValue {
-  // React 19's `use()` reads context with the same semantics as
-  // useContext but is allowed inside conditionals and loops, so it's the
-  // forward-looking choice for new code (RFC 0001 7 and the
-  // react-doctor recommendation).
-  const v = use(Ctx);
-  if (!v) {
-    throw new Error("useExecSessions must be used within ExecSessionsProvider");
-  }
-  return v;
+  return <ExecSessionsCtx.Provider value={value}>{children}</ExecSessionsCtx.Provider>;
 }

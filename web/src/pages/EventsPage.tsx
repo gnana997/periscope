@@ -249,7 +249,7 @@ export function EventsPage({ cluster }: { cluster: string }) {
     namespace ?? undefined,
   );
 
-  const all = data?.events ?? [];
+  const all = useMemo(() => data?.events ?? [], [data]);
   const warnings = all.filter((e) => e.type === "Warning").length;
 
   const filtered = useMemo(() => {

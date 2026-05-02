@@ -7,11 +7,13 @@ import { PageHeader } from "../components/page/PageHeader";
 import { FilterStrip } from "../components/page/FilterStrip";
 import { SplitPane } from "../components/page/SplitPane";
 import { DataTable, type Column } from "../components/table/DataTable";
-import { EmptyState, ErrorState, ForbiddenState, LoadingState, isForbidden } from "../components/table/states";
+import { EmptyState, ErrorState, ForbiddenState, LoadingState } from "../components/table/states";
+import { isForbidden } from "../components/table/isForbidden";
 import { DetailPane } from "../components/detail/DetailPane";
 import { LimitRangeDescribe } from "../components/detail/describe/LimitRangeDescribe";
 import { YamlView } from "../components/detail/YamlView";
 import { useEditorDirty } from "../hooks/useEditorDirty";
+import { ResourceActions } from "../components/edit/ResourceActions";
 import { EventsView } from "../components/detail/EventsView";
 import { NamespacePicker } from "../components/shell/NamespacePicker";
 
@@ -40,7 +42,7 @@ export function LimitRangesPage({ cluster }: { cluster: string }) {
   };
 
   const query = useResource({ cluster, resource: "limitranges", namespace: namespace ?? undefined });
-  const all = ((query.data as LimitRangeList | undefined)?.limitRanges ?? []) as LimitRange[];
+  const all = useMemo<LimitRange[]>(() => (query.data as LimitRangeList | undefined)?.limitRanges ?? [], [query.data]);
   const filtered = useMemo(
     () => (search ? all.filter((r) => nameMatches(r.name, search)) : all),
     [all, search],
@@ -70,6 +72,15 @@ export function LimitRangesPage({ cluster }: { cluster: string }) {
           { id: "yaml", label: "yaml", ready: true, content: <YamlView cluster={cluster} kind="limitranges" ns={selectedNs} name={selectedName} />, dirty: editFlag.dirty },
           { id: "events", label: "events", ready: true, content: <EventsView cluster={cluster} kind="limitranges" ns={selectedNs} name={selectedName} /> },
         ]}
+        actions={
+          <ResourceActions
+            cluster={cluster}
+            yamlKind="limitranges"
+            namespace={selectedNs}
+            name={selectedName}
+            onDeleted={() => setParam("sel", null)}
+          />
+        }
       />
     ) : null;
 

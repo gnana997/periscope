@@ -7,11 +7,13 @@ import { PageHeader } from "../components/page/PageHeader";
 import { FilterStrip } from "../components/page/FilterStrip";
 import { SplitPane } from "../components/page/SplitPane";
 import { DataTable, type Column } from "../components/table/DataTable";
-import { EmptyState, ErrorState, ForbiddenState, LoadingState, isForbidden } from "../components/table/states";
+import { EmptyState, ErrorState, ForbiddenState, LoadingState } from "../components/table/states";
+import { isForbidden } from "../components/table/isForbidden";
 import { DetailPane } from "../components/detail/DetailPane";
 import { ServiceAccountDescribe } from "../components/detail/describe/ServiceAccountDescribe";
 import { YamlView } from "../components/detail/YamlView";
 import { useEditorDirty } from "../hooks/useEditorDirty";
+import { ResourceActions } from "../components/edit/ResourceActions";
 import { NamespacePicker } from "../components/shell/NamespacePicker";
 
 export function ServiceAccountsPage({ cluster }: { cluster: string }) {
@@ -39,7 +41,7 @@ export function ServiceAccountsPage({ cluster }: { cluster: string }) {
   };
 
   const query = useResource({ cluster, resource: "serviceaccounts", namespace: namespace ?? undefined });
-  const all = ((query.data as ServiceAccountList | undefined)?.serviceAccounts ?? []) as ServiceAccount[];
+  const all = useMemo<ServiceAccount[]>(() => (query.data as ServiceAccountList | undefined)?.serviceAccounts ?? [], [query.data]);
   const filtered = useMemo(
     () => (search ? all.filter((sa) => nameMatches(sa.name, search)) : all),
     [all, search],
@@ -68,6 +70,15 @@ export function ServiceAccountsPage({ cluster }: { cluster: string }) {
           { id: "describe", label: "describe", ready: true, content: <ServiceAccountDescribe cluster={cluster} ns={selectedNs} name={selectedName} /> },
           { id: "yaml", label: "yaml", ready: true, content: <YamlView cluster={cluster} kind="serviceaccounts" ns={selectedNs} name={selectedName} />, dirty: editFlag.dirty },
         ]}
+        actions={
+          <ResourceActions
+            cluster={cluster}
+            yamlKind="serviceaccounts"
+            namespace={selectedNs}
+            name={selectedName}
+            onDeleted={() => setParam("sel", null)}
+          />
+        }
       />
     ) : null;
 

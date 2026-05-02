@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useClusters, useNamespaces } from "../hooks/useClusters";
 import { useResource } from "../hooks/useResource";
-import { useExecSessions } from "./ExecSessionsContext";
+import { useExecSessions } from "./useExecSessions";
 import { cn } from "../lib/cn";
 import type { Pod, PodList } from "../lib/types";
 
@@ -76,7 +76,10 @@ export function EmptyPicker({ initialCluster }: EmptyPickerProps) {
     resource: "pods",
     namespace: namespace || undefined,
   });
-  const pods = ((podsQuery.data as PodList | undefined)?.pods ?? []) as Pod[];
+  const pods = useMemo<Pod[]>(
+    () => (podsQuery.data as PodList | undefined)?.pods ?? [],
+    [podsQuery.data],
+  );
 
   // Filter client-side: pods are already namespace-scoped if a ns is set.
   const filtered = useMemo(() => {
@@ -121,6 +124,10 @@ export function EmptyPicker({ initialCluster }: EmptyPickerProps) {
 
   // --- virtualized list ----------------------------------------------------
   const listRef = useRef<HTMLDivElement | null>(null);
+  // TanStack Virtual returns functions that the React Compiler can't
+  // safely memoize; warning is informational, useVirtualizer manages
+  // its own internal stability.
+  // eslint-disable-next-line react-hooks/incompatible-library
   const rowVirtualizer = useVirtualizer({
     count: filtered.length,
     getScrollElement: () => listRef.current,

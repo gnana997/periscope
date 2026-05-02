@@ -17,16 +17,19 @@ import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useCanI } from "../../hooks/useCanI";
 import type { ResourceRef, YamlKind } from "../../lib/api";
+import { KIND_REGISTRY } from "../../lib/k8sKinds";
 import { DeleteResourceModal } from "./DeleteResourceModal";
 import { EditButton } from "../detail/yaml/EditButton";
 
 interface ResourceActionsProps {
   cluster: string;
-  // The YAML kind / URL segment for the existing GET /yaml endpoint.
+  // The YAML kind / URL segment. Drives the GET /yaml endpoint and the
+  // GVRK lookup (group/version/resource/kind) via KIND_REGISTRY — so
+  // pages don't have to repeat that information at every call site.
   yamlKind: YamlKind;
-  // Resource ref the modals act on. Pass `kind` for a friendlier
-  // confirm-modal title ("delete pod foo" vs "delete pods foo").
-  resource: ResourceRef;
+  // null/undefined → cluster-scoped resource.
+  namespace: string | null | undefined;
+  name: string;
   // Optional: actions to render after edit/delete (e.g. "open shell").
   trailing?: React.ReactNode;
   // Called after a successful delete so the page can navigate away
@@ -35,22 +38,27 @@ interface ResourceActionsProps {
 }
 
 export function ResourceActions({
+  cluster,
   yamlKind,
-  resource,
+  namespace,
+  name,
   trailing,
   onDeleted,
 }: ResourceActionsProps) {
   const [showDelete, setShowDelete] = useState(false);
-  const canEdit = useCanI({
-    verb: "patch",
-    resource: resource.resource,
-    namespace: resource.namespace,
-  });
-  const canDelete = useCanI({
-    verb: "delete",
-    resource: resource.resource,
-    namespace: resource.namespace,
-  });
+  const meta = KIND_REGISTRY[yamlKind];
+  const ns = namespace ?? undefined;
+  const resource: ResourceRef = {
+    cluster,
+    group: meta.group,
+    version: meta.version,
+    resource: meta.resource,
+    namespace: ns,
+    name,
+    kind: meta.kind,
+  };
+  const canEdit = useCanI({ verb: "patch", resource: meta.resource, namespace: ns });
+  const canDelete = useCanI({ verb: "delete", resource: meta.resource, namespace: ns });
 
   const qc = useQueryClient();
 

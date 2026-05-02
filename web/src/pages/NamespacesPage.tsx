@@ -15,13 +15,14 @@ import {
   EmptyState,
   ErrorState,
   ForbiddenState,
-  isForbidden,
   LoadingState,
 } from "../components/table/states";
+import { isForbidden } from "../components/table/isForbidden";
 import { DetailPane } from "../components/detail/DetailPane";
 import { NamespaceDescribe } from "../components/detail/describe/NamespaceDescribe";
 import { YamlView } from "../components/detail/YamlView";
 import { useEditorDirty } from "../hooks/useEditorDirty";
+import { ResourceActions } from "../components/edit/ResourceActions";
 import { EventsView } from "../components/detail/EventsView";
 import { cn } from "../lib/cn";
 
@@ -48,8 +49,7 @@ export function NamespacesPage({ cluster }: { cluster: string }) {
   };
 
   const query = useResource({ cluster, resource: "namespaces" });
-  const all =
-    ((query.data as NamespaceList | undefined)?.namespaces ?? []) as Namespace[];
+  const all = useMemo<Namespace[]>(() => (query.data as NamespaceList | undefined)?.namespaces ?? [], [query.data]);
   const filtered = useMemo(
     () => (search ? all.filter((n) => nameMatches(n.name, search)) : all),
     [all, search],
@@ -80,6 +80,15 @@ export function NamespacesPage({ cluster }: { cluster: string }) {
         { id: "yaml", label: "yaml", ready: true, content: <YamlView cluster={cluster} kind="namespaces" ns="" name={selectedName} />, dirty: editFlag.dirty },
         { id: "events", label: "events", ready: true, content: <EventsView cluster={cluster} kind="namespaces" ns="" name={selectedName} /> },
       ]}
+      actions={
+        <ResourceActions
+          cluster={cluster}
+          yamlKind="namespaces"
+          namespace={null}
+          name={selectedName}
+          onDeleted={() => setParam("sel", null)}
+        />
+      }
     />
   ) : null;
 

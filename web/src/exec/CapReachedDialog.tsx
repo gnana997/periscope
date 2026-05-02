@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { cn } from "../lib/cn";
-import { useExecSessions, SESSION_CAP } from "./ExecSessionsContext";
+import { useExecSessions } from "./useExecSessions";
+import { SESSION_CAP } from "./ExecSessionsContext";
 import { clusterStripeColor } from "./clusterColor";
 
 /**

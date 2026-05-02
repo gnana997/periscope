@@ -11,9 +11,11 @@ import { PhaseTag } from "../components/table/StatusDot";
 import { DetailPane } from "../components/detail/DetailPane";
 import { YamlView } from "../components/detail/YamlView";
 import { useEditorDirty } from "../hooks/useEditorDirty";
+import { ResourceActions } from "../components/edit/ResourceActions";
 import { EventsView } from "../components/detail/EventsView";
 import { PVDescribe } from "../components/detail/describe/PVDescribe";
-import { EmptyState, ErrorState, ForbiddenState, LoadingState, isForbidden } from "../components/table/states";
+import { EmptyState, ErrorState, ForbiddenState, LoadingState } from "../components/table/states";
+import { isForbidden } from "../components/table/isForbidden";
 import type { RowTint } from "../components/table/DataTable";
 
 const PV_STATUS_OPTIONS = ["Available", "Bound", "Released", "Failed"];
@@ -42,7 +44,7 @@ export function PVsPage({ cluster }: { cluster: string }) {
   };
 
   const query = useResource({ cluster, resource: "pvs" });
-  const all = ((query.data as PVList | undefined)?.pvs ?? []) as PV[];
+  const all = useMemo<PV[]>(() => (query.data as PVList | undefined)?.pvs ?? [], [query.data]);
 
   const filtered = useMemo(() => {
     let rows = all;
@@ -80,6 +82,15 @@ export function PVsPage({ cluster }: { cluster: string }) {
         { id: "yaml", label: "yaml", ready: true, content: <YamlView cluster={cluster} kind="pvs" ns="" name={selectedName} />, dirty: editFlag.dirty },
         { id: "events", label: "events", ready: true, content: <EventsView cluster={cluster} kind="pvs" ns="" name={selectedName} /> },
       ]}
+      actions={
+        <ResourceActions
+          cluster={cluster}
+          yamlKind="pvs"
+          namespace={null}
+          name={selectedName}
+          onDeleted={() => setParam("sel", null)}
+        />
+      }
     />
   ) : null;
 

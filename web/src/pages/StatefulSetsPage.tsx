@@ -15,13 +15,14 @@ import {
   EmptyState,
   ErrorState,
   ForbiddenState,
-  isForbidden,
   LoadingState,
 } from "../components/table/states";
+import { isForbidden } from "../components/table/isForbidden";
 import { DetailPane } from "../components/detail/DetailPane";
 import { StatefulSetDescribe } from "../components/detail/describe/StatefulSetDescribe";
 import { YamlView } from "../components/detail/YamlView";
 import { useEditorDirty } from "../hooks/useEditorDirty";
+import { ResourceActions } from "../components/edit/ResourceActions";
 import { EventsView } from "../components/detail/EventsView";
 import { WorkloadLogsTab } from "../components/logs/WorkloadLogsTab";
 import { NamespacePicker } from "../components/shell/NamespacePicker";
@@ -56,8 +57,7 @@ export function StatefulSetsPage({ cluster }: { cluster: string }) {
     resource: "statefulsets",
     namespace: namespace ?? undefined,
   });
-  const all =
-    ((query.data as StatefulSetList | undefined)?.statefulSets ?? []) as StatefulSet[];
+  const all = useMemo<StatefulSet[]>(() => (query.data as StatefulSetList | undefined)?.statefulSets ?? [], [query.data]);
   const filtered = useMemo(
     () => (search ? all.filter((s) => nameMatches(s.name, search)) : all),
     [all, search],
@@ -108,6 +108,15 @@ export function StatefulSetsPage({ cluster }: { cluster: string }) {
           { id: "events", label: "events", ready: true, content: <EventsView cluster={cluster} kind="statefulsets" ns={selectedNs} name={selectedName} /> },
           { id: "logs", label: "logs", ready: true, content: <WorkloadLogsTab kind="statefulset" cluster={cluster} ns={selectedNs} name={selectedName} /> },
         ]}
+        actions={
+          <ResourceActions
+            cluster={cluster}
+            yamlKind="statefulsets"
+            namespace={selectedNs}
+            name={selectedName}
+            onDeleted={() => setParam("sel", null)}
+          />
+        }
       />
     ) : null;
 

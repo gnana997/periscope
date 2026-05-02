@@ -12,9 +12,11 @@ import { PhaseTag } from "../components/table/StatusDot";
 import { DetailPane } from "../components/detail/DetailPane";
 import { YamlView } from "../components/detail/YamlView";
 import { useEditorDirty } from "../hooks/useEditorDirty";
+import { ResourceActions } from "../components/edit/ResourceActions";
 import { EventsView } from "../components/detail/EventsView";
 import { PVCDescribe } from "../components/detail/describe/PVCDescribe";
-import { EmptyState, ErrorState, ForbiddenState, LoadingState, isForbidden } from "../components/table/states";
+import { EmptyState, ErrorState, ForbiddenState, LoadingState } from "../components/table/states";
+import { isForbidden } from "../components/table/isForbidden";
 import type { RowTint } from "../components/table/DataTable";
 
 const PVC_STATUS_OPTIONS = ["Bound", "Pending", "Lost"];
@@ -45,7 +47,7 @@ export function PVCsPage({ cluster }: { cluster: string }) {
   };
 
   const query = useResource({ cluster, resource: "pvcs", namespace: namespace ?? undefined });
-  const all = ((query.data as PVCList | undefined)?.pvcs ?? []) as PVC[];
+  const all = useMemo<PVC[]>(() => (query.data as PVCList | undefined)?.pvcs ?? [], [query.data]);
 
   const filtered = useMemo(() => {
     let rows = all;
@@ -86,6 +88,15 @@ export function PVCsPage({ cluster }: { cluster: string }) {
           { id: "yaml", label: "yaml", ready: true, content: <YamlView cluster={cluster} kind="pvcs" ns={selectedNs} name={selectedName} />, dirty: editFlag.dirty },
           { id: "events", label: "events", ready: true, content: <EventsView cluster={cluster} kind="pvcs" ns={selectedNs} name={selectedName} /> },
         ]}
+        actions={
+          <ResourceActions
+            cluster={cluster}
+            yamlKind="pvcs"
+            namespace={selectedNs}
+            name={selectedName}
+            onDeleted={() => setParam("sel", null)}
+          />
+        }
       />
     ) : null;
 

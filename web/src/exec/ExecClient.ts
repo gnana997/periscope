@@ -217,7 +217,7 @@ export class ExecClient {
       return;
     }
     if (typeof ev.data !== "string") return;
-    let frame: InboundControlFrame | null = null;
+    let frame: InboundControlFrame;
     try {
       frame = JSON.parse(ev.data) as InboundControlFrame;
     } catch {

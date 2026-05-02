@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
-import { useExecSessions } from "../exec/ExecSessionsContext";
+import { useExecSessions } from "../exec/useExecSessions";
 
 /**
  * ExecPage is a redirect-style route. The drawer is the actual UI for

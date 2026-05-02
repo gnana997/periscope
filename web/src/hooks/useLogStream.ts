@@ -233,6 +233,11 @@ export function useLogStream(config: LogStreamConfig): UseLogStreamResult {
       es.close();
       if (flushTimer !== null) window.clearTimeout(flushTimer);
     };
+    // Depend on each leaf field of `config.source` rather than the
+    // object itself: callers usually rebuild the source ref on every
+    // render but with identical contents, and the resubscribe storm
+    // would tear down the SSE connection on every keystroke.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     config.source.kind,
     config.source.cluster,

@@ -16,13 +16,14 @@ import {
   EmptyState,
   ErrorState,
   ForbiddenState,
-  isForbidden,
   LoadingState,
 } from "../components/table/states";
+import { isForbidden } from "../components/table/isForbidden";
 import { DetailPane } from "../components/detail/DetailPane";
 import { CronJobDescribe } from "../components/detail/describe/CronJobDescribe";
 import { YamlView } from "../components/detail/YamlView";
 import { useEditorDirty } from "../hooks/useEditorDirty";
+import { ResourceActions } from "../components/edit/ResourceActions";
 import { EventsView } from "../components/detail/EventsView";
 import { NamespacePicker } from "../components/shell/NamespacePicker";
 
@@ -60,8 +61,7 @@ export function CronJobsPage({ cluster }: { cluster: string }) {
     resource: "cronjobs",
     namespace: namespace ?? undefined,
   });
-  const all =
-    ((query.data as CronJobList | undefined)?.cronJobs ?? []) as CronJob[];
+  const all = useMemo<CronJob[]>(() => (query.data as CronJobList | undefined)?.cronJobs ?? [], [query.data]);
 
   const suspendedFlag = params.get("suspended") === "true";
 
@@ -144,6 +144,15 @@ export function CronJobsPage({ cluster }: { cluster: string }) {
           { id: "yaml", label: "yaml", ready: true, content: <YamlView cluster={cluster} kind="cronjobs" ns={selectedNs} name={selectedName} />, dirty: editFlag.dirty },
           { id: "events", label: "events", ready: true, content: <EventsView cluster={cluster} kind="cronjobs" ns={selectedNs} name={selectedName} /> },
         ]}
+        actions={
+          <ResourceActions
+            cluster={cluster}
+            yamlKind="cronjobs"
+            namespace={selectedNs}
+            name={selectedName}
+            onDeleted={() => setParam("sel", null)}
+          />
+        }
       />
     ) : null;
 

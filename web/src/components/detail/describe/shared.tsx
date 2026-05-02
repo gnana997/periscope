@@ -194,36 +194,6 @@ export function ConditionList({ items }: { items: ConditionRow[] }) {
   );
 }
 
-// ---------- Tone helpers ----------
-
-export function phaseStatTone(phase: string): StatTone {
-  switch (phase) {
-    case "Running":
-    case "Active":
-      return "green";
-    case "Pending":
-    case "Terminating":
-      return "yellow";
-    case "Failed":
-    case "CrashLoopBackOff":
-      return "red";
-    default:
-      return "muted";
-  }
-}
-
-export function restartStatTone(n: number): StatTone {
-  if (n > 5) return "red";
-  if (n > 0) return "yellow";
-  return "muted";
-}
-
-export function readyStatTone(ready: string): StatTone {
-  const [r, t] = ready.split("/").map((n) => parseInt(n, 10));
-  if (Number.isNaN(r) || Number.isNaN(t)) return "neutral";
-  return r < t ? "yellow" : "neutral";
-}
-
 // ---------- PodRow (shared across workload + service describe panes) ----------
 
 function podPhaseTone(phase: string): string {
