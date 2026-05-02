@@ -30,7 +30,7 @@ import * as monaco from "monaco-editor";
 import { useQueryClient } from "@tanstack/react-query";
 import { useSearchParams } from "react-router-dom";
 
-import { ApiError, api, type ResourceRef } from "../../../lib/api";
+import { ApiError, api, type ResourceMeta, type ResourceRef } from "../../../lib/api";
 import { cn } from "../../../lib/cn";
 import {
   buildMonacoSchemaConfig,
@@ -39,6 +39,8 @@ import {
   modelURIForResource,
   parseIdentityFromYaml,
 } from "../../../lib/k8sSchema";
+import { describeDrift } from "../../../lib/drift";
+import { stripForEdit } from "../../../lib/stripForEdit";
 import { classifyManager } from "../../../lib/managers";
 import {
   parseManagedFields,
@@ -66,6 +68,8 @@ import type { YamlKind } from "../../../lib/api";
 import { ActionBar, type ApplyState } from "./ActionBar";
 import { ProblemsStrip } from "./ProblemsStrip";
 import { ApplyErrorBanner } from "./ApplyErrorBanner";
+import { DriftBanner } from "./DriftBanner";
+import { DriftDiffOverlay } from "./DriftDiffOverlay";
 import { showToast } from "../../../lib/toastBus";
 import { ConflictResolutionView, type FieldConflict, type Resolution } from "./ConflictResolutionView";
 import { TakeoverDialog } from "./TakeoverDialog";
@@ -115,7 +119,7 @@ interface EditorProps {
 function Editor({ cluster, yamlKind, resource, pristine }: EditorProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const editorRef = useRef<monaco.editor.IStandaloneCodeEditor | null>(null);
-  const [pristineLocked] = useState(pristine);
+  const [pristineLocked, setPristineLocked] = useState(pristine);
   const abortRef = useRef<AbortController | null>(null);
   const [, setParams] = useSearchParams();
 
@@ -212,7 +216,8 @@ function Editor({ cluster, yamlKind, resource, pristine }: EditorProps) {
   );
 
   // Resource metadata (managedFields + resourceVersion). Drives the
-  // owner-glyph margin; also used by Phase 3 drift detection.
+  // owner-glyph margin and Phase 3 drift detection. Polls every 15s
+  // (configured in useResourceMeta).
   const metaQuery = useResourceMeta(
     cluster,
     {
@@ -224,6 +229,136 @@ function Editor({ cluster, yamlKind, resource, pristine }: EditorProps) {
     },
     true,
   );
+
+  const qc = useQueryClient();
+
+  // ----- Drift detection (Phase 3) -----
+  // pristineMeta is the meta the user mounted against. As metaQuery
+  // polls fresh data every 15s, describeDrift compares the two to
+  // spot real spec writes by other actors. Clean buffer → silently
+  // swap pristine YAML (no banner); dirty buffer → render
+  // <DriftBanner> with reload/dismiss/show-diff actions.
+  //
+  // State (rather than ref) so it can be read during render to
+  // compute the `drift` memo that gates the banner. Updated on three
+  // events: first arrival, post-clean-refresh, and explicit reload.
+  //
+  // dismissedAtRV: the resourceVersion the user last clicked dismiss
+  // on. Drift is suppressed while metaQuery's rv equals this; a newer
+  // rv (i.e. fresh drift) re-shows the banner.
+  const [pristineMeta, setPristineMeta] = useState<ResourceMeta | null>(null);
+  const [dismissedAtRV, setDismissedAtRV] = useState<string | null>(null);
+
+  // Capture pristine on first arrival. Setting state in an effect is
+  // the textbook "sync external (server) value into local state" use
+  // case the rule's docs accept; we cannot derive pristineMeta from
+  // metaQuery.data because pristine has to *persist* across polls.
+  useEffect(() => {
+    if (!metaQuery.data || pristineMeta) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setPristineMeta(metaQuery.data);
+  }, [metaQuery.data, pristineMeta]);
+
+  const drift = useMemo(() => {
+    if (!metaQuery.data || !pristineMeta) return null;
+    if (
+      dismissedAtRV !== null &&
+      metaQuery.data.resourceVersion === dismissedAtRV
+    ) {
+      return null;
+    }
+    return describeDrift(pristineMeta, metaQuery.data);
+  }, [metaQuery.data, pristineMeta, dismissedAtRV]);
+
+  // Clean-buffer auto-refresh. Forwards pristineMeta to the polled
+  // value so the next describeDrift doesn't fire on the same write,
+  // then invalidates the YAML query. The pristine-swap effect below
+  // picks up the fresh data and updates editor + cursor.
+  //
+  // Same justification as the capture effect above: pristineMeta is
+  // server-derived state that has to persist across polls.
+  useEffect(() => {
+    if (!drift || dirty || !metaQuery.data) return;
+    console.debug(
+      `[periscope] drift refresh (clean): ${drift.manager} (${drift.category}) touched ${drift.paths.length} field(s)`,
+      drift.paths.slice(0, 3),
+    );
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setPristineMeta(metaQuery.data);
+    qc.invalidateQueries({
+      queryKey: ["yaml", cluster, yamlKind, resource.namespace ?? "", resource.name],
+    });
+  }, [drift, dirty, metaQuery.data, qc, cluster, yamlKind, resource.namespace, resource.name]);
+
+  const onDriftDismiss = useCallback(() => {
+    if (!metaQuery.data) return;
+    setDismissedAtRV(metaQuery.data.resourceVersion);
+  }, [metaQuery.data]);
+
+  const onDriftReload = useCallback(() => {
+    if (dirty) {
+      const ok = window.confirm(
+        "Discard your unsaved edits and load the latest cluster state?",
+      );
+      if (!ok) return;
+    }
+    // Clear the dirty buffer so the pristine-swap effect (below) will
+    // accept the new pristine when yamlQuery refetches.
+    const editor = editorRef.current;
+    if (editor) editor.setValue(pristineLocked);
+    setCurrentYaml(pristineLocked);
+    if (metaQuery.data) setPristineMeta(metaQuery.data);
+    setDismissedAtRV(null);
+    qc.invalidateQueries({
+      queryKey: ["yaml", cluster, yamlKind, resource.namespace ?? "", resource.name],
+    });
+  }, [
+    dirty,
+    pristineLocked,
+    metaQuery.data,
+    qc,
+    cluster,
+    yamlKind,
+    resource.namespace,
+    resource.name,
+  ]);
+
+  const [showDriftDiff, setShowDriftDiff] = useState(false);
+  const onDriftShowDiff = useCallback(() => {
+    setShowDriftDiff(true);
+  }, []);
+  const onDriftDiffClose = useCallback(() => {
+    setShowDriftDiff(false);
+  }, []);
+
+  // Pristine swap: when yamlQuery refetches after a drift-triggered
+  // invalidate (or any other cause) AND the buffer is clean, swap the
+  // editor's pristine baseline + Monaco model contents to the new
+  // YAML. Cursor position is preserved across the swap so the user
+  // doesn't visually jump.
+  //
+  // The setState-in-effect rule is correct in spirit, but this is the
+  // textbook "sync external change to internal state" case the rule's
+  // own docs accept: the prop `pristine` came from a server refetch
+  // we triggered, and the component has to drop its frozen baseline
+  // to match. There is no derive-during-render alternative since the
+  // baseline must persist across re-renders to drive `dirty`.
+  useEffect(() => {
+    if (dirty) return;
+    if (pristine === pristineLocked) return;
+    const editor = editorRef.current;
+    const pos = editor?.getPosition() ?? null;
+    /* eslint-disable react-hooks/set-state-in-effect */
+    setPristineLocked(pristine);
+    setCurrentYaml(pristine);
+    /* eslint-enable react-hooks/set-state-in-effect */
+    editor?.setValue(pristine);
+    if (metaQuery.data) setPristineMeta(metaQuery.data);
+    if (pos && editor) {
+      // Restore on the next paint after Monaco re-renders the model.
+      queueMicrotask(() => editor.setPosition(pos));
+    }
+  }, [pristine, dirty, pristineLocked, metaQuery.data]);
 
   // ----- Conflict / glyph helpers -----
 
@@ -509,7 +644,6 @@ function Editor({ cluster, yamlKind, resource, pristine }: EditorProps) {
 
   // Apply orchestration. force=false on the first attempt; ConflictBanner
   // calls back with force=true when the user opts in.
-  const qc = useQueryClient();
   const runApply = useCallback(
     async (force: boolean) => {
       if (!identity) return;
@@ -894,6 +1028,29 @@ function Editor({ cluster, yamlKind, resource, pristine }: EditorProps) {
         )}
       </div>
 
+      {drift && dirty && mode !== "conflict" && (
+        <DriftBanner
+          drift={drift}
+          busy={applyState.kind === "dryRunning" || applyState.kind === "applying"}
+          onShowDiff={onDriftShowDiff}
+          onReload={onDriftReload}
+          onDismiss={onDriftDismiss}
+          showDiffEnabled
+        />
+      )}
+
+      {showDriftDiff && (
+        <DriftDiffOverlay
+          cluster={cluster}
+          yamlKind={yamlKind}
+          namespace={resource.namespace}
+          name={resource.name}
+          pristineYaml={pristineLocked}
+          onClose={onDriftDiffClose}
+          onReload={onDriftReload}
+        />
+      )}
+
       {applyState.kind === "error" && mode !== "conflict" && (
         <ApplyErrorBanner
           message={applyState.message}
@@ -936,87 +1093,6 @@ function Editor({ cluster, yamlKind, resource, pristine }: EditorProps) {
       )}
     </div>
   );
-}
-
-/* ============================================================
-   stripForEdit — trim server-managed sub-blocks from the YAML
-   before it becomes the pristine buffer. yamlPatch.computeOps
-   also strips metadata at diff time; this is purely a *display*
-   concern (don't show the user a wall of `managedFields:`).
-
-   Critical: scalars like `uid:`, `resourceVersion:`, `generation:`
-   only get stripped when they are *direct children of the
-   top-level metadata block*. Without that scope check, the K8s
-   schema validator complains about ownerReferences[].uid being
-   missing (it's required there) — same scalar name, different
-   semantics depending on parent.
-   ============================================================ */
-function stripForEdit(yaml: string): string {
-  if (!yaml.includes("managedFields:") && !yaml.includes("status:")) {
-    return yaml;
-  }
-  const META_SCALARS = new Set([
-    "uid",
-    "resourceVersion",
-    "generation",
-    "creationTimestamp",
-  ]);
-  const lines = yaml.split("\n");
-  const out: string[] = [];
-  let skipUntilDedentTo: number | null = null;
-  // Indent of the `metadata:` block when we're inside it; null otherwise.
-  // We're "inside metadata" while subsequent lines indent deeper than
-  // metadataAt, and we leave when we hit a line at metadataAt or shallower.
-  let metadataAt: number | null = null;
-
-  for (const line of lines) {
-    const indent = line.search(/\S/);
-
-    // Active block-skip (continuing to drop a managedFields/status block)
-    if (skipUntilDedentTo !== null) {
-      if (indent === -1 || indent > skipUntilDedentTo) continue;
-      skipUntilDedentTo = null;
-    }
-
-    // Track entry/exit of the top-level metadata block by indent.
-    if (metadataAt !== null && indent !== -1 && indent <= metadataAt) {
-      metadataAt = null;
-    }
-
-    const trimmed = line.trimStart();
-
-    // status: and managedFields: are server-only blocks. Strip them
-    // wherever they appear at the top level (managedFields lives in
-    // metadata, status at root). The block-skip catches the children.
-    if (
-      trimmed.startsWith("status:") ||
-      trimmed.startsWith("managedFields:")
-    ) {
-      const isBlock = !trimmed.includes(":") || /:\s*$/.test(trimmed);
-      if (isBlock) skipUntilDedentTo = indent;
-      continue;
-    }
-
-    // Direct metadata-scalar strip — only inside metadata: block, only
-    // for the four well-known server-managed scalars.
-    if (metadataAt !== null && indent === metadataAt + 2) {
-      const colonIdx = trimmed.indexOf(":");
-      const key = colonIdx > 0 ? trimmed.slice(0, colonIdx) : trimmed;
-      if (META_SCALARS.has(key)) {
-        const isBlock = /:\s*$/.test(trimmed);
-        if (isBlock) skipUntilDedentTo = indent;
-        continue;
-      }
-    }
-
-    // Note we entered metadata: (after deciding not to strip this line).
-    if (trimmed.startsWith("metadata:") && indent !== -1) {
-      metadataAt = indent;
-    }
-
-    out.push(line);
-  }
-  return out.join("\n");
 }
 
 // Map plural → singular for invalidating *-detail cache keys on apply

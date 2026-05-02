@@ -342,6 +342,12 @@ export function useResourceMeta(
     // round trip on remount).
     staleTime: 0,
     refetchOnWindowFocus: false,
+    // Phase 3 drift detection: poll every 15s while the editor is
+    // open. react-query pauses the interval automatically when the tab
+    // is hidden (refetchIntervalInBackground default false), so this
+    // costs nothing when no eyes are on it.
+    refetchInterval: enabled ? 15_000 : false,
+    refetchIntervalInBackground: false,
   });
 }
 
