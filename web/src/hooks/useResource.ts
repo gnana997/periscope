@@ -3,7 +3,11 @@ import { api, type ClusterScopedKind, type OpenAPIDoc, type ResourceMeta, type W
 import { useIsWatchStreamEnabled } from "../lib/features";
 import { queryKeys } from "../lib/queryKeys";
 import { editorYamlQueryKey, type EditorSource } from "../lib/customResources";
-import { useResourceStream, type StreamStatus } from "./useResourceStream";
+import {
+  useChildPodWatch,
+  useResourceStream,
+  type StreamStatus,
+} from "./useResourceStream";
 import type {
   ClusterEventList,
   ClusterRoleBindingDetail,
@@ -36,6 +40,7 @@ import type {
   PDBDetail,
   ReplicaSetDetail,
   NetworkPolicyDetail,
+  EndpointSliceDetail,
   IngressClassDetail,
   ResourceQuota,
   LimitRangeDetail,
@@ -54,14 +59,45 @@ interface ResourceQueryArgs {
 // polling after repeated reconnect failures. Kinds not listed here
 // stay refresh-on-demand.
 //
-// The four streaming kinds (pods, events, replicasets, jobs) keep
-// their entries here on purpose — they're the polling fallback path
-// when useResourceStream surfaces streamStatus="polling_fallback".
+// The streaming kinds keep their entries here on purpose — they're the
+// polling fallback path when useResourceStream surfaces
+// streamStatus="polling_fallback". Cadences trade churn vs. apiserver
+// load: pods/events at 15s match the live cluster signal users expect
+// during incidents; workload controllers at 30s reflect their slower
+// change rate.
 const LIST_REFETCH_INTERVAL: Partial<Record<ResourceKind, number>> = {
   pods: 15_000,
-  replicasets: 30_000,
   events: 15_000,
+  deployments: 30_000,
+  statefulsets: 30_000,
+  daemonsets: 30_000,
+  replicasets: 30_000,
   jobs: 30_000,
+  cronjobs: 30_000,
+  horizontalpodautoscalers: 30_000,
+  poddisruptionbudgets: 30_000,
+  // Networking — services and ingresses are mostly stable; endpointslices
+  // churn rapidly during rollouts (one delta per pod-readiness flip),
+  // which matches pods/events at 15s when the stream falls back.
+  services: 30_000,
+  ingresses: 30_000,
+  networkpolicies: 30_000,
+  endpointslices: 15_000,
+  ingressclasses: 60_000,
+  // Storage — PVCs follow pod lifecycle (Bound/Pending transitions on
+  // workload startup), so 30s polling. PVs/StorageClasses are largely
+  // static cluster admin objects; 60s is fine.
+  pvs: 60_000,
+  pvcs: 30_000,
+  storageclasses: 60_000,
+  // Cluster admin — Nodes change on autoscaling/maintenance windows
+  // (poll at 30s as a meaningful fallback during cluster ops);
+  // Namespaces and PriorityClasses/RuntimeClasses are essentially
+  // static (60s is plenty when the stream is down).
+  nodes: 30_000,
+  namespaces: 60_000,
+  priorityclasses: 60_000,
+  runtimeclasses: 60_000,
 };
 
 // WATCH_STREAM_KINDS mirrors the WatchStreamKind union; lifted here so
@@ -69,8 +105,26 @@ const LIST_REFETCH_INTERVAL: Partial<Record<ResourceKind, number>> = {
 const WATCH_STREAM_KINDS: ReadonlyArray<ResourceKind> = [
   "pods",
   "events",
+  "deployments",
+  "statefulsets",
+  "daemonsets",
   "replicasets",
   "jobs",
+  "cronjobs",
+  "horizontalpodautoscalers",
+  "poddisruptionbudgets",
+  "services",
+  "ingresses",
+  "networkpolicies",
+  "endpointslices",
+  "ingressclasses",
+  "pvs",
+  "pvcs",
+  "storageclasses",
+  "nodes",
+  "namespaces",
+  "priorityclasses",
+  "runtimeclasses",
 ];
 
 function isWatchStreamKind(k: ResourceKind): k is WatchStreamKind {
@@ -165,6 +219,8 @@ export function useResource({
           return api.replicaSets(cluster!, namespace, signal);
         case "networkpolicies":
           return api.networkPolicies(cluster!, namespace, signal);
+        case "endpointslices":
+          return api.endpointSlices(cluster!, namespace, signal);
         case "ingressclasses":
           return api.ingressClasses(cluster!, signal);
         case "resourcequotas":
@@ -206,6 +262,11 @@ export function usePodDetail(cluster: string, ns: string, name: string | null) {
 }
 
 export function useDeploymentDetail(cluster: string, ns: string, name: string | null) {
+  // Auxiliary Pod stream keeps the embedded child-pods table fresh
+  // while the panel is open: pod state transitions don't touch the
+  // Deployment object's RV, so the deployments stream alone can't see
+  // them. See useChildPodWatch.
+  useChildPodWatch(cluster, ns, Boolean(name));
   return useQuery<DeploymentDetail>({
     queryKey: queryKeys.cluster(cluster).kind("deployments").detail(ns, name ?? ""),
     queryFn: ({ signal }) => api.getDeployment(cluster, ns, name!, signal),
@@ -214,6 +275,7 @@ export function useDeploymentDetail(cluster: string, ns: string, name: string | 
 }
 
 export function useStatefulSetDetail(cluster: string, ns: string, name: string | null) {
+  useChildPodWatch(cluster, ns, Boolean(name));
   return useQuery<StatefulSetDetail>({
     queryKey: queryKeys.cluster(cluster).kind("statefulsets").detail(ns, name ?? ""),
     queryFn: ({ signal }) => api.getStatefulSet(cluster, ns, name!, signal),
@@ -222,6 +284,7 @@ export function useStatefulSetDetail(cluster: string, ns: string, name: string |
 }
 
 export function useDaemonSetDetail(cluster: string, ns: string, name: string | null) {
+  useChildPodWatch(cluster, ns, Boolean(name));
   return useQuery<DaemonSetDetail>({
     queryKey: queryKeys.cluster(cluster).kind("daemonsets").detail(ns, name ?? ""),
     queryFn: ({ signal }) => api.getDaemonSet(cluster, ns, name!, signal),
@@ -230,6 +293,10 @@ export function useDaemonSetDetail(cluster: string, ns: string, name: string | n
 }
 
 export function useServiceDetail(cluster: string, ns: string, name: string | null) {
+  // Service detail embeds selected-by-selector pods; pod transitions
+  // need to flow into the embedded table the same as workload
+  // controllers above.
+  useChildPodWatch(cluster, ns, Boolean(name));
   return useQuery<ServiceDetail>({
     queryKey: queryKeys.cluster(cluster).kind("services").detail(ns, name ?? ""),
     queryFn: ({ signal }) => api.getService(cluster, ns, name!, signal),
@@ -262,6 +329,7 @@ export function useSecretDetail(cluster: string, ns: string, name: string | null
 }
 
 export function useJobDetail(cluster: string, ns: string, name: string | null) {
+  useChildPodWatch(cluster, ns, Boolean(name));
   return useQuery<JobDetail>({
     queryKey: queryKeys.cluster(cluster).kind("jobs").detail(ns, name ?? ""),
     queryFn: ({ signal }) => api.getJob(cluster, ns, name!, signal),
@@ -270,6 +338,10 @@ export function useJobDetail(cluster: string, ns: string, name: string | null) {
 }
 
 export function useCronJobDetail(cluster: string, ns: string, name: string | null) {
+  // CronJob detail surfaces recent Jobs (which surface child pods);
+  // pod-driven invalidation keeps the panel current without depending
+  // on the cronjob's own RV ticking.
+  useChildPodWatch(cluster, ns, Boolean(name));
   return useQuery<CronJobDetail>({
     queryKey: queryKeys.cluster(cluster).kind("cronjobs").detail(ns, name ?? ""),
     queryFn: ({ signal }) => api.getCronJob(cluster, ns, name!, signal),
@@ -529,6 +601,7 @@ export function usePDBDetail(cluster: string, ns: string, name: string | null) {
 }
 
 export function useReplicaSetDetail(cluster: string, ns: string, name: string | null) {
+  useChildPodWatch(cluster, ns, Boolean(name));
   return useQuery<ReplicaSetDetail>({
     queryKey: queryKeys.cluster(cluster).kind("replicasets").detail(ns, name ?? ""),
     queryFn: ({ signal }) => api.getReplicaSet(cluster, ns, name!, signal),
@@ -540,6 +613,14 @@ export function useNetworkPolicyDetail(cluster: string, ns: string, name: string
   return useQuery<NetworkPolicyDetail>({
     queryKey: queryKeys.cluster(cluster).kind("networkpolicies").detail(ns, name ?? ""),
     queryFn: ({ signal }) => api.getNetworkPolicy(cluster, ns, name!, signal),
+    enabled: Boolean(name),
+  });
+}
+
+export function useEndpointSliceDetail(cluster: string, ns: string, name: string | null) {
+  return useQuery<EndpointSliceDetail>({
+    queryKey: queryKeys.cluster(cluster).kind("endpointslices").detail(ns, name ?? ""),
+    queryFn: ({ signal }) => api.getEndpointSlice(cluster, ns, name!, signal),
     enabled: Boolean(name),
   });
 }

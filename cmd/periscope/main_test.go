@@ -1,40 +1,86 @@
 package main
 
 import (
+	"maps"
 	"sync"
 	"testing"
 	"time"
 )
 
 func TestParseWatchStreamsEnv(t *testing.T) {
+	// Build expected sets from the live watchKinds registry rather than
+	// hardcoding kind names — that way adding a new kind in main.go's
+	// registry never drifts these tests. Each new kind only needs a
+	// dedicated single-token case below if the wiring deserves explicit
+	// coverage; the all-on / group-expansion cases follow the registry.
+	allOn := allKindsOn()
+	groupOn := func(group string) watchStreamsConfig {
+		out := watchStreamsConfig{}
+		for _, k := range watchKinds {
+			if k.Group == group {
+				out[k.Name] = true
+			}
+		}
+		return out
+	}
+	merge := func(a, b watchStreamsConfig) watchStreamsConfig {
+		out := watchStreamsConfig{}
+		for k, v := range a {
+			out[k] = v
+		}
+		for k, v := range b {
+			out[k] = v
+		}
+		return out
+	}
+
 	tests := []struct {
 		name string
 		raw  string
 		want watchStreamsConfig
 	}{
-		// Defaults — empty/unset means all on now (was: all off).
-		{name: "empty defaults all on", raw: "", want: watchStreamsConfig{pods: true, events: true, replicasets: true, jobs: true}},
-		{name: "whitespace defaults all on", raw: "   ", want: watchStreamsConfig{pods: true, events: true, replicasets: true, jobs: true}},
-		{name: "all", raw: "all", want: watchStreamsConfig{pods: true, events: true, replicasets: true, jobs: true}},
+		// Defaults — empty/unset means all on.
+		{name: "empty defaults all on", raw: "", want: allOn},
+		{name: "whitespace defaults all on", raw: "   ", want: allOn},
+		{name: "all", raw: "all", want: allOn},
 		// Explicit opt-out — for operators behind proxies that mishandle long-lived connections.
 		{name: "off", raw: "off", want: watchStreamsConfig{}},
 		{name: "none", raw: "none", want: watchStreamsConfig{}},
 		{name: "off with spaces", raw: "  off  ", want: watchStreamsConfig{}},
-		// Subset selection.
-		{name: "pods", raw: "pods", want: watchStreamsConfig{pods: true}},
-		{name: "events", raw: "events", want: watchStreamsConfig{events: true}},
-		{name: "replicasets", raw: "replicasets", want: watchStreamsConfig{replicasets: true}},
-		{name: "jobs", raw: "jobs", want: watchStreamsConfig{jobs: true}},
-		{name: "pods,events", raw: "pods,events", want: watchStreamsConfig{pods: true, events: true}},
-		{name: "all kinds explicit", raw: "pods,events,replicasets,jobs", want: watchStreamsConfig{pods: true, events: true, replicasets: true, jobs: true}},
-		{name: "with spaces", raw: " pods , events ", want: watchStreamsConfig{pods: true, events: true}},
-		{name: "unknown only", raw: "deployments", want: watchStreamsConfig{}},
-		{name: "unknown plus pods", raw: "deployments,pods", want: watchStreamsConfig{pods: true}},
+		// Per-kind selection — one assertion per registered kind so a
+		// typo in the registry's Name field shows up as a test failure.
+		{name: "pods", raw: "pods", want: watchStreamsConfig{"pods": true}},
+		{name: "events", raw: "events", want: watchStreamsConfig{"events": true}},
+		{name: "deployments", raw: "deployments", want: watchStreamsConfig{"deployments": true}},
+		{name: "statefulsets", raw: "statefulsets", want: watchStreamsConfig{"statefulsets": true}},
+		{name: "daemonsets", raw: "daemonsets", want: watchStreamsConfig{"daemonsets": true}},
+		{name: "replicasets", raw: "replicasets", want: watchStreamsConfig{"replicasets": true}},
+		{name: "jobs", raw: "jobs", want: watchStreamsConfig{"jobs": true}},
+		{name: "cronjobs", raw: "cronjobs", want: watchStreamsConfig{"cronjobs": true}},
+		{name: "horizontalpodautoscalers", raw: "horizontalpodautoscalers", want: watchStreamsConfig{"horizontalpodautoscalers": true}},
+		{name: "poddisruptionbudgets", raw: "poddisruptionbudgets", want: watchStreamsConfig{"poddisruptionbudgets": true}},
+		{name: "pods,events", raw: "pods,events", want: watchStreamsConfig{"pods": true, "events": true}},
+		{name: "with spaces", raw: " pods , events ", want: watchStreamsConfig{"pods": true, "events": true}},
+		// Group aliases — the env grammar accepts kindReg.Group tokens and
+		// expands them to every kind in that group. Both group and kind
+		// tokens may mix freely in a single comma-separated value.
+		{name: "core group", raw: "core", want: groupOn("core")},
+		{name: "workloads group", raw: "workloads", want: groupOn("workloads")},
+		{name: "core,workloads", raw: "core,workloads", want: merge(groupOn("core"), groupOn("workloads"))},
+		{name: "kind plus group", raw: "pods,workloads", want: merge(watchStreamsConfig{"pods": true}, groupOn("workloads"))},
+		{name: "duplicate group is idempotent", raw: "core,core", want: groupOn("core")},
+		// Unknowns silently dropped — startup slog summary makes the
+		// effective set visible to operators, so misspellings are obvious.
+		// Tokens here are intentionally not in the registry (would have
+		// to be added to watchKinds before they'd parse).
+		{name: "unknown only", raw: "banana", want: watchStreamsConfig{}},
+		{name: "unknown plus pods", raw: "banana,pods", want: watchStreamsConfig{"pods": true}},
+		{name: "empty token between commas", raw: "pods,,events", want: watchStreamsConfig{"pods": true, "events": true}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got := parseWatchStreamsEnv(tt.raw)
-			if got != tt.want {
+			if !maps.Equal(got, tt.want) {
 				t.Errorf("parseWatchStreamsEnv(%q) = %+v, want %+v", tt.raw, got, tt.want)
 			}
 		})

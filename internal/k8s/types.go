@@ -921,6 +921,69 @@ type ReplicaSetDetail struct {
 	Conditions  []DeploymentCondition `json:"conditions,omitempty"`
 }
 
+// --- EndpointSlice (discovery.k8s.io/v1) ---
+//
+// EndpointSlice is the modern replacement for Endpoints (deprecated in
+// 1.33). Each slice is a sharded view of one Service's backing
+// endpoints; the controller fans them out to keep individual objects
+// small even on Services with thousands of pods. The list page shows
+// one row per slice; the detail page enumerates the addresses with
+// per-endpoint conditions (ready/serving/terminating) and target refs.
+
+type EndpointSlicePort struct {
+	Name        string `json:"name,omitempty"`
+	Protocol    string `json:"protocol,omitempty"`
+	Port        int32  `json:"port"`
+	AppProtocol string `json:"appProtocol,omitempty"`
+}
+
+// EndpointSliceEndpoint mirrors the apiserver discoveryv1.Endpoint
+// shape — addresses + per-endpoint conditions + topology hints. Fields
+// are pointers in the upstream API for the conditions; we materialize
+// them as bool because nil "ready" is rendered the same as false in
+// the UI. NodeName / Zone are surfaced for topology debugging.
+type EndpointSliceEndpoint struct {
+	Addresses   []string             `json:"addresses"`
+	Hostname    string               `json:"hostname,omitempty"`
+	NodeName    string               `json:"nodeName,omitempty"`
+	Zone        string               `json:"zone,omitempty"`
+	Ready       bool                 `json:"ready"`
+	Serving     bool                 `json:"serving"`
+	Terminating bool                 `json:"terminating"`
+	TargetRef   *EndpointSliceTarget `json:"targetRef,omitempty"`
+}
+
+type EndpointSliceTarget struct {
+	Kind      string `json:"kind"`
+	Name      string `json:"name"`
+	Namespace string `json:"namespace,omitempty"`
+}
+
+type EndpointSlice struct {
+	Name        string    `json:"name"`
+	Namespace   string    `json:"namespace"`
+	AddressType string    `json:"addressType"` // IPv4 / IPv6 / FQDN
+	Ports       []EndpointSlicePort `json:"ports"`
+	// ServiceName is the parent Service derived from the
+	// kubernetes.io/service-name label set by the EndpointSlice
+	// controller. Empty for slices not managed by a Service.
+	ServiceName  string `json:"serviceName,omitempty"`
+	ReadyCount   int    `json:"readyCount"`
+	TotalCount   int    `json:"totalCount"`
+	CreatedAt    time.Time `json:"createdAt"`
+}
+
+type EndpointSliceList struct {
+	EndpointSlices []EndpointSlice `json:"endpointSlices"`
+}
+
+type EndpointSliceDetail struct {
+	EndpointSlice
+	Endpoints   []EndpointSliceEndpoint `json:"endpoints,omitempty"`
+	Labels      map[string]string       `json:"labels,omitempty"`
+	Annotations map[string]string       `json:"annotations,omitempty"`
+}
+
 // --- NetworkPolicy ---
 
 type NetworkPolicyRule struct {
