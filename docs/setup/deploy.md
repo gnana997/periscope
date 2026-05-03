@@ -24,29 +24,51 @@ For IdP setup that produces the `auth.*` values, see
 
 ## 2. Quickstart
 
+### Option A — install from the OCI registry (recommended)
+
+The chart is published to ghcr.io as an OCI artifact and signed with cosign. No `helm repo add` step needed.
+
 ```sh
-# 1. Pull (or vendor) the chart
-git clone https://github.com/gnana997/periscope
-cd periscope
+# 1. Write a values file (see section 3 below for the minimum shape)
+$EDITOR my-values.yaml
 
-# 2. Write a values file (see 3)
-cp examples/config/auth.yaml.auth0 my-auth.yaml   # for reference
-$EDITOR my-values.yaml                             # paste in & adapt
-
-# 3. Apply your OIDC client secret (default secrets.mode=existing)
+# 2. Apply your OIDC client secret (default secrets.mode=existing)
 kubectl create namespace periscope
 kubectl -n periscope create secret generic periscope-oidc \
   --from-literal=OIDC_CLIENT_SECRET='<the-secret-from-your-IdP>'
 
-# 4. Install
-helm install periscope ./deploy/helm/periscope \
+# 3. Install (find the latest version at
+#    https://artifacthub.io/packages/helm/periscope/periscope)
+helm install periscope \
+  oci://ghcr.io/gnana997/charts/periscope \
+  --version <VERSION> \
   --namespace periscope \
   --values my-values.yaml
 
-# 5. Reach it
+# 4. Reach it
 kubectl -n periscope port-forward svc/periscope 8080:8080
 open http://localhost:8080/
 ```
+
+To verify the chart signature before install:
+
+```sh
+cosign verify oci://ghcr.io/gnana997/charts/periscope:<VERSION> \
+  --certificate-identity-regexp=https://github.com/gnana997/periscope \
+  --certificate-oidc-issuer=https://token.actions.githubusercontent.com
+```
+
+### Option B — install from a local clone (development)
+
+```sh
+git clone https://github.com/gnana997/periscope
+cd periscope
+helm install periscope ./deploy/helm/periscope \
+  --namespace periscope \
+  --values my-values.yaml
+```
+
+Use this when you're iterating on the chart itself or want to test unreleased changes.
 
 ---
 

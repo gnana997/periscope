@@ -20,7 +20,6 @@ sources:
   - https://github.com/gnana997/periscope
 maintainers:
   - name: gnana997
-icon: https://periscopehq.dev/icon.png
 annotations:
   # Artifact Hub renders these in the chart's listing page. See
   # https://artifacthub.io/docs/topics/annotations/helm/ for the

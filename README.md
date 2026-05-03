@@ -4,6 +4,8 @@
 
 [![CI](https://github.com/gnana997/periscope/actions/workflows/ci.yaml/badge.svg?branch=main)](https://github.com/gnana997/periscope/actions/workflows/ci.yaml)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
+[![Latest Release](https://img.shields.io/github/v/release/gnana997/periscope?include_prereleases&sort=semver)](https://github.com/gnana997/periscope/releases/latest)
+[![Artifact Hub](https://img.shields.io/endpoint?url=https://artifacthub.io/badge/repository/periscope)](https://artifacthub.io/packages/search?repo=periscope)
 [![Go](https://img.shields.io/badge/Go-1.26-00ADD8.svg)](https://go.dev/)
 [![Node](https://img.shields.io/badge/Node-22-339933.svg)](https://nodejs.org/)
 
@@ -39,11 +41,28 @@ Open <http://localhost:5173>.
 
 A Helm chart lives at [`deploy/helm/periscope/`](deploy/helm/periscope/). Full walkthrough including OIDC client setup and Pod Identity / IRSA wiring: [`docs/setup/deploy.md`](docs/setup/deploy.md).
 
+
 ```sh
-helm repo add periscope https://gnana997.github.io/periscope
-helm install periscope periscope/periscope \
+# Pin to a specific version. Find the latest at
+# https://artifacthub.io/packages/helm/periscope/periscope
+helm install periscope \
+  oci://ghcr.io/gnana997/charts/periscope \
+  --version <VERSION> \
   --namespace periscope --create-namespace
 ```
+
+For CI / scripts that always want the latest stable, resolve the tag from the GitHub API:
+
+```sh
+LATEST=$(curl -s https://api.github.com/repos/gnana997/periscope/releases/latest \
+  | jq -r .tag_name | sed 's/^v//')
+helm install periscope \
+  oci://ghcr.io/gnana997/charts/periscope \
+  --version "$LATEST" \
+  --namespace periscope --create-namespace
+```
+
+Both signed (cosign keyless) and discoverable on [Artifact Hub](https://artifacthub.io/packages/helm/periscope/periscope). To verify the chart signature before install, see the verification snippet in [`docs/RELEASING.md`](docs/RELEASING.md).
 
 ## Features
 
