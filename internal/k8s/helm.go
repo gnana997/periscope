@@ -42,6 +42,7 @@ import (
 	"sync"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
@@ -57,6 +58,27 @@ import (
 // helmOwnerLabel is the Helm-set marker on the storage object. Every
 // driver (secret / configmap / sql) tags releases with owner=helm.
 const helmOwnerLabel = "owner=helm"
+
+// helmListSelector is the label selector used by the LIST endpoint.
+// It scopes to Helm-owned storage objects AND excludes statuses we
+// never render in the browser — superseded (every revision before the
+// current one) and uninstalled/uninstalling (release was deleted).
+// This trims the wire payload from N×R to roughly N for clusters with
+// many revisions per release. The set-based `notin` operator is part
+// of the standard label-selector grammar (supported on every k8s
+// version Periscope targets).
+//
+// Status values left visible: deployed, failed, pending-install,
+// pending-upgrade, pending-rollback. Operators want to see all of
+// these — failed and pending releases are usually the reason the
+// browser was opened.
+const helmListSelector = "owner=helm,status notin (superseded,uninstalled,uninstalling)"
+
+// helmFanOutConcurrency caps in-flight per-namespace LISTs in the 403
+// fallback path. Picked at 8 to stay under client-go's default 5/10
+// QPS+burst on a single client while still finishing 100 namespaces
+// in well under a second.
+const helmFanOutConcurrency = 8
 
 // HelmReleaseSummary is one row in the list endpoint. Slim — meant
 // for tabular rendering on the SPA. The rendered manifest and values
@@ -201,11 +223,18 @@ var (
 const helmDriverCacheTTL = 5 * time.Minute
 
 // ListHelmReleases returns the latest revision of every release the
-// user can see. Cluster-wide LIST under impersonation; a user without
-// cluster-wide list permission on the storage kind will receive a
-// forbidden error, surfaced as 403 by the handler.
+// user can see.
 //
-// Returns up to `cap` releases; `truncated` is true when the storage
+// Default path: a single cluster-wide LIST under impersonation. When
+// the user's RBAC denies cluster-wide list on the storage kind (the
+// common namespace-scoped posture), we fall back to a per-namespace
+// fan-out — list the namespaces the user CAN see, then bounded-
+// concurrency LIST per namespace. A user with no cluster-wide
+// `list namespaces` permission either gets a per-cluster-namespace
+// fallback (rare) or the original 403 surfaces — the handler maps
+// that to its standard ForbiddenState.
+//
+// Returns up to `cap` releases; `truncated` is true when storage
 // returned more than `cap` (we slice in-memory because there is no
 // K8s pagination semantics on label-selector lists in this scenario).
 func ListHelmReleases(ctx context.Context, p credentials.Provider, c clusters.Cluster, cap int) (items []HelmReleaseSummary, truncated bool, err error) {
@@ -223,52 +252,22 @@ func ListHelmReleases(ctx context.Context, p credentials.Provider, c clusters.Cl
 		return nil, false, err
 	}
 
-	// Read the storage blobs for every release. We collapse to
-	// "latest revision per (namespace, name)" using the Secret/CM
-	// labels — no need to decode bodies for the version comparison.
-	type latest struct {
-		release *helmRelease
-		updated time.Time
-	}
-	latestByKey := map[string]latest{}
-
-	if drv == "secret" {
-		secrets, err := cs.CoreV1().Secrets("").List(ctx, helmListOpts())
+	latestByKey, err := listHelmReleaseBlobs(ctx, cs, drv, "")
+	if err != nil {
+		if !apierrors.IsForbidden(err) && !apierrors.IsUnauthorized(err) {
+			return nil, false, fmt.Errorf("list helm releases: %w", err)
+		}
+		// Cluster-wide LIST denied. Discover namespaces the user CAN
+		// see, then fan out. If even namespace discovery is denied,
+		// surface the original cluster-wide 403 — without a candidate
+		// set there's nothing useful we can do.
+		nsList, nsErr := cs.CoreV1().Namespaces().List(ctx, metav1.ListOptions{})
+		if nsErr != nil {
+			return nil, false, fmt.Errorf("list helm releases: %w", err)
+		}
+		latestByKey, err = fanOutHelmReleaseBlobs(ctx, cs, drv, nsList.Items)
 		if err != nil {
-			return nil, false, fmt.Errorf("list helm release secrets: %w", err)
-		}
-		for i := range secrets.Items {
-			s := &secrets.Items[i]
-			rev, _ := strconv.Atoi(s.Labels["version"])
-			key := s.Namespace + "/" + s.Labels["name"]
-			cur, ok := latestByKey[key]
-			if ok && cur.release != nil && cur.release.Version >= rev {
-				continue
-			}
-			rel, derr := decodeHelmRelease(s.Data["release"])
-			if derr != nil || rel == nil {
-				continue
-			}
-			latestByKey[key] = latest{release: rel}
-		}
-	} else {
-		cms, err := cs.CoreV1().ConfigMaps("").List(ctx, helmListOpts())
-		if err != nil {
-			return nil, false, fmt.Errorf("list helm release configmaps: %w", err)
-		}
-		for i := range cms.Items {
-			cm := &cms.Items[i]
-			rev, _ := strconv.Atoi(cm.Labels["version"])
-			key := cm.Namespace + "/" + cm.Labels["name"]
-			cur, ok := latestByKey[key]
-			if ok && cur.release != nil && cur.release.Version >= rev {
-				continue
-			}
-			rel, derr := decodeHelmRelease([]byte(cm.Data["release"]))
-			if derr != nil || rel == nil {
-				continue
-			}
-			latestByKey[key] = latest{release: rel}
+			return nil, false, fmt.Errorf("list helm releases (fan-out): %w", err)
 		}
 	}
 
@@ -291,6 +290,118 @@ func ListHelmReleases(ctx context.Context, p credentials.Provider, c clusters.Cl
 		return out[:cap], true, nil
 	}
 	return out, false, nil
+}
+
+// helmLatest is one entry in the "latest revision per (ns, name)" map.
+// Tracked separately from the slice form so dedup is O(1) on insert.
+type helmLatest struct {
+	release *helmRelease
+}
+
+// listHelmReleaseBlobs runs a single LIST against the helm storage
+// driver in the given namespace ("" for cluster-wide), then collapses
+// to the latest revision per (ns, name) using the version label —
+// blobs that aren't the latest are not decoded, saving CPU.
+func listHelmReleaseBlobs(ctx context.Context, cs kubernetes.Interface, drv, namespace string) (map[string]helmLatest, error) {
+	out := map[string]helmLatest{}
+	if drv == "secret" {
+		secrets, err := cs.CoreV1().Secrets(namespace).List(ctx, helmListOpts())
+		if err != nil {
+			return nil, err
+		}
+		for i := range secrets.Items {
+			s := &secrets.Items[i]
+			rev, _ := strconv.Atoi(s.Labels["version"])
+			key := s.Namespace + "/" + s.Labels["name"]
+			if cur, ok := out[key]; ok && cur.release != nil && cur.release.Version >= rev {
+				continue
+			}
+			rel, derr := decodeHelmRelease(s.Data["release"])
+			if derr != nil || rel == nil {
+				continue
+			}
+			out[key] = helmLatest{release: rel}
+		}
+		return out, nil
+	}
+	cms, err := cs.CoreV1().ConfigMaps(namespace).List(ctx, helmListOpts())
+	if err != nil {
+		return nil, err
+	}
+	for i := range cms.Items {
+		cm := &cms.Items[i]
+		rev, _ := strconv.Atoi(cm.Labels["version"])
+		key := cm.Namespace + "/" + cm.Labels["name"]
+		if cur, ok := out[key]; ok && cur.release != nil && cur.release.Version >= rev {
+			continue
+		}
+		rel, derr := decodeHelmRelease([]byte(cm.Data["release"]))
+		if derr != nil || rel == nil {
+			continue
+		}
+		out[key] = helmLatest{release: rel}
+	}
+	return out, nil
+}
+
+// fanOutHelmReleaseBlobs runs listHelmReleaseBlobs across the given
+// namespaces with a bounded concurrency cap, merging the per-namespace
+// results. Per-namespace 403/401 errors are dropped silently — the
+// user simply has no helm visibility there. Other errors are recorded;
+// if every namespace failed with a non-permission error, the first
+// one is returned. Otherwise we return whatever we collected.
+func fanOutHelmReleaseBlobs(ctx context.Context, cs kubernetes.Interface, drv string, namespaces []corev1.Namespace) (map[string]helmLatest, error) {
+	merged := map[string]helmLatest{}
+	if len(namespaces) == 0 {
+		return merged, nil
+	}
+
+	var (
+		mu       sync.Mutex
+		firstErr error
+		nonPermFailures int
+		sem      = make(chan struct{}, helmFanOutConcurrency)
+		wg       sync.WaitGroup
+	)
+	for _, ns := range namespaces {
+		ns := ns
+		wg.Add(1)
+		sem <- struct{}{}
+		go func() {
+			defer wg.Done()
+			defer func() { <-sem }()
+			part, err := listHelmReleaseBlobs(ctx, cs, drv, ns.Name)
+			if err != nil {
+				if apierrors.IsForbidden(err) || apierrors.IsUnauthorized(err) {
+					return
+				}
+				mu.Lock()
+				if firstErr == nil {
+					firstErr = err
+				}
+				nonPermFailures++
+				mu.Unlock()
+				return
+			}
+			mu.Lock()
+			for k, v := range part {
+				if cur, ok := merged[k]; ok && cur.release != nil && v.release != nil && cur.release.Version >= v.release.Version {
+					continue
+				}
+				merged[k] = v
+			}
+			mu.Unlock()
+		}()
+	}
+	wg.Wait()
+
+	// Only fail the whole call if every namespace returned a
+	// non-permission error. A partial failure (some namespaces 403,
+	// some succeeded) is fine — the user gets what they can see.
+	if len(merged) == 0 && nonPermFailures == len(namespaces) && firstErr != nil {
+		return nil, firstErr
+	}
+	return merged, nil
 }
 
 // GetHelmRelease returns the per-revision detail blob. Pass
@@ -510,10 +621,10 @@ func cacheHelmDriver(cluster, drv string) {
 	helmDriverCacheMu.Unlock()
 }
 
-// helmListOpts returns ListOptions for "owner=helm" label selector.
-// Used for cluster-wide LIST in the list path.
+// helmListOpts returns ListOptions for the helm browser LIST path —
+// scoped to current revisions only (see helmListSelector).
 func helmListOpts() metav1.ListOptions {
-	return metav1.ListOptions{LabelSelector: helmOwnerLabel}
+	return metav1.ListOptions{LabelSelector: helmListSelector}
 }
 
 // storageObjectName returns the canonical name of the Helm storage
