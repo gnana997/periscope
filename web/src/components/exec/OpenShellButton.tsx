@@ -2,8 +2,10 @@ import { useEffect, useRef, useState } from "react";
 import { cn } from "../../lib/cn";
 import { usePodDetail } from "../../hooks/useResource";
 import { useClusters } from "../../hooks/useClusters";
+import { useCanI } from "../../hooks/useCanI";
 import { useExecSessions } from "../../exec/useExecSessions";
 import { CapReachedDialog } from "../../exec/CapReachedDialog";
+import { Tooltip } from "../Tooltip";
 
 /**
  * OpenShellButton — pod-detail action that opens (or focuses) a shell
@@ -44,6 +46,17 @@ export function OpenShellButton({
   // that hasn't shipped the execEnabled bit.
   const clusterMeta = clustersData?.clusters.find((c) => c.name === cluster);
   const execDisabled = clusterMeta?.execEnabled === false;
+
+  // RBAC gate via SAR. Disable (don't hide) when the user lacks
+  // `create pods/exec`; the tooltip explains which tier or rule
+  // would be needed.
+  const canExec = useCanI(cluster, {
+    verb: "create",
+    resource: "pods",
+    subresource: "exec",
+    namespace,
+    name: pod,
+  });
 
   const [pickerOpen, setPickerOpen] = useState(false);
   const [capReached, setCapReached] = useState(false);
@@ -95,7 +108,7 @@ export function OpenShellButton({
   // Capture phase + stopPropagation match the Cmd-` shortcut wired in
   // ExecSessionsContext so the two coexist cleanly.
   useEffect(() => {
-    if (execDisabled) return;
+    if (execDisabled || !canExec.allowed) return;
     function onKey(e: KeyboardEvent) {
       const meta = e.metaKey || e.ctrlKey;
       if (!meta) return;
@@ -125,7 +138,7 @@ export function OpenShellButton({
     // closure captures the latest values at fire time via the ref-y
     // pattern of recomputing inside the handler.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [execDisabled]);
+  }, [execDisabled, canExec.allowed]);
 
   const multi = containers.length > 1;
 
@@ -137,37 +150,46 @@ export function OpenShellButton({
     return null;
   }
 
+  const denied = !canExec.allowed;
+  const allowedTitle = multi
+    ? `Open shell to ${defaultContainerName} (default) · Ctrl-E`
+    : `Open shell · Ctrl-E`;
+
   return (
     <>
       <div ref={wrapperRef} className="relative inline-flex h-7 items-stretch">
-        <button
-          type="button"
-          onClick={() => open(defaultContainerName)}
-          className={cn(
-            "inline-flex items-center gap-1.5 border border-border bg-surface px-2 font-mono text-[11px] text-ink-muted transition-colors",
-            "hover:border-accent/60 hover:bg-accent-soft hover:text-accent",
-            multi ? "rounded-l-md border-r-0" : "rounded-md",
-          )}
-          title={
-            multi
-              ? `Open shell to ${defaultContainerName} (default) · Ctrl-E`
-              : `Open shell · Ctrl-E`
-          }
-        >
-          <ShellGlyph />
-          <span>shell</span>
-          {multi && defaultContainerName && (
-            <span className="text-ink-faint">· {defaultContainerName}</span>
-          )}
-        </button>
+        <Tooltip content={denied ? canExec.tooltip : null}>
+          <button
+            type="button"
+            onClick={() => !denied && open(defaultContainerName)}
+            disabled={denied}
+            aria-disabled={denied}
+            className={cn(
+              "inline-flex items-center gap-1.5 border border-border bg-surface px-2 font-mono text-[11px] text-ink-muted transition-colors",
+              "hover:border-accent/60 hover:bg-accent-soft hover:text-accent",
+              multi ? "rounded-l-md border-r-0" : "rounded-md",
+              "disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:border-border disabled:hover:bg-surface disabled:hover:text-ink-muted",
+            )}
+            title={denied ? undefined : allowedTitle}
+          >
+            <ShellGlyph />
+            <span>shell</span>
+            {multi && defaultContainerName && (
+              <span className="text-ink-faint">· {defaultContainerName}</span>
+            )}
+          </button>
+        </Tooltip>
         {multi && (
           <button
             type="button"
-            onClick={() => setPickerOpen((v) => !v)}
+            onClick={() => !denied && setPickerOpen((v) => !v)}
+            disabled={denied}
+            aria-disabled={denied}
             className={cn(
               "inline-flex items-center justify-center rounded-r-md border border-border bg-surface px-1.5 text-ink-muted transition-colors",
               "hover:border-accent/60 hover:bg-accent-soft hover:text-accent",
               pickerOpen && "border-accent/60 bg-accent-soft text-accent",
+              "disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:border-border disabled:hover:bg-surface disabled:hover:text-ink-muted",
             )}
             aria-haspopup="listbox"
             aria-expanded={pickerOpen}

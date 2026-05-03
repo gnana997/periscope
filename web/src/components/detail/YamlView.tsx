@@ -43,16 +43,18 @@ export function YamlView({ cluster, source, ns, name }: YamlViewProps) {
   const meta = gvrkFromSource(source);
   const resource = sourceToResourceRef(source, cluster, ns || null, name);
 
-  // SSAR via the existing hook — the same gate ResourceActions uses.
+  // SAR via the existing hook — same gate ResourceActions uses.
   // Always called for stable hook order; only the editor branch
-  // reads it.
-  const canEdit = useCanI({
+  // reads it. While the can-i query is in flight, useCanI reports
+  // allowed=true (defer to the backend's gate on click) — this keeps
+  // first-paint smooth and matches ResourceActions.
+  const canEdit = useCanI(cluster, {
     verb: "patch",
     resource: meta.resource,
     namespace: ns || undefined,
   });
 
-  if (wantEdit && canEdit) {
+  if (wantEdit && canEdit.allowed) {
     return (
       <Suspense fallback={<DetailLoading label="loading editor…" />}>
         <YamlEditor cluster={cluster} source={source} resource={resource} />

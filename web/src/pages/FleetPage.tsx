@@ -226,4 +226,4 @@ function sortedEnvs(envs: string[]): string[] {
 // the page as default; keeping the named export for routes.tsx import.
 export default FleetPage;
 // suppress unused-import lint when FleetStatus is only used via types
-type _Unused = FleetStatus;
+export type _UnusedFleetStatus = FleetStatus;

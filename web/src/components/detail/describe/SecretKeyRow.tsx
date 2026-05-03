@@ -1,7 +1,9 @@
 import { useState } from "react";
 import { useRevealSecretValue } from "../../../hooks/useResource";
+import { useCanI } from "../../../hooks/useCanI";
 import { cn } from "../../../lib/cn";
 import type { SecretKey } from "../../../lib/types";
+import { Tooltip } from "../../Tooltip";
 
 function formatBytes(n: number): string {
   if (n < 1024) return `${n} B`;
@@ -23,6 +25,18 @@ export function SecretKeyRow({
   const reveal = useRevealSecretValue();
   const [revealed, setRevealed] = useState(false);
   const [copied, setCopied] = useState(false);
+
+  // RBAC gate: revealing the value requires `get` on the named secret.
+  // Reads (the list of keys / sizes) are gated upstream by the
+  // describe page; this gate is just for the value bytes.
+  const canReveal = useCanI(cluster, {
+    verb: "get",
+    resource: "secrets",
+    namespace: ns,
+    name,
+  });
+  const denied = !canReveal.allowed;
+  const revealDisabled = reveal.isPending || denied;
 
   const value = revealed ? reveal.data : undefined;
 
@@ -62,33 +76,41 @@ export function SecretKeyRow({
           {formatBytes(k.size)}
         </span>
         <div className="ml-auto flex items-center gap-1">
-          <button
-            type="button"
-            onClick={handleReveal}
-            disabled={reveal.isPending}
-            className={cn(
-              "inline-flex items-center gap-1 rounded px-2 py-0.5 font-mono text-[11px] transition-colors",
-              revealed
-                ? "border border-accent/30 bg-accent-soft text-accent"
-                : "border border-border text-ink-muted hover:border-border-strong hover:text-ink",
-              reveal.isPending && "cursor-not-allowed opacity-60",
-            )}
-            aria-pressed={revealed}
-          >
-            {revealed ? "hide" : "reveal"}
-          </button>
-          <button
-            type="button"
-            onClick={handleCopy}
-            className={cn(
-              "inline-flex items-center gap-1 rounded px-2 py-0.5 font-mono text-[11px] transition-colors",
-              copied
-                ? "border border-green/40 bg-green-soft text-green"
-                : "border border-border text-ink-muted hover:border-border-strong hover:text-ink",
-            )}
-          >
-            {copied ? "copied" : "copy"}
-          </button>
+          <Tooltip content={denied ? canReveal.tooltip : null}>
+            <button
+              type="button"
+              onClick={handleReveal}
+              disabled={revealDisabled}
+              aria-disabled={revealDisabled}
+              className={cn(
+                "inline-flex items-center gap-1 rounded px-2 py-0.5 font-mono text-[11px] transition-colors",
+                revealed
+                  ? "border border-accent/30 bg-accent-soft text-accent"
+                  : "border border-border text-ink-muted hover:border-border-strong hover:text-ink",
+                "disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:border-border disabled:hover:text-ink-muted",
+              )}
+              aria-pressed={revealed}
+            >
+              {revealed ? "hide" : "reveal"}
+            </button>
+          </Tooltip>
+          <Tooltip content={denied ? canReveal.tooltip : null}>
+            <button
+              type="button"
+              onClick={handleCopy}
+              disabled={denied}
+              aria-disabled={denied}
+              className={cn(
+                "inline-flex items-center gap-1 rounded px-2 py-0.5 font-mono text-[11px] transition-colors",
+                copied
+                  ? "border border-green/40 bg-green-soft text-green"
+                  : "border border-border text-ink-muted hover:border-border-strong hover:text-ink",
+                "disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:border-border disabled:hover:text-ink-muted",
+              )}
+            >
+              {copied ? "copied" : "copy"}
+            </button>
+          </Tooltip>
         </div>
       </div>
       {revealed && value !== undefined && (
