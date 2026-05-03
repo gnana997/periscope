@@ -31,7 +31,12 @@ COPY --from=web-builder /web/dist /src/internal/spa/dist
 # Build with the embed tag so the SPA bundle is baked into the binary.
 ARG VERSION=dev
 ARG COMMIT=unknown
-RUN CGO_ENABLED=0 GOOS=linux go build \
+# TARGETARCH is set automatically by Docker buildx when --platform is
+# passed (e.g. linux/amd64,linux/arm64). The Go toolchain compiles
+# cross-arch via GOARCH; CGO_ENABLED=0 keeps the build static so no
+# per-arch C toolchain is needed.
+ARG TARGETARCH
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} go build \
     -tags embed \
     -trimpath \
     -ldflags "-s -w -X main.version=${VERSION} -X main.commit=${COMMIT}" \

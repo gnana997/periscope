@@ -20,3 +20,36 @@ sources:
   - https://github.com/gnana997/periscope
 maintainers:
   - name: gnana997
+icon: https://periscopehq.dev/icon.png
+annotations:
+  # Artifact Hub renders these in the chart's listing page. See
+  # https://artifacthub.io/docs/topics/annotations/helm/ for the
+  # full list of recognized annotation keys.
+  artifacthub.io/license: Apache-2.0
+  artifacthub.io/operator: "false"
+  artifacthub.io/links: |
+    - name: Documentation
+      url: https://periscopehq.dev/docs
+    - name: Source code
+      url: https://github.com/gnana997/periscope
+    - name: Changelog
+      url: https://periscopehq.dev/changelog
+    - name: Issues
+      url: https://github.com/gnana997/periscope/issues
+  # The release.yaml workflow updates this annotation on every tag
+  # to reflect the PR titles since the previous tag (high-signal
+  # release notes for Artifact Hub's "What changed" panel).
+  artifacthub.io/changes: |
+    - kind: added
+      description: real-time SSE updates for 21+ resource kinds
+    - kind: added
+      description: searchable audit log with SQLite/Postgres backends
+    - kind: added
+      description: Helm release browser
+  # Cosign signing — Artifact Hub will display a "Signed" badge when
+  # the chart is verifiable via cosign. The signKey block teaches it
+  # how to verify; for keyless (Sigstore) signatures the URL points
+  # at the GH OIDC issuer.
+  artifacthub.io/signKey: |
+    fingerprint: keyless
+    url: https://token.actions.githubusercontent.com
