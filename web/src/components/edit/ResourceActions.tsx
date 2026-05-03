@@ -1,12 +1,13 @@
-// ResourceActions — the "edit yaml" + "delete" pair shown in detail
-// panel tab strips. Centralises styling + RBAC gating so the
-// Pods/Deployments/Secrets detail components stay declarative.
+// ResourceActions — the action bar shown in detail panel tab strips.
+// Centralises styling + RBAC gating + mutation wiring so the
+// per-kind detail components stay declarative.
 //
-// As of PR5 the edit flow is the inline YamlEditor (not a modal):
-// `<EditButton />` navigates the URL to `?tab=yaml&edit=1`, and
-// YamlView dispatches to the editor. ResourceActions retains the
-// delete modal — that's still a confirm-and-go interaction that
-// doesn't benefit from being inline.
+// Lane 2 expanded the surface from {Edit YAML, Delete} to
+// {Edit YAML, Edit labels, Scale (scalable kinds only), Delete}.
+// Each destructive / write action has its own dedicated mutation
+// hook (useEditLabels, useScaleResource, useDeleteResource) that
+// optimistically updates the React Query cache before the network
+// call lands, so the UI feels instant on slow links.
 //
 // Actions are shown unconditionally in v1 — the backend is the
 // authoritative gate (impersonated K8s RBAC). useCanI() is called
@@ -14,12 +15,18 @@
 // free. See useCanI for the rationale.
 
 import { useState } from "react";
-import { useQueryClient } from "@tanstack/react-query";
-import { useCanI } from "../../hooks/useCanI";
+import { ApiError } from "../../lib/api";
 import type { ResourceRef, YamlKind } from "../../lib/api";
 import { KIND_REGISTRY } from "../../lib/k8sKinds";
+import { useCanI } from "../../hooks/useCanI";
+import { useQueryClient } from "@tanstack/react-query";
 import { queryKeys } from "../../lib/queryKeys";
+import { useScaleResource, isScalable } from "../../hooks/mutations/useScaleResource";
+import { useEditLabels } from "../../hooks/mutations/useEditLabels";
+import { useDeleteResource } from "../../hooks/mutations/useDeleteResource";
 import { DeleteResourceModal } from "./DeleteResourceModal";
+import { ScaleModal } from "./ScaleModal";
+import { EditLabelsModal } from "./EditLabelsModal";
 import { EditButton } from "../detail/yaml/EditButton";
 
 interface ResourceActionsProps {
@@ -38,6 +45,11 @@ interface ResourceActionsProps {
   onDeleted?: () => void;
 }
 
+interface DetailLike {
+  replicas?: number;
+  labels?: Record<string, string>;
+}
+
 export function ResourceActions({
   cluster,
   yamlKind,
@@ -47,6 +59,8 @@ export function ResourceActions({
   onDeleted,
 }: ResourceActionsProps) {
   const [showDelete, setShowDelete] = useState(false);
+  const [showScale, setShowScale] = useState(false);
+  const [showLabels, setShowLabels] = useState(false);
   const meta = KIND_REGISTRY[yamlKind];
   const ns = namespace ?? undefined;
   const resource: ResourceRef = {
@@ -60,12 +74,70 @@ export function ResourceActions({
   };
   const canEdit = useCanI({ verb: "patch", resource: meta.resource, namespace: ns });
   const canDelete = useCanI({ verb: "delete", resource: meta.resource, namespace: ns });
+  const canScale = useCanI({
+    verb: "patch",
+    resource: `${meta.resource}/scale`,
+    namespace: ns,
+  });
+  const showScaleButton = canScale && isScalable(yamlKind);
 
   const qc = useQueryClient();
+  const detailKey = queryKeys
+    .cluster(cluster)
+    .kind(yamlKind)
+    .detail(ns ?? "", name);
+  const cachedDetail = qc.getQueryData<DetailLike>(detailKey);
+
+  const scaleMutation = useScaleResource({
+    cluster,
+    kind: yamlKind,
+    namespace: ns ?? "",
+    name,
+  });
+  const labelsMutation = useEditLabels({
+    cluster,
+    kind: yamlKind,
+    namespace: ns ?? "",
+    name,
+  });
+  const deleteMutation = useDeleteResource({
+    cluster,
+    kind: yamlKind,
+    namespace: ns ?? "",
+    name,
+  });
+
+  const deleteError = deleteMutation.error
+    ? deleteErrorShape(deleteMutation.error)
+    : null;
 
   return (
     <div className="flex items-center gap-1.5">
       {canEdit && <EditButton />}
+      {canEdit && (
+        <button
+          type="button"
+          onClick={() => setShowLabels(true)}
+          className="rounded-sm border border-border-strong px-2.5 py-1 font-mono text-[12px] text-ink-muted transition-colors hover:bg-surface-2 hover:text-ink"
+        >
+          labels
+        </button>
+      )}
+      {showScaleButton && (
+        <button
+          type="button"
+          onClick={() => setShowScale(true)}
+          disabled={cachedDetail?.replicas === undefined}
+          className="rounded-sm border border-border-strong px-2.5 py-1 font-mono text-[12px] text-ink-muted transition-colors hover:bg-surface-2 hover:text-ink disabled:cursor-not-allowed disabled:opacity-50"
+          title={
+            cachedDetail?.replicas === undefined
+              ? "loading current replica count…"
+              : `current replicas: ${cachedDetail.replicas}`
+          }
+        >
+          scale
+        </button>
+      )}
       {canDelete && (
         <button
           type="button"
@@ -80,18 +152,54 @@ export function ResourceActions({
       {showDelete && (
         <DeleteResourceModal
           resourceRef={resource}
-          onClose={() => setShowDelete(false)}
-          onDeleted={async () => {
-            // Await before calling onDeleted: the parent typically
-            // navigates away, and the new route's queries must see
-            // the post-delete cache to render fresh data.
-            await qc.invalidateQueries({
-              queryKey: queryKeys.cluster(cluster).kind(yamlKind).all,
-            });
-            onDeleted?.();
+          pending={deleteMutation.isPending}
+          error={deleteError}
+          onClose={() => {
+            if (deleteMutation.isPending) return;
+            deleteMutation.reset();
+            setShowDelete(false);
           }}
+          onConfirm={() => {
+            deleteMutation.mutate(undefined, {
+              onSuccess: () => {
+                setShowDelete(false);
+                onDeleted?.();
+              },
+            });
+          }}
+        />
+      )}
+
+      {showScale && showScaleButton && cachedDetail?.replicas !== undefined && (
+        <ScaleModal
+          cluster={cluster}
+          kind={yamlKind}
+          namespace={ns ?? ""}
+          name={name}
+          currentReplicas={cachedDetail.replicas}
+          onClose={() => setShowScale(false)}
+          onSubmit={(replicas) => scaleMutation.mutate({ replicas })}
+        />
+      )}
+
+      {showLabels && (
+        <EditLabelsModal
+          title={`${meta.kind} ${name}`}
+          initialLabels={cachedDetail?.labels ?? {}}
+          onClose={() => setShowLabels(false)}
+          onSubmit={(labels) => labelsMutation.mutate({ labels })}
         />
       )}
     </div>
   );
+}
+
+function deleteErrorShape(err: Error): { status?: number; message: string } {
+  if (err instanceof ApiError) {
+    return {
+      status: err.status,
+      message: err.bodyText?.trim() || err.message,
+    };
+  }
+  return { message: err.message || "delete failed" };
 }
