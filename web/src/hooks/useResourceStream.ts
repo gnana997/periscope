@@ -198,7 +198,7 @@ function invalidateRelated(
   qc: QueryClient,
   cluster: string,
   resource: WatchStreamKind,
-  rows: NamedRow[],
+  deltas: Delta[],
 ): void {
   // cancelRefetch:false makes a flurry of invalidations during an
   // in-flight refetch piggyback on the existing fetch instead of
@@ -223,7 +223,8 @@ function invalidateRelated(
   // Kind (e.g. "Pod"), which we map back to URL-plural via
   // KIND_TO_PLURAL.
   const seen = new Set<string>();
-  for (const row of rows) {
+  for (const delta of deltas) {
+    const row = delta.row;
     let kind: string;
     if (resource === "events") {
       const mapped = row.kind ? KIND_TO_PLURAL[row.kind] : undefined;
@@ -246,24 +247,45 @@ function invalidateRelated(
   // Pod-only: invalidate aggregating-parent detail queries in the same
   // namespace. Pod deltas drive Deployment/StatefulSet/.../Service
   // detail panels because those panels embed child-pod rows.
+  //
+  // For MODIFIED/DELETED rows the predicate also checks ownership:
+  // we only invalidate a parent whose cached data.pods array actually
+  // contains the changing pod. Without this, a single noisy pod
+  // (e.g. an unrelated CrashLoopBackOff pod sharing the namespace)
+  // would invalidate every workload-controller detail in the
+  // namespace on each restart, generating a continuous stream of
+  // refetches the user observes as "polling-like" traffic.
+  //
+  // ADDED rows skip the ownership check because the parent's pods
+  // array hasn't been refreshed yet — fan out broadly so whichever
+  // parent owns the new pod will refetch and pick it up.
   if (resource === "pods") {
-    const namespaces = new Set<string>();
-    for (const row of rows) namespaces.add(row.namespace ?? "");
-    for (const parent of POD_AGGREGATING_PARENTS) {
-      for (const ns of namespaces) {
+    for (const delta of deltas) {
+      const row = delta.row;
+      const ns = row.namespace ?? "";
+      const requireOwnership = delta.type !== "added";
+      for (const parent of POD_AGGREGATING_PARENTS) {
         void qc.invalidateQueries(
           {
             predicate: (q) => {
               const key = q.queryKey;
-              return (
-                Array.isArray(key) &&
-                key[0] === "cluster" &&
-                key[1] === cluster &&
-                key[2] === "kind" &&
-                key[3] === parent &&
-                key[4] === "detail" &&
-                key[5] === ns
-              );
+              if (
+                !Array.isArray(key) ||
+                key[0] !== "cluster" ||
+                key[1] !== cluster ||
+                key[2] !== "kind" ||
+                key[3] !== parent ||
+                key[4] !== "detail" ||
+                key[5] !== ns
+              ) {
+                return false;
+              }
+              if (!requireOwnership) return true;
+              const detail = q.state.data as
+                | { pods?: { name: string }[] }
+                | undefined;
+              if (!detail?.pods) return false;
+              return detail.pods.some((p) => p.name === row.name);
             },
           },
           opts,
@@ -407,12 +429,7 @@ export function useResourceStream(
       // and don't auto-refetch on watch deltas — without this call, a
       // Deployment detail panel's pods table stays at its initial
       // snapshot while the list page updates live.
-      invalidateRelated(
-        qc,
-        cluster,
-        resource,
-        deltas.map((d) => d.row),
-      );
+      invalidateRelated(qc, cluster, resource, deltas);
       // First delta arrival on a resumed stream signals "live": the
       // backend skipped the Snapshot because it accepted our
       // Last-Event-ID, so the snapshot handler never fires. Treat
