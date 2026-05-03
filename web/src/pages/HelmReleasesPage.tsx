@@ -142,7 +142,7 @@ export function HelmReleasesPage({ cluster }: { cluster: string }) {
           isForbidden(query.error) ? (
             <ForbiddenState
               resource="helm releases"
-              message="needs cluster-wide list permission on the helm storage Secrets (or ConfigMaps)."
+              message="needs list permission on the helm storage Secrets (or ConfigMaps) in at least one namespace. Ask your cluster administrator if you believe you should have access."
             />
           ) : (
             <ErrorState

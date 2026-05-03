@@ -3,22 +3,25 @@ package k8s
 import (
 	"bytes"
 	"compress/gzip"
+	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
+	"strings"
 	"testing"
 	"time"
-	"context"
-	"errors"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/fake"
 	testingaction "k8s.io/client-go/testing"
 
 	"github.com/gnana997/periscope/internal/clusters"
+	"github.com/gnana997/periscope/internal/credentials"
 )
 
 // makeHelmReleaseBlob produces the storage-blob shape Helm writes
@@ -276,6 +279,357 @@ func TestResolveHelmDriver_SecretsForbiddenFallsThroughToConfigMap(t *testing.T)
 	}
 	if drv != "configmap" {
 		t.Errorf("expected ConfigMap probe to succeed when Secrets is 403; got driver=%q", drv)
+	}
+}
+
+func TestListHelmReleases_UsesNotInSelector(t *testing.T) {
+	// The list path must scope the selector to exclude superseded /
+	// uninstalled / uninstalling so the API server filters out the bulk
+	// of revision blobs at the source instead of after wire transfer.
+	helmDriverCacheMu.Lock()
+	delete(helmDriverCache, "selector-cluster")
+	helmDriverCacheMu.Unlock()
+
+	cs := fake.NewClientset()
+	var captured string
+	cs.PrependReactor("list", "secrets", func(action testingaction.Action) (bool, runtime.Object, error) {
+		la, ok := action.(testingaction.ListAction)
+		if !ok {
+			return false, nil, nil
+		}
+		// Only capture the *non-probe* list — the driver probe uses
+		// Limit:1 with the bare owner-helm label. The browser LIST
+		// uses no Limit and the full helmListSelector.
+		if la.GetListRestrictions().Labels.String() != helmOwnerLabel {
+			captured = la.GetListRestrictions().Labels.String()
+		}
+		return true, &corev1.SecretList{}, nil
+	})
+
+	orig := newClientFn
+	newClientFn = func(_ context.Context, _ credentials.Provider, _ clusters.Cluster) (kubernetes.Interface, error) {
+		return cs, nil
+	}
+	t.Cleanup(func() { newClientFn = orig })
+
+	if _, _, err := ListHelmReleases(context.Background(), stubProvider{}, clusters.Cluster{Name: "selector-cluster"}, 50); err != nil {
+		t.Fatalf("ListHelmReleases: %v", err)
+	}
+
+	for _, want := range []string{"owner=helm", "status notin", "superseded", "uninstalled", "uninstalling"} {
+		if !strings.Contains(captured, want) {
+			t.Errorf("LIST selector %q missing %q", captured, want)
+		}
+	}
+}
+
+func TestListHelmReleases_FanOutOnClusterWide403(t *testing.T) {
+	// User has no cluster-wide `list secrets` (the common namespace-
+	// scoped RBAC posture). The list path must (a) detect 403,
+	// (b) discover namespaces, (c) fan out per-namespace, and
+	// (d) surface releases from namespaces the user CAN see.
+	helmDriverCacheMu.Lock()
+	delete(helmDriverCache, "fanout-cluster")
+	helmDriverCacheMu.Unlock()
+
+	cs := fake.NewClientset()
+
+	// Cluster-wide secret list → 403; per-namespace lists are allowed.
+	cs.PrependReactor("list", "secrets", func(action testingaction.Action) (bool, runtime.Object, error) {
+		if action.GetNamespace() == "" {
+			return true, nil, apierrors.NewForbidden(
+				schema.GroupResource{Resource: "secrets"}, "",
+				errors.New("RBAC: cluster-wide list denied"),
+			)
+		}
+		// Defer to the default tracker for namespace-scoped lists.
+		return false, nil, nil
+	})
+
+	// Plant two namespaces; only the second has a release.
+	for _, ns := range []string{"team-a", "team-b"} {
+		if _, err := cs.CoreV1().Namespaces().Create(
+			context.Background(),
+			&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: ns}},
+			metav1.CreateOptions{},
+		); err != nil {
+			t.Fatalf("seed namespace %s: %v", ns, err)
+		}
+	}
+
+	rel := helmRelease{
+		Name:      "my-app",
+		Namespace: "team-b",
+		Version:   3,
+		Info: &helmReleaseInfo{
+			Status:       "deployed",
+			LastDeployed: time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC),
+		},
+		Chart: &helmChart{Metadata: &helmChartMetadata{
+			Name: "my-app", Version: "1.0.0", AppVersion: "v1",
+		}},
+	}
+	blob := makeHelmReleaseBlob(t, rel)
+	if _, err := cs.CoreV1().Secrets("team-b").Create(
+		context.Background(),
+		&corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "sh.helm.release.v1.my-app.v3",
+				Namespace: "team-b",
+				Labels: map[string]string{
+					"owner":   "helm",
+					"name":    "my-app",
+					"version": "3",
+					"status":  "deployed",
+				},
+			},
+			Data: map[string][]byte{"release": blob},
+		},
+		metav1.CreateOptions{},
+	); err != nil {
+		t.Fatalf("seed release secret: %v", err)
+	}
+
+	orig := newClientFn
+	newClientFn = func(_ context.Context, _ credentials.Provider, _ clusters.Cluster) (kubernetes.Interface, error) {
+		return cs, nil
+	}
+	t.Cleanup(func() { newClientFn = orig })
+
+	got, truncated, err := ListHelmReleases(
+		context.Background(), stubProvider{},
+		clusters.Cluster{Name: "fanout-cluster"}, 50,
+	)
+	if err != nil {
+		t.Fatalf("ListHelmReleases: %v", err)
+	}
+	if truncated {
+		t.Errorf("unexpected truncated=true")
+	}
+	if len(got) != 1 {
+		t.Fatalf("got %d releases, want 1: %+v", len(got), got)
+	}
+	if got[0].Name != "my-app" || got[0].Namespace != "team-b" || got[0].Revision != 3 {
+		t.Errorf("wrong release: %+v", got[0])
+	}
+}
+
+func TestListHelmReleases_NamespaceListAlsoForbidden(t *testing.T) {
+	// When the user is denied cluster-wide list AND cannot list
+	// namespaces, surface the original 403. Without a candidate
+	// namespace set there's nothing useful we can fan out to.
+	helmDriverCacheMu.Lock()
+	delete(helmDriverCache, "ns-403-cluster")
+	helmDriverCacheMu.Unlock()
+
+	cs := fake.NewClientset()
+	cs.PrependReactor("list", "secrets", func(action testingaction.Action) (bool, runtime.Object, error) {
+		if action.GetNamespace() == "" {
+			return true, nil, apierrors.NewForbidden(
+				schema.GroupResource{Resource: "secrets"}, "",
+				errors.New("RBAC: cluster-wide list denied"),
+			)
+		}
+		return false, nil, nil
+	})
+	cs.PrependReactor("list", "namespaces", func(action testingaction.Action) (bool, runtime.Object, error) {
+		return true, nil, apierrors.NewForbidden(
+			schema.GroupResource{Resource: "namespaces"}, "",
+			errors.New("RBAC: list namespaces denied"),
+		)
+	})
+
+	orig := newClientFn
+	newClientFn = func(_ context.Context, _ credentials.Provider, _ clusters.Cluster) (kubernetes.Interface, error) {
+		return cs, nil
+	}
+	t.Cleanup(func() { newClientFn = orig })
+
+	_, _, err := ListHelmReleases(
+		context.Background(), stubProvider{},
+		clusters.Cluster{Name: "ns-403-cluster"}, 50,
+	)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !apierrors.IsForbidden(err) {
+		t.Errorf("expected forbidden error, got %v", err)
+	}
+}
+
+func TestListHelmReleases_PartialFanOutFailureReturnsWhatWeHave(t *testing.T) {
+	// Mixed-RBAC posture: user can list in team-a but is denied in
+	// team-b. The fan-out drops 403s silently and returns whatever
+	// succeeded — operator's UX shouldn't be all-or-nothing.
+	helmDriverCacheMu.Lock()
+	delete(helmDriverCache, "partial-cluster")
+	helmDriverCacheMu.Unlock()
+
+	cs := fake.NewClientset()
+	cs.PrependReactor("list", "secrets", func(action testingaction.Action) (bool, runtime.Object, error) {
+		switch action.GetNamespace() {
+		case "":
+			return true, nil, apierrors.NewForbidden(
+				schema.GroupResource{Resource: "secrets"}, "",
+				errors.New("RBAC: cluster-wide list denied"),
+			)
+		case "team-b":
+			return true, nil, apierrors.NewForbidden(
+				schema.GroupResource{Resource: "secrets"}, "",
+				errors.New("RBAC: namespace list denied"),
+			)
+		}
+		return false, nil, nil
+	})
+
+	for _, ns := range []string{"team-a", "team-b"} {
+		if _, err := cs.CoreV1().Namespaces().Create(
+			context.Background(),
+			&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: ns}},
+			metav1.CreateOptions{},
+		); err != nil {
+			t.Fatalf("seed namespace %s: %v", ns, err)
+		}
+	}
+
+	blob := makeHelmReleaseBlob(t, helmRelease{
+		Name: "ok-app", Namespace: "team-a", Version: 1,
+		Info: &helmReleaseInfo{Status: "deployed"},
+	})
+	if _, err := cs.CoreV1().Secrets("team-a").Create(
+		context.Background(),
+		&corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "sh.helm.release.v1.ok-app.v1",
+				Namespace: "team-a",
+				Labels:    map[string]string{"owner": "helm", "name": "ok-app", "version": "1", "status": "deployed"},
+			},
+			Data: map[string][]byte{"release": blob},
+		},
+		metav1.CreateOptions{},
+	); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	orig := newClientFn
+	newClientFn = func(_ context.Context, _ credentials.Provider, _ clusters.Cluster) (kubernetes.Interface, error) {
+		return cs, nil
+	}
+	t.Cleanup(func() { newClientFn = orig })
+
+	got, _, err := ListHelmReleases(
+		context.Background(), stubProvider{},
+		clusters.Cluster{Name: "partial-cluster"}, 50,
+	)
+	if err != nil {
+		t.Fatalf("ListHelmReleases: %v", err)
+	}
+	if len(got) != 1 || got[0].Name != "ok-app" {
+		t.Errorf("expected one release from team-a, got %+v", got)
+	}
+}
+
+func TestListHelmReleases_AllNamespaces403_ReturnsForbidden(t *testing.T) {
+	// User has cluster-wide `list namespaces` (so we get into the
+	// fan-out path) but no `list secrets` in ANY namespace. Every
+	// per-namespace LIST returns 403 → the fan-out must surface that
+	// 403 rather than masquerading as a 200-empty result, so the
+	// frontend can render ForbiddenState instead of "no helm releases".
+	helmDriverCacheMu.Lock()
+	delete(helmDriverCache, "all-403-cluster")
+	helmDriverCacheMu.Unlock()
+
+	cs := fake.NewClientset()
+	cs.PrependReactor("list", "secrets", func(action testingaction.Action) (bool, runtime.Object, error) {
+		// Cluster-wide AND namespace-scoped LISTs both denied.
+		return true, nil, apierrors.NewForbidden(
+			schema.GroupResource{Resource: "secrets"},
+			"",
+			errors.New("RBAC: forbidden"),
+		)
+	})
+
+	for _, ns := range []string{"team-a", "team-b", "team-c"} {
+		if _, err := cs.CoreV1().Namespaces().Create(
+			context.Background(),
+			&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: ns}},
+			metav1.CreateOptions{},
+		); err != nil {
+			t.Fatalf("seed namespace %s: %v", ns, err)
+		}
+	}
+
+	orig := newClientFn
+	newClientFn = func(_ context.Context, _ credentials.Provider, _ clusters.Cluster) (kubernetes.Interface, error) {
+		return cs, nil
+	}
+	t.Cleanup(func() { newClientFn = orig })
+
+	_, _, err := ListHelmReleases(
+		context.Background(), stubProvider{},
+		clusters.Cluster{Name: "all-403-cluster"}, 50,
+	)
+	if err == nil {
+		t.Fatal("expected forbidden error when every namespace LIST is 403, got nil")
+	}
+	if !apierrors.IsForbidden(err) {
+		t.Errorf("expected forbidden, got %v", err)
+	}
+}
+
+func TestListHelmReleases_PartialEmptyIsNotForbidden(t *testing.T) {
+	// Mixed posture: user can list secrets in team-a (empty — no helm
+	// releases planted) and is denied in team-b. This is "the user has
+	// helm visibility somewhere, just no releases there" — must NOT
+	// be reported as forbidden, since it would hide the genuine
+	// empty-state diagnostic from the operator.
+	helmDriverCacheMu.Lock()
+	delete(helmDriverCache, "partial-empty-cluster")
+	helmDriverCacheMu.Unlock()
+
+	cs := fake.NewClientset()
+	cs.PrependReactor("list", "secrets", func(action testingaction.Action) (bool, runtime.Object, error) {
+		switch action.GetNamespace() {
+		case "":
+			return true, nil, apierrors.NewForbidden(
+				schema.GroupResource{Resource: "secrets"}, "",
+				errors.New("RBAC: cluster-wide list denied"),
+			)
+		case "team-b":
+			return true, nil, apierrors.NewForbidden(
+				schema.GroupResource{Resource: "secrets"}, "",
+				errors.New("RBAC: namespace list denied"),
+			)
+		}
+		// team-a: defer to default tracker (empty result).
+		return false, nil, nil
+	})
+
+	for _, ns := range []string{"team-a", "team-b"} {
+		if _, err := cs.CoreV1().Namespaces().Create(
+			context.Background(),
+			&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: ns}},
+			metav1.CreateOptions{},
+		); err != nil {
+			t.Fatalf("seed namespace %s: %v", ns, err)
+		}
+	}
+
+	orig := newClientFn
+	newClientFn = func(_ context.Context, _ credentials.Provider, _ clusters.Cluster) (kubernetes.Interface, error) {
+		return cs, nil
+	}
+	t.Cleanup(func() { newClientFn = orig })
+
+	got, _, err := ListHelmReleases(
+		context.Background(), stubProvider{},
+		clusters.Cluster{Name: "partial-empty-cluster"}, 50,
+	)
+	if err != nil {
+		t.Fatalf("expected nil error for partial-empty case, got %v", err)
+	}
+	if len(got) != 0 {
+		t.Errorf("expected empty list, got %+v", got)
 	}
 }
 
