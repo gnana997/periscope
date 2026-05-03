@@ -138,8 +138,8 @@
       "properties": {
         "kinds": {
           "type": "string",
-          "description": "Empty/unset or 'all' = all on (server default). 'off'/'none' = disable. Comma-separated subset of pods,events,replicasets,jobs is also accepted.",
-          "pattern": "^\\s*$|^\\s*(all|off|none)\\s*$|^\\s*(pods|events|replicasets|jobs)(\\s*,\\s*(pods|events|replicasets|jobs))*\\s*$"
+          "description": "Empty/unset or 'all' = all on (server default). 'off'/'none' = disable. Comma-separated mix of per-kind tokens (pods, events, replicasets, jobs) and group aliases (core, workloads) is also accepted; unknown tokens are silently dropped server-side.",
+          "pattern": "^\\s*$|^\\s*(all|off|none)\\s*$|^\\s*(pods|events|replicasets|jobs|core|workloads)(\\s*,\\s*(pods|events|replicasets|jobs|core|workloads))*\\s*$"
         },
         "perUserLimit": {
           "type": "integer",

@@ -1,40 +1,53 @@
 package main
 
 import (
+	"maps"
 	"sync"
 	"testing"
 	"time"
 )
 
 func TestParseWatchStreamsEnv(t *testing.T) {
+	all := watchStreamsConfig{"pods": true, "events": true, "replicasets": true, "jobs": true}
 	tests := []struct {
 		name string
 		raw  string
 		want watchStreamsConfig
 	}{
-		// Defaults — empty/unset means all on now (was: all off).
-		{name: "empty defaults all on", raw: "", want: watchStreamsConfig{pods: true, events: true, replicasets: true, jobs: true}},
-		{name: "whitespace defaults all on", raw: "   ", want: watchStreamsConfig{pods: true, events: true, replicasets: true, jobs: true}},
-		{name: "all", raw: "all", want: watchStreamsConfig{pods: true, events: true, replicasets: true, jobs: true}},
+		// Defaults — empty/unset means all on.
+		{name: "empty defaults all on", raw: "", want: all},
+		{name: "whitespace defaults all on", raw: "   ", want: all},
+		{name: "all", raw: "all", want: all},
 		// Explicit opt-out — for operators behind proxies that mishandle long-lived connections.
 		{name: "off", raw: "off", want: watchStreamsConfig{}},
 		{name: "none", raw: "none", want: watchStreamsConfig{}},
 		{name: "off with spaces", raw: "  off  ", want: watchStreamsConfig{}},
-		// Subset selection.
-		{name: "pods", raw: "pods", want: watchStreamsConfig{pods: true}},
-		{name: "events", raw: "events", want: watchStreamsConfig{events: true}},
-		{name: "replicasets", raw: "replicasets", want: watchStreamsConfig{replicasets: true}},
-		{name: "jobs", raw: "jobs", want: watchStreamsConfig{jobs: true}},
-		{name: "pods,events", raw: "pods,events", want: watchStreamsConfig{pods: true, events: true}},
-		{name: "all kinds explicit", raw: "pods,events,replicasets,jobs", want: watchStreamsConfig{pods: true, events: true, replicasets: true, jobs: true}},
-		{name: "with spaces", raw: " pods , events ", want: watchStreamsConfig{pods: true, events: true}},
+		// Per-kind selection.
+		{name: "pods", raw: "pods", want: watchStreamsConfig{"pods": true}},
+		{name: "events", raw: "events", want: watchStreamsConfig{"events": true}},
+		{name: "replicasets", raw: "replicasets", want: watchStreamsConfig{"replicasets": true}},
+		{name: "jobs", raw: "jobs", want: watchStreamsConfig{"jobs": true}},
+		{name: "pods,events", raw: "pods,events", want: watchStreamsConfig{"pods": true, "events": true}},
+		{name: "all kinds explicit", raw: "pods,events,replicasets,jobs", want: all},
+		{name: "with spaces", raw: " pods , events ", want: watchStreamsConfig{"pods": true, "events": true}},
+		// Group aliases — the env grammar accepts kindReg.Group tokens and
+		// expands them to every kind in that group. Both group and kind
+		// tokens may mix freely in a single comma-separated value.
+		{name: "core group", raw: "core", want: watchStreamsConfig{"pods": true, "events": true}},
+		{name: "workloads group", raw: "workloads", want: watchStreamsConfig{"replicasets": true, "jobs": true}},
+		{name: "core,workloads", raw: "core,workloads", want: all},
+		{name: "kind plus group", raw: "pods,workloads", want: watchStreamsConfig{"pods": true, "replicasets": true, "jobs": true}},
+		{name: "duplicate group is idempotent", raw: "core,core", want: watchStreamsConfig{"pods": true, "events": true}},
+		// Unknowns silently dropped — startup slog summary makes the
+		// effective set visible to operators, so misspellings are obvious.
 		{name: "unknown only", raw: "deployments", want: watchStreamsConfig{}},
-		{name: "unknown plus pods", raw: "deployments,pods", want: watchStreamsConfig{pods: true}},
+		{name: "unknown plus pods", raw: "deployments,pods", want: watchStreamsConfig{"pods": true}},
+		{name: "empty token between commas", raw: "pods,,events", want: watchStreamsConfig{"pods": true, "events": true}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got := parseWatchStreamsEnv(tt.raw)
-			if got != tt.want {
+			if !maps.Equal(got, tt.want) {
 				t.Errorf("parseWatchStreamsEnv(%q) = %+v, want %+v", tt.raw, got, tt.want)
 			}
 		})
