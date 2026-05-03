@@ -47,6 +47,9 @@ func main() {
 		os.Exit(1)
 	}
 
+	watchCfg := parseWatchStreamsEnv(os.Getenv("PERISCOPE_WATCH_STREAMS"))
+	slog.Info("watch streams", "pods", watchCfg.pods)
+
 	authCfg, err := auth.Load(os.Getenv("PERISCOPE_AUTH_FILE"))
 	if err != nil {
 		slog.Error("auth config", "err", err)
@@ -789,6 +792,18 @@ func main() {
 		credentials.Wrap(factory, workloadLogsHandler(registry, "daemonset", k8s.StreamDaemonSetLogs)))
 	router.Get("/api/clusters/{cluster}/jobs/{ns}/{name}/logs",
 		credentials.Wrap(factory, workloadLogsHandler(registry, "job", k8s.StreamJobLogs)))
+
+	// --- Watch (SSE streaming) endpoints ---
+	//
+	// Real-time push for resource lists. Each route is gated by the
+	// PERISCOPE_WATCH_STREAMS env var; when disabled the route literally
+	// does not exist and the frontend falls back to polling via 404.
+	// See issue #4.
+
+	if watchCfg.pods {
+		router.Get("/api/clusters/{cluster}/pods/watch",
+			credentials.Wrap(factory, podsWatchHandler(registry)))
+	}
 
 	// --- Secret reveal endpoint (audit-logged, per-key) ---
 
@@ -1731,5 +1746,170 @@ func customResourceEventsHandler(reg *clusters.Registry) credentials.Handler {
 			return
 		}
 		writeJSON(w, http.StatusOK, events)
+	}
+}
+
+// watchStreamsConfig holds which kinds have the watch SSE route
+// registered. Driven by PERISCOPE_WATCH_STREAMS at startup.
+type watchStreamsConfig struct {
+	pods bool
+}
+
+// parseWatchStreamsEnv parses the PERISCOPE_WATCH_STREAMS env var.
+//
+//	"" / unset       → all off
+//	"pods"           → pods watch enabled
+//	"pods,events"    → both (events lands in a later phase)
+//	"all"            → every supported kind
+//
+// Unknown tokens are silently dropped — operators get a slog summary
+// at startup so misspellings are obvious.
+func parseWatchStreamsEnv(raw string) watchStreamsConfig {
+	cfg := watchStreamsConfig{}
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return cfg
+	}
+	if raw == "all" {
+		cfg.pods = true
+		return cfg
+	}
+	for _, part := range strings.Split(raw, ",") {
+		switch strings.TrimSpace(part) {
+		case "pods":
+			cfg.pods = true
+		}
+	}
+	return cfg
+}
+
+// watchChannelSink implements k8s.WatchSink by pushing into a buffered
+// channel. Send is non-blocking — when the channel is full, the sink
+// records a backpressure flag and returns false so the watch loop
+// exits cleanly. The handler then closes the SSE stream so the
+// browser auto-reconnects with a fresh snapshot.
+//
+// Goroutine pattern: writes to ClosedByBackpressure happen inside the
+// watch goroutine before it returns; the handler reads the flag only
+// after waiting on streamDone, establishing happens-before via the
+// goroutine exit.
+type watchChannelSink struct {
+	ctx                  context.Context
+	ch                   chan<- k8s.WatchEvent
+	closedByBackpressure bool
+}
+
+func (s *watchChannelSink) Send(ev k8s.WatchEvent) bool {
+	select {
+	case <-s.ctx.Done():
+		return false
+	default:
+	}
+	select {
+	case s.ch <- ev:
+		return true
+	case <-s.ctx.Done():
+		return false
+	default:
+		s.closedByBackpressure = true
+		return false
+	}
+}
+
+// podsWatchHandler streams pod ADDED/MODIFIED/DELETED events as Server-Sent
+// Events. Wire format (frozen — frontend depends on it):
+//
+//	event: snapshot
+//	id: <resourceVersion>
+//	data: {"resourceVersion":"<rv>","items":[<Pod>...]}
+//
+//	event: added | modified | deleted
+//	id: <resourceVersion>
+//	data: {"object":<Pod>}
+//
+//	event: relist
+//	data: {"reason":"gone_410"}
+//
+//	event: backpressure
+//	data: {}
+//
+//	event: error
+//	data: {"message":"..."}
+//
+// <Pod> is the same DTO returned by GET /api/clusters/{c}/pods, so the
+// frontend cache patches with type-identical objects.
+func podsWatchHandler(reg *clusters.Registry) credentials.Handler {
+	return func(w http.ResponseWriter, r *http.Request, p credentials.Provider) {
+		c, ok := reg.ByName(chi.URLParam(r, "cluster"))
+		if !ok {
+			http.Error(w, "cluster not found", http.StatusNotFound)
+			return
+		}
+		ns := r.URL.Query().Get("namespace")
+
+		sw, err := sse.Open(w)
+		if err != nil {
+			http.Error(w, "streaming unsupported", http.StatusInternalServerError)
+			return
+		}
+		defer sw.Close()
+
+		eventCh := make(chan k8s.WatchEvent, 256)
+		sink := &watchChannelSink{ctx: r.Context(), ch: eventCh}
+
+		var streamErr error
+		streamDone := make(chan struct{})
+		go func() {
+			defer close(streamDone)
+			defer close(eventCh)
+			streamErr = k8s.WatchPods(r.Context(), p, k8s.WatchPodsArgs{
+				Cluster:   c,
+				Namespace: ns,
+			}, sink)
+		}()
+
+		for {
+			select {
+			case <-r.Context().Done():
+				<-streamDone
+				return
+			case <-sw.HeartbeatC():
+				_ = sw.Ping()
+			case ev, ok := <-eventCh:
+				if !ok {
+					<-streamDone
+					switch {
+					case streamErr != nil && !errors.Is(streamErr, context.Canceled):
+						slog.ErrorContext(r.Context(), "pods watch failed",
+							"err", streamErr, "cluster", c.Name, "ns", ns, "actor", p.Actor())
+						_ = sw.Event("error", "", map[string]string{"message": streamErr.Error()})
+					case sink.closedByBackpressure:
+						_ = sw.Event("backpressure", "", struct{}{})
+					}
+					return
+				}
+				emitPodWatchEvent(sw, ev)
+			}
+		}
+	}
+}
+
+// emitPodWatchEvent translates a k8s.WatchEvent into the SSE wire
+// format. Errors from sw.Event are intentionally ignored — a write
+// failure means the connection has dropped and the next iteration of
+// the handler loop will observe ctx cancellation and exit cleanly.
+func emitPodWatchEvent(sw *sse.Writer, ev k8s.WatchEvent) {
+	switch ev.Type {
+	case k8s.WatchSnapshot:
+		_ = sw.Event("snapshot", ev.ResourceVersion, struct {
+			ResourceVersion string `json:"resourceVersion"`
+			Items           any    `json:"items"`
+		}{ResourceVersion: ev.ResourceVersion, Items: ev.Items})
+	case k8s.WatchAdded, k8s.WatchModified, k8s.WatchDeleted:
+		_ = sw.Event(string(ev.Type), ev.ResourceVersion, struct {
+			Object any `json:"object"`
+		}{Object: ev.Object})
+	case k8s.WatchRelist:
+		_ = sw.Event("relist", "", map[string]string{"reason": "gone_410"})
 	}
 }
