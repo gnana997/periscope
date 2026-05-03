@@ -10,13 +10,14 @@
 //   - RootRedirect entry point — redirects to the first cluster's
 //                  default page once the cluster list resolves
 
-import { useEffect, useRef } from "react";
+import { Suspense, useEffect, useRef } from "react";
 import { Outlet, useParams } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import { Brand } from "./components/shell/Brand";
 import { ClusterRail } from "./components/shell/ClusterRail";
 import { Sidebar } from "./components/shell/Sidebar";
 import { queryKeys } from "./lib/queryKeys";
+import { LoadingState } from "./components/table/states";
 
 export function AppShell() {
   const { cluster } = useParams<{ cluster: string }>();
@@ -52,7 +53,7 @@ export function AppShell() {
         </div>
       </div>
       <main className="flex min-w-0 flex-1 flex-col bg-bg">
-        <Outlet />
+        <Suspense fallback={<LoadingState resource="page" />}><Outlet /></Suspense>
       </main>
     </div>
   );

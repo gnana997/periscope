@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -126,6 +127,9 @@ func execHandler(reg *clusters.Registry, sessions *execsess.Registry, policy *k8
 			OriginPatterns: originPatterns(),
 		})
 		if err != nil {
+			if errors.Is(err, context.Canceled) {
+				return
+			}
 			slog.WarnContext(r.Context(), "exec.upgrade failed",
 				"err", err, "actor", actor, "cluster", c.Name, "ns", ns, "pod", pod)
 			return // websocket.Accept already wrote the HTTP error

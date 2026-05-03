@@ -1,6 +1,8 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -53,6 +55,9 @@ func auditQueryHandler(reader audit.Reader, resolver *authz.Resolver) http.Handl
 
 		result, err := reader.Query(r.Context(), args)
 		if err != nil {
+			if errors.Is(err, context.Canceled) {
+				return
+			}
 			slog.ErrorContext(r.Context(), "audit query failed",
 				"err", err, "actor", s.Subject)
 			http.Error(w, "operation failed", http.StatusInternalServerError)
