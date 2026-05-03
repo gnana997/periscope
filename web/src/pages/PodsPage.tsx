@@ -206,6 +206,7 @@ export function PodsPage({ cluster }: { cluster: string }) {
           { label: "failing", count: failing, tone: "red", active: status === "Failed", onClick: () => setParam("status", status === "Failed" ? null : "Failed") },
           { label: "pending", count: pending, tone: "yellow", active: status === "Pending", onClick: () => setParam("status", status === "Pending" ? null : "Pending") },
         ]}
+        streamStatus={podsQuery.streamStatus}
         trailing={<NamespacePicker />}
       />
       <FilterStrip

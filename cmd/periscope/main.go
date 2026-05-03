@@ -11,8 +11,10 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -28,6 +30,7 @@ import (
 	"github.com/gnana997/periscope/internal/k8s"
 	"github.com/gnana997/periscope/internal/secrets"
 	"github.com/gnana997/periscope/internal/spa"
+	"github.com/gnana997/periscope/internal/sse"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -77,6 +80,26 @@ func main() {
 		slog.Error("failed to load cluster registry", "err", err)
 		os.Exit(1)
 	}
+
+	watchCfg := parseWatchStreamsEnv(os.Getenv("PERISCOPE_WATCH_STREAMS"))
+	slog.Info("watch streams",
+		"pods", watchCfg.pods,
+		"events", watchCfg.events,
+		"replicasets", watchCfg.replicasets,
+		"jobs", watchCfg.jobs)
+
+	// Tracks active watch SSE streams for the /debug/streams page. Lives
+	// for the lifetime of the process; entries register on stream open
+	// and remove on stream close.
+	streamTracker := newStreamTracker()
+
+	// Caps concurrent watch SSE streams per OIDC subject so a runaway
+	// tab (or a buggy script) can't exhaust apiserver watch quota for
+	// the whole team. 30 covers ~5 tabs × 6 list views — invisible in
+	// normal use, hard ceiling on accidents.
+	streamLimit := parseIntEnv("PERISCOPE_WATCH_PER_USER_LIMIT", 30)
+	streamLimiter := newUserStreamLimiter(streamLimit)
+	slog.Info("watch stream limit", "per_user", streamLimit)
 
 	authCfg, err := auth.Load(os.Getenv("PERISCOPE_AUTH_FILE"))
 	if err != nil {
@@ -142,6 +165,7 @@ func main() {
 	})
 	router.Get("/api/whoami", credentials.Wrap(factory, whoamiHandler(auditReader != nil, authzResolver)))
 	router.Get("/api/clusters", listClustersHandler(registry))
+	router.Get("/api/features", featuresHandler(watchCfg))
 
 	// Audit query endpoint. Registered only when SQLite is wired.
 	// Authz is self-only by default; admins (tier mode) see all rows.
@@ -838,6 +862,56 @@ func main() {
 	router.Get("/api/clusters/{cluster}/jobs/{ns}/{name}/logs",
 		credentials.Wrap(factory, workloadLogsHandler(registry, "job", k8s.StreamJobLogs)))
 
+	// --- Watch (SSE streaming) endpoints ---
+	//
+	// Real-time push for resource lists. Each route is gated by the
+	// PERISCOPE_WATCH_STREAMS env var; when disabled the route literally
+	// does not exist and the frontend falls back to polling via 404.
+	// See issue #4.
+
+	// serverCtx is cancelled on SIGTERM/SIGINT so long-lived handlers
+	// (watch streams) can emit a graceful "event: server_shutdown" before
+	// the HTTP server closes their connection. Cancellation propagates
+	// from a single signal goroutine started below.
+	serverCtx, cancelServer := context.WithCancel(context.Background())
+	defer cancelServer()
+
+	// watchHandlerDeps bundles the cross-cutting dependencies the kind-
+	// agnostic resourceWatchHandler needs. Shared across every watch
+	// route so adding a new kind is one router.Get line.
+	watchHandlerDeps := &watchDeps{
+		Tracker:   streamTracker,
+		Limiter:   streamLimiter,
+		ServerCtx: serverCtx,
+		SessionValid: func(r *http.Request) bool {
+			return auth.SessionValid(r, sessionStore, authCfg)
+		},
+	}
+
+	if watchCfg.pods {
+		router.Get("/api/clusters/{cluster}/pods/watch",
+			credentials.Wrap(factory, resourceWatchHandler("pods", registry, watchHandlerDeps, k8s.WatchPods)))
+	}
+	if watchCfg.events {
+		router.Get("/api/clusters/{cluster}/events/watch",
+			credentials.Wrap(factory, resourceWatchHandler("events", registry, watchHandlerDeps, k8s.WatchEvents)))
+	}
+	if watchCfg.replicasets {
+		router.Get("/api/clusters/{cluster}/replicasets/watch",
+			credentials.Wrap(factory, resourceWatchHandler("replicasets", registry, watchHandlerDeps, k8s.WatchReplicaSets)))
+	}
+	if watchCfg.jobs {
+		router.Get("/api/clusters/{cluster}/jobs/watch",
+			credentials.Wrap(factory, resourceWatchHandler("jobs", registry, watchHandlerDeps, k8s.WatchJobs)))
+	}
+
+	// Debug endpoint listing currently-open watch streams. JSON for
+	// easy scraping; auth middleware applies (any authenticated user).
+	// Always registered — empty snapshot when no streams are configured.
+	router.Get("/debug/streams", func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(w, http.StatusOK, streamTracker.snapshot())
+	})
+
 	// --- Secret reveal endpoint (audit-logged, per-key) ---
 
 	router.Get("/api/clusters/{cluster}/secrets/{ns}/{name}/data/{key}",
@@ -935,6 +1009,7 @@ func main() {
 		}
 		slog.Info("server stopped cleanly")
 	}
+	slog.Info("server stopped")
 }
 
 func loadRegistry() (*clusters.Registry, error) {
@@ -1443,11 +1518,6 @@ func podLogsHandler(reg *clusters.Registry) credentials.Handler {
 			http.Error(w, "cluster not found", http.StatusNotFound)
 			return
 		}
-		flusher, ok := w.(http.Flusher)
-		if !ok {
-			http.Error(w, "streaming unsupported", http.StatusInternalServerError)
-			return
-		}
 
 		q := r.URL.Query()
 		args := k8s.PodLogsArgs{
@@ -1483,12 +1553,12 @@ func podLogsHandler(reg *clusters.Registry) credentials.Handler {
 		}
 		defer stream.Close()
 
-		w.Header().Set("Content-Type", "text/event-stream")
-		w.Header().Set("Cache-Control", "no-cache, no-transform")
-		w.Header().Set("Connection", "keep-alive")
-		w.Header().Set("X-Accel-Buffering", "no")
-		w.WriteHeader(http.StatusOK)
-		flusher.Flush()
+		sw, err := sse.Open(w)
+		if err != nil {
+			http.Error(w, "streaming unsupported", http.StatusInternalServerError)
+			return
+		}
+		defer sw.Close()
 
 		// Lines are read off the upstream in a goroutine so the main loop
 		// can multiplex line emission with the heartbeat ticker. Only the
@@ -1515,9 +1585,6 @@ func podLogsHandler(reg *clusters.Registry) credentials.Handler {
 			}
 		}()
 
-		heartbeat := time.NewTicker(15 * time.Second)
-		defer heartbeat.Stop()
-
 		type linePayload struct {
 			T string `json:"t,omitempty"`
 			L string `json:"l"`
@@ -1527,24 +1594,19 @@ func podLogsHandler(reg *clusters.Registry) credentials.Handler {
 			select {
 			case <-r.Context().Done():
 				return
-			case <-heartbeat.C:
-				_, _ = fmt.Fprint(w, ": ping\n\n")
-				flusher.Flush()
+			case <-sw.HeartbeatC():
+				_ = sw.Ping()
 			case res := <-lineCh:
 				if res.eof {
 					if res.err != nil && !errors.Is(res.err, context.Canceled) {
-						payload, _ := json.Marshal(map[string]string{"message": res.err.Error()})
-						_, _ = fmt.Fprintf(w, "event: error\ndata: %s\n\n", payload)
+						_ = sw.Event("error", "", map[string]string{"message": res.err.Error()})
 					} else {
-						_, _ = fmt.Fprint(w, "event: done\ndata: {}\n\n")
+						_ = sw.Event("done", "", struct{}{})
 					}
-					flusher.Flush()
 					return
 				}
 				ts, msg := k8s.SplitLogTimestamp(res.line)
-				payload, _ := json.Marshal(linePayload{T: ts, L: msg})
-				_, _ = fmt.Fprintf(w, "data: %s\n\n", payload)
-				flusher.Flush()
+				_ = sw.Event("", "", linePayload{T: ts, L: msg})
 			}
 		}
 	}
@@ -1607,11 +1669,6 @@ func workloadLogsHandler(reg *clusters.Registry, kind string, stream workloadStr
 			http.Error(w, "cluster not found", http.StatusNotFound)
 			return
 		}
-		flusher, ok := w.(http.Flusher)
-		if !ok {
-			http.Error(w, "streaming unsupported", http.StatusInternalServerError)
-			return
-		}
 
 		q := r.URL.Query()
 		args := k8s.WorkloadLogsArgs{
@@ -1634,12 +1691,12 @@ func workloadLogsHandler(reg *clusters.Registry, kind string, stream workloadStr
 			}
 		}
 
-		w.Header().Set("Content-Type", "text/event-stream")
-		w.Header().Set("Cache-Control", "no-cache, no-transform")
-		w.Header().Set("Connection", "keep-alive")
-		w.Header().Set("X-Accel-Buffering", "no")
-		w.WriteHeader(http.StatusOK)
-		flusher.Flush()
+		sw, err := sse.Open(w)
+		if err != nil {
+			http.Error(w, "streaming unsupported", http.StatusInternalServerError)
+			return
+		}
+		defer sw.Close()
 
 		eventCh := make(chan deploymentEvent, 4096)
 		sink := &channelSink{ch: eventCh, ctx: r.Context()}
@@ -1651,9 +1708,6 @@ func workloadLogsHandler(reg *clusters.Registry, kind string, stream workloadStr
 			defer close(eventCh)
 			streamErr = stream(r.Context(), p, args, sink)
 		}()
-
-		heartbeat := time.NewTicker(15 * time.Second)
-		defer heartbeat.Stop()
 
 		type linePayload struct {
 			T string `json:"t,omitempty"`
@@ -1669,9 +1723,8 @@ func workloadLogsHandler(reg *clusters.Registry, kind string, stream workloadStr
 			case <-r.Context().Done():
 				<-streamDone
 				return
-			case <-heartbeat.C:
-				_, _ = fmt.Fprint(w, ": ping\n\n")
-				flusher.Flush()
+			case <-sw.HeartbeatC():
+				_ = sw.Ping()
 			case ev, ok := <-eventCh:
 				if !ok {
 					<-streamDone
@@ -1680,24 +1733,19 @@ func workloadLogsHandler(reg *clusters.Registry, kind string, stream workloadStr
 							"kind", kind, "err", streamErr,
 							"cluster", c.Name, "ns", args.Namespace,
 							"name", args.Name, "actor", p.Actor())
-						payload, _ := json.Marshal(map[string]string{"message": streamErr.Error()})
-						_, _ = fmt.Fprintf(w, "event: error\ndata: %s\n\n", payload)
+						_ = sw.Event("error", "", map[string]string{"message": streamErr.Error()})
 					} else {
-						_, _ = fmt.Fprint(w, "event: done\ndata: {}\n\n")
+						_ = sw.Event("done", "", struct{}{})
 					}
-					flusher.Flush()
 					return
 				}
 				switch ev.kind {
 				case "line":
 					ts, msg := k8s.SplitLogTimestamp(ev.line)
-					payload, _ := json.Marshal(linePayload{T: ts, P: ev.pod, L: msg})
-					_, _ = fmt.Fprintf(w, "data: %s\n\n", payload)
+					_ = sw.Event("", "", linePayload{T: ts, P: ev.pod, L: msg})
 				case "podSet":
-					payload, _ := json.Marshal(metaPayload{Pods: ev.pods})
-					_, _ = fmt.Fprintf(w, "event: meta\ndata: %s\n\n", payload)
+					_ = sw.Event("meta", "", metaPayload{Pods: ev.pods})
 				}
-				flusher.Flush()
 			}
 		}
 	}
@@ -1918,5 +1966,416 @@ func customResourceEventsHandler(reg *clusters.Registry) credentials.Handler {
 			return
 		}
 		writeJSON(w, http.StatusOK, events)
+	}
+}
+
+// featuresHandler returns the server's feature flags so the frontend
+// can branch on them at boot. Currently surfaces which kinds have
+// the watch SSE route registered, used by useResource to dispatch
+// between polling and streaming. Public (auth middleware applies),
+// no per-cluster scoping — features are server-wide.
+func featuresHandler(cfg watchStreamsConfig) http.HandlerFunc {
+	kinds := make([]string, 0, 4)
+	if cfg.pods {
+		kinds = append(kinds, "pods")
+	}
+	if cfg.events {
+		kinds = append(kinds, "events")
+	}
+	if cfg.replicasets {
+		kinds = append(kinds, "replicasets")
+	}
+	if cfg.jobs {
+		kinds = append(kinds, "jobs")
+	}
+	body := map[string]any{"watchStreams": kinds}
+	return func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(w, http.StatusOK, body)
+	}
+}
+
+// watchStreamsConfig holds which kinds have the watch SSE route
+// registered. Driven by PERISCOPE_WATCH_STREAMS at startup.
+type watchStreamsConfig struct {
+	pods        bool
+	events      bool
+	replicasets bool
+	jobs        bool
+}
+
+// parseWatchStreamsEnv parses the PERISCOPE_WATCH_STREAMS env var.
+//
+//	"" / unset                            → all off
+//	"pods"                                → pods watch enabled
+//	"pods,events,replicasets,jobs"        → each enabled
+//	"all"                                 → every supported kind
+//
+// Unknown tokens are silently dropped — operators get a slog summary
+// at startup so misspellings are obvious.
+func parseWatchStreamsEnv(raw string) watchStreamsConfig {
+	cfg := watchStreamsConfig{}
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return cfg
+	}
+	if raw == "all" {
+		cfg.pods = true
+		cfg.events = true
+		cfg.replicasets = true
+		cfg.jobs = true
+		return cfg
+	}
+	for _, part := range strings.Split(raw, ",") {
+		switch strings.TrimSpace(part) {
+		case "pods":
+			cfg.pods = true
+		case "events":
+			cfg.events = true
+		case "replicasets":
+			cfg.replicasets = true
+		case "jobs":
+			cfg.jobs = true
+		}
+	}
+	return cfg
+}
+
+// userStreamLimiter caps the number of concurrent watch SSE streams
+// per OIDC subject (or other actor identifier). Acquire returns false
+// when the user is already at the cap; the handler responds 429 and
+// returns without opening the stream.
+//
+// max == 0 disables the cap (Acquire always returns true). Negative
+// values are clamped to 0.
+type userStreamLimiter struct {
+	max    int
+	mu     sync.Mutex
+	counts map[string]int
+}
+
+func newUserStreamLimiter(max int) *userStreamLimiter {
+	if max < 0 {
+		max = 0
+	}
+	return &userStreamLimiter{max: max, counts: make(map[string]int)}
+}
+
+// acquire reserves a slot for actor and returns true. Returns false
+// when actor is already at the cap. Pair every successful acquire
+// with a deferred release.
+func (u *userStreamLimiter) acquire(actor string) bool {
+	if u.max == 0 {
+		return true
+	}
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	if u.counts[actor] >= u.max {
+		return false
+	}
+	u.counts[actor]++
+	return true
+}
+
+func (u *userStreamLimiter) release(actor string) {
+	if u.max == 0 {
+		return
+	}
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	if u.counts[actor] > 0 {
+		u.counts[actor]--
+	}
+	if u.counts[actor] == 0 {
+		delete(u.counts, actor)
+	}
+}
+
+// parseIntEnv reads a positive integer from the named env var; returns
+// fallback when the var is unset, empty, malformed, or negative.
+func parseIntEnv(name string, fallback int) int {
+	raw := strings.TrimSpace(os.Getenv(name))
+	if raw == "" {
+		return fallback
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n < 0 {
+		slog.Warn("invalid env var, using default", "name", name, "value", raw, "default", fallback)
+		return fallback
+	}
+	return n
+}
+
+// watchChannelSink implements k8s.WatchSink by pushing into a buffered
+// channel. Send is non-blocking — when the channel is full, the sink
+// records a backpressure flag and returns false so the watch loop
+// exits cleanly. The handler then closes the SSE stream so the
+// browser auto-reconnects with a fresh snapshot.
+//
+// Goroutine pattern: writes to ClosedByBackpressure happen inside the
+// watch goroutine before it returns; the handler reads the flag only
+// after waiting on streamDone, establishing happens-before via the
+// goroutine exit.
+type watchChannelSink struct {
+	ctx                  context.Context
+	ch                   chan<- k8s.WatchEvent
+	closedByBackpressure bool
+}
+
+func (s *watchChannelSink) Send(ev k8s.WatchEvent) bool {
+	select {
+	case <-s.ctx.Done():
+		return false
+	default:
+	}
+	select {
+	case s.ch <- ev:
+		return true
+	case <-s.ctx.Done():
+		return false
+	default:
+		s.closedByBackpressure = true
+		return false
+	}
+}
+
+// streamEntry is one row of /debug/streams. Fields are JSON-tagged
+// for direct serialization.
+type streamEntry struct {
+	ID        int64     `json:"id"`
+	Actor     string    `json:"actor"`
+	Cluster   string    `json:"cluster"`
+	Kind      string    `json:"kind"`
+	Namespace string    `json:"namespace"`
+	OpenedAt  time.Time `json:"openedAt"`
+}
+
+// streamTracker is an in-memory registry of active watch SSE streams.
+// Used solely by /debug/streams for operator visibility — handlers call
+// register on entry, the returned deregister func runs in defer.
+type streamTracker struct {
+	mu     sync.Mutex
+	next   int64
+	active map[int64]streamEntry
+}
+
+func newStreamTracker() *streamTracker {
+	return &streamTracker{active: make(map[int64]streamEntry)}
+}
+
+// register adds e and returns its id plus a deregister func.
+func (t *streamTracker) register(e streamEntry) (int64, func()) {
+	t.mu.Lock()
+	t.next++
+	e.ID = t.next
+	t.active[e.ID] = e
+	t.mu.Unlock()
+	return e.ID, func() {
+		t.mu.Lock()
+		delete(t.active, e.ID)
+		t.mu.Unlock()
+	}
+}
+
+// snapshot returns a copy of all active entries, sorted by id (oldest
+// streams first).
+func (t *streamTracker) snapshot() []streamEntry {
+	t.mu.Lock()
+	out := make([]streamEntry, 0, len(t.active))
+	for _, e := range t.active {
+		out = append(out, e)
+	}
+	t.mu.Unlock()
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	return out
+}
+
+// watchDeps bundles the cross-cutting dependencies every watch SSE
+// handler needs. Built once at startup and shared across kinds.
+type watchDeps struct {
+	Tracker      *streamTracker
+	Limiter      *userStreamLimiter
+	ServerCtx    context.Context
+	SessionValid func(*http.Request) bool
+}
+
+// watchFn matches the signature of every k8s.Watch* primitive
+// (WatchPods, WatchEvents, WatchReplicaSets, WatchJobs). The handler
+// uses it as an opaque function value, so each route registration just
+// passes the appropriate primitive without further wrapping.
+type watchFn func(ctx context.Context, p credentials.Provider, args k8s.WatchArgs, sink k8s.WatchSink) error
+
+// resourceWatchHandler is the kind-agnostic SSE handler for resource
+// watch streams. Wire format (frozen — frontend depends on it):
+//
+//	event: snapshot
+//	id: <resourceVersion>
+//	data: {"resourceVersion":"<rv>","items":[<DTO>...]}
+//
+//	event: added | modified | deleted
+//	id: <resourceVersion>
+//	data: {"object":<DTO>}
+//
+//	event: relist
+//	data: {"reason":"gone_410"}
+//
+//	event: backpressure
+//	data: {}
+//
+//	event: server_shutdown | auth_expired
+//	data: {}
+//
+//	event: error
+//	data: {"message":"..."}
+//
+// <DTO> is whatever the corresponding k8s.Watch* primitive emits in
+// WatchEvent.Object / .Items — same shape returned by the matching
+// list endpoint, so the frontend cache patches against type-identical
+// objects.
+//
+// Lifecycle transitions are slog'd at info level with event names
+// "watch_stream.opened" / "watch_stream.closed" / "watch_stream.relist"
+// / "watch_stream.auth_expired" / "watch_stream.rate_limited" so
+// log-to-metrics agents can derive counters until Prometheus is wired up.
+func resourceWatchHandler(kind string, reg *clusters.Registry, deps *watchDeps, watch watchFn) credentials.Handler {
+	return func(w http.ResponseWriter, r *http.Request, p credentials.Provider) {
+		c, ok := reg.ByName(chi.URLParam(r, "cluster"))
+		if !ok {
+			http.Error(w, "cluster not found", http.StatusNotFound)
+			return
+		}
+		ns := r.URL.Query().Get("namespace")
+		actor := p.Actor()
+
+		if !deps.Limiter.acquire(actor) {
+			slog.WarnContext(r.Context(), "watch_stream.rate_limited",
+				"actor", actor, "kind", kind, "cluster", c.Name, "ns", ns)
+			http.Error(w, "too many concurrent watch streams for this user", http.StatusTooManyRequests)
+			return
+		}
+		defer deps.Limiter.release(actor)
+
+		sw, err := sse.Open(w)
+		if err != nil {
+			http.Error(w, "streaming unsupported", http.StatusInternalServerError)
+			return
+		}
+		defer sw.Close()
+
+		id, deregister := deps.Tracker.register(streamEntry{
+			Actor:     actor,
+			Cluster:   c.Name,
+			Kind:      kind,
+			Namespace: ns,
+			OpenedAt:  time.Now(),
+		})
+		defer deregister()
+		slog.InfoContext(r.Context(), "watch_stream.opened",
+			"id", id, "kind", kind, "cluster", c.Name, "ns", ns, "actor", actor)
+
+		eventCh := make(chan k8s.WatchEvent, 256)
+		sink := &watchChannelSink{ctx: r.Context(), ch: eventCh}
+
+		// EventSource forwards the id of the last successfully delivered
+		// event as Last-Event-ID on reconnect. We pass it to the watch
+		// primitive as a starting RV so the apiserver resumes from there
+		// instead of replaying a full snapshot — preserving the client's
+		// cache (no row flicker) and saving a list call's bandwidth.
+		// Stale RVs degrade gracefully: watchKind falls back to fresh
+		// List+Watch on 410 Gone.
+		resumeFrom := r.Header.Get("Last-Event-ID")
+
+		var streamErr error
+		streamDone := make(chan struct{})
+		go func() {
+			defer close(streamDone)
+			defer close(eventCh)
+			streamErr = watch(r.Context(), p, k8s.WatchArgs{
+				Cluster:    c,
+				Namespace:  ns,
+				ResumeFrom: resumeFrom,
+			}, sink)
+		}()
+
+		closeReason := "ctx_done"
+		defer func() {
+			slog.InfoContext(r.Context(), "watch_stream.closed",
+				"id", id, "kind", kind, "cluster", c.Name, "ns", ns,
+				"actor", actor, "reason", closeReason)
+		}()
+
+		// Tick the auth-revalidation check independently of the SSE
+		// keepalive heartbeat. 60s is short enough that an expired
+		// session closes the stream within a minute, long enough that
+		// the cost (one map lookup + a couple of time comparisons) is
+		// negligible.
+		authCheck := time.NewTicker(60 * time.Second)
+		defer authCheck.Stop()
+
+		for {
+			select {
+			case <-r.Context().Done():
+				<-streamDone
+				return
+			case <-deps.ServerCtx.Done():
+				closeReason = "server_shutdown"
+				_ = sw.Event("server_shutdown", "", struct{}{})
+				return
+			case <-authCheck.C:
+				if !deps.SessionValid(r) {
+					closeReason = "auth_expired"
+					slog.InfoContext(r.Context(), "watch_stream.auth_expired",
+						"id", id, "kind", kind, "cluster", c.Name, "ns", ns, "actor", actor)
+					_ = sw.Event("auth_expired", "", struct{}{})
+					return
+				}
+			case <-sw.HeartbeatC():
+				_ = sw.Ping()
+			case ev, ok := <-eventCh:
+				if !ok {
+					<-streamDone
+					switch {
+					case streamErr != nil && !errors.Is(streamErr, context.Canceled):
+						closeReason = "error"
+						slog.ErrorContext(r.Context(), "watch_stream.failed",
+							"kind", kind, "err", streamErr, "cluster", c.Name, "ns", ns, "actor", actor)
+						_ = sw.Event("error", "", map[string]string{"message": streamErr.Error()})
+					case sink.closedByBackpressure:
+						closeReason = "backpressure"
+						_ = sw.Event("backpressure", "", struct{}{})
+					default:
+						closeReason = "eof"
+					}
+					return
+				}
+				if ev.Type == k8s.WatchRelist {
+					slog.InfoContext(r.Context(), "watch_stream.relist",
+						"id", id, "kind", kind, "cluster", c.Name, "ns", ns)
+				}
+				emitWatchEvent(sw, ev)
+			}
+		}
+	}
+}
+
+// emitWatchEvent translates a k8s.WatchEvent into the SSE wire format.
+// Errors from sw.Event are intentionally ignored — a write failure
+// means the connection has dropped and the next iteration of the
+// handler loop will observe ctx cancellation and exit cleanly.
+//
+// Kind-agnostic: ev.Object and ev.Items pass through as any, JSON-
+// marshalled by sw.Event.
+func emitWatchEvent(sw *sse.Writer, ev k8s.WatchEvent) {
+	switch ev.Type {
+	case k8s.WatchSnapshot:
+		_ = sw.Event("snapshot", ev.ResourceVersion, struct {
+			ResourceVersion string `json:"resourceVersion"`
+			Items           any    `json:"items"`
+		}{ResourceVersion: ev.ResourceVersion, Items: ev.Items})
+	case k8s.WatchAdded, k8s.WatchModified, k8s.WatchDeleted:
+		_ = sw.Event(string(ev.Type), ev.ResourceVersion, struct {
+			Object any `json:"object"`
+		}{Object: ev.Object})
+	case k8s.WatchRelist:
+		_ = sw.Event("relist", "", map[string]string{"reason": "gone_410"})
 	}
 }

@@ -191,6 +191,7 @@ export function JobsPage({ cluster }: { cluster: string }) {
           { label: "failing", count: failing, tone: "red", active: status === "Failed", onClick: () => setParam("status", status === "Failed" ? null : "Failed") },
           { label: "running", count: running, tone: "yellow", active: status === "Running", onClick: () => setParam("status", status === "Running" ? null : "Running") },
         ]}
+        streamStatus={query.streamStatus}
         trailing={<NamespacePicker />}
       />
       <FilterStrip

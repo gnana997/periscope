@@ -244,7 +244,7 @@ export function EventsPage({ cluster }: { cluster: string }) {
     setParams(next, { replace: true });
   };
 
-  const { data, isLoading, isError, error } = useClusterEvents(
+  const { data, isLoading, isError, error, streamStatus } = useClusterEvents(
     cluster,
     namespace ?? undefined,
   );
@@ -288,6 +288,7 @@ export function EventsPage({ cluster }: { cluster: string }) {
               setParam("type", typeFilter === "Warning" ? null : "Warning"),
           },
         ]}
+        streamStatus={streamStatus}
         trailing={
           <div className="flex items-center gap-3">
             <LivePulse />

@@ -488,6 +488,8 @@ export interface EventList {
 // --- ClusterEvent (cluster-wide events list page) ---
 
 export interface ClusterEvent {
+  /** K8s Event resource metadata.uid — stable identity across watch deltas. */
+  uid?: string;
   namespace: string;
   kind: string;
   name: string;

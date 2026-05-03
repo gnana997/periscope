@@ -588,6 +588,12 @@ type StorageClassDetail struct {
 // meaningful row and cross-link to the affected resource.
 
 type ClusterEvent struct {
+	// UID is the K8s Event resource's metadata.uid. The streaming
+	// frontend uses this as the row identity key — without it,
+	// (name, namespace) collides for multiple events on the same
+	// involved object (Name = involvedObject.Name, not the Event's
+	// own metadata.name).
+	UID       string    `json:"uid"`
 	Namespace string    `json:"namespace"`
 	Kind      string    `json:"kind"` // Pod, Deployment, Job, etc.
 	Name      string    `json:"name"` // object name

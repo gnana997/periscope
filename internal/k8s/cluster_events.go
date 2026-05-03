@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sort"
 
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/gnana997/periscope/internal/clusters"
@@ -33,33 +34,8 @@ func ListClusterEvents(ctx context.Context, p credentials.Provider, args ListClu
 	}
 
 	out := make([]ClusterEvent, 0, len(raw.Items))
-	for _, e := range raw.Items {
-		source := e.Source.Component
-		if e.Source.Host != "" {
-			source += "/" + e.Source.Host
-		}
-		// ReportingController supersedes the legacy Source field when set.
-		if e.ReportingController != "" {
-			source = e.ReportingController
-		}
-
-		count := e.Count
-		if count == 0 {
-			count = 1
-		}
-
-		out = append(out, ClusterEvent{
-			Namespace: e.Namespace,
-			Kind:      e.InvolvedObject.Kind,
-			Name:      e.InvolvedObject.Name,
-			Type:      e.Type,
-			Reason:    e.Reason,
-			Message:   e.Message,
-			Count:     count,
-			First:     e.FirstTimestamp.Time,
-			Last:      e.LastTimestamp.Time,
-			Source:    source,
-		})
+	for i := range raw.Items {
+		out = append(out, eventSummary(&raw.Items[i]))
 	}
 
 	// Newest last-occurrence first.
@@ -72,4 +48,37 @@ func ListClusterEvents(ctx context.Context, p credentials.Provider, args ListClu
 	}
 
 	return ClusterEventList{Events: out}, nil
+}
+
+// eventSummary builds the cluster-events list-view DTO from a corev1.Event.
+// Shared between ListClusterEvents (one-shot list) and WatchEvents
+// (streaming snapshots + delta events).
+func eventSummary(e *corev1.Event) ClusterEvent {
+	source := e.Source.Component
+	if e.Source.Host != "" {
+		source += "/" + e.Source.Host
+	}
+	// ReportingController supersedes the legacy Source field when set.
+	if e.ReportingController != "" {
+		source = e.ReportingController
+	}
+
+	count := e.Count
+	if count == 0 {
+		count = 1
+	}
+
+	return ClusterEvent{
+		UID:       string(e.UID),
+		Namespace: e.Namespace,
+		Kind:      e.InvolvedObject.Kind,
+		Name:      e.InvolvedObject.Name,
+		Type:      e.Type,
+		Reason:    e.Reason,
+		Message:   e.Message,
+		Count:     count,
+		First:     e.FirstTimestamp.Time,
+		Last:      e.LastTimestamp.Time,
+		Source:    source,
+	}
 }

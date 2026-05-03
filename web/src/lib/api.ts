@@ -184,8 +184,22 @@ export type YamlKind =
   | "runtimeclasses"
   | "nodes";
 
+// WatchStreamKind is the union of resource kinds the backend can serve
+// over a watch SSE endpoint. Mirrors the env-var tokens accepted by
+// PERISCOPE_WATCH_STREAMS server-side.
+export type WatchStreamKind = "pods" | "events" | "replicasets" | "jobs";
+
+// Features describes server-side capability flags. Fetched once at app
+// boot via api.features and consumed by useResource (Phase 6) to choose
+// between polling and streaming per kind.
+export interface Features {
+  watchStreams: WatchStreamKind[];
+}
+
 export const api = {
   whoami: (signal?: AbortSignal) => getJSON<Whoami>("/api/whoami", signal),
+
+  features: (signal?: AbortSignal) => getJSON<Features>("/api/features", signal),
 
   getClusterSummary: (cluster: string, signal?: AbortSignal) =>
     getJSON<ClusterSummary>(`/api/clusters/${enc(cluster)}/dashboard`, signal),
