@@ -41,6 +41,7 @@ func main() {
 	ctx := context.Background()
 	auditSinks := []audit.Sink{&audit.StdoutSink{Logger: logger}}
 	auditCfg := audit.LoadSQLiteConfigFromEnv()
+	var auditReader audit.Reader
 	if auditCfg.Enabled {
 		sqliteSink, err := audit.OpenSQLiteSink(ctx, auditCfg)
 		if err != nil {
@@ -48,6 +49,7 @@ func main() {
 				"err", err, "path", auditCfg.Path)
 		} else {
 			auditSinks = append(auditSinks, sqliteSink)
+			auditReader = sqliteSink
 			slog.Info("audit: sqlite enabled",
 				"path", auditCfg.Path,
 				"retention_days", auditCfg.RetentionDays,
@@ -132,6 +134,12 @@ func main() {
 	})
 	router.Get("/api/whoami", credentials.Wrap(factory, whoami))
 	router.Get("/api/clusters", listClustersHandler(registry))
+
+	// Audit query endpoint. Registered only when SQLite is wired.
+	// Authz is self-only by default; admins (tier mode) see all rows.
+	if auditReader != nil {
+		router.Get("/api/audit", auditQueryHandler(auditReader, authzResolver))
+	}
 
 	// --- Overview / dashboard ---
 

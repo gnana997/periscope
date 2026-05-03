@@ -343,6 +343,195 @@ func dbFileSize(path string) (int64, error) {
 	return fi.Size(), nil
 }
 
+// Query implements Reader. Builds the SELECT dynamically from
+// QueryArgs — every filter is parameterized; nothing is interpolated.
+//
+// Result ordering is (ts_unix_nano DESC, id DESC) so two rows that
+// share a timestamp paginate deterministically. The total count is
+// computed in a separate query against the same WHERE clause; for
+// our retention-capped DB that's well within milliseconds.
+func (s *SQLiteSink) Query(ctx context.Context, q QueryArgs) (QueryResult, error) {
+	where, args := buildQueryWhere(q)
+
+	limit := q.Limit
+	if limit <= 0 {
+		limit = DefaultQueryLimit
+	}
+	if limit > MaxQueryLimit {
+		limit = MaxQueryLimit
+	}
+	offset := q.Offset
+	if offset < 0 {
+		offset = 0
+	}
+
+	var total int
+	if err := s.db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM audit_events `+where, args...).Scan(&total); err != nil {
+		return QueryResult{}, fmt.Errorf("audit: count: %w", err)
+	}
+
+	listSQL := `
+		SELECT id, ts_unix_nano, request_id,
+		       actor_sub, actor_email, actor_groups,
+		       verb, outcome, cluster,
+		       res_group, res_version, res_type, res_namespace, res_name,
+		       reason, extra
+		FROM audit_events ` + where + `
+		ORDER BY ts_unix_nano DESC, id DESC
+		LIMIT ? OFFSET ?`
+
+	listArgs := append(args, limit, offset)
+	rows, err := s.db.QueryContext(ctx, listSQL, listArgs...)
+	if err != nil {
+		return QueryResult{}, fmt.Errorf("audit: select: %w", err)
+	}
+	defer rows.Close()
+
+	items := make([]Row, 0, limit)
+	for rows.Next() {
+		r, err := scanRow(rows)
+		if err != nil {
+			return QueryResult{}, fmt.Errorf("audit: scan: %w", err)
+		}
+		items = append(items, r)
+	}
+	if err := rows.Err(); err != nil {
+		return QueryResult{}, fmt.Errorf("audit: rows: %w", err)
+	}
+
+	return QueryResult{
+		Items:  items,
+		Total:  total,
+		Limit:  limit,
+		Offset: offset,
+	}, nil
+}
+
+// buildQueryWhere assembles the parameterized WHERE clause. Returns
+// the clause (including the leading "WHERE " when non-empty, "" when
+// no filters) and the matching args slice in placeholder order.
+func buildQueryWhere(q QueryArgs) (string, []any) {
+	var clauses []string
+	var args []any
+
+	if !q.From.IsZero() {
+		clauses = append(clauses, "ts_unix_nano >= ?")
+		args = append(args, q.From.UnixNano())
+	}
+	if !q.To.IsZero() {
+		clauses = append(clauses, "ts_unix_nano < ?")
+		args = append(args, q.To.UnixNano())
+	}
+	if q.Actor != "" {
+		clauses = append(clauses, "actor_sub = ?")
+		args = append(args, q.Actor)
+	}
+	if q.Verb != "" {
+		clauses = append(clauses, "verb = ?")
+		args = append(args, string(q.Verb))
+	}
+	if q.Outcome != "" {
+		clauses = append(clauses, "outcome = ?")
+		args = append(args, string(q.Outcome))
+	}
+	if q.Cluster != "" {
+		clauses = append(clauses, "cluster = ?")
+		args = append(args, q.Cluster)
+	}
+	if q.Namespace != "" {
+		clauses = append(clauses, "res_namespace = ?")
+		args = append(args, q.Namespace)
+	}
+	if q.ResourceName != "" {
+		clauses = append(clauses, "res_name = ?")
+		args = append(args, q.ResourceName)
+	}
+	if q.RequestID != "" {
+		clauses = append(clauses, "request_id = ?")
+		args = append(args, q.RequestID)
+	}
+
+	if len(clauses) == 0 {
+		return "", nil
+	}
+	return "WHERE " + joinAnd(clauses), args
+}
+
+func joinAnd(parts []string) string {
+	out := parts[0]
+	for _, p := range parts[1:] {
+		out += " AND " + p
+	}
+	return out
+}
+
+// scanRow materializes one DB row into the wire-shape Row struct.
+// Nullable columns come back as *sql.NullString so we can distinguish
+// "field absent" (NULL) from "empty string" — the StdoutSink omits
+// empty fields too, so the JSON we emit is symmetric.
+func scanRow(rows interface {
+	Scan(dest ...any) error
+}) (Row, error) {
+	var (
+		r            Row
+		tsNano       int64
+		reqID, email sql.NullString
+		groupsJSON   sql.NullString
+		cluster      sql.NullString
+		grp, ver     sql.NullString
+		rtype, ns    sql.NullString
+		name, reason sql.NullString
+		extraJSON    sql.NullString
+	)
+	if err := rows.Scan(
+		&r.ID,
+		&tsNano,
+		&reqID,
+		&r.Actor.Sub,
+		&email,
+		&groupsJSON,
+		&r.Verb,
+		&r.Outcome,
+		&cluster,
+		&grp,
+		&ver,
+		&rtype,
+		&ns,
+		&name,
+		&reason,
+		&extraJSON,
+	); err != nil {
+		return Row{}, err
+	}
+	r.Timestamp = time.Unix(0, tsNano).UTC()
+	r.RequestID = nullStr(reqID)
+	r.Actor.Email = nullStr(email)
+	if groupsJSON.Valid && groupsJSON.String != "" {
+		_ = json.Unmarshal([]byte(groupsJSON.String), &r.Actor.Groups)
+	}
+	r.Cluster = nullStr(cluster)
+	r.Resource = ResourceRef{
+		Group:     nullStr(grp),
+		Version:   nullStr(ver),
+		Resource:  nullStr(rtype),
+		Namespace: nullStr(ns),
+		Name:      nullStr(name),
+	}
+	r.Reason = nullStr(reason)
+	if extraJSON.Valid && extraJSON.String != "" {
+		_ = json.Unmarshal([]byte(extraJSON.String), &r.Extra)
+	}
+	return r, nil
+}
+
+func nullStr(s sql.NullString) string {
+	if s.Valid {
+		return s.String
+	}
+	return ""
+}
+
 // nullable returns a *string that's nil when v is empty so
 // SQLite stores NULL rather than empty strings — keeps queries
 // like `WHERE namespace IS NULL` honest.
