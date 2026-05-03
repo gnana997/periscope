@@ -219,6 +219,7 @@ export function useResourceStream(
       es = new EventSource(url);
 
       es.addEventListener("snapshot", (evt) => {
+        if (closed) return;
         try {
           const data = JSON.parse((evt as MessageEvent).data) as SnapshotEvent;
           const wrapped = wrapSnapshot(resource, data.items);
@@ -237,6 +238,7 @@ export function useResourceStream(
         type: Delta["type"],
         evt: MessageEvent,
       ): void => {
+        if (closed) return;
         try {
           const data = JSON.parse(evt.data) as DeltaEvent;
           if (!data.object || typeof data.object.name !== "string") return;
@@ -261,12 +263,14 @@ export function useResourceStream(
       // the cache; the next snapshot will replace it. Briefly degraded
       // status until snapshot lands.
       es.addEventListener("relist", () => {
+        if (closed) return;
         setStatus("reconnecting");
       });
 
       // server_shutdown: backend SIGTERM during deploy. Native
       // EventSource auto-reconnect picks up the next pod within ~3s.
       es.addEventListener("server_shutdown", () => {
+        if (closed) return;
         setStatus("reconnecting");
       });
 
@@ -274,6 +278,7 @@ export function useResourceStream(
       // fresh snapshot. Single toast so users in a tab know there was
       // a hiccup; no toast spam if it cycles.
       es.addEventListener("backpressure", () => {
+        if (closed) return;
         setStatus("reconnecting");
       });
 
@@ -289,6 +294,7 @@ export function useResourceStream(
       // Server-side error event with a body. Native onerror handles
       // transport-level; this is for explicit server-emitted errors.
       es.addEventListener("error", (evt) => {
+        if (closed) return;
         const me = evt as MessageEvent;
         if (typeof me.data === "string" && me.data.length > 0) {
           // Server-emitted error event with a JSON body.
