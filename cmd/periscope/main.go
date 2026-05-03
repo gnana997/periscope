@@ -52,7 +52,7 @@ func main() {
 	}
 
 	watchCfg := parseWatchStreamsEnv(os.Getenv("PERISCOPE_WATCH_STREAMS"))
-	slog.Info("watch streams", "pods", watchCfg.pods)
+	slog.Info("watch streams", "pods", watchCfg.pods, "events", watchCfg.events)
 
 	// Tracks active watch SSE streams for the /debug/streams page. Lives
 	// for the lifetime of the process; entries register on stream open
@@ -834,6 +834,10 @@ func main() {
 	if watchCfg.pods {
 		router.Get("/api/clusters/{cluster}/pods/watch",
 			credentials.Wrap(factory, podsWatchHandler(registry, streamTracker, streamLimiter, serverCtx, sessionValid)))
+	}
+	if watchCfg.events {
+		router.Get("/api/clusters/{cluster}/events/watch",
+			credentials.Wrap(factory, eventsWatchHandler(registry, streamTracker, streamLimiter, serverCtx, sessionValid)))
 	}
 
 	// Debug endpoint listing currently-open watch streams. JSON for
@@ -1813,14 +1817,15 @@ func customResourceEventsHandler(reg *clusters.Registry) credentials.Handler {
 // watchStreamsConfig holds which kinds have the watch SSE route
 // registered. Driven by PERISCOPE_WATCH_STREAMS at startup.
 type watchStreamsConfig struct {
-	pods bool
+	pods   bool
+	events bool
 }
 
 // parseWatchStreamsEnv parses the PERISCOPE_WATCH_STREAMS env var.
 //
 //	"" / unset       → all off
 //	"pods"           → pods watch enabled
-//	"pods,events"    → both (events lands in a later phase)
+//	"pods,events"    → both
 //	"all"            → every supported kind
 //
 // Unknown tokens are silently dropped — operators get a slog summary
@@ -1833,12 +1838,15 @@ func parseWatchStreamsEnv(raw string) watchStreamsConfig {
 	}
 	if raw == "all" {
 		cfg.pods = true
+		cfg.events = true
 		return cfg
 	}
 	for _, part := range strings.Split(raw, ",") {
 		switch strings.TrimSpace(part) {
 		case "pods":
 			cfg.pods = true
+		case "events":
+			cfg.events = true
 		}
 	}
 	return cfg
@@ -2165,5 +2173,127 @@ func emitPodWatchEvent(sw *sse.Writer, ev k8s.WatchEvent) {
 		}{Object: ev.Object})
 	case k8s.WatchRelist:
 		_ = sw.Event("relist", "", map[string]string{"reason": "gone_410"})
+	}
+}
+
+// eventsWatchHandler streams cluster Events as Server-Sent Events.
+// Wire format and lifecycle are byte-identical to podsWatchHandler;
+// the only differences are the underlying watch primitive (k8s.WatchEvents)
+// and the ClusterEvent DTO carried in snapshot/added/modified/deleted
+// events.
+//
+// The duplication with podsWatchHandler is intentional and short-lived:
+// Phase 5 factors a generic resourceWatchHandler[F] once we have three
+// concrete handlers (events, replicasets, jobs) to confirm the right
+// shape.
+func eventsWatchHandler(
+	reg *clusters.Registry,
+	tracker *streamTracker,
+	limiter *userStreamLimiter,
+	serverCtx context.Context,
+	sessionValid func(*http.Request) bool,
+) credentials.Handler {
+	return func(w http.ResponseWriter, r *http.Request, p credentials.Provider) {
+		c, ok := reg.ByName(chi.URLParam(r, "cluster"))
+		if !ok {
+			http.Error(w, "cluster not found", http.StatusNotFound)
+			return
+		}
+		ns := r.URL.Query().Get("namespace")
+
+		actor := p.Actor()
+		if !limiter.acquire(actor) {
+			slog.WarnContext(r.Context(), "watch_stream.rate_limited",
+				"actor", actor, "kind", "events", "cluster", c.Name, "ns", ns)
+			http.Error(w, "too many concurrent watch streams for this user", http.StatusTooManyRequests)
+			return
+		}
+		defer limiter.release(actor)
+
+		sw, err := sse.Open(w)
+		if err != nil {
+			http.Error(w, "streaming unsupported", http.StatusInternalServerError)
+			return
+		}
+		defer sw.Close()
+
+		id, deregister := tracker.register(streamEntry{
+			Actor:     actor,
+			Cluster:   c.Name,
+			Kind:      "events",
+			Namespace: ns,
+			OpenedAt:  time.Now(),
+		})
+		defer deregister()
+		slog.InfoContext(r.Context(), "watch_stream.opened",
+			"id", id, "kind", "events", "cluster", c.Name, "ns", ns, "actor", actor)
+
+		eventCh := make(chan k8s.WatchEvent, 256)
+		sink := &watchChannelSink{ctx: r.Context(), ch: eventCh}
+
+		var streamErr error
+		streamDone := make(chan struct{})
+		go func() {
+			defer close(streamDone)
+			defer close(eventCh)
+			streamErr = k8s.WatchEvents(r.Context(), p, k8s.WatchArgs{
+				Cluster:   c,
+				Namespace: ns,
+			}, sink)
+		}()
+
+		closeReason := "ctx_done"
+		defer func() {
+			slog.InfoContext(r.Context(), "watch_stream.closed",
+				"id", id, "kind", "events", "cluster", c.Name, "ns", ns,
+				"actor", actor, "reason", closeReason)
+		}()
+
+		authCheck := time.NewTicker(60 * time.Second)
+		defer authCheck.Stop()
+
+		for {
+			select {
+			case <-r.Context().Done():
+				<-streamDone
+				return
+			case <-serverCtx.Done():
+				closeReason = "server_shutdown"
+				_ = sw.Event("server_shutdown", "", struct{}{})
+				return
+			case <-authCheck.C:
+				if !sessionValid(r) {
+					closeReason = "auth_expired"
+					slog.InfoContext(r.Context(), "watch_stream.auth_expired",
+						"id", id, "kind", "events", "cluster", c.Name, "ns", ns, "actor", actor)
+					_ = sw.Event("auth_expired", "", struct{}{})
+					return
+				}
+			case <-sw.HeartbeatC():
+				_ = sw.Ping()
+			case ev, ok := <-eventCh:
+				if !ok {
+					<-streamDone
+					switch {
+					case streamErr != nil && !errors.Is(streamErr, context.Canceled):
+						closeReason = "error"
+						slog.ErrorContext(r.Context(), "events watch failed",
+							"err", streamErr, "cluster", c.Name, "ns", ns, "actor", actor)
+						_ = sw.Event("error", "", map[string]string{"message": streamErr.Error()})
+					case sink.closedByBackpressure:
+						closeReason = "backpressure"
+						_ = sw.Event("backpressure", "", struct{}{})
+					default:
+						closeReason = "eof"
+					}
+					return
+				}
+				if ev.Type == k8s.WatchRelist {
+					slog.InfoContext(r.Context(), "watch_stream.relist",
+						"id", id, "kind", "events", "cluster", c.Name, "ns", ns)
+				}
+				emitPodWatchEvent(sw, ev)
+			}
+		}
 	}
 }

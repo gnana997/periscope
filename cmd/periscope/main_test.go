@@ -15,10 +15,12 @@ func TestParseWatchStreamsEnv(t *testing.T) {
 		{name: "empty", raw: "", want: watchStreamsConfig{}},
 		{name: "whitespace", raw: "   ", want: watchStreamsConfig{}},
 		{name: "pods", raw: "pods", want: watchStreamsConfig{pods: true}},
-		{name: "all", raw: "all", want: watchStreamsConfig{pods: true}},
-		{name: "with spaces", raw: " pods , events ", want: watchStreamsConfig{pods: true}},
-		{name: "unknown only", raw: "events", want: watchStreamsConfig{}},
-		{name: "unknown plus pods", raw: "events,pods", want: watchStreamsConfig{pods: true}},
+		{name: "events", raw: "events", want: watchStreamsConfig{events: true}},
+		{name: "pods,events", raw: "pods,events", want: watchStreamsConfig{pods: true, events: true}},
+		{name: "all", raw: "all", want: watchStreamsConfig{pods: true, events: true}},
+		{name: "with spaces", raw: " pods , events ", want: watchStreamsConfig{pods: true, events: true}},
+		{name: "unknown only", raw: "deployments", want: watchStreamsConfig{}},
+		{name: "unknown plus pods", raw: "deployments,pods", want: watchStreamsConfig{pods: true}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
