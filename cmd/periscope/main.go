@@ -2138,14 +2138,24 @@ func resourceWatchHandler(kind string, reg *clusters.Registry, deps *watchDeps, 
 		eventCh := make(chan k8s.WatchEvent, 256)
 		sink := &watchChannelSink{ctx: r.Context(), ch: eventCh}
 
+		// EventSource forwards the id of the last successfully delivered
+		// event as Last-Event-ID on reconnect. We pass it to the watch
+		// primitive as a starting RV so the apiserver resumes from there
+		// instead of replaying a full snapshot — preserving the client's
+		// cache (no row flicker) and saving a list call's bandwidth.
+		// Stale RVs degrade gracefully: watchKind falls back to fresh
+		// List+Watch on 410 Gone.
+		resumeFrom := r.Header.Get("Last-Event-ID")
+
 		var streamErr error
 		streamDone := make(chan struct{})
 		go func() {
 			defer close(streamDone)
 			defer close(eventCh)
 			streamErr = watch(r.Context(), p, k8s.WatchArgs{
-				Cluster:   c,
-				Namespace: ns,
+				Cluster:    c,
+				Namespace:  ns,
+				ResumeFrom: resumeFrom,
 			}, sink)
 		}()
 

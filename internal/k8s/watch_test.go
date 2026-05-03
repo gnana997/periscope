@@ -11,6 +11,7 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/watch"
@@ -484,6 +485,120 @@ func TestWatchEvents_GoneTriggersRelist(t *testing.T) {
 	if got := awaitEvent(t, sink); got.Type != WatchSnapshot {
 		t.Fatalf("event = %v, want snapshot after relist", got.Type)
 	}
+}
+
+// --- Last-Event-ID resume tests ---
+
+func TestWatchPods_ResumeSkipsListAndSnapshot(t *testing.T) {
+	// Fake clientset with one pod. With ResumeFrom set, watchKind must
+	// open Watch directly (no List call, no Snapshot event) and just
+	// stream subsequent deltas. We assert this by pushing an ADDED
+	// through the fake watcher and confirming it's the first event the
+	// sink sees.
+	cs := fake.NewSimpleClientset(newWatchTestPod("pre-existing", "default", "5"))
+
+	// Track whether List was called — resume path must not List.
+	var listCalled atomic.Bool
+	cs.PrependReactor("list", "pods", func(_ ktesting.Action) (bool, runtime.Object, error) {
+		listCalled.Store(true)
+		return false, nil, nil // chain through to the default tracker
+	})
+
+	// Sync point: signal once Watch has been opened, so the test can
+	// fire its Create after the watcher is established (otherwise the
+	// Create races the goroutine and the event may not be observed).
+	watchOpened := make(chan struct{}, 1)
+	cs.PrependWatchReactor("pods", func(_ ktesting.Action) (bool, watch.Interface, error) {
+		select {
+		case watchOpened <- struct{}{}:
+		default:
+		}
+		return false, nil, nil // chain through to the default tracker
+	})
+	swapNewClientFn(t, cs)
+
+	sink := newTestSink(8)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	done := make(chan error, 1)
+	go func() {
+		done <- WatchPods(ctx, stubProvider{}, WatchArgs{
+			Cluster:    clusters.Cluster{Name: "demo", Backend: clusters.BackendKubeconfig},
+			Namespace:  "default",
+			ResumeFrom: "5",
+		}, sink)
+	}()
+
+	select {
+	case <-watchOpened:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Watch was never called; resume path may be broken")
+	}
+
+	// Push an ADDED via the tracker.
+	pod := newWatchTestPod("after-resume", "default", "10")
+	if _, err := cs.CoreV1().Pods("default").Create(ctx, pod, metav1.CreateOptions{}); err != nil {
+		t.Fatalf("create pod: %v", err)
+	}
+
+	first := awaitEvent(t, sink)
+	if first.Type != WatchAdded {
+		t.Fatalf("first event = %v, want added (resume should not emit snapshot)", first.Type)
+	}
+	if listCalled.Load() {
+		t.Error("List was called during resume; expected Watch only")
+	}
+
+	cancel()
+	<-done
+}
+
+func TestWatchPods_ResumeStaleRVFallsBackToFreshList(t *testing.T) {
+	cs := fake.NewSimpleClientset(newWatchTestPod("a", "default", "1"))
+
+	// Fake the Watch opener: first call (the resume attempt) returns
+	// 410 Gone; subsequent call (the fallback) returns the real watcher.
+	var watchCalls atomic.Int32
+	cs.PrependWatchReactor("pods", func(action ktesting.Action) (bool, watch.Interface, error) {
+		n := watchCalls.Add(1)
+		if n == 1 {
+			return true, nil, apierrors.NewResourceExpired("too old resource version")
+		}
+		// Subsequent calls fall through to the default tracker.
+		return false, nil, nil
+	})
+	swapNewClientFn(t, cs)
+
+	sink := newTestSink(8)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	done := make(chan error, 1)
+	go func() {
+		done <- WatchPods(ctx, stubProvider{}, WatchArgs{
+			Cluster:    clusters.Cluster{Name: "demo", Backend: clusters.BackendKubeconfig},
+			Namespace:  "default",
+			ResumeFrom: "stale-rv",
+		}, sink)
+	}()
+
+	// On 410 Gone, watchKind should fall through to fresh List+Watch.
+	// Expect: snapshot event with the pre-existing pod.
+	ev := awaitEvent(t, sink)
+	if ev.Type != WatchSnapshot {
+		t.Fatalf("event = %v, want snapshot after 410 fallback", ev.Type)
+	}
+	items, ok := ev.Items.([]Pod)
+	if !ok || len(items) != 1 || items[0].Name != "a" {
+		t.Errorf("snapshot items = %+v, want one pod 'a'", ev.Items)
+	}
+	if got := watchCalls.Load(); got != 2 {
+		t.Errorf("Watch was called %d times, want 2 (resume + fallback)", got)
+	}
+
+	cancel()
+	<-done
 }
 
 // --- WatchReplicaSets / WatchJobs smoke tests ---

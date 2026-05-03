@@ -9,6 +9,7 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/watch"
@@ -72,9 +73,21 @@ type WatchSink interface {
 // reference plus a namespace (empty for cluster-scoped or all-namespace
 // queries). The shape mirrors the existing List*Args structs across the
 // k8s package.
+//
+// ResumeFrom is the optional resourceVersion to resume from when a
+// client reconnects with Last-Event-ID. Empty means "fresh List+Watch
+// (and emit a Snapshot)"; non-empty means "skip the List, open Watch
+// directly at that RV, do not emit a Snapshot — only deltas". This
+// preserves the client's React Query cache across transient blips,
+// avoiding the row-flicker that a fresh snapshot causes on reconnect.
+//
+// If the apiserver rejects the RV with 410 Gone (cache too old),
+// watchKind falls back to a fresh List+Watch one time before giving
+// up, so a stale Last-Event-ID never causes a hard failure.
 type WatchArgs struct {
-	Cluster   clusters.Cluster
-	Namespace string
+	Cluster    clusters.Cluster
+	Namespace  string
+	ResumeFrom string
 }
 
 // watchSpec is the kind-specific surface that watchKind needs in order
@@ -115,46 +128,68 @@ type watchSpec[T any, S any] struct {
 //
 // Lifecycle:
 //
-//  1. List with no resourceVersion → emit Snapshot.
-//  2. Watch from that resourceVersion with allowWatchBookmarks=true.
-//  3. ADDED/MODIFIED/DELETED → emit the corresponding event.
-//  4. BOOKMARK → no emit; resource version is implicitly refreshed by
+//  1. If resumeFrom is non-empty: skip the List, open Watch at that
+//     RV, do NOT emit a Snapshot. If the Watch open fails with 410
+//     Gone (RV expired), fall through to the fresh path — the stale
+//     Last-Event-ID gracefully degrades.
+//  2. Otherwise (or after a 410 fall-through): List with no RV →
+//     emit Snapshot.
+//  3. Watch from the latest RV with allowWatchBookmarks=true.
+//  4. ADDED/MODIFIED/DELETED → emit the corresponding event.
+//  5. BOOKMARK → no emit; resource version is implicitly refreshed by
 //     the next list on relist.
-//  5. apiserver Status with code 410 Gone → emit Relist, list again,
+//  6. apiserver Status with code 410 Gone → emit Relist, list again,
 //     watch again.
-//  6. ctx cancelled or sink.Send returned false → return nil.
-//  7. Any other error → return it. The caller (SSE handler) decides
+//  7. ctx cancelled or sink.Send returned false → return nil.
+//  8. Any other error → return it. The caller (SSE handler) decides
 //     whether to surface it as event:error or close silently.
 //
 // watchKind does not retry transient network errors itself — the SSE
 // transport is the right place for that, since the browser's
 // EventSource will reconnect automatically.
-func watchKind[T any, S any](ctx context.Context, spec watchSpec[T, S], sink WatchSink) error {
+func watchKind[T any, S any](ctx context.Context, spec watchSpec[T, S], resumeFrom string, sink WatchSink) error {
 	for {
-		items, rv, err := spec.List(ctx, metav1.ListOptions{})
-		if err != nil {
-			return fmt.Errorf("list %s: %w", spec.Kind, err)
-		}
-		summarized := make([]S, 0, len(items))
-		for i := range items {
-			summarized = append(summarized, spec.Summary(&items[i]))
-		}
-		if spec.PostList != nil {
-			summarized = spec.PostList(summarized)
-		}
-		if !sink.Send(WatchEvent{
-			Type:            WatchSnapshot,
-			ResourceVersion: rv,
-			Items:           summarized,
-		}) {
-			return nil
+		var watchRV string
+
+		if resumeFrom != "" {
+			// Resume path: skip the List+Snapshot. Existing client cache
+			// is preserved; only deltas flow on reconnect.
+			watchRV = resumeFrom
+			resumeFrom = "" // single-use; on relist we go through fresh path
+		} else {
+			items, rv, err := spec.List(ctx, metav1.ListOptions{})
+			if err != nil {
+				return fmt.Errorf("list %s: %w", spec.Kind, err)
+			}
+			summarized := make([]S, 0, len(items))
+			for i := range items {
+				summarized = append(summarized, spec.Summary(&items[i]))
+			}
+			if spec.PostList != nil {
+				summarized = spec.PostList(summarized)
+			}
+			if !sink.Send(WatchEvent{
+				Type:            WatchSnapshot,
+				ResourceVersion: rv,
+				Items:           summarized,
+			}) {
+				return nil
+			}
+			watchRV = rv
 		}
 
 		watcher, err := spec.Watch(ctx, metav1.ListOptions{
-			ResourceVersion:     rv,
+			ResourceVersion:     watchRV,
 			AllowWatchBookmarks: true,
 		})
 		if err != nil {
+			// Stale Last-Event-ID can fail the initial Watch open with
+			// 410 Gone. Fall through to the fresh path one time —
+			// resumeFrom was already cleared above, so the next loop
+			// iteration runs List+Snapshot.
+			if apierrors.IsGone(err) || apierrors.IsResourceExpired(err) {
+				continue
+			}
 			return fmt.Errorf("watch %s: %w", spec.Kind, err)
 		}
 
@@ -267,7 +302,7 @@ func WatchPods(ctx context.Context, p credentials.Provider, args WatchArgs, sink
 			return cs.CoreV1().Pods(args.Namespace).Watch(ctx, opts)
 		},
 		Summary: podSummary,
-	}, sink)
+	}, args.ResumeFrom, sink)
 }
 
 // WatchReplicaSets runs a list-then-watch loop on ReplicaSets in the
@@ -290,7 +325,7 @@ func WatchReplicaSets(ctx context.Context, p credentials.Provider, args WatchArg
 			return cs.AppsV1().ReplicaSets(args.Namespace).Watch(ctx, opts)
 		},
 		Summary: replicaSetSummary,
-	}, sink)
+	}, args.ResumeFrom, sink)
 }
 
 // WatchJobs runs a list-then-watch loop on Jobs in the given namespace.
@@ -313,7 +348,7 @@ func WatchJobs(ctx context.Context, p credentials.Provider, args WatchArgs, sink
 			return cs.BatchV1().Jobs(args.Namespace).Watch(ctx, opts)
 		},
 		Summary: jobSummary,
-	}, sink)
+	}, args.ResumeFrom, sink)
 }
 
 // WatchEvents runs a list-then-watch loop on cluster Events. The
@@ -353,5 +388,5 @@ func WatchEvents(ctx context.Context, p credentials.Provider, args WatchArgs, si
 			}
 			return events
 		},
-	}, sink)
+	}, args.ResumeFrom, sink)
 }
