@@ -61,6 +61,22 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+  helm-lint:
+    name: Helm lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: azure/setup-helm@v4
+        with:
+          version: latest
+      - run: helm lint deploy/helm/periscope
+      # Render the chart with default values + a couple of common
+      # overrides to catch template/schema drift that `helm lint`
+      # alone misses.
+      - run: helm template deploy/helm/periscope > /dev/null
+      - run: helm template deploy/helm/periscope --set watchStreams.kinds=off > /dev/null
+      - run: helm template deploy/helm/periscope --set audit.enabled=true > /dev/null
+
   build-embed:
     name: Build embedded binary
     runs-on: ubuntu-latest
