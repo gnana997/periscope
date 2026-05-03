@@ -96,6 +96,7 @@ func nodeSummary(n *corev1.Node) Node {
 		CPUCapacity:    formatCPU(n.Status.Capacity.Cpu().MilliValue()),
 		MemoryCapacity: formatMemory(n.Status.Capacity.Memory().Value()),
 		CreatedAt:      n.CreationTimestamp.Time,
+		Unschedulable:  n.Spec.Unschedulable,
 	}
 }
 

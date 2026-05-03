@@ -46,6 +46,16 @@ type Cluster struct {
 	// to use. Empty means "use the kubeconfig's current-context".
 	KubeconfigContext string `yaml:"kubeconfigContext,omitempty" json:"kubeconfigContext,omitempty"`
 
+	// Environment is an optional, free-form environment label (prod, staging,
+	// dev, ...) used for grouping in the fleet view. Empty string is fine
+	// and bucketed under "other" by the UI.
+	Environment string `yaml:"environment,omitempty" json:"environment,omitempty"`
+
+	// Tags is an optional bag of operator-supplied key/value labels (team,
+	// owner, costcenter, ...). Surfaced verbatim by /api/fleet for richer
+	// grouping and filtering. Never used for access decisions.
+	Tags map[string]string `yaml:"tags,omitempty" json:"tags,omitempty"`
+
 	// Exec carries per-cluster overrides for pod-exec lifecycle and
 	// caps. Any field left nil/zero falls back to the global default.
 	// Omitted entirely from JSON to avoid leaking config-shape changes

@@ -20,7 +20,8 @@ import {
 } from "react-router-dom";
 
 import App from "./App";
-import { AppShell, RootRedirect, WithCluster } from "./routeShells";
+import { AppShell, WithCluster } from "./routeShells";
+import { FleetPage } from "./pages/FleetPage";
 
 import { OverviewPage } from "./pages/OverviewPage";
 import { ConfigMapsPage } from "./pages/ConfigMapsPage";
@@ -65,7 +66,7 @@ import { ExecPage } from "./pages/ExecPage";
 export const router = createBrowserRouter(
   createRoutesFromElements(
     <Route element={<App />}>
-      <Route path="/" element={<RootRedirect />} />
+      <Route path="/" element={<FleetPage />} />
       <Route path="/clusters/:cluster" element={<AppShell />}>
         <Route index element={<Navigate to="overview" replace />} />
         <Route path="overview" element={<WithCluster Page={OverviewPage} />} />
@@ -108,7 +109,7 @@ export const router = createBrowserRouter(
         <Route path="jobs/:ns/:name/logs" element={<WithCluster Page={JobLogsPage} />} />
         <Route path="pods/:ns/:name/exec" element={<WithCluster Page={ExecPage} />} />
       </Route>
-      <Route path="*" element={<RootRedirect />} />
+      <Route path="*" element={<Navigate to="/" replace />} />
     </Route>,
   ),
 );

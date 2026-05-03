@@ -11,10 +11,8 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"sort"
 	"strconv"
 	"strings"
-	"sync"
 	"syscall"
 	"time"
 
@@ -136,6 +134,15 @@ func main() {
 	router.Get("/api/whoami", credentials.Wrap(factory, whoami))
 	router.Get("/api/clusters", listClustersHandler(registry))
 	router.Get("/api/features", featuresHandler(watchCfg))
+
+	// --- Fleet (multi-cluster home page) ---
+	//
+	// Aggregator over every registered cluster. Page-level deny when
+	// the user has no tier; per-cluster status otherwise. See
+	// fleet_handler.go for the failure model.
+	fleetCacheTTL := 10 * time.Second
+	router.Get("/api/fleet", credentials.Wrap(factory,
+		fleetHandler(registry, authzResolver, newFleetCache(fleetCacheTTL))))
 
 	// --- Overview / dashboard ---
 
@@ -451,6 +458,9 @@ func main() {
 				return k8s.GetCronJob(ctx, p, k8s.GetCronJobArgs{Cluster: c, Namespace: ns, Name: name})
 			})))
 
+
+	router.Post("/api/clusters/{cluster}/cronjobs/{ns}/{name}/trigger",
+		credentials.Wrap(factory, triggerCronJobHandler(registry)))
 	router.Get("/api/clusters/{cluster}/pvcs/{ns}/{name}", credentials.Wrap(factory,
 		detailHandler(registry, "pvc",
 			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, ns, name string) (k8s.PVCDetail, error) {
@@ -930,31 +940,37 @@ func main() {
 	}
 	addr := ":" + port
 	slog.Info("periscope starting", "addr", addr, "clusters", len(registry.List()))
-
 	srv := &http.Server{Addr: addr, Handler: router}
 
-	// Signal goroutine: SIGINT/SIGTERM cancels serverCtx, then triggers
-	// http.Server.Shutdown so watch handlers can emit
-	// "event: server_shutdown" while the listener stops accepting new
-	// connections. Drain timeout is intentionally short (10s) — heartbeats
-	// keep clients responsive and we don't want pods stuck in Terminating
-	// during deploys.
-	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	// SIGTERM/SIGINT trigger a drain: stop accepting new conns, let in-flight
+	// requests finish for up to 25s. Pair with chart-side terminationGracePeriodSeconds=30
+	// (5s headroom before SIGKILL).
+	shutdownCtx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
+	serveErr := make(chan error, 1)
 	go func() {
-		sig := <-sigCh
-		slog.Info("shutdown signal received", "sig", sig.String())
-		cancelServer()
-		drainCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-		if err := srv.Shutdown(drainCtx); err != nil {
-			slog.Warn("server shutdown error", "err", err)
+		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			serveErr <- err
 		}
+		close(serveErr)
 	}()
 
-	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-		slog.Error("server failed", "err", err)
-		os.Exit(1)
+	select {
+	case err := <-serveErr:
+		if err != nil {
+			slog.Error("server failed", "err", err)
+			os.Exit(1)
+		}
+	case <-shutdownCtx.Done():
+		slog.Info("shutdown signal received, draining")
+		drainCtx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
+		defer cancel()
+		if err := srv.Shutdown(drainCtx); err != nil {
+			slog.Error("graceful shutdown failed", "err", err)
+			os.Exit(1)
+		}
+		slog.Info("server stopped cleanly")
 	}
 	slog.Info("server stopped")
 }
@@ -1194,6 +1210,42 @@ func applyResourceHandler(reg *clusters.Registry) credentials.Handler {
 			"group", args.Group, "version", args.Version, "resource", args.Resource,
 			"ns", args.Namespace, "name", args.Name,
 			"dryRun", args.DryRun, "force", args.Force)
+		writeJSON(w, http.StatusOK, result)
+	}
+}
+
+// triggerCronJobHandler implements POST /api/clusters/{c}/cronjobs/{ns}/{name}/trigger
+// — the SPA's "Trigger now" affordance. Clones the CronJob's
+// JobTemplate into a freshly-named Job, matching the semantics of
+// `kubectl create job <name> --from=cronjob/<src>`. Audit-logged.
+func triggerCronJobHandler(reg *clusters.Registry) credentials.Handler {
+	return func(w http.ResponseWriter, r *http.Request, p credentials.Provider) {
+		c, ok := reg.ByName(chi.URLParam(r, "cluster"))
+		if !ok {
+			http.Error(w, "cluster not found", http.StatusNotFound)
+			return
+		}
+		args := k8s.TriggerCronJobArgs{
+			Cluster:   c,
+			Namespace: chi.URLParam(r, "ns"),
+			Name:      chi.URLParam(r, "name"),
+		}
+		result, err := k8s.TriggerCronJob(r.Context(), p, args)
+		if err != nil {
+			if errors.Is(err, context.Canceled) {
+				return
+			}
+			slog.ErrorContext(r.Context(), "trigger cronjob failed",
+				"err", err, "cluster", c.Name,
+				"ns", args.Namespace, "name", args.Name,
+				"actor", p.Actor())
+			writeAPIError(w, err, httpStatusFor(err))
+			return
+		}
+		slog.InfoContext(r.Context(), "cronjob triggered",
+			"actor", p.Actor(), "cluster", c.Name,
+			"ns", args.Namespace, "name", args.Name,
+			"jobName", result.JobName)
 		writeJSON(w, http.StatusOK, result)
 	}
 }

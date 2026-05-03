@@ -6,4 +6,14 @@ metadata:
     {{- include "periscope.labels" . | nindent 4 }}
 data:
   auth.yaml: |
-    {{- toYaml .Values.auth | nindent 4 }}
+    {{- /*
+      In OIDC mode, strip the dev block so production ConfigMaps don't
+      ship with dev@local subject/email/groups baked in. The auth loader
+      treats a missing dev block the same as the default DevConfig — but
+      it never reads it when oidc.issuer is set, so the default is moot.
+    */}}
+    {{- $auth := deepCopy .Values.auth -}}
+    {{- if .Values.auth.oidc.issuer -}}
+    {{- $_ := unset $auth "dev" -}}
+    {{- end }}
+    {{- toYaml $auth | nindent 4 }}

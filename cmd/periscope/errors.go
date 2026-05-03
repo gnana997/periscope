@@ -51,3 +51,43 @@ func writeAPIError(w http.ResponseWriter, err error, status int) {
 	}
 	http.Error(w, err.Error(), status)
 }
+
+// ErrorCodeFor classifies a k8s/transport error into a stable string
+// code for fleet-style multi-cluster responses where a single error
+// per cluster needs to be surfaced to the UI without leaking raw
+// k8s client-go strings. Wraps httpStatusFor so the classification
+// stays single-source.
+//
+// Used by /api/fleet's per-cluster collector. The codes are part of
+// the public API; treat them as additive (do not rename existing
+// codes).
+func ErrorCodeFor(err error) string {
+	if err == nil {
+		return ""
+	}
+	switch httpStatusFor(err) {
+	case http.StatusForbidden:
+		return "denied"
+	case http.StatusUnauthorized:
+		return "auth_failed"
+	case http.StatusGatewayTimeout:
+		return "timeout"
+	case http.StatusInternalServerError:
+		// Net errors / dial failures land here. Distinguish "couldn't
+		// reach the apiserver at all" from generic unknown.
+		if isContextTimeout(err) {
+			return "timeout"
+		}
+		return "apiserver_unreachable"
+	}
+	return "unknown"
+}
+
+func isContextTimeout(err error) bool {
+	for e := err; e != nil; e = errors.Unwrap(e) {
+		if e.Error() == "context deadline exceeded" {
+			return true
+		}
+	}
+	return false
+}

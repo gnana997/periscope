@@ -97,9 +97,11 @@ export function CronJobsPage({ cluster }: { cluster: string }) {
       cellClassName: "font-mono text-ink-muted",
       accessor: (c) =>
         c.suspend ? (
-          <span className="text-yellow">true</span>
+          <span className="rounded-sm border border-yellow/40 bg-yellow/10 px-1.5 py-px font-mono text-[10.5px] uppercase tracking-[0.04em] text-yellow">
+            suspended
+          </span>
         ) : (
-          <span className="text-ink-faint">false</span>
+          <span className="text-ink-faint">—</span>
         ),
     },
     {

@@ -28,6 +28,12 @@ export function NodeDescribe({
       <StatStrip
         stats={[
           { label: "Status", value: data.status, tone: statusTone, family: "sans" },
+          {
+            label: "Schedulable",
+            value: data.unschedulable ? "cordoned" : "—",
+            tone: data.unschedulable ? "yellow" : "neutral",
+            family: "sans",
+          },
           { label: "Roles", value: data.roles.join(", "), family: "sans" },
           { label: "CPU", value: data.cpuCapacity, family: "mono" },
           { label: "Memory", value: data.memoryCapacity, family: "mono" },

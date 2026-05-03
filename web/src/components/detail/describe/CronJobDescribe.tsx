@@ -70,7 +70,7 @@ export function CronJobDescribe({
           { label: "Schedule", value: data.schedule, family: "mono" },
           {
             label: "Suspend",
-            value: data.suspend ? "true" : "false",
+            value: data.suspend ? "suspended" : "—",
             tone: data.suspend ? "yellow" : "neutral",
             family: "sans",
           },

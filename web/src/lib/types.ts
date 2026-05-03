@@ -39,6 +39,7 @@ export interface Node {
   cpuCapacity: string;
   memoryCapacity: string;
   createdAt: string;
+  unschedulable: boolean;
 }
 
 export interface NodeList {
@@ -1148,3 +1149,81 @@ export interface RuntimeClassDetail extends RuntimeClass {
 }
 
 export type AccessStatus = "ok" | "forbidden" | "unavailable";
+
+// =====================================================================
+// Fleet — multi-cluster home page
+// =====================================================================
+
+/** Stable status enum mirrored from cmd/periscope/fleet_handler.go. */
+export type FleetStatus =
+  | "healthy"
+  | "degraded"
+  | "unreachable"
+  | "unknown"
+  | "denied";
+
+export interface FleetCount {
+  ready: number;
+  total: number;
+}
+
+export interface FleetPods {
+  running: number;
+  pending: number;
+  failed: number;
+  total: number;
+}
+
+export interface FleetSummary {
+  nodes: FleetCount;
+  pods: FleetPods;
+  namespaces: number;
+  /** Substitute for "warnings15m" in v1: PodPhases.Stuck + Failed. */
+  stuckOrFailed: number;
+}
+
+export interface HotSignal {
+  /** Raw NeedsAttention[].Reason value: CrashLoopBackOff, ImagePullBackOff, etc. */
+  kind: string;
+  count: number;
+}
+
+export interface FleetError {
+  /** denied | auth_failed | timeout | apiserver_unreachable | unknown */
+  code: string;
+  message: string;
+}
+
+export interface FleetClusterEntry {
+  name: string;
+  backend: string;
+  region?: string;
+  /** AWS account ID parsed from the cluster ARN; empty for kubeconfig backends. */
+  accountID?: string;
+  environment?: string;
+  /** Kubeconfig context name; only present for kubeconfig backends. */
+  context?: string;
+  tags?: Record<string, string>;
+  status: FleetStatus;
+  /** RFC3339 timestamp. v1: "now" on every response (no historical ledger). */
+  lastContact: string;
+  /** Null when status is unreachable/denied/unknown. */
+  summary?: FleetSummary | null;
+  /** Always present, [] when no signals. */
+  hotSignals: HotSignal[];
+  /** Null on success. */
+  error?: FleetError | null;
+}
+
+export interface FleetRollup {
+  totalClusters: number;
+  byStatus: Partial<Record<FleetStatus, number>>;
+  /** Buckets keyed by environment label; "other" for untagged. */
+  byEnvironment: Record<string, number>;
+  generatedAt: string;
+}
+
+export interface FleetResponse {
+  rollup: FleetRollup;
+  clusters: FleetClusterEntry[];
+}

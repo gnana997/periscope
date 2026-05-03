@@ -33,8 +33,8 @@ To reach Periscope:
 {{- else }}
 
   No Ingress is configured. Port-forward for now:
-    kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "periscope.fullname" . }} 8080:{{ .Values.service.port }}
-  then open http://localhost:8080/.
+    kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "periscope.fullname" . }} 8088:{{ .Values.service.port }}
+  then open http://localhost:8088/.
 {{- end }}
 
 Health: kubectl -n {{ .Release.Namespace }} exec deploy/{{ include "periscope.fullname" . }} -- wget -qO- http://localhost:{{ .Values.service.port }}/healthz

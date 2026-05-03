@@ -34,6 +34,7 @@
 
 export const queryKeys = {
   clusters: () => ["clusters"] as const,
+  fleet: () => ["fleet"] as const,
 
   cluster: (c: string) => ({
     all: ["cluster", c] as const,
