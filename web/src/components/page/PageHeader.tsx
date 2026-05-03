@@ -1,6 +1,8 @@
 import type { ReactNode } from "react";
 import { cn } from "../../lib/cn";
 import { ThemeToggle } from "../shell/ThemeToggle";
+import { StreamHealthBadge } from "./StreamHealthBadge";
+import type { StreamStatus } from "../../hooks/useResourceStream";
 
 interface ActionChip {
   label: string;
@@ -17,6 +19,12 @@ interface PageHeaderProps {
   chips?: ActionChip[];
   /** Right-side trailing slot (e.g. namespace picker). Renders after chips. */
   trailing?: ReactNode;
+  /**
+   * Live-update badge state. Pass useResource's streamStatus on list
+   * pages whose kind has a watch SSE feed; undefined for everything
+   * else (the badge renders nothing).
+   */
+  streamStatus?: StreamStatus;
 }
 
 export function PageHeader({
@@ -24,6 +32,7 @@ export function PageHeader({
   subtitle,
   chips,
   trailing,
+  streamStatus,
 }: PageHeaderProps) {
   return (
     // Sticky glass-effect chrome: sits at the top of the page's scroll
@@ -43,6 +52,7 @@ export function PageHeader({
       )}
       <div className="ml-auto flex flex-wrap items-center gap-2 pb-1">
         {chips?.map((chip) => <Chip key={chip.label} {...chip} />)}
+        <StreamHealthBadge status={streamStatus} />
         {trailing}
         <ThemeToggle />
       </div>

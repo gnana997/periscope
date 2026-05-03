@@ -189,6 +189,7 @@ export function ReplicaSetsPage({ cluster }: { cluster: string }) {
             ? `${groups.length} deployment${groups.length === 1 ? "" : "s"} · ${all.length} revision${all.length === 1 ? "" : "s"}${namespace ? ` in ${namespace}` : ""}`
             : undefined
         }
+        streamStatus={query.streamStatus}
         trailing={<NamespacePicker />}
       />
 

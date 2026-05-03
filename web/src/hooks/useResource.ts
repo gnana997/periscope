@@ -1,7 +1,9 @@
-import { useMutation, useQuery } from "@tanstack/react-query";
-import { api, type ClusterScopedKind, type OpenAPIDoc, type ResourceMeta, type YamlKind } from "../lib/api";
+import { useMutation, useQuery, type UseQueryResult } from "@tanstack/react-query";
+import { api, type ClusterScopedKind, type OpenAPIDoc, type ResourceMeta, type WatchStreamKind, type YamlKind } from "../lib/api";
+import { useIsWatchStreamEnabled } from "../lib/features";
 import { queryKeys } from "../lib/queryKeys";
 import { editorYamlQueryKey, type EditorSource } from "../lib/customResources";
+import { useResourceStream, type StreamStatus } from "./useResourceStream";
 import type {
   ClusterEventList,
   ClusterRoleBindingDetail,
@@ -47,13 +49,14 @@ interface ResourceQueryArgs {
   namespace?: string;
 }
 
-// Per-kind background-refresh cadence. Only kinds whose state
-// transitions on its own (controller-driven, ephemeral, or
-// short-lived) get polled — the rest stay refresh-on-demand to keep
-// the request rate predictable.
+// Per-kind background-refresh cadence. Used for kinds that don't have
+// a watch SSE route AND for streaming kinds that have fallen back to
+// polling after repeated reconnect failures. Kinds not listed here
+// stay refresh-on-demand.
 //
-// Holding pattern until issue #4 (real-time push via K8s watch
-// streams) lands; once that ships these intervals become moot.
+// The four streaming kinds (pods, events, replicasets, jobs) keep
+// their entries here on purpose — they're the polling fallback path
+// when useResourceStream surfaces streamStatus="polling_fallback".
 const LIST_REFETCH_INTERVAL: Partial<Record<ResourceKind, number>> = {
   pods: 15_000,
   replicasets: 30_000,
@@ -61,8 +64,54 @@ const LIST_REFETCH_INTERVAL: Partial<Record<ResourceKind, number>> = {
   jobs: 30_000,
 };
 
-export function useResource({ cluster, resource, namespace }: ResourceQueryArgs) {
-  return useQuery<ResourceListResponse>({
+// WATCH_STREAM_KINDS mirrors the WatchStreamKind union; lifted here so
+// useResource can branch on it without referencing api.ts internals.
+const WATCH_STREAM_KINDS: ReadonlyArray<ResourceKind> = [
+  "pods",
+  "events",
+  "replicasets",
+  "jobs",
+];
+
+function isWatchStreamKind(k: ResourceKind): k is WatchStreamKind {
+  return (WATCH_STREAM_KINDS as ResourceKind[]).includes(k);
+}
+
+// Extension of UseQueryResult adding streamStatus for kinds that have
+// a watch SSE feed enabled. undefined for everything else (polling
+// kinds, or streaming kinds while the feature flag is loading) — the
+// StreamHealthBadge renders nothing for undefined.
+export type ResourceQueryResult = UseQueryResult<ResourceListResponse> & {
+  streamStatus?: StreamStatus;
+};
+
+export function useResource({
+  cluster,
+  resource,
+  namespace,
+}: ResourceQueryArgs): ResourceQueryResult {
+  // Hook order is fixed; isWatchStreamKind is a pure runtime check, not
+  // a hook gate. Pass a deterministic fallback "pods" to the stream
+  // hook for non-watch kinds — it short-circuits internally on
+  // enabled=false so the stream never opens.
+  const watchKind: WatchStreamKind = isWatchStreamKind(resource) ? resource : "pods";
+  const featureEnabled = useIsWatchStreamEnabled(watchKind);
+  const stream = useResourceStream({
+    cluster,
+    resource: watchKind,
+    namespace,
+    enabled: isWatchStreamKind(resource) && featureEnabled,
+  });
+
+  // useStreaming = the SPA is currently relying on the SSE stream for
+  // updates. When the stream falls back to polling, we flip enabled +
+  // refetchInterval back on so the standard list endpoint takes over.
+  const useStreaming =
+    isWatchStreamKind(resource) &&
+    featureEnabled &&
+    stream.streamStatus !== "polling_fallback";
+
+  const query = useQuery<ResourceListResponse>({
     queryKey: queryKeys.cluster(cluster ?? "").kind(resource).list(namespace ?? ""),
     queryFn: ({ signal }): Promise<ResourceListResponse> => {
       switch (resource) {
@@ -130,10 +179,20 @@ export function useResource({ cluster, resource, namespace }: ResourceQueryArgs)
           throw new Error(`Unknown resource kind: ${resource}`);
       }
     },
-    enabled: Boolean(cluster),
-    refetchInterval: LIST_REFETCH_INTERVAL[resource] ?? false,
+    enabled: Boolean(cluster) && !useStreaming,
+    refetchInterval: useStreaming ? false : (LIST_REFETCH_INTERVAL[resource] ?? false),
     refetchIntervalInBackground: false,
   });
+
+  // streamStatus surfaces only when the kind is a watch kind AND the
+  // server has it enabled. Polling-only kinds (deployments, services,
+  // configmaps, …) get undefined — the StreamHealthBadge renders nothing.
+  return Object.assign(query, {
+    streamStatus:
+      isWatchStreamKind(resource) && featureEnabled
+        ? stream.streamStatus
+        : undefined,
+  }) as ResourceQueryResult;
 }
 
 // --- Detail fetchers (lazy: only run when enabled by the caller) ---
@@ -219,12 +278,23 @@ export function useCronJobDetail(cluster: string, ns: string, name: string | nul
 }
 
 export function useClusterEvents(cluster: string, namespace?: string) {
-  return useQuery<ClusterEventList>({
-    queryKey: queryKeys.cluster(cluster).clusterEvents(namespace ?? ""),
-    queryFn: ({ signal }) => api.clusterEvents(cluster, namespace, signal),
-    enabled: Boolean(cluster),
-    refetchInterval: 15_000,
+  // Thin wrapper around useResource so EventsPage benefits from the
+  // same drop-in streaming dispatch as Pods/Jobs/ReplicaSets. The
+  // legacy queryKeys.cluster(c).clusterEvents(ns) key is now unused;
+  // the canonical cache slot is queryKeys.cluster(c).kind("events").list(ns)
+  // (where useResourceStream writes its snapshot + deltas).
+  //
+  // Type-asserts data back to ClusterEventList — for events that's
+  // exactly what the underlying ResourceListResponse union narrows to.
+  const result = useResource({
+    cluster,
+    resource: "events",
+    namespace,
   });
+  return {
+    ...result,
+    data: result.data as ClusterEventList | undefined,
+  };
 }
 
 export function usePVCDetail(cluster: string, ns: string, name: string | null) {
