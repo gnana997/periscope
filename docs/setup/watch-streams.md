@@ -236,5 +236,5 @@ stream flows there — if it does, the ingress is the culprit.
   list-then-watch lifecycle, adding a new kind.
 - [`docs/setup/networkpolicy.md`](./networkpolicy.md) — egress
   table including watch-stream impact (none).
-- [`docs/setup/deploy.md`](./deploy.md) §10.5 — feature summary in
+- [`docs/setup/deploy.md`](./deploy.md) 10.5 — feature summary in
   the deploy walkthrough.

@@ -406,16 +406,22 @@ clusters are registered.
 
 ### 10.5 Real-time list updates (watch streams)
 
-Periscope's pod, event, replicaset, and job list pages update in
-real time via SSE. **All four kinds are on by default**; the SPA
-falls back to polling when the EventSource fails. The `watchStreams:`
-helm block lets operators opt out (e.g. behind a proxy that
-mishandles long-lived connections) or restrict to a subset:
+Periscope's resource list pages update in real time via SSE for
+21+ kinds spanning workloads, networking, storage, cluster-scoped,
+and core resources. **Every registered kind is on by default**;
+the SPA falls back to polling when the EventSource fails. The
+`watchStreams:` helm block lets operators opt out (e.g. behind a
+proxy that mishandles long-lived connections), restrict to a
+subset, or use group aliases to subscribe to a whole API surface
+at once:
 
 ```yaml
 watchStreams:
-  kinds: ""           # default ("all on"); "off" / "none" disable; "pods,events" restricts
-  perUserLimit: 30    # concurrent SSE streams per OIDC subject
+  # Empty / "all" / "off" / "none" / comma list
+  # Per-kind tokens: pods, events, deployments, statefulsets, …
+  # Group aliases:  core, workloads, networking, storage, cluster
+  kinds: ""
+  perUserLimit: 60    # concurrent SSE streams per OIDC subject
 ```
 
 Full operator guide:
