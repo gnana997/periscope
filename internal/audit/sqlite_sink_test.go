@@ -170,6 +170,72 @@ func TestSQLiteSink_RecordSurvivesAfterClose(t *testing.T) {
 	})
 }
 
+func TestValidate_UnboundedGrowth(t *testing.T) {
+	cfg := SQLiteConfig{
+		RetentionDays: 0, MaxSizeMB: 0,
+		VacuumInterval: time.Hour,
+		Path:           "/tmp/nonexistent/audit.db",
+	}
+	warns := cfg.Validate()
+	if len(warns) == 0 {
+		t.Fatal("want at least one warning for unbounded growth")
+	}
+	if !containsSubstr(warns, "retentionDays and maxSizeMB are 0") {
+		t.Errorf("missing unbounded-growth warning: %v", warns)
+	}
+}
+
+func TestValidate_VacuumIntervalTooSmall(t *testing.T) {
+	cfg := SQLiteConfig{
+		RetentionDays: 30, MaxSizeMB: 1024,
+		VacuumInterval: time.Second,
+		Path:           "/tmp/nonexistent/audit.db",
+	}
+	warns := cfg.Validate()
+	if !containsSubstr(warns, "vacuumInterval < 1m") {
+		t.Errorf("missing vacuum-interval warning: %v", warns)
+	}
+}
+
+func TestValidate_RetentionTooLong(t *testing.T) {
+	cfg := SQLiteConfig{
+		RetentionDays: 400, MaxSizeMB: 1024,
+		VacuumInterval: time.Hour,
+		Path:           "/tmp/nonexistent/audit.db",
+	}
+	warns := cfg.Validate()
+	if !containsSubstr(warns, "retentionDays > 365") {
+		t.Errorf("missing retention-too-long warning: %v", warns)
+	}
+}
+
+func TestValidate_HappyPath(t *testing.T) {
+	cfg := SQLiteConfig{
+		RetentionDays: 30, MaxSizeMB: 1024,
+		VacuumInterval: 24 * time.Hour,
+		Path:           "/tmp/nonexistent/audit.db",
+	}
+	warns := cfg.Validate()
+	// Disk-free check is skipped for nonexistent path; the other
+	// checks should all pass.
+	if len(warns) != 0 {
+		t.Errorf("expected no warnings for happy path, got %v", warns)
+	}
+}
+
+func containsSubstr(haystack []string, needle string) bool {
+	for _, h := range haystack {
+		if len(h) >= len(needle) {
+			for i := 0; i+len(needle) <= len(h); i++ {
+				if h[i:i+len(needle)] == needle {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
 func TestLoadSQLiteConfigFromEnv_Defaults(t *testing.T) {
 	t.Setenv("PERISCOPE_AUDIT_ENABLED", "")
 	t.Setenv("PERISCOPE_AUDIT_DB_PATH", "")

@@ -228,7 +228,7 @@ affinity: {}
 # line per privileged action: pod exec, secret reveal, resource
 # apply/delete, cronjob trigger). When .audit.enabled is true, the
 # same events are also persisted to a local SQLite database the SPA
-# (and operators) can query.
+# (and operators) can query through GET /api/audit.
 #
 # v1 topology is single-replica, so the local DB is consistent with
 # the in-memory session store. If/when HA support lands, treat this
@@ -242,34 +242,63 @@ affinity: {}
 # Compliance-grade retention (1 year, 7 years, etc.) is out of scope
 # for SQLite — forward stdout to S3 / Loki / your SIEM and treat the
 # local DB as a queryable cache.
+#
+# How the size caps interact:
+#   .audit.maxSizeMB         → application-level cap. The vacuum
+#                              loop prunes oldest rows when the DB
+#                              exceeds this and runs VACUUM to
+#                              reclaim pages back to the OS.
+#   emptyDir.sizeLimit       → kubelet hard ceiling, only when
+#                              storage.type=emptyDir. Auto-derived
+#                              as 2 × maxSizeMB so the kubelet can't
+#                              evict the pod before the application
+#                              has a chance to prune (VACUUM
+#                              transiently doubles disk usage by
+#                              rewriting the DB to a temp file).
+#   .audit.storage.size      → PVC request size, only when
+#                              storage.type=pvc. Independent of
+#                              maxSizeMB because PVC sizing is
+#                              coupled to your StorageClass minimums
+#                              and isn't node-local. Default 5Gi
+#                              gives plenty of headroom over a 1Gi
+#                              app cap.
 # -----------------------------------------------------------------------------
 audit:
   enabled: false
 
   # Time-based retention. Rows older than this are pruned on each
   # vacuum tick. Set to 0 to disable time-based pruning (size cap
-  # still applies).
+  # still applies). Setting BOTH this and maxSizeMB to 0 is the
+  # unbounded-growth footgun — the startup validator will warn.
   retentionDays: 30
 
-  # Hard ceiling on the on-disk DB file. Oldest rows are pruned in
-  # 10% batches when the file exceeds this. Set to 0 to disable
-  # size-based pruning.
+  # Application-level on-disk cap. Oldest rows are pruned in 10%
+  # batches when the file exceeds this. Set to 0 to disable
+  # size-based pruning. In emptyDir mode this also drives the
+  # kubelet sizeLimit (rendered as 2 × maxSizeMB).
   maxSizeMB: 1024
 
   # How often the prune+VACUUM loop runs. Accepts Go duration syntax
-  # ("24h", "6h", "30m"). Shorter intervals reclaim disk faster but
-  # add load; the default of 24h is fine for most workloads.
+  # ("24h", "6h", "30m"). Shorter intervals reclaim disk faster and
+  # smooth out transient peaks; longer intervals reduce CPU and IO.
+  # Configurable here so high-volume environments can tune it down
+  # to e.g. 6h without a code change.
   vacuumInterval: 24h
 
   storage:
     # pvc      → PersistentVolumeClaim, survives pod restarts.
     #            Recommended for any environment where the audit
     #            trail matters (i.e. anywhere you have audit on).
-    # emptyDir → ephemeral; logs vanish on pod restart. Useful for
-    #            kind/minikube smoke testing or when stdout-shipping
-    #            to a SIEM is the system of record.
+    # emptyDir → ephemeral; logs vanish on pod restart. The kubelet
+    #            sizeLimit is auto-derived from maxSizeMB so the
+    #            volume can't outgrow the application cap. Useful
+    #            for kind/minikube smoke testing or when
+    #            stdout-shipping to a SIEM is the system of record.
     type: pvc
 
+    # PVC request size. Used only when type=pvc. Default 5Gi gives
+    # plenty of headroom over the default 1Gi maxSizeMB; lower it
+    # only if your StorageClass has a smaller minimum.
     size: 5Gi
     # Empty = use the cluster's default StorageClass. ReadWriteOnce
     # is sufficient for the v1 single-replica topology.

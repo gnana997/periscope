@@ -45,6 +45,12 @@ func main() {
 	auditCfg := audit.LoadSQLiteConfigFromEnv()
 	var auditReader audit.Reader
 	if auditCfg.Enabled {
+		// Surface footguns (unbounded growth, hammer-disk vacuum
+		// interval, cap > available disk) before they bite. Each
+		// warning is independent; we never refuse to boot here.
+		for _, w := range auditCfg.Validate() {
+			slog.Warn(w)
+		}
 		sqliteSink, err := audit.OpenSQLiteSink(ctx, auditCfg)
 		if err != nil {
 			slog.Warn("audit: sqlite disabled (open failed)",

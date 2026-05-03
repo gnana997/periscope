@@ -124,7 +124,12 @@ spec:
             claimName: {{ include "periscope.fullname" . }}-audit
           {{- else }}
           emptyDir:
-            sizeLimit: {{ .Values.audit.storage.size | default "5Gi" }}
+            # Derived from maxSizeMB rather than a separate knob so
+            # operators can't accidentally configure a kubelet hard
+            # ceiling smaller than the application working set. 2x
+            # gives headroom for VACUUM (rewrites the DB to a temp
+            # file, briefly doubling on-disk usage) and the WAL.
+            sizeLimit: {{ printf "%dMi" (mul .Values.audit.maxSizeMB 2) }}
           {{- end }}
         {{- end }}
       {{- with .Values.nodeSelector }}

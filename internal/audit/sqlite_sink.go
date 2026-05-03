@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"sync"
+	"syscall"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -86,6 +87,55 @@ func durationDefault(v string, fallback time.Duration) time.Duration {
 	return d
 }
 
+// Validate inspects the loaded config for footguns and returns a
+// (possibly empty) slice of human-readable warnings. main() logs
+// each warning at slog.Warn level rather than failing — a
+// misconfigured audit cap shouldn't block the pod from booting, but
+// the operator deserves to know.
+//
+// Validate is best-effort: it stat's the parent directory to read
+// available disk space, which only works after the directory is
+// mounted (post-Helm-render, in-pod). Calling it before the volume
+// is ready returns the warnings derivable from the config alone.
+func (c SQLiteConfig) Validate() []string {
+	var warns []string
+
+	// Both caps disabled = unbounded growth until the volume itself
+	// fills. Catch the combo even though either cap alone is fine.
+	if c.RetentionDays == 0 && c.MaxSizeMB == 0 {
+		warns = append(warns,
+			"audit: both retentionDays and maxSizeMB are 0 — "+
+				"the DB will grow until the volume fills")
+	}
+	if c.VacuumInterval > 0 && c.VacuumInterval < time.Minute {
+		warns = append(warns,
+			"audit: vacuumInterval < 1m — pruning will hammer disk; "+
+				"consider 6h or 24h")
+	}
+	if c.RetentionDays > 365 {
+		warns = append(warns,
+			"audit: retentionDays > 365 — SQLite is a local cache, "+
+				"not compliance storage; forward stdout to an external SIEM")
+	}
+
+	// Disk-free vs cap. If the parent dir doesn't exist yet, skip
+	// silently — main() may call Validate before OpenSQLiteSink.
+	if c.MaxSizeMB > 0 {
+		if avail, err := availableDiskMB(filepath.Dir(c.Path)); err == nil {
+			// VACUUM can transiently double the file. Plus WAL.
+			// Warn if the cap exceeds 50% of available disk.
+			needed := int64(c.MaxSizeMB) * 2
+			if needed > avail {
+				warns = append(warns, fmt.Sprintf(
+					"audit: maxSizeMB=%d exceeds 50%% of available disk (%dMi) "+
+						"at %s — VACUUM may fail or kubelet may evict the pod",
+					c.MaxSizeMB, avail, filepath.Dir(c.Path)))
+			}
+		}
+	}
+	return warns
+}
+
 // SQLiteSink writes audit events to a local SQLite database.
 //
 // Design notes:
@@ -158,7 +208,14 @@ func OpenSQLiteSink(ctx context.Context, cfg SQLiteConfig) (*SQLiteSink, error) 
 	if err := os.MkdirAll(filepath.Dir(cfg.Path), 0o755); err != nil {
 		return nil, fmt.Errorf("audit: mkdir %s: %w", filepath.Dir(cfg.Path), err)
 	}
-	dsn := cfg.Path + "?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)&_pragma=synchronous(NORMAL)"
+	// wal_autocheckpoint=1000 (the default in pages, ~4 MiB) is set
+	// explicitly so the value is visible at the call site rather
+	// than relying on SQLite's compiled-in default. The retention
+	// loop also runs PRAGMA wal_checkpoint(TRUNCATE) after each
+	// prune so the WAL file is bounded — without that, a sustained
+	// burst of writes can grow audit.db-wal alongside audit.db and
+	// blow past the on-disk budget the operator configured.
+	dsn := cfg.Path + "?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)&_pragma=synchronous(NORMAL)&_pragma=wal_autocheckpoint(1000)"
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("audit: open sqlite: %w", err)
@@ -179,6 +236,14 @@ func OpenSQLiteSink(ctx context.Context, cfg SQLiteConfig) (*SQLiteSink, error) 
 		return nil, fmt.Errorf("audit: prepare insert: %w", err)
 	}
 	s := &SQLiteSink{cfg: cfg, db: db, insertStmt: stmt}
+	// Run an initial retention pass synchronously before returning
+	// so a pod that's just woken up with stale data (e.g. after a
+	// long downtime) starts reclaiming space without waiting a full
+	// VacuumInterval. Also avoids a goroutine-scheduling race with
+	// callers that immediately Record() events on the new sink.
+	if cfg.RetentionDays > 0 || cfg.MaxSizeMB > 0 {
+		s.runRetention(ctx)
+	}
 	go s.retentionLoop(ctx)
 	return s, nil
 }
@@ -232,9 +297,8 @@ func (s *SQLiteSink) Close() error {
 }
 
 // retentionLoop runs prune-by-age and prune-by-size at
-// VacuumInterval until ctx is canceled. A first pass kicks off
-// immediately so a pod that just woke up with stale data starts
-// reclaiming space without waiting a full interval.
+// VacuumInterval until ctx is canceled. The initial pass is run
+// synchronously by OpenSQLiteSink before this goroutine starts.
 func (s *SQLiteSink) retentionLoop(ctx context.Context) {
 	if s.cfg.RetentionDays == 0 && s.cfg.MaxSizeMB == 0 {
 		return
@@ -242,7 +306,6 @@ func (s *SQLiteSink) retentionLoop(ctx context.Context) {
 	tick := time.NewTicker(s.cfg.VacuumInterval)
 	defer tick.Stop()
 
-	s.runRetention(ctx)
 	for {
 		select {
 		case <-ctx.Done():
@@ -281,6 +344,14 @@ func (s *SQLiteSink) runRetention(ctx context.Context) {
 		// it the file stays as large as the high-water mark.
 		if _, err := s.db.ExecContext(ctx, `VACUUM`); err != nil {
 			slog.ErrorContext(ctx, "audit: vacuum failed", "err", err)
+		}
+		// Truncate the WAL file. Without this, audit.db-wal can
+		// keep growing alongside audit.db on busy writers, eating
+		// into the operator's on-disk budget. wal_checkpoint(TRUNCATE)
+		// blocks until all pages are checkpointed and then resets
+		// the WAL file size to zero.
+		if _, err := s.db.ExecContext(ctx, `PRAGMA wal_checkpoint(TRUNCATE)`); err != nil {
+			slog.ErrorContext(ctx, "audit: wal checkpoint failed", "err", err)
 		}
 	}
 }
@@ -341,6 +412,20 @@ func dbFileSize(path string) (int64, error) {
 		return 0, err
 	}
 	return fi.Size(), nil
+}
+
+// availableDiskMB returns the bytes-available count at dir,
+// converted to MiB. Used by Validate to flag a cap larger than the
+// underlying volume can hold. Returns an error if the path doesn't
+// exist yet — Validate handles that as "skip the disk check."
+func availableDiskMB(dir string) (int64, error) {
+	var st syscall.Statfs_t
+	if err := syscall.Statfs(dir, &st); err != nil {
+		return 0, err
+	}
+	// Bavail is blocks available to non-root processes; Bsize is
+	// the block size. Multiply, divide by MiB.
+	return int64(st.Bavail) * int64(st.Bsize) / (1024 * 1024), nil
 }
 
 // Query implements Reader. Builds the SELECT dynamically from
