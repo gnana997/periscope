@@ -824,9 +824,16 @@ func main() {
 	serverCtx, cancelServer := context.WithCancel(context.Background())
 	defer cancelServer()
 
+	// sessionValid is the auth-revalidation hook the watch handler ticks
+	// every 60s mid-stream. Captured as a closure so handler doesn't
+	// import auth or the session store directly.
+	sessionValid := func(r *http.Request) bool {
+		return auth.SessionValid(r, sessionStore, authCfg)
+	}
+
 	if watchCfg.pods {
 		router.Get("/api/clusters/{cluster}/pods/watch",
-			credentials.Wrap(factory, podsWatchHandler(registry, streamTracker, streamLimiter, serverCtx)))
+			credentials.Wrap(factory, podsWatchHandler(registry, streamTracker, streamLimiter, serverCtx, sessionValid)))
 	}
 
 	// Debug endpoint listing currently-open watch streams. JSON for
@@ -2020,7 +2027,17 @@ func (t *streamTracker) snapshot() []streamEntry {
 // "event: server_shutdown" before the http.Server.Shutdown drain
 // closes the connection — clients see an explicit signal that the
 // disconnect was server-initiated and can adjust reconnect UX.
-func podsWatchHandler(reg *clusters.Registry, tracker *streamTracker, limiter *userStreamLimiter, serverCtx context.Context) credentials.Handler {
+//
+// sessionValid is invoked every 60s to detect session expiry mid-stream.
+// On invalid the handler emits "event: auth_expired" and closes; the
+// frontend redirects to login on receipt.
+func podsWatchHandler(
+	reg *clusters.Registry,
+	tracker *streamTracker,
+	limiter *userStreamLimiter,
+	serverCtx context.Context,
+	sessionValid func(*http.Request) bool,
+) credentials.Handler {
 	return func(w http.ResponseWriter, r *http.Request, p credentials.Provider) {
 		c, ok := reg.ByName(chi.URLParam(r, "cluster"))
 		if !ok {
@@ -2077,6 +2094,14 @@ func podsWatchHandler(reg *clusters.Registry, tracker *streamTracker, limiter *u
 				"actor", p.Actor(), "reason", closeReason)
 		}()
 
+		// Tick the auth-revalidation check independently of the SSE
+		// keepalive heartbeat. 60s is short enough that an expired
+		// session closes the stream within a minute, long enough that
+		// the cost (one map lookup + a couple of time comparisons) is
+		// negligible.
+		authCheck := time.NewTicker(60 * time.Second)
+		defer authCheck.Stop()
+
 		for {
 			select {
 			case <-r.Context().Done():
@@ -2086,6 +2111,14 @@ func podsWatchHandler(reg *clusters.Registry, tracker *streamTracker, limiter *u
 				closeReason = "server_shutdown"
 				_ = sw.Event("server_shutdown", "", struct{}{})
 				return
+			case <-authCheck.C:
+				if !sessionValid(r) {
+					closeReason = "auth_expired"
+					slog.InfoContext(r.Context(), "watch_stream.auth_expired",
+						"id", id, "kind", "pods", "cluster", c.Name, "ns", ns, "actor", p.Actor())
+					_ = sw.Event("auth_expired", "", struct{}{})
+					return
+				}
 			case <-sw.HeartbeatC():
 				_ = sw.Ping()
 			case ev, ok := <-eventCh:

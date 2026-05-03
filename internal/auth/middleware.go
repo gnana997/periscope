@@ -144,6 +144,41 @@ func unauthorized(w http.ResponseWriter) {
 	http.Error(w, "unauthenticated", http.StatusUnauthorized)
 }
 
+// SessionValid reports whether the request's session cookie still
+// resolves to a non-expired, non-idle session. Side-effect-free: does
+// not update LastActivity, refresh tokens, or hit the OIDC provider.
+//
+// Returns true unconditionally in non-OIDC modes (dev) — there is no
+// session record to expire.
+//
+// Used by long-lived handlers (e.g. SSE watch streams) to detect
+// expiry mid-stream so they can emit a graceful close event instead
+// of waiting for the next user-initiated request to fail. Other
+// concurrent requests through Middleware continue to bump LastActivity
+// normally, so an active user's stream stays alive even if the stream
+// itself isn't ticking activity.
+func SessionValid(r *http.Request, store SessionStore, cfg Config) bool {
+	if cfg.Mode != ModeOIDC {
+		return true
+	}
+	c, err := r.Cookie(cfg.Session.CookieName)
+	if err != nil || c.Value == "" {
+		return false
+	}
+	s, ok := store.Get(c.Value)
+	if !ok {
+		return false
+	}
+	now := time.Now()
+	if now.After(s.AbsoluteExpiry) {
+		return false
+	}
+	if cfg.Session.IdleTimeout > 0 && now.Sub(s.LastActivity) > cfg.Session.IdleTimeout {
+		return false
+	}
+	return true
+}
+
 // AcceptHTML reports whether the request looks like a browser
 // navigation. Useful for handlers that want to redirect humans to
 // /auth/login but return 401 to fetches.
