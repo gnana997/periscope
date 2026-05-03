@@ -69,6 +69,7 @@ func eventSummary(e *corev1.Event) ClusterEvent {
 	}
 
 	return ClusterEvent{
+		UID:       string(e.UID),
 		Namespace: e.Namespace,
 		Kind:      e.InvolvedObject.Kind,
 		Name:      e.InvolvedObject.Name,
