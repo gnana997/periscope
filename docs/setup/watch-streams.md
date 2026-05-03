@@ -36,24 +36,29 @@ feature parity is automatic and a partial failure (e.g. only
 
 ```yaml
 watchStreams:
-  # Empty / "all" / "off" / "none" / comma-separated subset.
+  # Empty / "all" / "off" / "none" / per-kind tokens / group aliases.
   # Leave empty to inherit the server default ("all on").
   kinds: ""
 
   # Concurrent SSE streams per OIDC subject. 0 disables the cap
   # entirely (not recommended).
-  perUserLimit: 30
+  perUserLimit: 60
 ```
 
 The `kinds` value accepts:
 
 | Value | Meaning |
 |---|---|
-| `""` (unset) | Server default — all four kinds enabled |
+| `""` (unset) | Server default — every registered kind enabled |
 | `"all"` | Same as unset; explicit form |
 | `"off"` | Disable all SSE routes; UI uses polling everywhere |
 | `"none"` | Same as `"off"` |
-| `"pods,events"` | Comma-separated subset (any of: `pods`, `events`, `replicasets`, `jobs`) |
+| `"pods,events"` | Comma-separated per-kind tokens (any of: `pods`, `events`, `replicasets`, `jobs`) |
+| `"workloads"` | Group alias — every kind in the `workloads` group |
+| `"core,workloads"` | Multiple groups, one token each |
+| `"pods,workloads"` | Mixed kinds and groups |
+
+Current groups: `core` (= `pods`, `events`), `workloads` (= `replicasets`, `jobs`). Groups expand as new kinds register; the env grammar is forward-compatible.
 
 The schema rejects misspellings (`banana,pods` won't pass `helm
 template`), so a typo fails at deploy time rather than silently
@@ -104,16 +109,16 @@ watchStreams:
 
 ## 4. Per-user concurrency cap
 
-`watchStreams.perUserLimit` (default 30) caps concurrent SSE
+`watchStreams.perUserLimit` (default 60) caps concurrent SSE
 streams per OIDC subject across all clusters and kinds. The cap
 exists to stop a runaway SPA bug from opening hundreds of
 EventSources and exhausting your apiservers' watch budget on the
 user's behalf.
 
 When a user hits the cap, the next watch request returns HTTP 429
-and the SPA falls back to polling for the affected page. The 30
-default reflects "10 list pages × 3 kinds at peak," which is well
-above realistic usage.
+and the SPA falls back to polling for the affected page. The 60
+default reflects "~10 tabs × 6 list views" with headroom for the
+larger kind set unlocked as more controllers gain SSE streams.
 
 Tune up if your team genuinely keeps lots of tabs open; tune down
 if a misbehaving SPA build is hammering your apiservers and you

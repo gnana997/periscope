@@ -229,23 +229,30 @@ func WatchFoos(ctx context.Context, p credentials.Provider, args WatchArgs, sink
 If the snapshot needs sorting or capping, add a `PostList` field. If
 not, leave it nil.
 
-### 8.3 The route
+### 8.3 The registry entry
 
-In `cmd/periscope/main.go`, instantiate the generic handler:
+In `cmd/periscope/main.go`, append a `kindReg` to `watchKinds`:
 
 ```go
-router.Get("/api/clusters/{cluster}/foos/watch",
-    resourceWatchHandler("foos", k8s.WatchFoos))
+var watchKinds = []kindReg{
+    // …existing entries…
+    {Name: "foos", Group: "workloads", Watch: k8s.WatchFoos},
+}
 ```
 
-The handler takes care of authz, limiter, tracker, heartbeat, resume,
-and shutdown.
+That single entry wires up:
 
-### 8.4 The feature flag
+- the route `GET /api/clusters/{cluster}/foos/watch`
+- inclusion in `/api/features.watchStreams` (so the SPA enables the stream)
+- the `PERISCOPE_WATCH_STREAMS=foos` token (and any group alias the kind belongs to, e.g. `workloads`)
+- the `/debug/streams` registry, per-user limiter, heartbeat, resume, shutdown — all inherited from the generic handler
 
-Append `foos` to `/api/features` in `cmd/periscope/main.go` so the
-SPA knows the kind is supported. Frontends use this to choose
-`useResourceStream` vs `useResource` per kind.
+### 8.4 The helm schema
+
+Add the new token (and its group alias if it's a new group) to the
+regex in `deploy/helm/periscope/values.schema.json` so operators
+typing the new kind into `watchStreams.kinds` pass `helm template`
+validation.
 
 ### 8.5 The test
 

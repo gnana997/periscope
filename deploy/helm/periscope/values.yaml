@@ -408,11 +408,17 @@ exec:
 #
 # Set .Values.watchStreams.kinds to one of:
 #
-#   ""        unset → all four kinds enabled (default)
-#   "all"     same as unset; explicit form
-#   "off"     disable all SSE routes; UI uses polling everywhere
-#   "none"    same as "off"
-#   "pods,events"   comma-separated subset
+#   ""             unset → all registered kinds enabled (default)
+#   "all"          same as unset; explicit form
+#   "off"          disable all SSE routes; UI uses polling everywhere
+#   "none"         same as "off"
+#   "pods,events"  comma-separated subset of per-kind tokens
+#   "workloads"    group alias — every kind in the workloads group
+#   "core,workloads"  multiple groups, one token each
+#
+# Per-kind tokens (current registry): pods, events, replicasets, jobs.
+# Group aliases (current registry): core (= pods, events),
+# workloads (= replicasets, jobs).
 #
 # Reasons to opt out: an HTTP proxy / load balancer in front of
 # Periscope that buffers responses or kills idle connections under
@@ -422,14 +428,14 @@ exec:
 #
 # Per-user concurrent stream cap (separate concern):
 #   .Values.watchStreams.perUserLimit → PERISCOPE_WATCH_PER_USER_LIMIT
-#   Default 30 covers ~5 tabs × 6 list views per user. Set to 0 to
+#   Default 60 covers ~10 tabs × 6 list views per user. Set to 0 to
 #   disable the cap entirely (not recommended).
 # -----------------------------------------------------------------------------
 watchStreams:
-  # Empty / "all" / "off" / "none" / comma-separated subset.
+  # Empty / "all" / "off" / "none" / per-kind tokens / group aliases.
   # Leave empty to inherit the server default ("all on").
   kinds: ""
-  perUserLimit: 30
+  perUserLimit: 60
 
 # -----------------------------------------------------------------------------
 # Pod Disruption Budget
