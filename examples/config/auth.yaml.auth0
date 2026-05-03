@@ -69,6 +69,12 @@ authorization:
   # Empty list = any authenticated user is allowed. Tighten in prod.
   allowedGroups: [periscope-users]
 
+  # IdP groups granted full /api/audit visibility (the read-side
+  # admin gate). Independent of authz mode. Leave commented to
+  # use mode-defaults — see docs/setup/audit.md for the resolution
+  # order. Typical security-team grant:
+  # auditAdminGroups: [Sec-Team, SRE-Platform]
+
 # Only consulted in dev mode (PERISCOPE_AUTH_MODE=dev or no auth file).
 dev:
   subject: dev@local

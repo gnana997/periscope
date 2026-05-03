@@ -18,6 +18,11 @@
             "mode": {
               "type": "string",
               "enum": ["shared", "tier", "raw"]
+            },
+            "auditAdminGroups": {
+              "type": "array",
+              "items": { "type": "string", "minLength": 1 },
+              "description": "IdP groups granted full /api/audit visibility. Independent of authz mode. See docs/setup/audit.md."
             }
           }
         }
@@ -91,6 +96,39 @@
         "required": ["host"],
         "properties": {
           "host": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "audit": {
+      "type": "object",
+      "description": "Audit pipeline persistence. See docs/setup/audit.md.",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "retentionDays": { "type": "integer", "minimum": 0 },
+        "maxSizeMB": { "type": "integer", "minimum": 0 },
+        "vacuumInterval": {
+          "type": "string",
+          "pattern": "^[0-9]+(ns|us|µs|ms|s|m|h)$",
+          "description": "Go duration string (e.g. 24h, 6h, 30m)."
+        },
+        "storage": {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": ["pvc", "emptyDir"]
+            },
+            "size": {
+              "type": "string",
+              "pattern": "^[0-9]+(Mi|Gi)$",
+              "description": "PVC request size (e.g. 5Gi). Used only when storage.type=pvc."
+            },
+            "storageClass": { "type": "string" },
+            "accessMode": {
+              "type": "string",
+              "enum": ["ReadWriteOnce", "ReadWriteMany", "ReadWriteOncePod"]
+            }
+          }
         }
       }
     },

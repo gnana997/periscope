@@ -99,6 +99,15 @@ auth:
 
     # Gate (all modes): empty list = any authenticated user is allowed.
     allowedGroups: []
+
+    # IdP groups granted full /api/audit visibility — see who-did-what
+    # across all users. Independent of authz mode (works in shared, tier,
+    # and raw). When empty, audit-admin falls back to mode-specific
+    # defaults; see docs/setup/audit.md for the full resolution order.
+    #
+    # Typical use:
+    #   auditAdminGroups: [SRE-Platform, Sec-Team]
+    auditAdminGroups: []
   dev:
     subject: dev@local
     email: dev@local
