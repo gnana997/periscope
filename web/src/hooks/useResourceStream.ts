@@ -43,6 +43,7 @@ import {
 import { showToast } from "../lib/toastBus";
 import { queryKeys } from "../lib/queryKeys";
 import { KIND_REGISTRY } from "../lib/k8sKinds";
+import { useIsWatchStreamEnabled } from "../lib/features";
 import type { ResourceListResponse } from "../lib/types";
 import type { WatchStreamKind } from "../lib/api";
 
@@ -527,4 +528,38 @@ export function useResourceStream(
   }, [enabled, cluster, resource, namespace, qc]);
 
   return { streamStatus: status };
+}
+
+// useChildPodWatch — auxiliary Pod SSE subscription used by detail
+// hooks that embed child pods (Deployment, StatefulSet, DaemonSet,
+// ReplicaSet, Job, CronJob, Service). Without it, a pod's state can
+// transition (Pending → Running, Running → Terminating → gone)
+// without the parent object's resourceVersion changing — meaning the
+// parent's stream fires no delta, and the embedded child-pods table
+// goes stale until the next manual reload.
+//
+// With this hook mounted, pod deltas in the namespace flow through
+// useResourceStream's pod-aggregating-parent fan-out (see
+// POD_AGGREGATING_PARENTS) which invalidates any active workload
+// detail in the same namespace. React Query refetches only the
+// active query, so opening one panel costs at most one extra
+// apiserver watch and one Get per pod transition. Stream closes
+// automatically when the panel closes (enabled flips false).
+//
+// `enabled` is the panel-is-open gate. Internally we additionally
+// gate on the server-side feature flag, so a deployment opt-out
+// (PERISCOPE_WATCH_STREAMS without "pods") cleanly skips the
+// auxiliary stream.
+export function useChildPodWatch(
+  cluster: string,
+  namespace: string,
+  enabled: boolean,
+): void {
+  const podsStreamEnabled = useIsWatchStreamEnabled("pods");
+  useResourceStream({
+    cluster,
+    resource: "pods",
+    namespace,
+    enabled: enabled && podsStreamEnabled && Boolean(namespace),
+  });
 }
