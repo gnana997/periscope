@@ -10,10 +10,12 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"os/signal"
 	"sort"
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -815,9 +817,16 @@ func main() {
 	// does not exist and the frontend falls back to polling via 404.
 	// See issue #4.
 
+	// serverCtx is cancelled on SIGTERM/SIGINT so long-lived handlers
+	// (watch streams) can emit a graceful "event: server_shutdown" before
+	// the HTTP server closes their connection. Cancellation propagates
+	// from a single signal goroutine started below.
+	serverCtx, cancelServer := context.WithCancel(context.Background())
+	defer cancelServer()
+
 	if watchCfg.pods {
 		router.Get("/api/clusters/{cluster}/pods/watch",
-			credentials.Wrap(factory, podsWatchHandler(registry, streamTracker, streamLimiter)))
+			credentials.Wrap(factory, podsWatchHandler(registry, streamTracker, streamLimiter, serverCtx)))
 	}
 
 	// Debug endpoint listing currently-open watch streams. JSON for
@@ -892,10 +901,33 @@ func main() {
 	}
 	addr := ":" + port
 	slog.Info("periscope starting", "addr", addr, "clusters", len(registry.List()))
-	if err := http.ListenAndServe(addr, router); err != nil {
+
+	srv := &http.Server{Addr: addr, Handler: router}
+
+	// Signal goroutine: SIGINT/SIGTERM cancels serverCtx, then triggers
+	// http.Server.Shutdown so watch handlers can emit
+	// "event: server_shutdown" while the listener stops accepting new
+	// connections. Drain timeout is intentionally short (10s) — heartbeats
+	// keep clients responsive and we don't want pods stuck in Terminating
+	// during deploys.
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	go func() {
+		sig := <-sigCh
+		slog.Info("shutdown signal received", "sig", sig.String())
+		cancelServer()
+		drainCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if err := srv.Shutdown(drainCtx); err != nil {
+			slog.Warn("server shutdown error", "err", err)
+		}
+	}()
+
+	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		slog.Error("server failed", "err", err)
 		os.Exit(1)
 	}
+	slog.Info("server stopped")
 }
 
 func loadRegistry() (*clusters.Registry, error) {
@@ -1983,7 +2015,12 @@ func (t *streamTracker) snapshot() []streamEntry {
 //
 // Per-user concurrency is capped via the limiter; over-cap requests
 // return 429 before any SSE work happens.
-func podsWatchHandler(reg *clusters.Registry, tracker *streamTracker, limiter *userStreamLimiter) credentials.Handler {
+//
+// serverCtx is cancelled on SIGTERM/SIGINT so the handler can emit
+// "event: server_shutdown" before the http.Server.Shutdown drain
+// closes the connection — clients see an explicit signal that the
+// disconnect was server-initiated and can adjust reconnect UX.
+func podsWatchHandler(reg *clusters.Registry, tracker *streamTracker, limiter *userStreamLimiter, serverCtx context.Context) credentials.Handler {
 	return func(w http.ResponseWriter, r *http.Request, p credentials.Provider) {
 		c, ok := reg.ByName(chi.URLParam(r, "cluster"))
 		if !ok {
@@ -2044,6 +2081,10 @@ func podsWatchHandler(reg *clusters.Registry, tracker *streamTracker, limiter *u
 			select {
 			case <-r.Context().Done():
 				<-streamDone
+				return
+			case <-serverCtx.Done():
+				closeReason = "server_shutdown"
+				_ = sw.Event("server_shutdown", "", struct{}{})
 				return
 			case <-sw.HeartbeatC():
 				_ = sw.Ping()
