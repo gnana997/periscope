@@ -2,15 +2,22 @@
 // replicasets. Builds a minimal SSA payload touching only spec.replicas
 // so periscope-spa claims ownership of just that field, leaving every
 // other field's manager intact. The cache is updated optimistically so
-// the StatStrip flips to the new desired count within one render;
-// readyReplicas stays at the prior value until the refetch lands —
-// which is honest UX because the new pods aren't ready yet.
+// the StatStrip and the table flip to the new desired count within
+// one render; readyReplicas stays at the prior value until the refetch
+// lands — which is honest UX because the new pods aren't ready yet.
+//
+// As with useDeleteResource, we patch every loaded list cache for
+// the kind via setQueriesData so the row updates wherever it's
+// currently rendered (all-namespaces view, specific-namespace view,
+// or both at once).
 
 import { ApiError, api, type YamlKind } from "../../lib/api";
 import { KIND_REGISTRY } from "../../lib/k8sKinds";
 import { queryKeys } from "../../lib/queryKeys";
 import { buildMinimalSSA, type Identity } from "../../lib/yamlPatch";
 import { patchRowInList } from "../../lib/listShape";
+import type { ResourceListResponse } from "../../lib/types";
+import type { QueryKey } from "@tanstack/react-query";
 import { useOptimisticMutation } from "./_useOptimistic";
 
 export type ScalableKind = "deployments" | "statefulsets" | "replicasets";
@@ -46,7 +53,7 @@ interface DetailLike {
 
 interface Snap {
   detail: DetailLike | undefined;
-  list: unknown;
+  lists: Array<[QueryKey, ResourceListResponse | undefined]>;
 }
 
 export function useScaleResource(args: ScaleArgs) {
@@ -59,34 +66,41 @@ export function useScaleResource(args: ScaleArgs) {
     .cluster(args.cluster)
     .kind(args.kind)
     .meta(args.namespace, args.name);
-  const listKey = queryKeys
-    .cluster(args.cluster)
-    .kind(args.kind)
-    .list(args.namespace);
+  const kindPrefix = queryKeys.cluster(args.cluster).kind(args.kind).all;
 
   return useOptimisticMutation<ScaleVars, Snap, unknown, ApiError | Error>({
     detailKey,
     metaKey,
-    listKey,
+    listKey: kindPrefix,
     applyOptimistic: (qc, vars) => {
       const detail = qc.getQueryData<DetailLike>(detailKey);
-      const list = qc.getQueryData(listKey);
+      const lists = qc.getQueriesData<ResourceListResponse>({
+        queryKey: kindPrefix,
+        predicate: (q) =>
+          Array.isArray(q.queryKey) && q.queryKey[4] === "list",
+      });
       qc.setQueryData<DetailLike>(detailKey, (prev) =>
         prev ? { ...prev, replicas: vars.replicas } : prev,
       );
-      qc.setQueryData(listKey, (prev) =>
-        patchRowInList<{ name: string; namespace?: string; replicas?: number }>(
-          prev as never,
-          args.kind,
-          { name: args.name, namespace: args.namespace },
-          (row) => ({ ...row, replicas: vars.replicas }),
-        ),
+      qc.setQueriesData<ResourceListResponse | undefined>(
+        {
+          queryKey: kindPrefix,
+          predicate: (q) =>
+            Array.isArray(q.queryKey) && q.queryKey[4] === "list",
+        },
+        (prev) =>
+          patchRowInList<{ name: string; namespace?: string; replicas?: number }>(
+            prev as never,
+            args.kind,
+            { name: args.name, namespace: args.namespace },
+            (row) => ({ ...row, replicas: vars.replicas }),
+          ),
       );
-      return { detail, list };
+      return { detail, lists };
     },
     rollback: (qc, snap) => {
       qc.setQueryData(detailKey, snap.detail);
-      qc.setQueryData(listKey, snap.list);
+      for (const [key, data] of snap.lists) qc.setQueryData(key, data);
     },
     mutationFn: (vars) => {
       const identity: Identity = {

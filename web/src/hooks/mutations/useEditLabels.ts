@@ -42,10 +42,11 @@ export function useEditLabels(args: EditLabelsArgs) {
     .cluster(args.cluster)
     .kind(args.kind)
     .meta(args.namespace, args.name);
-  const listKey = queryKeys
-    .cluster(args.cluster)
-    .kind(args.kind)
-    .list(args.namespace);
+  // Kind prefix so the post-success invalidation sweeps every loaded
+  // list cache for this kind (all-namespaces view + any specific-
+  // namespace view). Pinning to a single ns would miss the visible
+  // list when the user is browsing all namespaces.
+  const listKey = queryKeys.cluster(args.cluster).kind(args.kind).all;
 
   return useOptimisticMutation<EditLabelsVars, Snap, unknown, ApiError | Error>({
     detailKey,

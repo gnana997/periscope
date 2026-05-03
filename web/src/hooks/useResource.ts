@@ -47,6 +47,20 @@ interface ResourceQueryArgs {
   namespace?: string;
 }
 
+// Per-kind background-refresh cadence. Only kinds whose state
+// transitions on its own (controller-driven, ephemeral, or
+// short-lived) get polled — the rest stay refresh-on-demand to keep
+// the request rate predictable.
+//
+// Holding pattern until issue #4 (real-time push via K8s watch
+// streams) lands; once that ships these intervals become moot.
+const LIST_REFETCH_INTERVAL: Partial<Record<ResourceKind, number>> = {
+  pods: 15_000,
+  replicasets: 30_000,
+  events: 15_000,
+  jobs: 30_000,
+};
+
 export function useResource({ cluster, resource, namespace }: ResourceQueryArgs) {
   return useQuery<ResourceListResponse>({
     queryKey: queryKeys.cluster(cluster ?? "").kind(resource).list(namespace ?? ""),
@@ -117,6 +131,8 @@ export function useResource({ cluster, resource, namespace }: ResourceQueryArgs)
       }
     },
     enabled: Boolean(cluster),
+    refetchInterval: LIST_REFETCH_INTERVAL[resource] ?? false,
+    refetchIntervalInBackground: false,
   });
 }
 
