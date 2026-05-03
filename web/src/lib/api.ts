@@ -72,6 +72,10 @@ import type {
   FleetResponse,
   AuditQueryResult,
   AuditQueryParams,
+  HelmReleasesResponse,
+  HelmReleaseDetail,
+  HelmHistoryResponse,
+  HelmDiffResponse,
 } from "./types";
 
 class ApiError extends Error {
@@ -704,6 +708,66 @@ export const api = {
       undefined,
       signal,
     ),
+
+  // --- Helm release browser (read-only, issue #9) -----------------
+  //
+  // List + detail + history + structured diff. All cluster-scoped;
+  // backend impersonates the user, so the apiserver gates visibility.
+
+  helmReleases: (cluster: string, signal?: AbortSignal) =>
+    getJSON<HelmReleasesResponse>(
+      `/api/clusters/${enc(cluster)}/helm/releases`,
+      signal,
+    ),
+
+  /** Pass `revision` to fetch a specific revision; omit / undefined
+   *  for the latest. Returns the unified blob the detail page slices
+   *  into values/manifest/resources tabs. */
+  helmRelease: (
+    cluster: string,
+    namespace: string,
+    name: string,
+    revision?: number,
+    signal?: AbortSignal,
+  ) => {
+    const qs = revision && revision > 0 ? `?revision=${revision}` : "";
+    return getJSON<HelmReleaseDetail>(
+      `/api/clusters/${enc(cluster)}/helm/releases/${enc(namespace)}/${enc(name)}${qs}`,
+      signal,
+    );
+  },
+
+  helmHistory: (
+    cluster: string,
+    namespace: string,
+    name: string,
+    signal?: AbortSignal,
+  ) =>
+    getJSON<HelmHistoryResponse>(
+      `/api/clusters/${enc(cluster)}/helm/releases/${enc(namespace)}/${enc(name)}/history`,
+      signal,
+    ),
+
+  /** Backend produces a dyff-structured diff PLUS the raw YAMLs for
+   *  the SPA's monaco renderer. The `changes` array is the agent-tool
+   *  surface — pass `?from=N&to=M` (either may be 0 for "latest" but
+   *  not both). */
+  helmDiff: (
+    cluster: string,
+    namespace: string,
+    name: string,
+    fromRev: number,
+    toRev: number,
+    signal?: AbortSignal,
+  ) => {
+    const params = new URLSearchParams();
+    if (fromRev > 0) params.set("from", String(fromRev));
+    if (toRev > 0) params.set("to", String(toRev));
+    return getJSON<HelmDiffResponse>(
+      `/api/clusters/${enc(cluster)}/helm/releases/${enc(namespace)}/${enc(name)}/diff?${params.toString()}`,
+      signal,
+    );
+  },
 };
 
 // --- write helpers (kept out of `api` block so the call sites stay readable) ---
