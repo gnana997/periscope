@@ -275,6 +275,39 @@ audit:
     # is sufficient for the v1 single-replica topology.
     storageClass: ""
     accessMode: ReadWriteOnce
+# Pod Disruption Budget
+#
+# v1 is single-replica (in-memory session store) so a node drain takes
+# Periscope down. The default PDB still gets rendered to make that intent
+# explicit in cluster audit. Disable if you do not want a PDB at all.
+# -----------------------------------------------------------------------------
+pdb:
+  enabled: true
+  # maxUnavailable=1 means a drain can evict the single replica without
+  # blocking. When HA lands in v1.x, switch to minAvailable per replicaCount.
+  maxUnavailable: 1
+
+# -----------------------------------------------------------------------------
+# NetworkPolicy
+#
+# Off by default — every cluster has different ingress controller plumbing
+# and IdP egress targets. See docs/setup/networkpolicy.md for the recipe.
+# When enabled, the rendered policy denies all ingress except from the
+# namespaces you list, and denies all egress except DNS + the extra rules
+# you supply (typically the IdP host and EKS endpoints).
+# -----------------------------------------------------------------------------
+networkPolicy:
+  enabled: false
+  ingress:
+    # namespaceSelector matchLabels for ingress sources. Example:
+    #   - kubernetes.io/metadata.name: ingress-nginx
+    fromNamespaces: []
+    # Raw NetworkPolicyIngressRule entries appended to the rule set.
+    extra: []
+  egress:
+    # Raw NetworkPolicyEgressRule entries (e.g. IdP CIDRs, EKS endpoints,
+    # AWS STS). DNS to kube-dns is always added.
+    extra: []
 
 # -----------------------------------------------------------------------------
 # Per-cluster RBAC manifests (tier mode)

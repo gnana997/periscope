@@ -1,0 +1,122 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Periscope Helm values",
+  "type": "object",
+  "properties": {
+    "replicaCount": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 1,
+      "description": "v1 supports single replica only (in-memory session store)."
+    },
+    "auth": {
+      "type": "object",
+      "properties": {
+        "authorization": {
+          "type": "object",
+          "properties": {
+            "mode": {
+              "type": "string",
+              "enum": ["shared", "tier", "raw"]
+            }
+          }
+        }
+      }
+    },
+    "secrets": {
+      "type": "object",
+      "required": ["mode"],
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": ["existing", "plain", "external", "native"]
+        }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "mode": { "const": "existing" } }, "required": ["mode"] },
+          "then": {
+            "properties": {
+              "existing": {
+                "type": "object",
+                "required": ["name"],
+                "properties": {
+                  "name": { "type": "string", "minLength": 1 }
+                }
+              }
+            },
+            "required": ["existing"]
+          }
+        },
+        {
+          "if": { "properties": { "mode": { "const": "plain" } }, "required": ["mode"] },
+          "then": {
+            "properties": {
+              "plain": {
+                "type": "object",
+                "required": ["clientSecret"],
+                "properties": {
+                  "clientSecret": { "type": "string", "minLength": 1 }
+                }
+              }
+            },
+            "required": ["plain"]
+          }
+        },
+        {
+          "if": { "properties": { "mode": { "const": "external" } }, "required": ["mode"] },
+          "then": {
+            "properties": {
+              "external": {
+                "type": "object",
+                "required": ["storeName", "remoteKey"],
+                "properties": {
+                  "storeName": { "type": "string", "minLength": 1 },
+                  "remoteKey": { "type": "string", "minLength": 1 }
+                }
+              }
+            },
+            "required": ["external"]
+          }
+        }
+      ]
+    },
+    "ingress": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" }
+      },
+      "if": { "properties": { "enabled": { "const": true } }, "required": ["enabled"] },
+      "then": {
+        "required": ["host"],
+        "properties": {
+          "host": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "pdb": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" }
+      }
+    },
+    "networkPolicy": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" }
+      }
+    },
+    "clusterRBAC": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" }
+      }
+    },
+    "podIdentity": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" }
+      }
+    }
+  }
+}

@@ -10,8 +10,10 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"os/signal"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -887,9 +889,37 @@ func main() {
 	}
 	addr := ":" + port
 	slog.Info("periscope starting", "addr", addr, "clusters", len(registry.List()))
-	if err := http.ListenAndServe(addr, router); err != nil {
-		slog.Error("server failed", "err", err)
-		os.Exit(1)
+	srv := &http.Server{Addr: addr, Handler: router}
+
+	// SIGTERM/SIGINT trigger a drain: stop accepting new conns, let in-flight
+	// requests finish for up to 25s. Pair with chart-side terminationGracePeriodSeconds=30
+	// (5s headroom before SIGKILL).
+	shutdownCtx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
+	serveErr := make(chan error, 1)
+	go func() {
+		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			serveErr <- err
+		}
+		close(serveErr)
+	}()
+
+	select {
+	case err := <-serveErr:
+		if err != nil {
+			slog.Error("server failed", "err", err)
+			os.Exit(1)
+		}
+	case <-shutdownCtx.Done():
+		slog.Info("shutdown signal received, draining")
+		drainCtx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
+		defer cancel()
+		if err := srv.Shutdown(drainCtx); err != nil {
+			slog.Error("graceful shutdown failed", "err", err)
+			os.Exit(1)
+		}
+		slog.Info("server stopped cleanly")
 	}
 }
 

@@ -1,0 +1,15 @@
+{{- if .Values.pdb.enabled -}}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "periscope.fullname" . }}
+  labels:
+    {{- include "periscope.labels" . | nindent 4 }}
+spec:
+  # v1 is single-replica; maxUnavailable=1 lets node drains proceed.
+  # The PDB is rendered to make that intent visible to cluster audit.
+  maxUnavailable: {{ .Values.pdb.maxUnavailable | default 1 }}
+  selector:
+    matchLabels:
+      {{- include "periscope.selectorLabels" . | nindent 6 }}
+{{- end }}

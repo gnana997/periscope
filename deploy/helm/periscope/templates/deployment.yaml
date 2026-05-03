@@ -23,7 +23,9 @@ spec:
         {{- toYaml . | nindent 8 }}
         {{- end }}
     spec:
+      terminationGracePeriodSeconds: 30
       serviceAccountName: {{ include "periscope.serviceAccountName" . }}
+      automountServiceAccountToken: true
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
@@ -36,6 +38,12 @@ spec:
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           securityContext:
             {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          lifecycle:
+            preStop:
+              exec:
+                # Give the Service endpoints controller time to deregister
+                # this Pod before SIGTERM hits the binary.
+                command: ["/bin/sh", "-c", "sleep 5"]
           ports:
             - name: http
               containerPort: {{ .Values.service.port }}
