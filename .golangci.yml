@@ -1,0 +1,60 @@
+# golangci-lint baseline.
+#
+# Default linter set ("standard": errcheck, govet, ineffassign,
+# staticcheck, unused) is enabled. The exclusion rules below suppress
+# known pre-existing issues so CI starts green; remove entries as the
+# underlying issues get fixed.
+version: "2"
+
+run:
+  timeout: 5m
+
+linters:
+  default: standard
+
+  exclusions:
+    rules:
+      # errcheck: deferred Close() calls left unchecked.
+      - path: cmd/periscope/exec_handler\.go
+        linters: [errcheck]
+        text: ws\.Close
+      - path: cmd/periscope/main\.go
+        linters: [errcheck]
+        text: stream\.Close
+      - path: internal/audit/sqlite_sink\.go
+        linters: [errcheck]
+        text: rows\.Close
+      - path: internal/exec/session\.go
+        linters: [errcheck]
+        text: stdinW\.Close
+      - path: internal/k8s/helm\.go
+        linters: [errcheck]
+        text: gz\.Close
+      - path: internal/k8s/logs\.go
+        linters: [errcheck]
+        text: rc\.Close
+      - path: internal/k8s/openapi\.go
+        linters: [errcheck]
+        text: resp\.Body\.Close
+      - path: internal/spa/handler\.go
+        linters: [errcheck]
+        text: f\.Close
+
+      # staticcheck: style and deprecated-API findings.
+      - path: internal/clusters/registry_test\.go
+        linters: [staticcheck]
+        text: S1009
+      - path: internal/k8s/cani_test\.go
+        linters: [staticcheck]
+        text: QF1008
+      - path: internal/k8s/exec\.go
+        linters: [staticcheck]
+        text: SA1019
+      - path: internal/k8s/nodes\.go
+        linters: [staticcheck]
+        text: SA1019
+
+      # unused: errSkipDiskCheck reserved for non-linux build tags.
+      - path: internal/audit/diskstat_common\.go
+        linters: [unused]
+        text: errSkipDiskCheck
