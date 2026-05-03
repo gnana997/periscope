@@ -895,10 +895,11 @@ func main() {
 
 	// --- Watch (SSE streaming) endpoints ---
 	//
-	// Real-time push for resource lists. Each route is gated by the
-	// PERISCOPE_WATCH_STREAMS env var; when disabled the route literally
-	// does not exist and the frontend falls back to polling via 404.
-	// See issue #4.
+	// Real-time push for resource lists. On by default for the four
+	// supported kinds; the PERISCOPE_WATCH_STREAMS env var lets operators
+	// opt out ("off" / "none") or restrict to a subset. When a kind is
+	// disabled the route literally does not exist and the frontend
+	// downgrades to polling via 404. See issue #4.
 
 	// serverCtx is cancelled on SIGTERM/SIGINT so long-lived handlers
 	// (watch streams) can emit a graceful "event: server_shutdown" before
@@ -2043,26 +2044,29 @@ type watchStreamsConfig struct {
 
 // parseWatchStreamsEnv parses the PERISCOPE_WATCH_STREAMS env var.
 //
-//	"" / unset                            → all off
-//	"pods"                                → pods watch enabled
-//	"pods,events,replicasets,jobs"        → each enabled
-//	"all"                                 → every supported kind
+//	"" / unset                            → all on  (default — every supported kind)
+//	"all"                                 → all on  (explicit; same as unset)
+//	"off" / "none"                        → all off (escape hatch for restrictive proxies)
+//	"pods"                                → pods only
+//	"pods,events,replicasets,jobs"        → explicit subset
+//
+// Default is "all on" because the SSE plumbing has a per-user stream
+// cap and a tested polling-fallback path, so the bad case is graceful
+// degradation rather than a hard failure. Operators behind proxies
+// that mishandle long-lived connections can opt out with "off".
 //
 // Unknown tokens are silently dropped — operators get a slog summary
 // at startup so misspellings are obvious.
 func parseWatchStreamsEnv(raw string) watchStreamsConfig {
-	cfg := watchStreamsConfig{}
+	allOn := watchStreamsConfig{pods: true, events: true, replicasets: true, jobs: true}
 	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return cfg
+	if raw == "" || raw == "all" {
+		return allOn
 	}
-	if raw == "all" {
-		cfg.pods = true
-		cfg.events = true
-		cfg.replicasets = true
-		cfg.jobs = true
-		return cfg
+	if raw == "off" || raw == "none" {
+		return watchStreamsConfig{}
 	}
+	cfg := watchStreamsConfig{}
 	for _, part := range strings.Split(raw, ",") {
 		switch strings.TrimSpace(part) {
 		case "pods":
