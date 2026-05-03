@@ -36,16 +36,35 @@ same DTO shape, so feature parity is automatic.
 
 ---
 
-## 2. The four shipped kinds
+## 2. The shipped kinds
 
 | Kind | Path | DTO | Code |
 |---|---|---|---|
 | Pods | `/api/clusters/{cluster}/pods/watch` | `Pod` | `internal/k8s/watch.go: WatchPods` |
 | Events | `/api/clusters/{cluster}/events/watch` | `ClusterEvent` | `internal/k8s/watch.go: WatchEvents` |
+| Deployments | `/api/clusters/{cluster}/deployments/watch` | `Deployment` | `internal/k8s/watch.go: WatchDeployments` |
+| StatefulSets | `/api/clusters/{cluster}/statefulsets/watch` | `StatefulSet` | `internal/k8s/watch.go: WatchStatefulSets` |
+| DaemonSets | `/api/clusters/{cluster}/daemonsets/watch` | `DaemonSet` | `internal/k8s/watch.go: WatchDaemonSets` |
 | ReplicaSets | `/api/clusters/{cluster}/replicasets/watch` | `ReplicaSet` | `internal/k8s/watch.go: WatchReplicaSets` |
 | Jobs | `/api/clusters/{cluster}/jobs/watch` | `Job` | `internal/k8s/watch.go: WatchJobs` |
+| CronJobs | `/api/clusters/{cluster}/cronjobs/watch` | `CronJob` | `internal/k8s/watch.go: WatchCronJobs` |
+| HorizontalPodAutoscalers | `/api/clusters/{cluster}/horizontalpodautoscalers/watch` | `HPA` | `internal/k8s/watch.go: WatchHorizontalPodAutoscalers` |
+| PodDisruptionBudgets | `/api/clusters/{cluster}/poddisruptionbudgets/watch` | `PDB` | `internal/k8s/watch.go: WatchPodDisruptionBudgets` |
+| Services | `/api/clusters/{cluster}/services/watch` | `Service` | `internal/k8s/watch.go: WatchServices` |
+| Ingresses | `/api/clusters/{cluster}/ingresses/watch` | `Ingress` | `internal/k8s/watch.go: WatchIngresses` |
+| NetworkPolicies | `/api/clusters/{cluster}/networkpolicies/watch` | `NetworkPolicy` | `internal/k8s/watch.go: WatchNetworkPolicies` |
+| EndpointSlices | `/api/clusters/{cluster}/endpointslices/watch` | `EndpointSlice` | `internal/k8s/watch.go: WatchEndpointSlices` |
+| IngressClasses | `/api/clusters/{cluster}/ingressclasses/watch` | `IngressClass` | `internal/k8s/watch.go: WatchIngressClasses` |
+| PersistentVolumes | `/api/clusters/{cluster}/pvs/watch` | `PV` | `internal/k8s/watch.go: WatchPVs` |
+| PersistentVolumeClaims | `/api/clusters/{cluster}/pvcs/watch` | `PVC` | `internal/k8s/watch.go: WatchPVCs` |
+| StorageClasses | `/api/clusters/{cluster}/storageclasses/watch` | `StorageClass` | `internal/k8s/watch.go: WatchStorageClasses` |
+| Nodes | `/api/clusters/{cluster}/nodes/watch` | `Node` | `internal/k8s/watch.go: WatchNodes` |
+| Namespaces | `/api/clusters/{cluster}/namespaces/watch` | `Namespace` | `internal/k8s/watch.go: WatchNamespaces` |
+| PriorityClasses | `/api/clusters/{cluster}/priorityclasses/watch` | `PriorityClass` | `internal/k8s/watch.go: WatchPriorityClasses` |
+| RuntimeClasses | `/api/clusters/{cluster}/runtimeclasses/watch` | `RuntimeClass` | `internal/k8s/watch.go: WatchRuntimeClasses` |
 
-Each is a thin wrapper around the generic `watchKind[T, S]` primitive.
+Each is a thin wrapper around the generic `watchKind[T, S]` primitive,
+registered in the `watchKinds` slice in `cmd/periscope/main.go`.
 
 ---
 
@@ -229,23 +248,30 @@ func WatchFoos(ctx context.Context, p credentials.Provider, args WatchArgs, sink
 If the snapshot needs sorting or capping, add a `PostList` field. If
 not, leave it nil.
 
-### 8.3 The route
+### 8.3 The registry entry
 
-In `cmd/periscope/main.go`, instantiate the generic handler:
+In `cmd/periscope/main.go`, append a `kindReg` to `watchKinds`:
 
 ```go
-router.Get("/api/clusters/{cluster}/foos/watch",
-    resourceWatchHandler("foos", k8s.WatchFoos))
+var watchKinds = []kindReg{
+    // …existing entries…
+    {Name: "foos", Group: "workloads", Watch: k8s.WatchFoos},
+}
 ```
 
-The handler takes care of authz, limiter, tracker, heartbeat, resume,
-and shutdown.
+That single entry wires up:
 
-### 8.4 The feature flag
+- the route `GET /api/clusters/{cluster}/foos/watch`
+- inclusion in `/api/features.watchStreams` (so the SPA enables the stream)
+- the `PERISCOPE_WATCH_STREAMS=foos` token (and any group alias the kind belongs to, e.g. `workloads`)
+- the `/debug/streams` registry, per-user limiter, heartbeat, resume, shutdown — all inherited from the generic handler
 
-Append `foos` to `/api/features` in `cmd/periscope/main.go` so the
-SPA knows the kind is supported. Frontends use this to choose
-`useResourceStream` vs `useResource` per kind.
+### 8.4 The helm schema
+
+Add the new token (and its group alias if it's a new group) to the
+regex in `deploy/helm/periscope/values.schema.json` so operators
+typing the new kind into `watchStreams.kinds` pass `helm template`
+validation.
 
 ### 8.5 The test
 

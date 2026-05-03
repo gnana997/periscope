@@ -82,11 +82,14 @@ func main() {
 	}
 
 	watchCfg := parseWatchStreamsEnv(os.Getenv("PERISCOPE_WATCH_STREAMS"))
-	slog.Info("watch streams",
-		"pods", watchCfg.pods,
-		"events", watchCfg.events,
-		"replicasets", watchCfg.replicasets,
-		"jobs", watchCfg.jobs)
+	// Single-line summary keyed by kind so a simple grep tells operators
+	// what's enabled. Iterates the registry (not the map) for stable
+	// log key order across restarts.
+	watchAttrs := make([]any, 0, 2*len(watchKinds))
+	for _, k := range watchKinds {
+		watchAttrs = append(watchAttrs, k.Name, watchCfg[k.Name])
+	}
+	slog.Info("watch streams", watchAttrs...)
 
 	// Tracks active watch SSE streams for the /debug/streams page. Lives
 	// for the lifetime of the process; entries register on stream open
@@ -95,9 +98,12 @@ func main() {
 
 	// Caps concurrent watch SSE streams per OIDC subject so a runaway
 	// tab (or a buggy script) can't exhaust apiserver watch quota for
-	// the whole team. 30 covers ~5 tabs × 6 list views — invisible in
-	// normal use, hard ceiling on accidents.
-	streamLimit := parseIntEnv("PERISCOPE_WATCH_PER_USER_LIMIT", 30)
+	// the whole team. 60 leaves headroom for ~10 tabs × 6 list views —
+	// invisible in normal use, hard ceiling on accidents. As more kinds
+	// (workloads, networking, …) gain SSE streams, this grows linearly
+	// with realistic usage; bump if /debug/streams shows users hitting
+	// the cap.
+	streamLimit := parseIntEnv("PERISCOPE_WATCH_PER_USER_LIMIT", 60)
 	streamLimiter := newUserStreamLimiter(streamLimit)
 	slog.Info("watch stream limit", "per_user", streamLimit)
 
@@ -436,6 +442,12 @@ func main() {
 				return k8s.ListNetworkPolicies(ctx, p, k8s.ListNetworkPoliciesArgs{Cluster: c, Namespace: ns})
 			})))
 
+	router.Get("/api/clusters/{cluster}/endpointslices", credentials.Wrap(factory,
+		listResource(registry, "endpointslices",
+			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, ns string) (k8s.EndpointSliceList, error) {
+				return k8s.ListEndpointSlices(ctx, p, k8s.ListEndpointSlicesArgs{Cluster: c, Namespace: ns})
+			})))
+
 	router.Get("/api/clusters/{cluster}/resourcequotas", credentials.Wrap(factory,
 		listResource(registry, "resourcequotas",
 			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, ns string) (k8s.ResourceQuotaList, error) {
@@ -575,6 +587,12 @@ func main() {
 		detailHandler(registry, "networkpolicy",
 			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, ns, name string) (k8s.NetworkPolicyDetail, error) {
 				return k8s.GetNetworkPolicy(ctx, p, k8s.GetNetworkPolicyArgs{Cluster: c, Namespace: ns, Name: name})
+			})))
+
+	router.Get("/api/clusters/{cluster}/endpointslices/{ns}/{name}", credentials.Wrap(factory,
+		detailHandler(registry, "endpointslice",
+			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, ns, name string) (k8s.EndpointSliceDetail, error) {
+				return k8s.GetEndpointSlice(ctx, p, k8s.GetEndpointSliceArgs{Cluster: c, Namespace: ns, Name: name})
 			})))
 
 	router.Get("/api/clusters/{cluster}/resourcequotas/{ns}/{name}", credentials.Wrap(factory,
@@ -798,6 +816,12 @@ func main() {
 				return k8s.GetNetworkPolicyYAML(ctx, p, k8s.GetNetworkPolicyArgs{Cluster: c, Namespace: ns, Name: name})
 			})))
 
+	router.Get("/api/clusters/{cluster}/endpointslices/{ns}/{name}/yaml", credentials.Wrap(factory,
+		yamlHandler(registry, "endpointslice",
+			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, ns, name string) (string, error) {
+				return k8s.GetEndpointSliceYAML(ctx, p, k8s.GetEndpointSliceArgs{Cluster: c, Namespace: ns, Name: name})
+			})))
+
 	router.Get("/api/clusters/{cluster}/resourcequotas/{ns}/{name}/yaml", credentials.Wrap(factory,
 		yamlHandler(registry, "resourcequota",
 			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, ns, name string) (string, error) {
@@ -876,6 +900,8 @@ func main() {
 		credentials.Wrap(factory, eventsHandler(registry, "ReplicaSet")))
 	router.Get("/api/clusters/{cluster}/networkpolicies/{ns}/{name}/events",
 		credentials.Wrap(factory, eventsHandler(registry, "NetworkPolicy")))
+	router.Get("/api/clusters/{cluster}/endpointslices/{ns}/{name}/events",
+		credentials.Wrap(factory, eventsHandler(registry, "EndpointSlice")))
 	router.Get("/api/clusters/{cluster}/resourcequotas/{ns}/{name}/events",
 		credentials.Wrap(factory, eventsHandler(registry, "ResourceQuota")))
 	router.Get("/api/clusters/{cluster}/limitranges/{ns}/{name}/events",
@@ -920,21 +946,15 @@ func main() {
 		},
 	}
 
-	if watchCfg.pods {
-		router.Get("/api/clusters/{cluster}/pods/watch",
-			credentials.Wrap(factory, resourceWatchHandler("pods", registry, watchHandlerDeps, k8s.WatchPods)))
-	}
-	if watchCfg.events {
-		router.Get("/api/clusters/{cluster}/events/watch",
-			credentials.Wrap(factory, resourceWatchHandler("events", registry, watchHandlerDeps, k8s.WatchEvents)))
-	}
-	if watchCfg.replicasets {
-		router.Get("/api/clusters/{cluster}/replicasets/watch",
-			credentials.Wrap(factory, resourceWatchHandler("replicasets", registry, watchHandlerDeps, k8s.WatchReplicaSets)))
-	}
-	if watchCfg.jobs {
-		router.Get("/api/clusters/{cluster}/jobs/watch",
-			credentials.Wrap(factory, resourceWatchHandler("jobs", registry, watchHandlerDeps, k8s.WatchJobs)))
+	// Each enabled kind in the registry gets one /api/clusters/{cluster}/{kind}/watch
+	// route. Disabled kinds literally don't exist on the router — the
+	// SPA observes a 404 and downgrades to polling for that kind.
+	for _, k := range watchKinds {
+		if !watchCfg[k.Name] {
+			continue
+		}
+		router.Get("/api/clusters/{cluster}/"+k.Name+"/watch",
+			credentials.Wrap(factory, resourceWatchHandler(k.Name, registry, watchHandlerDeps, k.Watch)))
 	}
 
 	// Debug endpoint listing currently-open watch streams. JSON for
@@ -2014,18 +2034,15 @@ func customResourceEventsHandler(reg *clusters.Registry) credentials.Handler {
 // between polling and streaming. Public (auth middleware applies),
 // no per-cluster scoping — features are server-wide.
 func featuresHandler(cfg watchStreamsConfig) http.HandlerFunc {
-	kinds := make([]string, 0, 4)
-	if cfg.pods {
-		kinds = append(kinds, "pods")
-	}
-	if cfg.events {
-		kinds = append(kinds, "events")
-	}
-	if cfg.replicasets {
-		kinds = append(kinds, "replicasets")
-	}
-	if cfg.jobs {
-		kinds = append(kinds, "jobs")
+	// Iterate watchKinds (not the cfg map) so the order in /api/features
+	// is stable across restarts and matches registry order — the SPA
+	// doesn't depend on order today, but a stable response keeps
+	// snapshot tests and HTTP cache validators well-behaved.
+	kinds := make([]string, 0, len(watchKinds))
+	for _, k := range watchKinds {
+		if cfg[k.Name] {
+			kinds = append(kinds, k.Name)
+		}
 	}
 	body := map[string]any{"watchStreams": kinds}
 	return func(w http.ResponseWriter, _ *http.Request) {
@@ -2034,21 +2051,32 @@ func featuresHandler(cfg watchStreamsConfig) http.HandlerFunc {
 }
 
 // watchStreamsConfig holds which kinds have the watch SSE route
-// registered. Driven by PERISCOPE_WATCH_STREAMS at startup.
-type watchStreamsConfig struct {
-	pods        bool
-	events      bool
-	replicasets bool
-	jobs        bool
+// registered. Keys are the Name field of the corresponding kindReg.
+// Driven by PERISCOPE_WATCH_STREAMS at startup.
+//
+// Use maps.Equal for comparison; map equality with == is a compile error.
+type watchStreamsConfig map[string]bool
+
+// allKindsOn returns a watchStreamsConfig with every registered kind enabled.
+func allKindsOn() watchStreamsConfig {
+	cfg := make(watchStreamsConfig, len(watchKinds))
+	for _, k := range watchKinds {
+		cfg[k.Name] = true
+	}
+	return cfg
 }
 
-// parseWatchStreamsEnv parses the PERISCOPE_WATCH_STREAMS env var.
+// parseWatchStreamsEnv parses the PERISCOPE_WATCH_STREAMS env var against
+// the live watchKinds registry, so adding a kind in the registry is
+// the only edit needed for the env grammar.
 //
-//	"" / unset                            → all on  (default — every supported kind)
-//	"all"                                 → all on  (explicit; same as unset)
-//	"off" / "none"                        → all off (escape hatch for restrictive proxies)
-//	"pods"                                → pods only
-//	"pods,events,replicasets,jobs"        → explicit subset
+//	"" / unset                  → all on  (default — every registered kind)
+//	"all"                       → all on  (explicit; same as unset)
+//	"off" / "none"              → all off (escape hatch for restrictive proxies)
+//	"pods"                      → pods only
+//	"workloads"                 → group alias (every kindReg.Group == "workloads")
+//	"core,workloads"            → multiple groups
+//	"pods,workloads"            → mixed kinds and groups
 //
 // Default is "all on" because the SSE plumbing has a per-user stream
 // cap and a tested polling-fallback path, so the bad case is graceful
@@ -2058,26 +2086,43 @@ type watchStreamsConfig struct {
 // Unknown tokens are silently dropped — operators get a slog summary
 // at startup so misspellings are obvious.
 func parseWatchStreamsEnv(raw string) watchStreamsConfig {
-	allOn := watchStreamsConfig{pods: true, events: true, replicasets: true, jobs: true}
 	raw = strings.TrimSpace(raw)
 	if raw == "" || raw == "all" {
-		return allOn
+		return allKindsOn()
 	}
 	if raw == "off" || raw == "none" {
 		return watchStreamsConfig{}
 	}
+
+	// Build name and group indexes once per call. Both are tiny so the
+	// allocation is negligible; reading directly from watchKinds keeps
+	// the registry as the single source of truth.
+	byName := make(map[string]bool, len(watchKinds))
+	byGroup := make(map[string][]string)
+	for _, k := range watchKinds {
+		byName[k.Name] = true
+		if k.Group != "" {
+			byGroup[k.Group] = append(byGroup[k.Group], k.Name)
+		}
+	}
+
 	cfg := watchStreamsConfig{}
 	for _, part := range strings.Split(raw, ",") {
-		switch strings.TrimSpace(part) {
-		case "pods":
-			cfg.pods = true
-		case "events":
-			cfg.events = true
-		case "replicasets":
-			cfg.replicasets = true
-		case "jobs":
-			cfg.jobs = true
+		token := strings.TrimSpace(part)
+		if token == "" {
+			continue
 		}
+		if byName[token] {
+			cfg[token] = true
+			continue
+		}
+		if names, ok := byGroup[token]; ok {
+			for _, n := range names {
+				cfg[n] = true
+			}
+		}
+		// Unknown token: silently dropped. Startup slog summary makes
+		// the actually-enabled set visible to operators.
 	}
 	return cfg
 }
@@ -2245,6 +2290,56 @@ type watchDeps struct {
 // uses it as an opaque function value, so each route registration just
 // passes the appropriate primitive without further wrapping.
 type watchFn func(ctx context.Context, p credentials.Provider, args k8s.WatchArgs, sink k8s.WatchSink) error
+
+// kindReg describes one resource kind that can be exposed as a watch
+// SSE stream. It's the single point of truth read by:
+//
+//   - parseWatchStreamsEnv (env-var grammar, including group aliases)
+//   - featuresHandler      (/api/features.watchStreams enumeration)
+//   - the route loop below (router.Get registration)
+//
+// To add a new kind: define WatchFoo in internal/k8s and append a
+// kindReg entry to watchKinds. No other call site needs an edit.
+//
+// Group is an optional alias used by the env-var grammar so operators
+// can write "PERISCOPE_WATCH_STREAMS=workloads" instead of enumerating
+// every workload kind. Groups follow K8s API conventions loosely
+// ("core" = core/v1, "workloads" = apps/v1 + batch/v1, "networking" =
+// networking.k8s.io/v1, "storage" = storage.k8s.io/v1 + core PVCs).
+// An empty Group disables alias selection for that kind — it can only
+// be enabled by its exact Name.
+type kindReg struct {
+	Name  string
+	Group string
+	Watch watchFn
+}
+
+// watchKinds is the registry of kinds exposed as watch SSE streams.
+// Order here is the order returned by /api/features.watchStreams.
+var watchKinds = []kindReg{
+	{Name: "pods", Group: "core", Watch: k8s.WatchPods},
+	{Name: "events", Group: "core", Watch: k8s.WatchEvents},
+	{Name: "deployments", Group: "workloads", Watch: k8s.WatchDeployments},
+	{Name: "statefulsets", Group: "workloads", Watch: k8s.WatchStatefulSets},
+	{Name: "daemonsets", Group: "workloads", Watch: k8s.WatchDaemonSets},
+	{Name: "replicasets", Group: "workloads", Watch: k8s.WatchReplicaSets},
+	{Name: "jobs", Group: "workloads", Watch: k8s.WatchJobs},
+	{Name: "cronjobs", Group: "workloads", Watch: k8s.WatchCronJobs},
+	{Name: "horizontalpodautoscalers", Group: "workloads", Watch: k8s.WatchHorizontalPodAutoscalers},
+	{Name: "poddisruptionbudgets", Group: "workloads", Watch: k8s.WatchPodDisruptionBudgets},
+	{Name: "services", Group: "networking", Watch: k8s.WatchServices},
+	{Name: "ingresses", Group: "networking", Watch: k8s.WatchIngresses},
+	{Name: "networkpolicies", Group: "networking", Watch: k8s.WatchNetworkPolicies},
+	{Name: "endpointslices", Group: "networking", Watch: k8s.WatchEndpointSlices},
+	{Name: "ingressclasses", Group: "networking", Watch: k8s.WatchIngressClasses},
+	{Name: "pvs", Group: "storage", Watch: k8s.WatchPVs},
+	{Name: "pvcs", Group: "storage", Watch: k8s.WatchPVCs},
+	{Name: "storageclasses", Group: "storage", Watch: k8s.WatchStorageClasses},
+	{Name: "nodes", Group: "cluster", Watch: k8s.WatchNodes},
+	{Name: "namespaces", Group: "cluster", Watch: k8s.WatchNamespaces},
+	{Name: "priorityclasses", Group: "cluster", Watch: k8s.WatchPriorityClasses},
+	{Name: "runtimeclasses", Group: "cluster", Watch: k8s.WatchRuntimeClasses},
+}
 
 // resourceWatchHandler is the kind-agnostic SSE handler for resource
 // watch streams. Wire format (frozen — frontend depends on it):

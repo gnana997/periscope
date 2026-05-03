@@ -59,6 +59,8 @@ import type {
   ReplicaSetList,
   NetworkPolicyDetail,
   NetworkPolicyList,
+  EndpointSliceDetail,
+  EndpointSliceList,
   IngressClassDetail,
   IngressClassList,
   ResourceQuota,
@@ -181,6 +183,7 @@ export type YamlKind =
   | "poddisruptionbudgets"
   | "replicasets"
   | "networkpolicies"
+  | "endpointslices"
   | "ingressclasses"
   | "resourcequotas"
   | "limitranges"
@@ -191,7 +194,35 @@ export type YamlKind =
 // WatchStreamKind is the union of resource kinds the backend can serve
 // over a watch SSE endpoint. Mirrors the env-var tokens accepted by
 // PERISCOPE_WATCH_STREAMS server-side.
-export type WatchStreamKind = "pods" | "events" | "replicasets" | "jobs";
+//
+// Adding a kind here is purely a TypeScript declaration — the runtime
+// gate is /api/features.watchStreams. New kinds must also be added
+// to WATCH_STREAM_KINDS in useResource.ts so isWatchStreamKind sees
+// them, and (optionally) to LIST_REFETCH_INTERVAL for the polling
+// fallback cadence.
+export type WatchStreamKind =
+  | "pods"
+  | "events"
+  | "deployments"
+  | "statefulsets"
+  | "daemonsets"
+  | "replicasets"
+  | "jobs"
+  | "cronjobs"
+  | "horizontalpodautoscalers"
+  | "poddisruptionbudgets"
+  | "services"
+  | "ingresses"
+  | "networkpolicies"
+  | "endpointslices"
+  | "ingressclasses"
+  | "pvs"
+  | "pvcs"
+  | "storageclasses"
+  | "nodes"
+  | "namespaces"
+  | "priorityclasses"
+  | "runtimeclasses";
 
 // Features describes server-side capability flags. Fetched once at app
 // boot via api.features and consumed by useResource (Phase 6) to choose
@@ -582,6 +613,11 @@ export const api = {
     return getJSON<NetworkPolicyList>(`/api/clusters/${enc(cluster)}/networkpolicies${qs}`, signal);
   },
 
+  endpointSlices: (cluster: string, namespace?: string, signal?: AbortSignal) => {
+    const qs = namespace ? `?namespace=${enc(namespace)}` : "";
+    return getJSON<EndpointSliceList>(`/api/clusters/${enc(cluster)}/endpointslices${qs}`, signal);
+  },
+
   resourceQuotas: (cluster: string, namespace?: string, signal?: AbortSignal) => {
     const qs = namespace ? `?namespace=${enc(namespace)}` : "";
     return getJSON<ResourceQuotaList>(`/api/clusters/${enc(cluster)}/resourcequotas${qs}`, signal);
@@ -614,6 +650,9 @@ export const api = {
 
   getNetworkPolicy: (c: string, ns: string, name: string, signal?: AbortSignal) =>
     getJSON<NetworkPolicyDetail>(nsURL(c, "networkpolicies", ns, name), signal),
+
+  getEndpointSlice: (c: string, ns: string, name: string, signal?: AbortSignal) =>
+    getJSON<EndpointSliceDetail>(nsURL(c, "endpointslices", ns, name), signal),
 
   getResourceQuota: (c: string, ns: string, name: string, signal?: AbortSignal) =>
     getJSON<ResourceQuota>(nsURL(c, "resourcequotas", ns, name), signal),

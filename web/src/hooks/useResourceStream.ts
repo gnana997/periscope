@@ -31,7 +31,7 @@
 // later as bandwidth optimization.
 
 import { useEffect, useRef, useState } from "react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQueryClient, type QueryClient } from "@tanstack/react-query";
 
 import { useAuth } from "../auth/useAuth";
 import {
@@ -42,6 +42,8 @@ import {
 } from "../lib/listShape";
 import { showToast } from "../lib/toastBus";
 import { queryKeys } from "../lib/queryKeys";
+import { KIND_REGISTRY } from "../lib/k8sKinds";
+import { useIsWatchStreamEnabled } from "../lib/features";
 import type { ResourceListResponse } from "../lib/types";
 import type { WatchStreamKind } from "../lib/api";
 
@@ -78,9 +80,15 @@ const VISIBILITY_HIDE_GRACE_MS = 60_000;
 // `object` (single) or `items` (array). We don't type these any tighter
 // than `unknown` — the backend is the source of truth and the React
 // Query consumer (DataTable rows) already type-asserts via cast.
+//
+// `kind` is only populated by the events stream (where each row's
+// involvedObject Kind decides which detail/events caches to invalidate).
+// Every other stream's row carries an implicit kind = the stream's
+// `resource` prop and leaves the field undefined.
 interface NamedRow {
   name: string;
   namespace?: string;
+  kind?: string;
 }
 
 interface SnapshotEvent {
@@ -95,6 +103,35 @@ interface DeltaEvent {
 type Delta =
   | { type: "added" | "modified"; row: NamedRow }
   | { type: "deleted"; row: NamedRow };
+
+// POD_AGGREGATING_PARENTS lists the URL-plural kinds whose detail panel
+// embeds child Pods (rendered as a sub-table). When a Pod delta arrives,
+// any open detail for these kinds in the same namespace is potentially
+// stale, so we invalidate them too. React Query refetches only ACTIVE
+// queries, so closed panels cost nothing — at most one parent detail is
+// mounted at a time today.
+const POD_AGGREGATING_PARENTS: ReadonlyArray<string> = [
+  "deployments",
+  "statefulsets",
+  "daemonsets",
+  "replicasets",
+  "jobs",
+  "cronjobs",
+  "services",
+];
+
+// KIND_TO_PLURAL inverts KIND_REGISTRY so events-stream deltas (which
+// carry K8s singular Kind in the row's `kind` field, e.g. "Pod") can be
+// mapped back to the SPA's URL plural ("pods") for query-key
+// invalidation. Built once at module load; unrecognized kinds (custom
+// resources) are silently skipped.
+const KIND_TO_PLURAL: Record<string, string> = (() => {
+  const out: Record<string, string> = {};
+  for (const [plural, meta] of Object.entries(KIND_REGISTRY)) {
+    out[meta.kind] = plural;
+  }
+  return out;
+})();
 
 // wrapSnapshot constructs the kind-specific list-response shape (PodList
 // = { pods: [...] }, ClusterEventList = { events: [...] }, etc.) using
@@ -135,6 +172,183 @@ function applyDeltas(
     }
   }
   return next;
+}
+
+// invalidateRelated marks the detail/events/meta caches that a watch
+// delta could have made stale, so any mounted detail panel refetches.
+//
+// The list cache is patched directly by applyDeltas; this function
+// handles the *related* caches that aren't visible from the list shape:
+//
+//   1. Direct: the row's own detail/events/meta. For non-events streams
+//      the row's kind is the stream's `resource`; for events streams
+//      each row carries the involvedObject Kind separately.
+//   2. Aggregating parents (pod streams only): every workload kind
+//      whose detail panel embeds child pods needs to refetch when one
+//      of its pods changes. We invalidate every active parent-detail
+//      query in the same namespace via a predicate.
+//
+// React Query's invalidateQueries refetches only active (mounted)
+// queries by default, so closed panels cost nothing. The deltas array
+// is already deduped by name+namespace upstream (the 50ms flush
+// coalesces bursts), but we still dedupe here in case a parent kind
+// has multiple Pod deltas in the same flush window — one invalidate
+// per (parentKind, namespace) is enough.
+function invalidateRelated(
+  qc: QueryClient,
+  cluster: string,
+  resource: WatchStreamKind,
+  deltas: Delta[],
+): void {
+  // cancelRefetch:false makes a flurry of invalidations during an
+  // in-flight refetch piggyback on the existing fetch instead of
+  // cancelling and restarting it. Critical when the pod-aggregating-
+  // parent fan-out fires repeatedly during a scale storm: with the
+  // default cancelRefetch:true, every pod-readiness delta cancels
+  // the deployment-detail refetch in flight, and no fetch ever
+  // completes until pod activity dies down — making the StatStrip
+  // feel like it's on a 30 s polling cadence instead of streaming.
+  //
+  // Trade-off accepted: an in-flight fetch may return data slightly
+  // stale (by ~50–200 ms vs the latest delta). The next invalidate
+  // after that fetch completes triggers a fresh fetch with current
+  // data. Combined with the patchDetailFromRows direct cache write,
+  // top-stat staleness is bounded by stream latency rather than
+  // refetch latency.
+  const opts = { cancelRefetch: false } as const;
+
+  // Per-row direct invalidation: detail / events / meta on the row's
+  // own kind. For non-events streams, the kind is `resource`; for
+  // events streams, the row's `kind` field gives us the involvedObject
+  // Kind (e.g. "Pod"), which we map back to URL-plural via
+  // KIND_TO_PLURAL.
+  const seen = new Set<string>();
+  for (const delta of deltas) {
+    const row = delta.row;
+    let kind: string;
+    if (resource === "events") {
+      const mapped = row.kind ? KIND_TO_PLURAL[row.kind] : undefined;
+      if (!mapped) continue; // unknown / CRD involvedObject — skip
+      kind = mapped;
+    } else {
+      kind = resource;
+    }
+    const ns = row.namespace ?? "";
+    const tag = `${kind} ${ns} ${row.name}`;
+    if (seen.has(tag)) continue;
+    seen.add(tag);
+
+    const k = queryKeys.cluster(cluster).kind(kind);
+    void qc.invalidateQueries({ queryKey: k.detail(ns, row.name) }, opts);
+    void qc.invalidateQueries({ queryKey: k.events(ns, row.name) }, opts);
+    void qc.invalidateQueries({ queryKey: k.meta(ns, row.name) }, opts);
+  }
+
+  // Pod-only: invalidate aggregating-parent detail queries in the same
+  // namespace. Pod deltas drive Deployment/StatefulSet/.../Service
+  // detail panels because those panels embed child-pod rows.
+  //
+  // For MODIFIED/DELETED rows the predicate also checks ownership:
+  // we only invalidate a parent whose cached data.pods array actually
+  // contains the changing pod. Without this, a single noisy pod
+  // (e.g. an unrelated CrashLoopBackOff pod sharing the namespace)
+  // would invalidate every workload-controller detail in the
+  // namespace on each restart, generating a continuous stream of
+  // refetches the user observes as "polling-like" traffic.
+  //
+  // ADDED rows skip the ownership check because the parent's pods
+  // array hasn't been refreshed yet — fan out broadly so whichever
+  // parent owns the new pod will refetch and pick it up.
+  if (resource === "pods") {
+    for (const delta of deltas) {
+      const row = delta.row;
+      const ns = row.namespace ?? "";
+      const requireOwnership = delta.type !== "added";
+      for (const parent of POD_AGGREGATING_PARENTS) {
+        void qc.invalidateQueries(
+          {
+            predicate: (q) => {
+              const key = q.queryKey;
+              if (
+                !Array.isArray(key) ||
+                key[0] !== "cluster" ||
+                key[1] !== cluster ||
+                key[2] !== "kind" ||
+                key[3] !== parent ||
+                key[4] !== "detail" ||
+                key[5] !== ns
+              ) {
+                return false;
+              }
+              if (!requireOwnership) return true;
+              const detail = q.state.data as
+                | { pods?: { name: string }[] }
+                | undefined;
+              if (!detail?.pods) return false;
+              return detail.pods.some((p) => p.name === row.name);
+            },
+          },
+          opts,
+        );
+      }
+    }
+  }
+}
+
+// patchDetailFromRows shallow-merges delta-row fields into matching
+// detail caches so top-stat fields (replicas, readyReplicas,
+// updatedReplicas, availableReplicas, …) update instantly on a stream
+// delta — independent of whether the eventual detail refetch
+// completes or gets cancelled by another invalidation in flight.
+//
+// Detail-shape always extends list-summary shape (DeploymentDetail
+// extends Deployment, ServiceDetail extends Service, …), so a
+// shallow merge replaces only the summary fields and leaves
+// detail-only fields (containers, conditions, pods, labels,
+// annotations) intact. Those keep being refreshed by the existing
+// invalidate path.
+//
+// No-op when the detail isn't cached (panel closed) — the
+// setQueryData callback returns the existing `current` unchanged.
+//
+// Skipped for events streams: a ClusterEvent has no detail page of
+// its own; its row references an involvedObject which is handled
+// separately by invalidateRelated.
+function patchDetailFromRows(
+  qc: QueryClient,
+  cluster: string,
+  resource: WatchStreamKind,
+  rows: NamedRow[],
+): void {
+  if (resource === "events") return;
+  const seen = new Set<string>();
+  for (const row of rows) {
+    const ns = row.namespace ?? "";
+    const tag = `${ns} ${row.name}`;
+    if (seen.has(tag)) continue;
+    seen.add(tag);
+    const detailKey = queryKeys
+      .cluster(cluster)
+      .kind(resource)
+      .detail(ns, row.name);
+    qc.setQueryData(detailKey, (current: unknown) => {
+      if (!current || typeof current !== "object") return current;
+      // Merge intentional: row carries the latest summary fields
+      // from the apiserver; existing detail has the rich fields
+      // (pods, containers, conditions, …) we want to keep.
+      return { ...(current as Record<string, unknown>), ...row };
+    });
+    // Cancel any fetch in flight for this detail key. Its result was
+    // started before the apiserver published the event we just
+    // patched, so letting it settle would overwrite our fresh patch
+    // with stale data — the user would see top-stats flick to the
+    // new value and then snap back to the prior one. The subsequent
+    // invalidateRelated call in flush() restarts a fresh fetch
+    // (now idle, so cancelRefetch:false doesn’t make it piggyback
+    // on a non-existent fetch); that fresh fetch returns at least as
+    // new as our patched state.
+    void qc.cancelQueries({ queryKey: detailKey, exact: true });
+  }
 }
 
 function buildWatchURL(
@@ -199,6 +413,23 @@ export function useResourceStream(
       qc.setQueryData<ResourceListResponse | undefined>(queryKey, (current) =>
         applyDeltas(current, resource, deltas),
       );
+      // Patch the detail cache directly from the same delta data.
+      // Top-stat fields (replicas, readyReplicas, …) update instantly
+      // without depending on the detail refetch — which can be
+      // cancelled by another invalidation in flight during a storm
+      // (e.g. a scaling Deployment producing many pod-readiness
+      // deltas through useChildPodWatch). Skipped for deletes: the
+      // resource is gone, so an invalidate-driven refetch returning
+      // 404 is the correct UX.
+      const writeRows = deltas
+        .filter((d) => d.type !== "deleted")
+        .map((d) => d.row);
+      patchDetailFromRows(qc, cluster, resource, writeRows);
+      // Detail / events / meta caches live under separate query keys
+      // and don't auto-refetch on watch deltas — without this call, a
+      // Deployment detail panel's pods table stays at its initial
+      // snapshot while the list page updates live.
+      invalidateRelated(qc, cluster, resource, deltas);
       // First delta arrival on a resumed stream signals "live": the
       // backend skipped the Snapshot because it accepted our
       // Last-Event-ID, so the snapshot handler never fires. Treat
@@ -224,6 +455,31 @@ export function useResourceStream(
           const data = JSON.parse((evt as MessageEvent).data) as SnapshotEvent;
           const wrapped = wrapSnapshot(resource, data.items);
           if (wrapped) qc.setQueryData(queryKey, wrapped);
+          // After a reconnect / 410-Gone relist, the cluster state may
+          // have moved on while we were disconnected. Invalidate every
+          // active detail / events / meta query for this resource in
+          // one predicate sweep — cheaper than walking the snapshot
+          // items (which can be 500+ on a large cluster). React Query
+          // refetches only ACTIVE queries, so closed panels no-op.
+          void qc.invalidateQueries(
+            {
+              predicate: (q) => {
+                const k = q.queryKey;
+                return (
+                  Array.isArray(k) &&
+                  k[0] === "cluster" &&
+                  k[1] === cluster &&
+                  k[2] === "kind" &&
+                  k[3] === resource &&
+                  (k[4] === "detail" || k[4] === "events" || k[4] === "meta")
+                );
+              },
+            },
+            // Same coalescing rationale as invalidateRelated — a
+            // snapshot's invalidation shouldn't cancel an in-flight
+            // refetch driven by a concurrent stream's delta.
+            { cancelRefetch: false },
+          );
           // Fresh snapshot resets every error counter — by definition the
           // stream is healthy now.
           reconnectAttempts = 0;
@@ -382,4 +638,38 @@ export function useResourceStream(
   }, [enabled, cluster, resource, namespace, qc]);
 
   return { streamStatus: status };
+}
+
+// useChildPodWatch — auxiliary Pod SSE subscription used by detail
+// hooks that embed child pods (Deployment, StatefulSet, DaemonSet,
+// ReplicaSet, Job, CronJob, Service). Without it, a pod's state can
+// transition (Pending → Running, Running → Terminating → gone)
+// without the parent object's resourceVersion changing — meaning the
+// parent's stream fires no delta, and the embedded child-pods table
+// goes stale until the next manual reload.
+//
+// With this hook mounted, pod deltas in the namespace flow through
+// useResourceStream's pod-aggregating-parent fan-out (see
+// POD_AGGREGATING_PARENTS) which invalidates any active workload
+// detail in the same namespace. React Query refetches only the
+// active query, so opening one panel costs at most one extra
+// apiserver watch and one Get per pod transition. Stream closes
+// automatically when the panel closes (enabled flips false).
+//
+// `enabled` is the panel-is-open gate. Internally we additionally
+// gate on the server-side feature flag, so a deployment opt-out
+// (PERISCOPE_WATCH_STREAMS without "pods") cleanly skips the
+// auxiliary stream.
+export function useChildPodWatch(
+  cluster: string,
+  namespace: string,
+  enabled: boolean,
+): void {
+  const podsStreamEnabled = useIsWatchStreamEnabled("pods");
+  useResourceStream({
+    cluster,
+    resource: "pods",
+    namespace,
+    enabled: enabled && podsStreamEnabled && Boolean(namespace),
+  });
 }
