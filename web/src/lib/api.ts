@@ -70,6 +70,8 @@ import type {
   RuntimeClassDetail,
   RuntimeClassList,
   FleetResponse,
+  AuditQueryResult,
+  AuditQueryParams,
 } from "./types";
 
 class ApiError extends Error {
@@ -272,6 +274,23 @@ export const api = {
       { checks },
       signal,
     ),
+    
+  /**
+   * Audit log query. Filters serialize to URL query params; the backend
+   * applies them server-side and clamps limit at 500.
+   *
+   * Pass `cluster` to scope to one cluster (the per-cluster audit page
+   * always does); leave it empty to query across the fleet (future).
+   */
+  audit: (params: AuditQueryParams, signal?: AbortSignal) => {
+    const qs = new URLSearchParams();
+    for (const [k, v] of Object.entries(params)) {
+      if (v === undefined || v === null || v === "") continue;
+      qs.set(k, String(v));
+    }
+    const suffix = qs.toString() ? `?${qs.toString()}` : "";
+    return getJSON<AuditQueryResult>(`/api/audit${suffix}`, signal);
+  },
 
   // --- CRDs + custom resources -------------------------------------
 

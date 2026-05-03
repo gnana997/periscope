@@ -342,6 +342,11 @@ export function useResourceStream(
           visTimer = null;
         }
         if (!es && !closed && status !== "polling_fallback") {
+          // Tab-resume is a fresh start: clear the error budget so a single
+          // reconnect blip after a long hide does not escalate to fallback
+          // off the back of stale errors from before the tab went hidden.
+          reconnectAttempts = 0;
+          lastErrorAt = 0;
           setStatus("connecting");
           open();
         }

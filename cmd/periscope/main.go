@@ -158,7 +158,7 @@ func main() {
 	router.Use(httpx.Recoverer)
 	router.Use(httpx.AuditBegin)
 	router.Use(authMW)
-	auth.RegisterRoutes(router, authClient, sessionStore, authCfg, authzResolver)
+	auth.RegisterRoutes(router, authClient, sessionStore, authCfg, authzResolver, auditReader != nil)
 	router.Get("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))

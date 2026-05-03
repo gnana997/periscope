@@ -12,6 +12,10 @@ export interface AuthUser {
   authzMode: AuthzMode;
   /** Resolved tier when authzMode === "tier"; empty otherwise. */
   tier?: AuthzTier;
+  /** True when the audit pipeline has SQLite persistence wired. */
+  auditEnabled?: boolean;
+  /** "self" — user sees only own actions; "all" — audit-admin. */
+  auditScope?: "self" | "all";
   expiresAt: number;
 }
 

@@ -183,7 +183,7 @@ func LoggedOutHandler() http.HandlerFunc {
 
 // WhoamiHandler returns {subject, email, groups, mode, expiresAt} for
 // the current session. Used by the SPA's <AuthProvider> on first load.
-func WhoamiHandler(store SessionStore, cfg Config, resolver *authz.Resolver) http.HandlerFunc {
+func WhoamiHandler(store SessionStore, cfg Config, resolver *authz.Resolver, auditEnabled bool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		s, ok := SessionFromContext(r.Context())
 		if !ok {
@@ -202,6 +202,13 @@ func WhoamiHandler(store SessionStore, cfg Config, resolver *authz.Resolver) htt
 			authzMode = string(resolver.Mode())
 			tier = resolver.ResolvedTier(authz.Identity{Subject: s.Subject, Groups: s.Groups})
 		}
+		var auditScope string
+		if auditEnabled {
+			auditScope = "self"
+			if resolver != nil && resolver.IsAuditAdmin(authz.Identity{Subject: s.Subject, Groups: s.Groups}) {
+				auditScope = "all"
+			}
+		}
 		body := struct {
 			Subject    string   `json:"subject"`
 			Email      string   `json:"email"`
@@ -209,6 +216,8 @@ func WhoamiHandler(store SessionStore, cfg Config, resolver *authz.Resolver) htt
 			Mode       string   `json:"mode"`
 			AuthzMode  string   `json:"authzMode"`
 			Tier       string   `json:"tier,omitempty"`
+			AuditEnabled bool     `json:"auditEnabled"`
+			AuditScope   string   `json:"auditScope,omitempty"`
 			ExpiresAt  int64    `json:"expiresAt"`
 		}{
 			Subject:    s.Subject,
@@ -217,6 +226,8 @@ func WhoamiHandler(store SessionStore, cfg Config, resolver *authz.Resolver) htt
 			Mode:       string(cfg.Mode),
 			AuthzMode:  authzMode,
 			Tier:       tier,
+			AuditEnabled: auditEnabled,
+			AuditScope:   auditScope,
 			ExpiresAt:  expiresAt,
 		}
 		w.Header().Set("Content-Type", "application/json")

@@ -103,6 +103,19 @@ sub, but if "who deleted that pod?" reaches K8s, you can't tell from
 the K8s side alone. This is the cost of zero-RBAC-config; if attribution
 matters, use `tier` or `raw`.
 
+> **See also — audit visibility in the dashboard.** Periscope itself
+> records every privileged action through its own audit pipeline,
+> attributed by OIDC sub regardless of K8s impersonation mode. The
+> read-side endpoint (`/api/audit`) has its own RBAC: by default users
+> see only their own actions. To grant security or SRE teams full
+> visibility, set `auth.authorization.auditAdminGroups`. The full
+> resolution order across all three authz modes — including why raw
+> mode requires the explicit grant and shared mode falls back to
+> `allowedGroups` — is documented in
+> [docs/setup/audit.md](audit.md). The audit-admin story is decoupled
+> from K8s admin on purpose: security teams who can read history
+> shouldn't need to mutate prod.
+
 ---
 
 ## Mode 2: `tier` (recommended once you've outgrown shared)
