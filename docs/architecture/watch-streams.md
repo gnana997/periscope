@@ -36,16 +36,23 @@ same DTO shape, so feature parity is automatic.
 
 ---
 
-## 2. The four shipped kinds
+## 2. The shipped kinds
 
 | Kind | Path | DTO | Code |
 |---|---|---|---|
 | Pods | `/api/clusters/{cluster}/pods/watch` | `Pod` | `internal/k8s/watch.go: WatchPods` |
 | Events | `/api/clusters/{cluster}/events/watch` | `ClusterEvent` | `internal/k8s/watch.go: WatchEvents` |
+| Deployments | `/api/clusters/{cluster}/deployments/watch` | `Deployment` | `internal/k8s/watch.go: WatchDeployments` |
+| StatefulSets | `/api/clusters/{cluster}/statefulsets/watch` | `StatefulSet` | `internal/k8s/watch.go: WatchStatefulSets` |
+| DaemonSets | `/api/clusters/{cluster}/daemonsets/watch` | `DaemonSet` | `internal/k8s/watch.go: WatchDaemonSets` |
 | ReplicaSets | `/api/clusters/{cluster}/replicasets/watch` | `ReplicaSet` | `internal/k8s/watch.go: WatchReplicaSets` |
 | Jobs | `/api/clusters/{cluster}/jobs/watch` | `Job` | `internal/k8s/watch.go: WatchJobs` |
+| CronJobs | `/api/clusters/{cluster}/cronjobs/watch` | `CronJob` | `internal/k8s/watch.go: WatchCronJobs` |
+| HorizontalPodAutoscalers | `/api/clusters/{cluster}/horizontalpodautoscalers/watch` | `HPA` | `internal/k8s/watch.go: WatchHorizontalPodAutoscalers` |
+| PodDisruptionBudgets | `/api/clusters/{cluster}/poddisruptionbudgets/watch` | `PDB` | `internal/k8s/watch.go: WatchPodDisruptionBudgets` |
 
-Each is a thin wrapper around the generic `watchKind[T, S]` primitive.
+Each is a thin wrapper around the generic `watchKind[T, S]` primitive,
+registered in the `watchKinds` slice in `cmd/periscope/main.go`.
 
 ---
 

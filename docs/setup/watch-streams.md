@@ -53,12 +53,19 @@ The `kinds` value accepts:
 | `"all"` | Same as unset; explicit form |
 | `"off"` | Disable all SSE routes; UI uses polling everywhere |
 | `"none"` | Same as `"off"` |
-| `"pods,events"` | Comma-separated per-kind tokens (any of: `pods`, `events`, `replicasets`, `jobs`) |
+| `"pods,events"` | Comma-separated per-kind tokens (any of the names below) |
 | `"workloads"` | Group alias — every kind in the `workloads` group |
 | `"core,workloads"` | Multiple groups, one token each |
 | `"pods,workloads"` | Mixed kinds and groups |
 
-Current groups: `core` (= `pods`, `events`), `workloads` (= `replicasets`, `jobs`). Groups expand as new kinds register; the env grammar is forward-compatible.
+Per-kind tokens (current registry): `pods`, `events`, `deployments`, `statefulsets`, `daemonsets`, `replicasets`, `jobs`, `cronjobs`, `horizontalpodautoscalers`, `poddisruptionbudgets`.
+
+Group aliases (current registry):
+
+- `core` = `pods`, `events`
+- `workloads` = `deployments`, `statefulsets`, `daemonsets`, `replicasets`, `jobs`, `cronjobs`, `horizontalpodautoscalers`, `poddisruptionbudgets`
+
+Groups expand as new kinds register; the env grammar is forward-compatible.
 
 The schema rejects misspellings (`banana,pods` won't pass `helm
 template`), so a typo fails at deploy time rather than silently

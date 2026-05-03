@@ -7,8 +7,10 @@ import (
 	"sort"
 
 	appsv1 "k8s.io/api/apps/v1"
+	autoscalingv2 "k8s.io/api/autoscaling/v2"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
+	policyv1 "k8s.io/api/policy/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -388,5 +390,145 @@ func WatchEvents(ctx context.Context, p credentials.Provider, args WatchArgs, si
 			}
 			return events
 		},
+	}, args.ResumeFrom, sink)
+}
+
+// WatchDeployments runs a list-then-watch loop on Deployments in the
+// given namespace. See watchKind for lifecycle details.
+func WatchDeployments(ctx context.Context, p credentials.Provider, args WatchArgs, sink WatchSink) error {
+	cs, err := newClientFn(ctx, p, args.Cluster)
+	if err != nil {
+		return fmt.Errorf("build clientset: %w", err)
+	}
+	return watchKind(ctx, watchSpec[appsv1.Deployment, Deployment]{
+		Kind: "deployments",
+		List: func(ctx context.Context, opts metav1.ListOptions) ([]appsv1.Deployment, string, error) {
+			list, err := cs.AppsV1().Deployments(args.Namespace).List(ctx, opts)
+			if err != nil {
+				return nil, "", err
+			}
+			return list.Items, list.ResourceVersion, nil
+		},
+		Watch: func(ctx context.Context, opts metav1.ListOptions) (watch.Interface, error) {
+			return cs.AppsV1().Deployments(args.Namespace).Watch(ctx, opts)
+		},
+		Summary: deploymentSummary,
+	}, args.ResumeFrom, sink)
+}
+
+// WatchStatefulSets runs a list-then-watch loop on StatefulSets in the
+// given namespace. See watchKind for lifecycle details.
+func WatchStatefulSets(ctx context.Context, p credentials.Provider, args WatchArgs, sink WatchSink) error {
+	cs, err := newClientFn(ctx, p, args.Cluster)
+	if err != nil {
+		return fmt.Errorf("build clientset: %w", err)
+	}
+	return watchKind(ctx, watchSpec[appsv1.StatefulSet, StatefulSet]{
+		Kind: "statefulsets",
+		List: func(ctx context.Context, opts metav1.ListOptions) ([]appsv1.StatefulSet, string, error) {
+			list, err := cs.AppsV1().StatefulSets(args.Namespace).List(ctx, opts)
+			if err != nil {
+				return nil, "", err
+			}
+			return list.Items, list.ResourceVersion, nil
+		},
+		Watch: func(ctx context.Context, opts metav1.ListOptions) (watch.Interface, error) {
+			return cs.AppsV1().StatefulSets(args.Namespace).Watch(ctx, opts)
+		},
+		Summary: statefulSetSummary,
+	}, args.ResumeFrom, sink)
+}
+
+// WatchDaemonSets runs a list-then-watch loop on DaemonSets in the
+// given namespace. See watchKind for lifecycle details.
+func WatchDaemonSets(ctx context.Context, p credentials.Provider, args WatchArgs, sink WatchSink) error {
+	cs, err := newClientFn(ctx, p, args.Cluster)
+	if err != nil {
+		return fmt.Errorf("build clientset: %w", err)
+	}
+	return watchKind(ctx, watchSpec[appsv1.DaemonSet, DaemonSet]{
+		Kind: "daemonsets",
+		List: func(ctx context.Context, opts metav1.ListOptions) ([]appsv1.DaemonSet, string, error) {
+			list, err := cs.AppsV1().DaemonSets(args.Namespace).List(ctx, opts)
+			if err != nil {
+				return nil, "", err
+			}
+			return list.Items, list.ResourceVersion, nil
+		},
+		Watch: func(ctx context.Context, opts metav1.ListOptions) (watch.Interface, error) {
+			return cs.AppsV1().DaemonSets(args.Namespace).Watch(ctx, opts)
+		},
+		Summary: daemonSetSummary,
+	}, args.ResumeFrom, sink)
+}
+
+// WatchCronJobs runs a list-then-watch loop on CronJobs in the given
+// namespace. See watchKind for lifecycle details.
+func WatchCronJobs(ctx context.Context, p credentials.Provider, args WatchArgs, sink WatchSink) error {
+	cs, err := newClientFn(ctx, p, args.Cluster)
+	if err != nil {
+		return fmt.Errorf("build clientset: %w", err)
+	}
+	return watchKind(ctx, watchSpec[batchv1.CronJob, CronJob]{
+		Kind: "cronjobs",
+		List: func(ctx context.Context, opts metav1.ListOptions) ([]batchv1.CronJob, string, error) {
+			list, err := cs.BatchV1().CronJobs(args.Namespace).List(ctx, opts)
+			if err != nil {
+				return nil, "", err
+			}
+			return list.Items, list.ResourceVersion, nil
+		},
+		Watch: func(ctx context.Context, opts metav1.ListOptions) (watch.Interface, error) {
+			return cs.BatchV1().CronJobs(args.Namespace).Watch(ctx, opts)
+		},
+		Summary: cronJobSummary,
+	}, args.ResumeFrom, sink)
+}
+
+// WatchHorizontalPodAutoscalers runs a list-then-watch loop on
+// HorizontalPodAutoscalers (autoscaling/v2) in the given namespace.
+// See watchKind for lifecycle details.
+func WatchHorizontalPodAutoscalers(ctx context.Context, p credentials.Provider, args WatchArgs, sink WatchSink) error {
+	cs, err := newClientFn(ctx, p, args.Cluster)
+	if err != nil {
+		return fmt.Errorf("build clientset: %w", err)
+	}
+	return watchKind(ctx, watchSpec[autoscalingv2.HorizontalPodAutoscaler, HPA]{
+		Kind: "horizontalpodautoscalers",
+		List: func(ctx context.Context, opts metav1.ListOptions) ([]autoscalingv2.HorizontalPodAutoscaler, string, error) {
+			list, err := cs.AutoscalingV2().HorizontalPodAutoscalers(args.Namespace).List(ctx, opts)
+			if err != nil {
+				return nil, "", err
+			}
+			return list.Items, list.ResourceVersion, nil
+		},
+		Watch: func(ctx context.Context, opts metav1.ListOptions) (watch.Interface, error) {
+			return cs.AutoscalingV2().HorizontalPodAutoscalers(args.Namespace).Watch(ctx, opts)
+		},
+		Summary: hpaSummary,
+	}, args.ResumeFrom, sink)
+}
+
+// WatchPodDisruptionBudgets runs a list-then-watch loop on
+// PodDisruptionBudgets in the given namespace. See watchKind for
+// lifecycle details.
+func WatchPodDisruptionBudgets(ctx context.Context, p credentials.Provider, args WatchArgs, sink WatchSink) error {
+	cs, err := newClientFn(ctx, p, args.Cluster)
+	if err != nil {
+		return fmt.Errorf("build clientset: %w", err)
+	}
+	return watchKind(ctx, watchSpec[policyv1.PodDisruptionBudget, PDB]{
+		Kind: "poddisruptionbudgets",
+		List: func(ctx context.Context, opts metav1.ListOptions) ([]policyv1.PodDisruptionBudget, string, error) {
+			list, err := cs.PolicyV1().PodDisruptionBudgets(args.Namespace).List(ctx, opts)
+			if err != nil {
+				return nil, "", err
+			}
+			return list.Items, list.ResourceVersion, nil
+		},
+		Watch: func(ctx context.Context, opts metav1.ListOptions) (watch.Interface, error) {
+			return cs.PolicyV1().PodDisruptionBudgets(args.Namespace).Watch(ctx, opts)
+		},
+		Summary: pdbSummary,
 	}, args.ResumeFrom, sink)
 }

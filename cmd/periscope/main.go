@@ -2299,8 +2299,14 @@ type kindReg struct {
 var watchKinds = []kindReg{
 	{Name: "pods", Group: "core", Watch: k8s.WatchPods},
 	{Name: "events", Group: "core", Watch: k8s.WatchEvents},
+	{Name: "deployments", Group: "workloads", Watch: k8s.WatchDeployments},
+	{Name: "statefulsets", Group: "workloads", Watch: k8s.WatchStatefulSets},
+	{Name: "daemonsets", Group: "workloads", Watch: k8s.WatchDaemonSets},
 	{Name: "replicasets", Group: "workloads", Watch: k8s.WatchReplicaSets},
 	{Name: "jobs", Group: "workloads", Watch: k8s.WatchJobs},
+	{Name: "cronjobs", Group: "workloads", Watch: k8s.WatchCronJobs},
+	{Name: "horizontalpodautoscalers", Group: "workloads", Watch: k8s.WatchHorizontalPodAutoscalers},
+	{Name: "poddisruptionbudgets", Group: "workloads", Watch: k8s.WatchPodDisruptionBudgets},
 }
 
 // resourceWatchHandler is the kind-agnostic SSE handler for resource

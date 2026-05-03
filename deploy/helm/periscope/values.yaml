@@ -416,9 +416,12 @@ exec:
 #   "workloads"    group alias — every kind in the workloads group
 #   "core,workloads"  multiple groups, one token each
 #
-# Per-kind tokens (current registry): pods, events, replicasets, jobs.
+# Per-kind tokens (current registry): pods, events, deployments,
+# statefulsets, daemonsets, replicasets, jobs, cronjobs,
+# horizontalpodautoscalers, poddisruptionbudgets.
 # Group aliases (current registry): core (= pods, events),
-# workloads (= replicasets, jobs).
+# workloads (= deployments, statefulsets, daemonsets, replicasets,
+# jobs, cronjobs, horizontalpodautoscalers, poddisruptionbudgets).
 #
 # Reasons to opt out: an HTTP proxy / load balancer in front of
 # Periscope that buffers responses or kills idle connections under

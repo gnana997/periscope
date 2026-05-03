@@ -54,14 +54,23 @@ interface ResourceQueryArgs {
 // polling after repeated reconnect failures. Kinds not listed here
 // stay refresh-on-demand.
 //
-// The four streaming kinds (pods, events, replicasets, jobs) keep
-// their entries here on purpose — they're the polling fallback path
-// when useResourceStream surfaces streamStatus="polling_fallback".
+// The streaming kinds keep their entries here on purpose — they're the
+// polling fallback path when useResourceStream surfaces
+// streamStatus="polling_fallback". Cadences trade churn vs. apiserver
+// load: pods/events at 15s match the live cluster signal users expect
+// during incidents; workload controllers at 30s reflect their slower
+// change rate.
 const LIST_REFETCH_INTERVAL: Partial<Record<ResourceKind, number>> = {
   pods: 15_000,
-  replicasets: 30_000,
   events: 15_000,
+  deployments: 30_000,
+  statefulsets: 30_000,
+  daemonsets: 30_000,
+  replicasets: 30_000,
   jobs: 30_000,
+  cronjobs: 30_000,
+  horizontalpodautoscalers: 30_000,
+  poddisruptionbudgets: 30_000,
 };
 
 // WATCH_STREAM_KINDS mirrors the WatchStreamKind union; lifted here so
@@ -69,8 +78,14 @@ const LIST_REFETCH_INTERVAL: Partial<Record<ResourceKind, number>> = {
 const WATCH_STREAM_KINDS: ReadonlyArray<ResourceKind> = [
   "pods",
   "events",
+  "deployments",
+  "statefulsets",
+  "daemonsets",
   "replicasets",
   "jobs",
+  "cronjobs",
+  "horizontalpodautoscalers",
+  "poddisruptionbudgets",
 ];
 
 function isWatchStreamKind(k: ResourceKind): k is WatchStreamKind {
