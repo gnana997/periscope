@@ -10,8 +10,10 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -49,6 +51,11 @@ func main() {
 
 	watchCfg := parseWatchStreamsEnv(os.Getenv("PERISCOPE_WATCH_STREAMS"))
 	slog.Info("watch streams", "pods", watchCfg.pods)
+
+	// Tracks active watch SSE streams for the /debug/streams page. Lives
+	// for the lifetime of the process; entries register on stream open
+	// and remove on stream close.
+	streamTracker := newStreamTracker()
 
 	authCfg, err := auth.Load(os.Getenv("PERISCOPE_AUTH_FILE"))
 	if err != nil {
@@ -802,8 +809,15 @@ func main() {
 
 	if watchCfg.pods {
 		router.Get("/api/clusters/{cluster}/pods/watch",
-			credentials.Wrap(factory, podsWatchHandler(registry)))
+			credentials.Wrap(factory, podsWatchHandler(registry, streamTracker)))
 	}
+
+	// Debug endpoint listing currently-open watch streams. JSON for
+	// easy scraping; auth middleware applies (any authenticated user).
+	// Always registered — empty snapshot when no streams are configured.
+	router.Get("/debug/streams", func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(w, http.StatusOK, streamTracker.snapshot())
+	})
 
 	// --- Secret reveal endpoint (audit-logged, per-key) ---
 
@@ -1816,6 +1830,57 @@ func (s *watchChannelSink) Send(ev k8s.WatchEvent) bool {
 	}
 }
 
+// streamEntry is one row of /debug/streams. Fields are JSON-tagged
+// for direct serialization.
+type streamEntry struct {
+	ID        int64     `json:"id"`
+	Actor     string    `json:"actor"`
+	Cluster   string    `json:"cluster"`
+	Kind      string    `json:"kind"`
+	Namespace string    `json:"namespace"`
+	OpenedAt  time.Time `json:"openedAt"`
+}
+
+// streamTracker is an in-memory registry of active watch SSE streams.
+// Used solely by /debug/streams for operator visibility — handlers call
+// register on entry, the returned deregister func runs in defer.
+type streamTracker struct {
+	mu     sync.Mutex
+	next   int64
+	active map[int64]streamEntry
+}
+
+func newStreamTracker() *streamTracker {
+	return &streamTracker{active: make(map[int64]streamEntry)}
+}
+
+// register adds e and returns its id plus a deregister func.
+func (t *streamTracker) register(e streamEntry) (int64, func()) {
+	t.mu.Lock()
+	t.next++
+	e.ID = t.next
+	t.active[e.ID] = e
+	t.mu.Unlock()
+	return e.ID, func() {
+		t.mu.Lock()
+		delete(t.active, e.ID)
+		t.mu.Unlock()
+	}
+}
+
+// snapshot returns a copy of all active entries, sorted by id (oldest
+// streams first).
+func (t *streamTracker) snapshot() []streamEntry {
+	t.mu.Lock()
+	out := make([]streamEntry, 0, len(t.active))
+	for _, e := range t.active {
+		out = append(out, e)
+	}
+	t.mu.Unlock()
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	return out
+}
+
 // podsWatchHandler streams pod ADDED/MODIFIED/DELETED events as Server-Sent
 // Events. Wire format (frozen — frontend depends on it):
 //
@@ -1838,7 +1903,11 @@ func (s *watchChannelSink) Send(ev k8s.WatchEvent) bool {
 //
 // <Pod> is the same DTO returned by GET /api/clusters/{c}/pods, so the
 // frontend cache patches with type-identical objects.
-func podsWatchHandler(reg *clusters.Registry) credentials.Handler {
+//
+// Lifecycle transitions are slog'd at info level with event names
+// "watch_stream.opened" / "watch_stream.closed" so log-to-metrics
+// agents can derive counters until Prometheus is wired up.
+func podsWatchHandler(reg *clusters.Registry, tracker *streamTracker) credentials.Handler {
 	return func(w http.ResponseWriter, r *http.Request, p credentials.Provider) {
 		c, ok := reg.ByName(chi.URLParam(r, "cluster"))
 		if !ok {
@@ -1854,6 +1923,17 @@ func podsWatchHandler(reg *clusters.Registry) credentials.Handler {
 		}
 		defer sw.Close()
 
+		id, deregister := tracker.register(streamEntry{
+			Actor:     p.Actor(),
+			Cluster:   c.Name,
+			Kind:      "pods",
+			Namespace: ns,
+			OpenedAt:  time.Now(),
+		})
+		defer deregister()
+		slog.InfoContext(r.Context(), "watch_stream.opened",
+			"id", id, "kind", "pods", "cluster", c.Name, "ns", ns, "actor", p.Actor())
+
 		eventCh := make(chan k8s.WatchEvent, 256)
 		sink := &watchChannelSink{ctx: r.Context(), ch: eventCh}
 
@@ -1868,6 +1948,13 @@ func podsWatchHandler(reg *clusters.Registry) credentials.Handler {
 			}, sink)
 		}()
 
+		closeReason := "ctx_done"
+		defer func() {
+			slog.InfoContext(r.Context(), "watch_stream.closed",
+				"id", id, "kind", "pods", "cluster", c.Name, "ns", ns,
+				"actor", p.Actor(), "reason", closeReason)
+		}()
+
 		for {
 			select {
 			case <-r.Context().Done():
@@ -1880,13 +1967,21 @@ func podsWatchHandler(reg *clusters.Registry) credentials.Handler {
 					<-streamDone
 					switch {
 					case streamErr != nil && !errors.Is(streamErr, context.Canceled):
+						closeReason = "error"
 						slog.ErrorContext(r.Context(), "pods watch failed",
 							"err", streamErr, "cluster", c.Name, "ns", ns, "actor", p.Actor())
 						_ = sw.Event("error", "", map[string]string{"message": streamErr.Error()})
 					case sink.closedByBackpressure:
+						closeReason = "backpressure"
 						_ = sw.Event("backpressure", "", struct{}{})
+					default:
+						closeReason = "eof"
 					}
 					return
+				}
+				if ev.Type == k8s.WatchRelist {
+					slog.InfoContext(r.Context(), "watch_stream.relist",
+						"id", id, "kind", "pods", "cluster", c.Name, "ns", ns)
 				}
 				emitPodWatchEvent(sw, ev)
 			}
