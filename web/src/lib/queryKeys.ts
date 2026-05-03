@@ -44,8 +44,6 @@ export const queryKeys = {
     openapi: (group: string, version: string) =>
       ["cluster", c, "openapi", group, version] as const,
     search: (q: string) => ["cluster", c, "search", q] as const,
-    clusterEvents: (ns: string) =>
-      ["cluster", c, "cluster-events", ns] as const,
 
     // Per-kind cascade. The `kind` string is the YAML/URL plural
     // ("deployments", "ingresses", …) — the same token the rest of

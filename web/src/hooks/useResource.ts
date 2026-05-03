@@ -279,13 +279,9 @@ export function useCronJobDetail(cluster: string, ns: string, name: string | nul
 
 export function useClusterEvents(cluster: string, namespace?: string) {
   // Thin wrapper around useResource so EventsPage benefits from the
-  // same drop-in streaming dispatch as Pods/Jobs/ReplicaSets. The
-  // legacy queryKeys.cluster(c).clusterEvents(ns) key is now unused;
-  // the canonical cache slot is queryKeys.cluster(c).kind("events").list(ns)
-  // (where useResourceStream writes its snapshot + deltas).
-  //
-  // Type-asserts data back to ClusterEventList — for events that's
-  // exactly what the underlying ResourceListResponse union narrows to.
+  // same drop-in streaming dispatch as Pods/Jobs/ReplicaSets. Type-
+  // asserts data back to ClusterEventList — for events that's exactly
+  // what the underlying ResourceListResponse union narrows to.
   const result = useResource({
     cluster,
     resource: "events",
