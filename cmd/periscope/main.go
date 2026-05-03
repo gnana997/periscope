@@ -2081,7 +2081,7 @@ func podsWatchHandler(
 		go func() {
 			defer close(streamDone)
 			defer close(eventCh)
-			streamErr = k8s.WatchPods(r.Context(), p, k8s.WatchPodsArgs{
+			streamErr = k8s.WatchPods(r.Context(), p, k8s.WatchArgs{
 				Cluster:   c,
 				Namespace: ns,
 			}, sink)

@@ -103,7 +103,7 @@ func TestWatchPods_InitialSnapshot(t *testing.T) {
 
 	done := make(chan error, 1)
 	go func() {
-		done <- WatchPods(ctx, stubProvider{}, WatchPodsArgs{
+		done <- WatchPods(ctx, stubProvider{}, WatchArgs{
 			Cluster: clusters.Cluster{Name: "demo", Backend: clusters.BackendKubeconfig},
 		}, sink)
 	}()
@@ -140,7 +140,7 @@ func TestWatchPods_AddedThenDeleted(t *testing.T) {
 	defer cancel()
 
 	go func() {
-		_ = WatchPods(ctx, stubProvider{}, WatchPodsArgs{
+		_ = WatchPods(ctx, stubProvider{}, WatchArgs{
 			Cluster:   clusters.Cluster{Name: "demo", Backend: clusters.BackendKubeconfig},
 			Namespace: "default",
 		}, sink)
@@ -187,7 +187,7 @@ func TestWatchPods_ContextCancellation(t *testing.T) {
 
 	done := make(chan error, 1)
 	go func() {
-		done <- WatchPods(ctx, stubProvider{}, WatchPodsArgs{
+		done <- WatchPods(ctx, stubProvider{}, WatchArgs{
 			Cluster: clusters.Cluster{Name: "demo", Backend: clusters.BackendKubeconfig},
 		}, sink)
 	}()
@@ -215,7 +215,7 @@ func TestWatchPods_BackpressureCloses(t *testing.T) {
 
 	done := make(chan error, 1)
 	go func() {
-		done <- WatchPods(context.Background(), stubProvider{}, WatchPodsArgs{
+		done <- WatchPods(context.Background(), stubProvider{}, WatchArgs{
 			Cluster: clusters.Cluster{Name: "demo", Backend: clusters.BackendKubeconfig},
 		}, sink)
 	}()
@@ -252,7 +252,7 @@ func TestWatchPods_GoneTriggersRelist(t *testing.T) {
 
 	done := make(chan error, 1)
 	go func() {
-		done <- WatchPods(ctx, stubProvider{}, WatchPodsArgs{
+		done <- WatchPods(ctx, stubProvider{}, WatchArgs{
 			Cluster: clusters.Cluster{Name: "demo", Backend: clusters.BackendKubeconfig},
 		}, sink)
 	}()
@@ -307,7 +307,7 @@ func TestWatchPods_NonGoneWatchErrorPropagates(t *testing.T) {
 
 	done := make(chan error, 1)
 	go func() {
-		done <- WatchPods(context.Background(), stubProvider{}, WatchPodsArgs{
+		done <- WatchPods(context.Background(), stubProvider{}, WatchArgs{
 			Cluster: clusters.Cluster{Name: "demo", Backend: clusters.BackendKubeconfig},
 		}, sink)
 	}()
@@ -336,6 +336,154 @@ func TestWatchPods_NonGoneWatchErrorPropagates(t *testing.T) {
 	}
 }
 
+// --- WatchEvents tests ---
+
+func newTestK8sEvent(name, ns, rv string, last time.Time) *corev1.Event {
+	return &corev1.Event{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:            name,
+			Namespace:       ns,
+			ResourceVersion: rv,
+		},
+		InvolvedObject: corev1.ObjectReference{Kind: "Pod", Name: "p"},
+		Type:           "Warning",
+		Reason:         "FailedScheduling",
+		Message:        "no nodes available",
+		Count:          3,
+		FirstTimestamp: metav1.NewTime(last.Add(-time.Minute)),
+		LastTimestamp:  metav1.NewTime(last),
+		Source:         corev1.EventSource{Component: "scheduler"},
+	}
+}
+
+func TestWatchEvents_InitialSnapshotSortedNewestFirst(t *testing.T) {
+	now := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
+	older := newTestK8sEvent("old", "default", "1", now.Add(-1*time.Hour))
+	newer := newTestK8sEvent("new", "default", "2", now)
+
+	cs := fake.NewSimpleClientset(older, newer)
+	swapNewClientFn(t, cs)
+
+	sink := newTestSink(8)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go func() {
+		_ = WatchEvents(ctx, stubProvider{}, WatchArgs{
+			Cluster:   clusters.Cluster{Name: "demo", Backend: clusters.BackendKubeconfig},
+			Namespace: "default",
+		}, sink)
+	}()
+
+	ev := awaitEvent(t, sink)
+	if ev.Type != WatchSnapshot {
+		t.Fatalf("first event = %v, want snapshot", ev.Type)
+	}
+	items, ok := ev.Items.([]ClusterEvent)
+	if !ok {
+		t.Fatalf("Items type = %T, want []ClusterEvent", ev.Items)
+	}
+	if len(items) != 2 {
+		t.Fatalf("snapshot len = %d, want 2", len(items))
+	}
+	// Newer first.
+	if !items[0].Last.After(items[1].Last) {
+		t.Errorf("snapshot not sorted newest-first: %v then %v", items[0].Last, items[1].Last)
+	}
+}
+
+func TestWatchEvents_AddedDelivered(t *testing.T) {
+	cs := fake.NewSimpleClientset()
+	swapNewClientFn(t, cs)
+
+	sink := newTestSink(8)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go func() {
+		_ = WatchEvents(ctx, stubProvider{}, WatchArgs{
+			Cluster:   clusters.Cluster{Name: "demo", Backend: clusters.BackendKubeconfig},
+			Namespace: "default",
+		}, sink)
+	}()
+
+	awaitEvent(t, sink) // empty snapshot
+
+	ev := newTestK8sEvent("kicked", "default", "10", time.Now())
+	if _, err := cs.CoreV1().Events("default").Create(ctx, ev, metav1.CreateOptions{}); err != nil {
+		t.Fatalf("create event: %v", err)
+	}
+
+	got := awaitEvent(t, sink)
+	if got.Type != WatchAdded {
+		t.Fatalf("event type = %v, want added", got.Type)
+	}
+	ce, ok := got.Object.(ClusterEvent)
+	if !ok {
+		t.Fatalf("Object type = %T, want ClusterEvent", got.Object)
+	}
+	if ce.Reason != "FailedScheduling" {
+		t.Errorf("ClusterEvent.Reason = %q, want FailedScheduling", ce.Reason)
+	}
+}
+
+func TestWatchEvents_ContextCancellation(t *testing.T) {
+	cs := fake.NewSimpleClientset()
+	swapNewClientFn(t, cs)
+	sink := newTestSink(8)
+	ctx, cancel := context.WithCancel(context.Background())
+
+	done := make(chan error, 1)
+	go func() {
+		done <- WatchEvents(ctx, stubProvider{}, WatchArgs{
+			Cluster:   clusters.Cluster{Name: "demo", Backend: clusters.BackendKubeconfig},
+			Namespace: "default",
+		}, sink)
+	}()
+
+	awaitEvent(t, sink)
+	cancel()
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Errorf("WatchEvents returned %v after cancel, want nil", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("WatchEvents did not return after cancel")
+	}
+}
+
+func TestWatchEvents_GoneTriggersRelist(t *testing.T) {
+	cs := fake.NewSimpleClientset()
+	fw := &fakeWatcher{RaceFreeFakeWatcher: watch.NewRaceFreeFake()}
+	cs.PrependWatchReactor("events", func(_ ktesting.Action) (bool, watch.Interface, error) {
+		return true, fw, nil
+	})
+	swapNewClientFn(t, cs)
+
+	sink := newTestSink(16)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go func() {
+		_ = WatchEvents(ctx, stubProvider{}, WatchArgs{
+			Cluster: clusters.Cluster{Name: "demo", Backend: clusters.BackendKubeconfig},
+		}, sink)
+	}()
+
+	awaitEvent(t, sink) // initial snapshot
+
+	fw.Error(&metav1.Status{Status: metav1.StatusFailure, Code: 410, Reason: metav1.StatusReasonGone, Message: "rv expired"})
+
+	if got := awaitEvent(t, sink); got.Type != WatchRelist {
+		t.Fatalf("event = %v, want relist", got.Type)
+	}
+	if got := awaitEvent(t, sink); got.Type != WatchSnapshot {
+		t.Fatalf("event = %v, want snapshot after relist", got.Type)
+	}
+}
+
 func TestWatchPods_ListErrorPropagates(t *testing.T) {
 	cs := fake.NewSimpleClientset()
 	cs.PrependReactor("list", "pods", func(_ ktesting.Action) (bool, runtime.Object, error) {
@@ -343,7 +491,7 @@ func TestWatchPods_ListErrorPropagates(t *testing.T) {
 	})
 	swapNewClientFn(t, cs)
 
-	err := WatchPods(context.Background(), stubProvider{}, WatchPodsArgs{
+	err := WatchPods(context.Background(), stubProvider{}, WatchArgs{
 		Cluster: clusters.Cluster{Name: "demo", Backend: clusters.BackendKubeconfig},
 	}, newTestSink(8))
 	if err == nil {
