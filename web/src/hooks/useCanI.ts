@@ -28,6 +28,7 @@ import { skipToken, useQuery } from "@tanstack/react-query";
 import { ApiError, api, type CanICheck, type CanIResult } from "../lib/api";
 import { queryKeys } from "../lib/queryKeys";
 import { formatCanIDeniedReason } from "../lib/canIReason";
+import type { AuthzMode, AuthzTier } from "../auth/types";
 import { useAuth } from "../auth/useAuth";
 
 export type { CanICheck, CanIResult } from "../lib/api";
@@ -108,36 +109,18 @@ export function useCanIBatch(
     retry: 0,
   });
 
-  // While loading, render allowed=true so first paint isn't a sea of
-  // greyed-out buttons. Backend is the authoritative gate; if the
-  // user clicks, the action's own 403 path still catches misses.
-  return checks.map((check, i) => {
-    const r = (() => {
-      if (!enabled) return DENIED_FALLBACK;
-      if (query.isError) {
-        // Whole-batch failure: classify so the tooltip can be helpful.
-        const reason =
-          query.error instanceof ApiError
-            ? mapApiErrorToReason(query.error)
-            : "apiserver_unreachable";
-        return { allowed: false, reason };
-      }
-      return query.data?.[i] ?? DENIED_FALLBACK;
-    })();
-    const loading = query.isLoading;
-    const tooltip = formatCanIDeniedReason({
-      result: r,
+  return checks.map((check, i) =>
+    buildCanIDecision({
       check,
+      enabled,
+      isPending: query.isPending,
+      isError: query.isError,
+      error: query.error,
+      result: query.data?.[i],
       authzMode: user?.authzMode,
       tier: user?.tier,
-    });
-    return {
-      allowed: loading ? true : r.allowed,
-      reason: r.reason,
-      tooltip: loading ? "" : tooltip,
-      loading,
-    };
-  });
+    }),
+  );
 }
 
 /**
@@ -163,6 +146,66 @@ const DENIED_DECISION: CanIDecision = {
   tooltip: "",
   loading: false,
 };
+
+/**
+ * buildCanIDecision is the pure per-check decision builder. Extracted
+ * from the hook so it's testable without React rendering infra. Given
+ * the relevant query state and one check, returns the decision the
+ * consuming component will read.
+ *
+ * Disabled-state semantics (cluster="" or no checks): returns the
+ * optimistic placeholder { allowed: true, loading: true } so consumers
+ * do not briefly grey out their buttons during route transitions. The
+ * actual click would still be backend-gated. This matches the doc
+ * comment on useCanIBatch and fixes the bug where !enabled previously
+ * returned allowed=false (the inverse of the documented behavior).
+ */
+export function buildCanIDecision(args: {
+  check: CanICheck;
+  enabled: boolean;
+  isPending: boolean;
+  isError: boolean;
+  error: unknown;
+  result: CanIResult | undefined;
+  authzMode: AuthzMode | undefined;
+  tier: AuthzTier | undefined;
+}): CanIDecision {
+  const { check, enabled, isPending, isError, error, result, authzMode, tier } = args;
+
+  // No usable answer yet — either disabled (skipToken because cluster
+  // is empty or no checks), or fetching for the first time, or in the
+  // synchronous render between a queryKey change and the new fetch
+  // starting. All three render the same: optimistic placeholder so
+  // consumer buttons do not flicker DISABLED while waiting for the
+  // apiserver answer. The actual click would still gate at the K8s
+  // API layer.
+  if (!enabled || isPending) {
+    return { allowed: true, reason: "", tooltip: "", loading: true };
+  }
+
+  // Whole-batch failure: classify so the tooltip can be helpful.
+  if (isError) {
+    const reason = error instanceof ApiError
+      ? mapApiErrorToReason(error)
+      : "apiserver_unreachable";
+    const r: CanIResult = { allowed: false, reason };
+    return {
+      allowed: false,
+      reason,
+      tooltip: formatCanIDeniedReason({ result: r, check, authzMode, tier }),
+      loading: false,
+    };
+  }
+
+  // Resolved: return the apiserver's answer for this check.
+  const r = result ?? DENIED_FALLBACK;
+  return {
+    allowed: r.allowed,
+    reason: r.reason,
+    tooltip: formatCanIDeniedReason({ result: r, check, authzMode, tier }),
+    loading: false,
+  };
+}
 
 function mapApiErrorToReason(err: ApiError): string {
   switch (err.status) {
