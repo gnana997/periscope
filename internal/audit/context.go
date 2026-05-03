@@ -49,6 +49,20 @@ func RequestContextFrom(ctx context.Context) RequestContext {
 // No-op if no RequestContext is present (e.g. internal callers that
 // bypassed httpx.AuditBegin). Used by the auth middleware once the
 // Session has been resolved from the cookie.
+//
+// IMPORTANT — single-writer per request. PatchActor MUST be called
+// from the request goroutine only, never from a handler-spawned
+// goroutine. The function mutates a *RequestContext pointer shared
+// with concurrent readers in Emitter.Record; a write from a background
+// goroutine would race (the race detector catches this the first
+// time you run the test suite with -race).
+//
+// Today the auth middleware satisfies this constraint: it runs
+// synchronously before any handler. If you add a future emit site
+// that runs in a background goroutine spawned from a handler
+// (e.g. async log streaming, batched writes), snapshot the Actor at
+// goroutine launch time and pass it explicitly rather than re-reading
+// from ctx.
 func PatchActor(ctx context.Context, a Actor) {
 	if v, ok := ctx.Value(requestContextKey).(*RequestContext); ok && v != nil {
 		v.Actor = a

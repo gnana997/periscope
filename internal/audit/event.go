@@ -70,9 +70,9 @@ const (
 // emission time. We snapshot rather than holding a pointer so a later
 // sink can serialize the event without re-reading request context.
 type Actor struct {
-	Sub    string
-	Email  string
-	Groups []string
+	Sub    string   `json:"sub"`
+	Email  string   `json:"email,omitempty"`
+	Groups []string `json:"groups,omitempty"`
 }
 
 // ResourceRef is the Kubernetes object the action targeted.
@@ -83,11 +83,11 @@ type Actor struct {
 // leaves Name empty. Empty strings are written as empty strings; sinks
 // don't need to special-case absence.
 type ResourceRef struct {
-	Group     string
-	Version   string
-	Resource  string
-	Namespace string
-	Name      string
+	Group     string `json:"group,omitempty"`
+	Version   string `json:"version,omitempty"`
+	Resource  string `json:"resource,omitempty"`
+	Namespace string `json:"namespace,omitempty"`
+	Name      string `json:"name,omitempty"`
 }
 
 // Event is the single shape every audit emission produces.

@@ -4,14 +4,12 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
 	"strconv"
 	"sync"
-	"syscall"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -161,7 +159,7 @@ type SQLiteSink struct {
 	insertStmt *sql.Stmt
 }
 
-const sqliteSchema = `
+const schemaV1 = `
 CREATE TABLE IF NOT EXISTS audit_events (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
     ts_unix_nano  INTEGER NOT NULL,
@@ -188,6 +186,51 @@ CREATE INDEX IF NOT EXISTS idx_audit_verb_ts   ON audit_events (verb, ts_unix_na
 CREATE INDEX IF NOT EXISTS idx_audit_outcome_ts ON audit_events (outcome, ts_unix_nano);
 CREATE INDEX IF NOT EXISTS idx_audit_scope_ts  ON audit_events (cluster, res_namespace, ts_unix_nano);
 `
+
+// migrations is the ordered list of schema versions. The slice index
+// + 1 is the version number stored in PRAGMA user_version. Append a
+// new entry when the schema needs to evolve — never edit existing
+// entries (they may have already run on production DBs).
+var migrations = []string{
+	schemaV1,
+}
+
+// runMigrations applies any unapplied schema migrations to the open
+// DB inside a single transaction per migration, then bumps
+// PRAGMA user_version. Idempotent on a fully-migrated DB.
+//
+// Failure mid-migration aborts the transaction; callers (OpenSQLiteSink)
+// surface the error so main() can fail-open to stdout-only audit.
+func runMigrations(ctx context.Context, db *sql.DB) error {
+	var current int
+	if err := db.QueryRowContext(ctx, "PRAGMA user_version").Scan(&current); err != nil {
+		return fmt.Errorf("read user_version: %w", err)
+	}
+	target := len(migrations)
+	if current > target {
+		// DB is from a newer Periscope build than this binary. Refuse
+		// to downgrade; operator must roll forward.
+		return fmt.Errorf("audit DB is at schema v%d, this binary only knows v%d (downgrade not supported)", current, target)
+	}
+	for v := current; v < target; v++ {
+		tx, err := db.BeginTx(ctx, nil)
+		if err != nil {
+			return fmt.Errorf("begin migration v%d: %w", v+1, err)
+		}
+		if _, err := tx.ExecContext(ctx, migrations[v]); err != nil {
+			_ = tx.Rollback()
+			return fmt.Errorf("apply migration v%d: %w", v+1, err)
+		}
+		if _, err := tx.ExecContext(ctx, fmt.Sprintf("PRAGMA user_version = %d", v+1)); err != nil {
+			_ = tx.Rollback()
+			return fmt.Errorf("set user_version v%d: %w", v+1, err)
+		}
+		if err := tx.Commit(); err != nil {
+			return fmt.Errorf("commit migration v%d: %w", v+1, err)
+		}
+	}
+	return nil
+}
 
 const insertSQL = `
 INSERT INTO audit_events (
@@ -226,7 +269,7 @@ func OpenSQLiteSink(ctx context.Context, cfg SQLiteConfig) (*SQLiteSink, error) 
 		_ = db.Close()
 		return nil, fmt.Errorf("audit: ping sqlite: %w", err)
 	}
-	if _, err := db.ExecContext(ctx, sqliteSchema); err != nil {
+	if err := runMigrations(ctx, db); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("audit: migrate schema: %w", err)
 	}
@@ -242,7 +285,12 @@ func OpenSQLiteSink(ctx context.Context, cfg SQLiteConfig) (*SQLiteSink, error) 
 	// VacuumInterval. Also avoids a goroutine-scheduling race with
 	// callers that immediately Record() events on the new sink.
 	if cfg.RetentionDays > 0 || cfg.MaxSizeMB > 0 {
-		s.runRetention(ctx)
+		// Bound the initial sweep so a stale DB on a slow PVC cannot fail
+		// the readiness probe. The regular vacuum loop catches up on its
+		// 24h cadence if this round hits the deadline.
+		initCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		s.runRetention(initCtx)
+		cancel()
 	}
 	go s.retentionLoop(ctx)
 	return s, nil
@@ -360,50 +408,52 @@ func (s *SQLiteSink) runRetention(ctx context.Context) {
 // on-disk file is under MaxSizeMB. Capped at 10 iterations so a
 // pathologically wrong cap doesn't lock the loop.
 func (s *SQLiteSink) pruneBySize(ctx context.Context) (int64, error) {
+	// Single-shot prune. Estimate the fraction of rows to drop from the
+	// (currentSize, targetSize) ratio, delete that many oldest rows in
+	// one DELETE, return. The post-prune VACUUM in runRetention reclaims
+	// pages back to the OS in a single pass.
+	//
+	// Why single-shot rather than a loop: without an in-loop VACUUM the
+	// file size doesn't shrink between iterations, so any size-based
+	// convergence test would never converge. Estimating up front is the
+	// same total work and avoids a misleading "did not converge" error
+	// when the loop simply lacked a way to observe progress.
 	target := int64(s.cfg.MaxSizeMB) * 1024 * 1024
-	var total int64
-	for i := 0; i < 10; i++ {
-		size, err := dbFileSize(s.cfg.Path)
-		if err != nil {
-			return total, err
-		}
-		if size <= target {
-			return total, nil
-		}
-		var rowCount int64
-		if err := s.db.QueryRowContext(ctx,
-			`SELECT COUNT(*) FROM audit_events`).Scan(&rowCount); err != nil {
-			return total, err
-		}
-		if rowCount == 0 {
-			return total, nil
-		}
-		// Drop the oldest 10% in one shot. Bounded so a small DB
-		// converges in a few iterations and a giant DB doesn't
-		// take a single multi-second DELETE.
-		batch := rowCount / 10
-		if batch < 1 {
-			batch = 1
-		}
-		res, err := s.db.ExecContext(ctx,
-			`DELETE FROM audit_events
-			 WHERE id IN (
-			     SELECT id FROM audit_events ORDER BY ts_unix_nano ASC LIMIT ?
-			 )`, batch)
-		if err != nil {
-			return total, err
-		}
-		n, _ := res.RowsAffected()
-		total += n
-		if n == 0 {
-			return total, nil
-		}
-		// VACUUM between batches so dbFileSize reflects the prune.
-		if _, err := s.db.ExecContext(ctx, `VACUUM`); err != nil {
-			return total, err
-		}
+	size, err := dbFileSize(s.cfg.Path)
+	if err != nil {
+		return 0, err
 	}
-	return total, errors.New("size-prune did not converge in 10 iterations")
+	if size <= target {
+		return 0, nil
+	}
+	var rowCount int64
+	if err := s.db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM audit_events`).Scan(&rowCount); err != nil {
+		return 0, err
+	}
+	if rowCount == 0 {
+		return 0, nil
+	}
+	// 10% headroom: drop slightly more than the ratio suggests so we land
+	// comfortably under the cap after VACUUM rather than just at it.
+	excess := float64(size-target) / float64(size)
+	toDrop := int64(float64(rowCount) * excess * 1.1)
+	if toDrop < 1 {
+		toDrop = 1
+	}
+	if toDrop > rowCount {
+		toDrop = rowCount
+	}
+	res, err := s.db.ExecContext(ctx,
+		`DELETE FROM audit_events
+		 WHERE id IN (
+		     SELECT id FROM audit_events ORDER BY ts_unix_nano ASC LIMIT ?
+		 )`, toDrop)
+	if err != nil {
+		return 0, err
+	}
+	n, _ := res.RowsAffected()
+	return n, nil
 }
 
 func dbFileSize(path string) (int64, error) {
@@ -414,19 +464,6 @@ func dbFileSize(path string) (int64, error) {
 	return fi.Size(), nil
 }
 
-// availableDiskMB returns the bytes-available count at dir,
-// converted to MiB. Used by Validate to flag a cap larger than the
-// underlying volume can hold. Returns an error if the path doesn't
-// exist yet — Validate handles that as "skip the disk check."
-func availableDiskMB(dir string) (int64, error) {
-	var st syscall.Statfs_t
-	if err := syscall.Statfs(dir, &st); err != nil {
-		return 0, err
-	}
-	// Bavail is blocks available to non-root processes; Bsize is
-	// the block size. Multiply, divide by MiB.
-	return int64(st.Bavail) * int64(st.Bsize) / (1024 * 1024), nil
-}
 
 // Query implements Reader. Builds the SELECT dynamically from
 // QueryArgs — every filter is parameterized; nothing is interpolated.

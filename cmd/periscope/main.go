@@ -140,7 +140,7 @@ func main() {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))
 	})
-	router.Get("/api/whoami", credentials.Wrap(factory, whoami))
+	router.Get("/api/whoami", credentials.Wrap(factory, whoamiHandler(auditReader != nil, authzResolver)))
 	router.Get("/api/clusters", listClustersHandler(registry))
 
 	// Audit query endpoint. Registered only when SQLite is wired.
@@ -946,8 +946,24 @@ func loadRegistry() (*clusters.Registry, error) {
 	return clusters.LoadFromFile(path)
 }
 
-func whoami(w http.ResponseWriter, _ *http.Request, p credentials.Provider) {
-	writeJSON(w, http.StatusOK, map[string]string{"actor": p.Actor()})
+// whoamiHandler returns a closure over the audit-availability flag + the
+// authz resolver so the SPA can render audit nav items only when both the
+// feature is wired and the user's scope (self vs all) is known up front.
+// Replaces the older bare whoami(w, r, p) shape.
+func whoamiHandler(auditEnabled bool, resolver *authz.Resolver) func(http.ResponseWriter, *http.Request, credentials.Provider) {
+	return func(w http.ResponseWriter, r *http.Request, p credentials.Provider) {
+		resp := map[string]any{"actor": p.Actor()}
+		resp["auditEnabled"] = auditEnabled
+		scope := "self"
+		if auditEnabled && resolver != nil {
+			s := credentials.SessionFromContext(r.Context())
+			if resolver.IsAuditAdmin(authz.Identity{Subject: s.Subject, Groups: s.Groups}) {
+				scope = "all"
+			}
+		}
+		resp["auditScope"] = scope
+		writeJSON(w, http.StatusOK, resp)
+	}
 }
 
 // listClustersHandler returns the registered clusters with PR4's

@@ -38,16 +38,17 @@ func auditQueryHandler(reader audit.Reader, resolver *authz.Resolver) http.Handl
 			return
 		}
 
-		// Self-only enforcement. We hard-override Actor so a client
-		// passing ?actor=someone-else gets quietly scoped down to
-		// themselves rather than 403'd — the alternative leaks the
-		// existence of other actors via the error.
-		canSeeAll := resolver != nil &&
-			resolver.ResolvedTier(authz.Identity{
-				Subject: s.Subject, Groups: s.Groups,
-			}) == authz.TierAdmin
+		// canSeeAll resolves via Resolver.IsAuditAdmin — combines the explicit
+		// AuditAdminGroups override with mode-specific fallbacks. See
+		// internal/authz/mode.go::IsAuditAdmin for the full resolution order.
+		canSeeAll := resolver != nil && resolver.IsAuditAdmin(authz.Identity{
+			Subject: s.Subject, Groups: s.Groups,
+		})
 		if !canSeeAll {
 			args.Actor = s.Subject
+			w.Header().Set("X-Audit-Scope", "self")
+		} else {
+			w.Header().Set("X-Audit-Scope", "all")
 		}
 
 		result, err := reader.Query(r.Context(), args)

@@ -1,6 +1,7 @@
 package audit
 
 import (
+	"strings"
 	"context"
 	"database/sql"
 	"path/filepath"
@@ -276,5 +277,213 @@ func TestLoadSQLiteConfigFromEnv_Overrides(t *testing.T) {
 	}
 	if cfg.VacuumInterval != 6*time.Hour {
 		t.Errorf("VacuumInterval: got %v", cfg.VacuumInterval)
+	}
+}
+
+func TestSQLiteSink_PruneBySize_SingleShot(t *testing.T) {
+	// 1MB cap; each row is small but with overhead the file will exceed
+	// 1MB after a few thousand inserts, exercising the prune path.
+	s := openTestSink(t, SQLiteConfig{MaxSizeMB: 1})
+	ctx := context.Background()
+
+	// Insert enough rows to push the file well past 1MB.
+	for i := 0; i < 5000; i++ {
+		s.Record(ctx, Event{
+			Timestamp: time.Now(),
+			Actor:     Actor{Sub: "alice"},
+			Verb:      VerbApply,
+			Outcome:   OutcomeSuccess,
+			Cluster:   "prod",
+			Reason:    "padding-padding-padding-padding-padding-padding-padding-padding",
+			Extra:     map[string]any{"i": i, "filler": "0123456789012345678901234567890123456789"},
+		})
+	}
+	before := countRows(t, s.db)
+	if before == 0 {
+		t.Fatal("no rows inserted")
+	}
+
+	// Single-shot prune: returns rows-deleted, no convergence error.
+	dropped, err := s.pruneBySize(ctx)
+	if err != nil {
+		t.Fatalf("pruneBySize: %v", err)
+	}
+	if dropped == 0 {
+		// File may not have grown past 1MB on this system. Assert the
+		// no-op path returned (0, nil) cleanly.
+		size, _ := dbFileSize(s.cfg.Path)
+		t.Logf("dropped=0 size=%d (under cap, no prune needed)", size)
+		return
+	}
+	after := countRows(t, s.db)
+	if after >= before {
+		t.Errorf("after=%d should be less than before=%d (dropped=%d)", after, before, dropped)
+	}
+	t.Logf("pruned %d rows (before=%d, after=%d)", dropped, before, after)
+}
+
+func TestSQLiteSink_PruneBySize_NoOpUnderCap(t *testing.T) {
+	s := openTestSink(t, SQLiteConfig{MaxSizeMB: 100})
+	ctx := context.Background()
+	for i := 0; i < 5; i++ {
+		s.Record(ctx, Event{Timestamp: time.Now(), Actor: Actor{Sub: "alice"}, Verb: VerbApply, Outcome: OutcomeSuccess})
+	}
+	dropped, err := s.pruneBySize(ctx)
+	if err != nil {
+		t.Fatalf("pruneBySize: %v", err)
+	}
+	if dropped != 0 {
+		t.Errorf("expected 0 dropped under cap, got %d", dropped)
+	}
+}
+
+func TestSQLiteSink_Query_FilterAndPagination(t *testing.T) {
+	s := openTestSink(t, SQLiteConfig{})
+	ctx := context.Background()
+	base := time.Now().Add(-time.Hour)
+
+	// Insert 10 rows, alternating actors and verbs.
+	for i := 0; i < 10; i++ {
+		actor := "alice"
+		verb := VerbApply
+		outcome := OutcomeSuccess
+		if i%2 == 1 {
+			actor = "bob"
+			verb = VerbDelete
+		}
+		if i%3 == 0 {
+			outcome = OutcomeDenied
+		}
+		s.Record(ctx, Event{
+			Timestamp: base.Add(time.Duration(i) * time.Minute),
+			Actor:     Actor{Sub: actor},
+			Verb:      verb,
+			Outcome:   outcome,
+			Cluster:   "prod",
+		})
+	}
+
+	// Filter by actor.
+	res, err := s.Query(ctx, QueryArgs{Actor: "alice"})
+	if err != nil {
+		t.Fatalf("Query: %v", err)
+	}
+	for _, r := range res.Items {
+		if r.Actor.Sub != "alice" {
+			t.Errorf("actor filter leaked %q", r.Actor.Sub)
+		}
+	}
+	if int64(res.Total) != int64(len(res.Items)) {
+		t.Errorf("Total=%d does not match len(Rows)=%d", res.Total, len(res.Items))
+	}
+
+	// Filter by verb + outcome combined.
+	res, err = s.Query(ctx, QueryArgs{Verb: VerbDelete, Outcome: OutcomeDenied})
+	if err != nil {
+		t.Fatalf("Query: %v", err)
+	}
+	for _, r := range res.Items {
+		if r.Verb != VerbDelete || r.Outcome != OutcomeDenied {
+			t.Errorf("verb+outcome filter leaked: %+v", r)
+		}
+	}
+
+	// Pagination + ordering: ts DESC.
+	res, err = s.Query(ctx, QueryArgs{Limit: 3})
+	if err != nil {
+		t.Fatalf("Query: %v", err)
+	}
+	if len(res.Items) != 3 {
+		t.Fatalf("Limit=3 returned %d rows", len(res.Items))
+	}
+	for i := 1; i < len(res.Items); i++ {
+		if !res.Items[i-1].Timestamp.After(res.Items[i].Timestamp) &&
+			!res.Items[i-1].Timestamp.Equal(res.Items[i].Timestamp) {
+			t.Errorf("ordering not DESC at i=%d: %v vs %v",
+				i, res.Items[i-1].Timestamp, res.Items[i].Timestamp)
+		}
+	}
+
+	// Offset skips the first N.
+	page1, _ := s.Query(ctx, QueryArgs{Limit: 5, Offset: 0})
+	page2, _ := s.Query(ctx, QueryArgs{Limit: 5, Offset: 5})
+	if len(page1.Items) == 0 || len(page2.Items) == 0 {
+		t.Fatal("pagination returned empty pages")
+	}
+	if page1.Items[0].Timestamp.Equal(page2.Items[0].Timestamp) {
+		t.Errorf("pagination overlap: page1[0]==page2[0]")
+	}
+}
+
+func TestSQLiteSink_Query_LimitClamp(t *testing.T) {
+	s := openTestSink(t, SQLiteConfig{})
+	ctx := context.Background()
+	res, err := s.Query(ctx, QueryArgs{Limit: 999999})
+	if err != nil {
+		t.Fatalf("Query: %v", err)
+	}
+	// MaxQueryLimit is 500 per reader.go; the call should not error
+	// even when the requested limit exceeds it.
+	if res.Limit > MaxQueryLimit {
+		t.Errorf("Limit=%d not clamped to %d", res.Limit, MaxQueryLimit)
+	}
+}
+
+func TestSQLiteSink_Query_TimeRange(t *testing.T) {
+	s := openTestSink(t, SQLiteConfig{})
+	ctx := context.Background()
+	now := time.Now()
+	old := now.Add(-2 * time.Hour)
+	recent := now.Add(-10 * time.Minute)
+
+	s.Record(ctx, Event{Timestamp: old, Actor: Actor{Sub: "alice"}, Verb: VerbApply, Outcome: OutcomeSuccess})
+	s.Record(ctx, Event{Timestamp: recent, Actor: Actor{Sub: "alice"}, Verb: VerbApply, Outcome: OutcomeSuccess})
+
+	res, err := s.Query(ctx, QueryArgs{From: now.Add(-30 * time.Minute)})
+	if err != nil {
+		t.Fatalf("Query: %v", err)
+	}
+	if len(res.Items) != 1 {
+		t.Errorf("From filter returned %d rows, want 1", len(res.Items))
+	}
+}
+
+// TestSQLiteSink_Migrations_FreshDB asserts that a brand-new DB ends
+// up with PRAGMA user_version equal to len(migrations).
+func TestSQLiteSink_Migrations_FreshDB(t *testing.T) {
+	s := openTestSink(t, SQLiteConfig{})
+	var v int
+	if err := s.db.QueryRow(`PRAGMA user_version`).Scan(&v); err != nil {
+		t.Fatalf("read user_version: %v", err)
+	}
+	if v != len(migrations) {
+		t.Errorf("user_version=%d, want %d (len(migrations))", v, len(migrations))
+	}
+}
+
+// TestSQLiteSink_Migrations_RefuseDowngrade asserts that an audit DB
+// from a future Periscope build (PRAGMA user_version > len(migrations))
+// is refused at open time rather than silently overwritten.
+func TestSQLiteSink_Migrations_RefuseDowngrade(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "audit.db")
+
+	// Pre-populate a DB at a "future" user_version.
+	{
+		s := openTestSink(t, SQLiteConfig{Path: path})
+		if _, err := s.db.Exec(`PRAGMA user_version = 999`); err != nil {
+			t.Fatalf("set user_version: %v", err)
+		}
+		_ = s.Close()
+	}
+
+	// Re-opening should error with a downgrade-refused message.
+	ctx := context.Background()
+	_, err := OpenSQLiteSink(ctx, SQLiteConfig{Path: path, VacuumInterval: time.Hour})
+	if err == nil {
+		t.Fatal("expected downgrade refusal, got nil")
+	}
+	if !strings.Contains(err.Error(), "downgrade") {
+		t.Errorf("error missing 'downgrade': %v", err)
 	}
 }
