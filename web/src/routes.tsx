@@ -60,6 +60,7 @@ const HorizontalPodAutoscalersPage = lazyNamed(() => import("./pages/HorizontalP
 const PodDisruptionBudgetsPage = lazyNamed(() => import("./pages/PodDisruptionBudgetsPage"), "PodDisruptionBudgetsPage");
 const ReplicaSetsPage = lazyNamed(() => import("./pages/ReplicaSetsPage"), "ReplicaSetsPage");
 const NetworkPoliciesPage = lazyNamed(() => import("./pages/NetworkPoliciesPage"), "NetworkPoliciesPage");
+const EndpointSlicesPage = lazyNamed(() => import("./pages/EndpointSlicesPage"), "EndpointSlicesPage");
 const IngressClassesPage = lazyNamed(() => import("./pages/IngressClassesPage"), "IngressClassesPage");
 const ResourceQuotasPage = lazyNamed(() => import("./pages/ResourceQuotasPage"), "ResourceQuotasPage");
 const LimitRangesPage = lazyNamed(() => import("./pages/LimitRangesPage"), "LimitRangesPage");
@@ -106,6 +107,7 @@ export const router = createBrowserRouter(
         <Route path="poddisruptionbudgets" element={<WithCluster Page={PodDisruptionBudgetsPage} />} />
         <Route path="replicasets" element={<WithCluster Page={ReplicaSetsPage} />} />
         <Route path="networkpolicies" element={<WithCluster Page={NetworkPoliciesPage} />} />
+        <Route path="endpointslices" element={<WithCluster Page={EndpointSlicesPage} />} />
         <Route path="ingressclasses" element={<WithCluster Page={IngressClassesPage} />} />
         <Route path="resourcequotas" element={<WithCluster Page={ResourceQuotasPage} />} />
         <Route path="limitranges" element={<WithCluster Page={LimitRangesPage} />} />

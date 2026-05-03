@@ -36,6 +36,7 @@ import type {
   PDBDetail,
   ReplicaSetDetail,
   NetworkPolicyDetail,
+  EndpointSliceDetail,
   IngressClassDetail,
   ResourceQuota,
   LimitRangeDetail,
@@ -71,6 +72,13 @@ const LIST_REFETCH_INTERVAL: Partial<Record<ResourceKind, number>> = {
   cronjobs: 30_000,
   horizontalpodautoscalers: 30_000,
   poddisruptionbudgets: 30_000,
+  // Networking — services and ingresses are mostly stable; endpointslices
+  // churn rapidly during rollouts (one delta per pod-readiness flip),
+  // which matches pods/events at 15s when the stream falls back.
+  services: 30_000,
+  ingresses: 30_000,
+  networkpolicies: 30_000,
+  endpointslices: 15_000,
 };
 
 // WATCH_STREAM_KINDS mirrors the WatchStreamKind union; lifted here so
@@ -86,6 +94,10 @@ const WATCH_STREAM_KINDS: ReadonlyArray<ResourceKind> = [
   "cronjobs",
   "horizontalpodautoscalers",
   "poddisruptionbudgets",
+  "services",
+  "ingresses",
+  "networkpolicies",
+  "endpointslices",
 ];
 
 function isWatchStreamKind(k: ResourceKind): k is WatchStreamKind {
@@ -180,6 +192,8 @@ export function useResource({
           return api.replicaSets(cluster!, namespace, signal);
         case "networkpolicies":
           return api.networkPolicies(cluster!, namespace, signal);
+        case "endpointslices":
+          return api.endpointSlices(cluster!, namespace, signal);
         case "ingressclasses":
           return api.ingressClasses(cluster!, signal);
         case "resourcequotas":
@@ -555,6 +569,14 @@ export function useNetworkPolicyDetail(cluster: string, ns: string, name: string
   return useQuery<NetworkPolicyDetail>({
     queryKey: queryKeys.cluster(cluster).kind("networkpolicies").detail(ns, name ?? ""),
     queryFn: ({ signal }) => api.getNetworkPolicy(cluster, ns, name!, signal),
+    enabled: Boolean(name),
+  });
+}
+
+export function useEndpointSliceDetail(cluster: string, ns: string, name: string | null) {
+  return useQuery<EndpointSliceDetail>({
+    queryKey: queryKeys.cluster(cluster).kind("endpointslices").detail(ns, name ?? ""),
+    queryFn: ({ signal }) => api.getEndpointSlice(cluster, ns, name!, signal),
     enabled: Boolean(name),
   });
 }

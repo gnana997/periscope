@@ -10,6 +10,8 @@ import (
 	autoscalingv2 "k8s.io/api/autoscaling/v2"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
+	discoveryv1 "k8s.io/api/discovery/v1"
+	networkingv1 "k8s.io/api/networking/v1"
 	policyv1 "k8s.io/api/policy/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -530,5 +532,102 @@ func WatchPodDisruptionBudgets(ctx context.Context, p credentials.Provider, args
 			return cs.PolicyV1().PodDisruptionBudgets(args.Namespace).Watch(ctx, opts)
 		},
 		Summary: pdbSummary,
+	}, args.ResumeFrom, sink)
+}
+
+// WatchServices runs a list-then-watch loop on Services in the given
+// namespace. See watchKind for lifecycle details.
+func WatchServices(ctx context.Context, p credentials.Provider, args WatchArgs, sink WatchSink) error {
+	cs, err := newClientFn(ctx, p, args.Cluster)
+	if err != nil {
+		return fmt.Errorf("build clientset: %w", err)
+	}
+	return watchKind(ctx, watchSpec[corev1.Service, Service]{
+		Kind: "services",
+		List: func(ctx context.Context, opts metav1.ListOptions) ([]corev1.Service, string, error) {
+			list, err := cs.CoreV1().Services(args.Namespace).List(ctx, opts)
+			if err != nil {
+				return nil, "", err
+			}
+			return list.Items, list.ResourceVersion, nil
+		},
+		Watch: func(ctx context.Context, opts metav1.ListOptions) (watch.Interface, error) {
+			return cs.CoreV1().Services(args.Namespace).Watch(ctx, opts)
+		},
+		Summary: serviceSummary,
+	}, args.ResumeFrom, sink)
+}
+
+// WatchIngresses runs a list-then-watch loop on Ingresses in the
+// given namespace. See watchKind for lifecycle details.
+func WatchIngresses(ctx context.Context, p credentials.Provider, args WatchArgs, sink WatchSink) error {
+	cs, err := newClientFn(ctx, p, args.Cluster)
+	if err != nil {
+		return fmt.Errorf("build clientset: %w", err)
+	}
+	return watchKind(ctx, watchSpec[networkingv1.Ingress, Ingress]{
+		Kind: "ingresses",
+		List: func(ctx context.Context, opts metav1.ListOptions) ([]networkingv1.Ingress, string, error) {
+			list, err := cs.NetworkingV1().Ingresses(args.Namespace).List(ctx, opts)
+			if err != nil {
+				return nil, "", err
+			}
+			return list.Items, list.ResourceVersion, nil
+		},
+		Watch: func(ctx context.Context, opts metav1.ListOptions) (watch.Interface, error) {
+			return cs.NetworkingV1().Ingresses(args.Namespace).Watch(ctx, opts)
+		},
+		Summary: ingressSummary,
+	}, args.ResumeFrom, sink)
+}
+
+// WatchNetworkPolicies runs a list-then-watch loop on NetworkPolicies
+// in the given namespace. See watchKind for lifecycle details.
+func WatchNetworkPolicies(ctx context.Context, p credentials.Provider, args WatchArgs, sink WatchSink) error {
+	cs, err := newClientFn(ctx, p, args.Cluster)
+	if err != nil {
+		return fmt.Errorf("build clientset: %w", err)
+	}
+	return watchKind(ctx, watchSpec[networkingv1.NetworkPolicy, NetworkPolicy]{
+		Kind: "networkpolicies",
+		List: func(ctx context.Context, opts metav1.ListOptions) ([]networkingv1.NetworkPolicy, string, error) {
+			list, err := cs.NetworkingV1().NetworkPolicies(args.Namespace).List(ctx, opts)
+			if err != nil {
+				return nil, "", err
+			}
+			return list.Items, list.ResourceVersion, nil
+		},
+		Watch: func(ctx context.Context, opts metav1.ListOptions) (watch.Interface, error) {
+			return cs.NetworkingV1().NetworkPolicies(args.Namespace).Watch(ctx, opts)
+		},
+		Summary: networkPolicySummary,
+	}, args.ResumeFrom, sink)
+}
+
+// WatchEndpointSlices runs a list-then-watch loop on EndpointSlices
+// (discovery.k8s.io/v1) in the given namespace. See watchKind for
+// lifecycle details.
+//
+// EndpointSlices churn fast during rollouts (each pod-readiness
+// transition emits a delta), so streaming saves materially over
+// 30s polling for service-debugging workflows.
+func WatchEndpointSlices(ctx context.Context, p credentials.Provider, args WatchArgs, sink WatchSink) error {
+	cs, err := newClientFn(ctx, p, args.Cluster)
+	if err != nil {
+		return fmt.Errorf("build clientset: %w", err)
+	}
+	return watchKind(ctx, watchSpec[discoveryv1.EndpointSlice, EndpointSlice]{
+		Kind: "endpointslices",
+		List: func(ctx context.Context, opts metav1.ListOptions) ([]discoveryv1.EndpointSlice, string, error) {
+			list, err := cs.DiscoveryV1().EndpointSlices(args.Namespace).List(ctx, opts)
+			if err != nil {
+				return nil, "", err
+			}
+			return list.Items, list.ResourceVersion, nil
+		},
+		Watch: func(ctx context.Context, opts metav1.ListOptions) (watch.Interface, error) {
+			return cs.DiscoveryV1().EndpointSlices(args.Namespace).Watch(ctx, opts)
+		},
+		Summary: endpointSliceSummary,
 	}, args.ResumeFrom, sink)
 }

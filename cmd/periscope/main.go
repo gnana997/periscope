@@ -442,6 +442,12 @@ func main() {
 				return k8s.ListNetworkPolicies(ctx, p, k8s.ListNetworkPoliciesArgs{Cluster: c, Namespace: ns})
 			})))
 
+	router.Get("/api/clusters/{cluster}/endpointslices", credentials.Wrap(factory,
+		listResource(registry, "endpointslices",
+			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, ns string) (k8s.EndpointSliceList, error) {
+				return k8s.ListEndpointSlices(ctx, p, k8s.ListEndpointSlicesArgs{Cluster: c, Namespace: ns})
+			})))
+
 	router.Get("/api/clusters/{cluster}/resourcequotas", credentials.Wrap(factory,
 		listResource(registry, "resourcequotas",
 			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, ns string) (k8s.ResourceQuotaList, error) {
@@ -581,6 +587,12 @@ func main() {
 		detailHandler(registry, "networkpolicy",
 			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, ns, name string) (k8s.NetworkPolicyDetail, error) {
 				return k8s.GetNetworkPolicy(ctx, p, k8s.GetNetworkPolicyArgs{Cluster: c, Namespace: ns, Name: name})
+			})))
+
+	router.Get("/api/clusters/{cluster}/endpointslices/{ns}/{name}", credentials.Wrap(factory,
+		detailHandler(registry, "endpointslice",
+			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, ns, name string) (k8s.EndpointSliceDetail, error) {
+				return k8s.GetEndpointSlice(ctx, p, k8s.GetEndpointSliceArgs{Cluster: c, Namespace: ns, Name: name})
 			})))
 
 	router.Get("/api/clusters/{cluster}/resourcequotas/{ns}/{name}", credentials.Wrap(factory,
@@ -804,6 +816,12 @@ func main() {
 				return k8s.GetNetworkPolicyYAML(ctx, p, k8s.GetNetworkPolicyArgs{Cluster: c, Namespace: ns, Name: name})
 			})))
 
+	router.Get("/api/clusters/{cluster}/endpointslices/{ns}/{name}/yaml", credentials.Wrap(factory,
+		yamlHandler(registry, "endpointslice",
+			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, ns, name string) (string, error) {
+				return k8s.GetEndpointSliceYAML(ctx, p, k8s.GetEndpointSliceArgs{Cluster: c, Namespace: ns, Name: name})
+			})))
+
 	router.Get("/api/clusters/{cluster}/resourcequotas/{ns}/{name}/yaml", credentials.Wrap(factory,
 		yamlHandler(registry, "resourcequota",
 			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, ns, name string) (string, error) {
@@ -882,6 +900,8 @@ func main() {
 		credentials.Wrap(factory, eventsHandler(registry, "ReplicaSet")))
 	router.Get("/api/clusters/{cluster}/networkpolicies/{ns}/{name}/events",
 		credentials.Wrap(factory, eventsHandler(registry, "NetworkPolicy")))
+	router.Get("/api/clusters/{cluster}/endpointslices/{ns}/{name}/events",
+		credentials.Wrap(factory, eventsHandler(registry, "EndpointSlice")))
 	router.Get("/api/clusters/{cluster}/resourcequotas/{ns}/{name}/events",
 		credentials.Wrap(factory, eventsHandler(registry, "ResourceQuota")))
 	router.Get("/api/clusters/{cluster}/limitranges/{ns}/{name}/events",
@@ -2307,6 +2327,10 @@ var watchKinds = []kindReg{
 	{Name: "cronjobs", Group: "workloads", Watch: k8s.WatchCronJobs},
 	{Name: "horizontalpodautoscalers", Group: "workloads", Watch: k8s.WatchHorizontalPodAutoscalers},
 	{Name: "poddisruptionbudgets", Group: "workloads", Watch: k8s.WatchPodDisruptionBudgets},
+	{Name: "services", Group: "networking", Watch: k8s.WatchServices},
+	{Name: "ingresses", Group: "networking", Watch: k8s.WatchIngresses},
+	{Name: "networkpolicies", Group: "networking", Watch: k8s.WatchNetworkPolicies},
+	{Name: "endpointslices", Group: "networking", Watch: k8s.WatchEndpointSlices},
 }
 
 // resourceWatchHandler is the kind-agnostic SSE handler for resource

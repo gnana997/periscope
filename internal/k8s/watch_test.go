@@ -12,6 +12,8 @@ import (
 	autoscalingv2 "k8s.io/api/autoscaling/v2"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
+	discoveryv1 "k8s.io/api/discovery/v1"
+	networkingv1 "k8s.io/api/networking/v1"
 	policyv1 "k8s.io/api/policy/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -1033,6 +1035,211 @@ func TestWatchPodDisruptionBudgets_SnapshotAndAdded(t *testing.T) {
 	}
 	if pdbObj.Name != "pdb-b" {
 		t.Errorf("added pdb name = %q, want pdb-b", pdbObj.Name)
+	}
+}
+
+// --- Tier-B networking smoke tests ---
+
+func TestWatchServices_SnapshotAndAdded(t *testing.T) {
+	svc := &corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{Name: "svc-a", Namespace: "default", ResourceVersion: "1"},
+		Spec:       corev1.ServiceSpec{Type: corev1.ServiceTypeClusterIP, ClusterIP: "10.0.0.1"},
+	}
+	cs := fake.NewSimpleClientset(svc)
+	swapNewClientFn(t, cs)
+
+	sink := newTestSink(8)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go func() {
+		_ = WatchServices(ctx, stubProvider{}, WatchArgs{
+			Cluster:   clusters.Cluster{Name: "demo", Backend: clusters.BackendKubeconfig},
+			Namespace: "default",
+		}, sink)
+	}()
+
+	snap := awaitEvent(t, sink)
+	if snap.Type != WatchSnapshot {
+		t.Fatalf("first event = %v, want snapshot", snap.Type)
+	}
+	items, ok := snap.Items.([]Service)
+	if !ok {
+		t.Fatalf("Items type = %T, want []Service", snap.Items)
+	}
+	if len(items) != 1 || items[0].Name != "svc-a" {
+		t.Fatalf("snapshot items = %+v, want one svc-a", items)
+	}
+
+	svc2 := &corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{Name: "svc-b", Namespace: "default", ResourceVersion: "2"},
+	}
+	if _, err := cs.CoreV1().Services("default").Create(ctx, svc2, metav1.CreateOptions{}); err != nil {
+		t.Fatalf("create service: %v", err)
+	}
+
+	got := awaitEvent(t, sink)
+	if got.Type != WatchAdded {
+		t.Fatalf("event = %v, want added", got.Type)
+	}
+	svcObj, ok := got.Object.(Service)
+	if !ok {
+		t.Fatalf("Object type = %T, want Service", got.Object)
+	}
+	if svcObj.Name != "svc-b" {
+		t.Errorf("added service name = %q, want svc-b", svcObj.Name)
+	}
+}
+
+func TestWatchIngresses_SnapshotAndAdded(t *testing.T) {
+	ing := &networkingv1.Ingress{
+		ObjectMeta: metav1.ObjectMeta{Name: "ing-a", Namespace: "default", ResourceVersion: "1"},
+	}
+	cs := fake.NewSimpleClientset(ing)
+	swapNewClientFn(t, cs)
+
+	sink := newTestSink(8)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go func() {
+		_ = WatchIngresses(ctx, stubProvider{}, WatchArgs{
+			Cluster:   clusters.Cluster{Name: "demo", Backend: clusters.BackendKubeconfig},
+			Namespace: "default",
+		}, sink)
+	}()
+
+	snap := awaitEvent(t, sink)
+	if snap.Type != WatchSnapshot {
+		t.Fatalf("first event = %v, want snapshot", snap.Type)
+	}
+	items, ok := snap.Items.([]Ingress)
+	if !ok {
+		t.Fatalf("Items type = %T, want []Ingress", snap.Items)
+	}
+	if len(items) != 1 || items[0].Name != "ing-a" {
+		t.Fatalf("snapshot items = %+v, want one ing-a", items)
+	}
+
+	ing2 := &networkingv1.Ingress{
+		ObjectMeta: metav1.ObjectMeta{Name: "ing-b", Namespace: "default", ResourceVersion: "2"},
+	}
+	if _, err := cs.NetworkingV1().Ingresses("default").Create(ctx, ing2, metav1.CreateOptions{}); err != nil {
+		t.Fatalf("create ingress: %v", err)
+	}
+
+	got := awaitEvent(t, sink)
+	if got.Type != WatchAdded {
+		t.Fatalf("event = %v, want added", got.Type)
+	}
+	ingObj, ok := got.Object.(Ingress)
+	if !ok {
+		t.Fatalf("Object type = %T, want Ingress", got.Object)
+	}
+	if ingObj.Name != "ing-b" {
+		t.Errorf("added ingress name = %q, want ing-b", ingObj.Name)
+	}
+}
+
+func TestWatchNetworkPolicies_SnapshotAndAdded(t *testing.T) {
+	np := &networkingv1.NetworkPolicy{
+		ObjectMeta: metav1.ObjectMeta{Name: "np-a", Namespace: "default", ResourceVersion: "1"},
+	}
+	cs := fake.NewSimpleClientset(np)
+	swapNewClientFn(t, cs)
+
+	sink := newTestSink(8)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go func() {
+		_ = WatchNetworkPolicies(ctx, stubProvider{}, WatchArgs{
+			Cluster:   clusters.Cluster{Name: "demo", Backend: clusters.BackendKubeconfig},
+			Namespace: "default",
+		}, sink)
+	}()
+
+	snap := awaitEvent(t, sink)
+	if snap.Type != WatchSnapshot {
+		t.Fatalf("first event = %v, want snapshot", snap.Type)
+	}
+	items, ok := snap.Items.([]NetworkPolicy)
+	if !ok {
+		t.Fatalf("Items type = %T, want []NetworkPolicy", snap.Items)
+	}
+	if len(items) != 1 || items[0].Name != "np-a" {
+		t.Fatalf("snapshot items = %+v, want one np-a", items)
+	}
+
+	np2 := &networkingv1.NetworkPolicy{
+		ObjectMeta: metav1.ObjectMeta{Name: "np-b", Namespace: "default", ResourceVersion: "2"},
+	}
+	if _, err := cs.NetworkingV1().NetworkPolicies("default").Create(ctx, np2, metav1.CreateOptions{}); err != nil {
+		t.Fatalf("create networkpolicy: %v", err)
+	}
+
+	got := awaitEvent(t, sink)
+	if got.Type != WatchAdded {
+		t.Fatalf("event = %v, want added", got.Type)
+	}
+	npObj, ok := got.Object.(NetworkPolicy)
+	if !ok {
+		t.Fatalf("Object type = %T, want NetworkPolicy", got.Object)
+	}
+	if npObj.Name != "np-b" {
+		t.Errorf("added networkpolicy name = %q, want np-b", npObj.Name)
+	}
+}
+
+func TestWatchEndpointSlices_SnapshotAndAdded(t *testing.T) {
+	es := &discoveryv1.EndpointSlice{
+		ObjectMeta:  metav1.ObjectMeta{Name: "es-a", Namespace: "default", ResourceVersion: "1", Labels: map[string]string{kubernetesIOServiceNameLabel: "svc-a"}},
+		AddressType: discoveryv1.AddressTypeIPv4,
+	}
+	cs := fake.NewSimpleClientset(es)
+	swapNewClientFn(t, cs)
+
+	sink := newTestSink(8)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go func() {
+		_ = WatchEndpointSlices(ctx, stubProvider{}, WatchArgs{
+			Cluster:   clusters.Cluster{Name: "demo", Backend: clusters.BackendKubeconfig},
+			Namespace: "default",
+		}, sink)
+	}()
+
+	snap := awaitEvent(t, sink)
+	if snap.Type != WatchSnapshot {
+		t.Fatalf("first event = %v, want snapshot", snap.Type)
+	}
+	items, ok := snap.Items.([]EndpointSlice)
+	if !ok {
+		t.Fatalf("Items type = %T, want []EndpointSlice", snap.Items)
+	}
+	if len(items) != 1 || items[0].Name != "es-a" || items[0].ServiceName != "svc-a" {
+		t.Fatalf("snapshot items = %+v, want one es-a serving svc-a", items)
+	}
+
+	es2 := &discoveryv1.EndpointSlice{
+		ObjectMeta:  metav1.ObjectMeta{Name: "es-b", Namespace: "default", ResourceVersion: "2"},
+		AddressType: discoveryv1.AddressTypeIPv4,
+	}
+	if _, err := cs.DiscoveryV1().EndpointSlices("default").Create(ctx, es2, metav1.CreateOptions{}); err != nil {
+		t.Fatalf("create endpointslice: %v", err)
+	}
+
+	got := awaitEvent(t, sink)
+	if got.Type != WatchAdded {
+		t.Fatalf("event = %v, want added", got.Type)
+	}
+	esObj, ok := got.Object.(EndpointSlice)
+	if !ok {
+		t.Fatalf("Object type = %T, want EndpointSlice", got.Object)
+	}
+	if esObj.Name != "es-b" {
+		t.Errorf("added endpointslice name = %q, want es-b", esObj.Name)
 	}
 }
 
