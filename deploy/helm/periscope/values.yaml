@@ -117,6 +117,31 @@ auth:
 # Clusters registry — written verbatim into a ConfigMap as clusters.yaml.
 # See examples/config/clusters.yaml for a fuller example with multiple
 # backends.
+#
+# Per-cluster `exec:` overrides
+# -----------------------------
+# Any cluster entry MAY override the global pod-exec defaults (set under
+# the top-level .exec block) on a field-by-field basis. Omitted fields
+# fall through to the global default — partial overrides are fine.
+#
+# Example with overrides:
+#   - name: prod-eu-west-1
+#     backend: eks
+#     region: eu-west-1
+#     arn: arn:aws:eks:eu-west-1:222222222222:cluster/prod-eu-west-1
+#     exec:
+#       # Long-running prod debugging: 30-min idle timeout, beefier caps.
+#       serverIdleSeconds: 1800
+#       maxSessionsPerUser: 10
+#       maxSessionsTotal: 100
+#
+#   - name: locked-down
+#     backend: eks
+#     region: us-west-2
+#     arn: arn:aws:eks:us-west-2:333333333333:cluster/locked
+#     exec:
+#       # Disable interactive shell entirely on this cluster.
+#       enabled: false
 # -----------------------------------------------------------------------------
 clusters: []
 # - name: prod-eu-west-1
@@ -313,6 +338,64 @@ audit:
     # is sufficient for the v1 single-replica topology.
     storageClass: ""
     accessMode: ReadWriteOnce
+
+# -----------------------------------------------------------------------------
+# Pod exec (interactive shell into containers)
+#
+# Periscope ships pod exec on by default. The route is registered for
+# every cluster in the registry; a user clicking "Open Shell" upgrades
+# to a WebSocket and the binary streams stdin/stdout/stderr from the
+# kube-apiserver under the user's impersonated identity.
+#
+# These are GLOBAL DEFAULTS — applied to every cluster's sessions
+# unless a cluster entry overrides them in clusters[].exec (see the
+# clusters: section above).
+#
+# There is intentionally no global `exec.enabled` switch. Disabling
+# exec is a per-cluster decision: set `clusters[<i>].exec.enabled:
+# false` to opt a specific cluster out (the UI hides the action and
+# the API returns 403 / E_EXEC_DISABLED). To turn exec off everywhere,
+# set it false on every cluster entry — typically a sign the feature
+# is the wrong fit for your deployment.
+#
+# See docs/setup/pod-exec.md for the operator guide (caps, transports,
+# circuit breaker, troubleshooting) and RFC 0001 for the design.
+# -----------------------------------------------------------------------------
+exec:
+  # Server-side idle timeout. No stdin/stdout activity for this long
+  # tears the session down. The browser shows a 30-second warning
+  # banner before the cut. Bump for clusters where long-running
+  # debugging is normal (e.g. prod incident response → 1800s).
+  serverIdleSeconds: 600
+
+  # How long before the server idle cut the browser is warned.
+  # Subtracted from the idle deadline, so users can keep the session
+  # alive by typing.
+  idleWarnSeconds: 30
+
+  # WebSocket heartbeat interval. Sends a ping frame every N seconds
+  # to keep intermediate proxies (ingress, NLB, CloudFront) from
+  # silently dropping idle sockets.
+  heartbeatSeconds: 20
+
+  # Concurrent exec sessions per OIDC subject, across all clusters
+  # they have access to. Hit the cap → HTTP 429 with the active
+  # sessions in the response body. Per-cluster overrides win.
+  maxSessionsPerUser: 5
+
+  # Concurrent exec sessions per cluster, total across all users.
+  # Soft ceiling that protects the apiserver and the Periscope pod's
+  # memory — each session pins ~1 MiB of buffers. Per-cluster
+  # overrides win.
+  maxSessionsTotal: 50
+
+  # When true, Periscope pre-warms each cluster's IAM credentials and
+  # exec policy at boot. Off by default; turn on when first-exec
+  # latency on cold clusters is a UX problem (typically ~3-5s the
+  # first time a cluster is touched after a restart).
+  probeClustersOnBoot: false
+
+# -----------------------------------------------------------------------------
 # Pod Disruption Budget
 #
 # v1 is single-replica (in-memory session store) so a node drain takes

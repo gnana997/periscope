@@ -43,6 +43,25 @@ The default is `false` — opt-in. When off:
   container logs to a SIEM, that's your source of truth and you can
   legitimately leave persistence off.
 
+### Helm values ↔ env var mapping
+
+The chart templates each `audit.*` value to a `PERISCOPE_AUDIT_*`
+env var on the pod. Useful when debugging what's actually applied:
+
+| Helm value | Env var | Required when `audit.enabled=true` |
+|---|---|---|
+| `audit.enabled` | `PERISCOPE_AUDIT_ENABLED=true` | — (gates the rest) |
+| (fixed) | `PERISCOPE_AUDIT_DB_PATH=/var/lib/periscope/audit/audit.db` | always |
+| `audit.retentionDays` | `PERISCOPE_AUDIT_RETENTION_DAYS` | optional (default `30`) |
+| `audit.maxSizeMB` | `PERISCOPE_AUDIT_MAX_SIZE_MB` | optional (default `1024`) |
+| `audit.vacuumInterval` | `PERISCOPE_AUDIT_VACUUM_INTERVAL` | optional (default `24h`) |
+| `audit.storage.type` | (mount only — no env var) | required: `pvc` or `emptyDir` |
+| `audit.storage.size` | (PVC `spec.resources.requests.storage`) | required when `storage.type=pvc` |
+
+Setting both `retentionDays` and `maxSizeMB` to `0` is the
+unbounded-growth footgun. The startup validator emits a `slog.Warn`
+line — visible in pod logs but easy to miss; don't do it.
+
 ### Storage
 
 Two modes, both rendered in `templates/deployment.yaml`:
@@ -273,7 +292,10 @@ After enabling:
 # 1. PVC is bound (pvc mode):
 kubectl -n <ns> get pvc
 
-# 2. SQLite is open and the route is registered:
+# 2. SQLite is open and the route is registered. The port-forward maps
+#    a local port (8088 below — pick whatever's free) to the Service's
+#    8080. Use whichever local port suits you; the rest of this guide
+#    uses 8088 to keep examples copy-pasteable.
 kubectl -n <ns> port-forward svc/<release>-periscope 8088:8080
 curl -s http://localhost:8088/api/whoami    # {"actor":"...","auditEnabled":true,"auditScope":"self"}
 curl -s http://localhost:8088/api/audit     # {"items":[],"total":0,...}
@@ -292,6 +314,12 @@ curl -s -i http://localhost:8088/api/audit | grep X-Audit-Scope
 **`/api/audit` returns 404**
 → `audit.enabled=false` in your values, OR the SQLite sink failed to
 open. Check pod logs for `audit: sqlite disabled (open failed)`.
+Note that the binary **fails open** by design: a stuck PVC or schema
+migration error logs at `slog.Warn` and continues with stdout-only
+audit. The pod stays Ready, the SPA hides the audit nav (because
+`/api/whoami` reports `auditEnabled: false`), and the warning is
+easy to miss in a noisy log stream. When debugging, grep
+specifically for `audit:` lines around startup time.
 
 **X-Audit-Scope is always `self` even for an admin**
 → Your `auditAdminGroups` list doesn't match the user's actual IdP

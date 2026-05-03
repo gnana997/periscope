@@ -155,6 +155,42 @@
       "properties": {
         "enabled": { "type": "boolean" }
       }
+    },
+    "exec": {
+      "type": "object",
+      "description": "Pod exec global defaults. Per-cluster overrides in clusters[].exec take precedence. See docs/setup/pod-exec.md.",
+      "properties": {
+        "serverIdleSeconds":   { "type": "integer", "minimum": 1 },
+        "idleWarnSeconds":     { "type": "integer", "minimum": 1 },
+        "heartbeatSeconds":    { "type": "integer", "minimum": 1 },
+        "maxSessionsPerUser":  { "type": "integer", "minimum": 1 },
+        "maxSessionsTotal":    { "type": "integer", "minimum": 1 },
+        "probeClustersOnBoot": { "type": "boolean" }
+      },
+      "additionalProperties": false
+    },
+    "clusters": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name":    { "type": "string", "minLength": 1 },
+          "backend": { "type": "string", "enum": ["eks", "kubeconfig"] },
+          "exec": {
+            "type": "object",
+            "description": "Per-cluster pod-exec overrides. Partial overrides are fine — omitted fields fall back to the global .exec defaults.",
+            "properties": {
+              "enabled":            { "type": "boolean" },
+              "serverIdleSeconds":  { "type": "integer", "minimum": 1 },
+              "idleWarnSeconds":    { "type": "integer", "minimum": 1 },
+              "heartbeatSeconds":   { "type": "integer", "minimum": 1 },
+              "maxSessionsPerUser": { "type": "integer", "minimum": 1 },
+              "maxSessionsTotal":   { "type": "integer", "minimum": 1 }
+            },
+            "additionalProperties": false
+          }
+        }
+      }
     }
   }
 }
