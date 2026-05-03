@@ -12,7 +12,7 @@
 #     --config=/dev/null:application/vnd.cncf.artifacthub.config.v1+yaml \
 #     deploy/helm/periscope/artifacthub-repo.yml:application/vnd.cncf.artifacthub.repository-metadata.layer.v1.yaml
 
-repositoryID: 00000000-0000-0000-0000-000000000000
+repositoryID: 3cd99c65-cfb5-4e56-b881-b985ece9a0e0
 # After registering the repo on Artifact Hub, replace the zeros above
 # with the UUID Artifact Hub assigns to the repository. Re-push the
 # metadata layer (same oras command above) to claim the OCI repo
