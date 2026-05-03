@@ -37,6 +37,8 @@ helm.sh/chart: {{ include "periscope.chart" . }}
 {{- if .Chart.AppVersion }}
 app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
 {{- end }}
+app.kubernetes.io/component: dashboard
+app.kubernetes.io/part-of: periscope
 app.kubernetes.io/managed-by: {{ .Release.Service }}
 {{- end -}}
 
