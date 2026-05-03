@@ -7,6 +7,18 @@ import (
 	"encoding/json"
 	"testing"
 	"time"
+	"context"
+	"errors"
+
+	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/client-go/kubernetes/fake"
+	testingaction "k8s.io/client-go/testing"
+
+	"github.com/gnana997/periscope/internal/clusters"
 )
 
 // makeHelmReleaseBlob produces the storage-blob shape Helm writes
@@ -154,5 +166,155 @@ func TestDiffYAMLDocuments(t *testing.T) {
 	}
 	if !found {
 		t.Errorf("expected modify nginx:1.19→nginx:1.20, got %+v", items)
+	}
+}
+
+func TestParseManifestObjects_SkipsMalformedDocInMiddle(t *testing.T) {
+	// Repro for the bug fixed in this PR: pre-fix the decoder broke on the
+	// first malformed YAML doc and dropped every doc after it. Post-fix
+	// each doc is decoded independently, so a single bad doc loses only
+	// itself.
+	manifest := `apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: good-before
+  namespace: ns-a
+---
+this: is: not: valid: yaml: at: all
+  bad indentation
+    even worse
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: good-after
+  namespace: ns-b
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: also-good-after
+`
+	objs := parseManifestObjects(manifest, "default")
+	// Expect the SA, Deployment, and Service — three valid docs — even
+	// though the middle doc is malformed.
+	if len(objs) != 3 {
+		t.Fatalf("expected 3 objects (one bad doc skipped), got %d: %+v", len(objs), objs)
+	}
+	if objs[0].Name != "good-before" || objs[1].Name != "good-after" || objs[2].Name != "also-good-after" {
+		t.Errorf("wrong objects (the docs after the bad one were dropped?): %+v", objs)
+	}
+}
+
+func TestSplitYAMLDocs(t *testing.T) {
+	cases := []struct {
+		name    string
+		in      string
+		wantLen int
+	}{
+		{"empty", "", 0},
+		{"single doc, no separator", "kind: Pod\nname: a\n", 1},
+		{"two docs", "kind: A\n---\nkind: B\n", 2},
+		{"leading separator", "---\nkind: A\n---\nkind: B\n", 2},
+		{"trailing separator", "kind: A\n---\nkind: B\n---\n", 2},
+		{"separator with trailing whitespace", "kind: A\n---  \nkind: B\n", 2},
+		{"empty doc between", "kind: A\n---\n---\nkind: B\n", 2},
+		{"nested --- inside string is NOT a separator", "data: |\n  one\n  ---\n  two\nkind: ConfigMap\n", 2},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := splitYAMLDocs(tc.in)
+			if len(got) != tc.wantLen {
+				t.Errorf("splitYAMLDocs %q: got %d docs, want %d: %+v", tc.in, len(got), tc.wantLen, got)
+			}
+		})
+	}
+}
+
+func TestResolveHelmDriver_SecretsForbiddenFallsThroughToConfigMap(t *testing.T) {
+	// Repro for the bug: pre-fix, a 403 on Secrets list short-circuited
+	// to "secret" default, hiding any ConfigMap-driver releases the user
+	// CAN see. Post-fix, 403/Unauthorized on Secrets falls through to the
+	// ConfigMap probe.
+	//
+	// Reset cache so test results don't leak between runs.
+	helmDriverCacheMu.Lock()
+	delete(helmDriverCache, "test-cluster-403")
+	helmDriverCacheMu.Unlock()
+
+	cs := fake.NewClientset()
+	// Secrets list → 403 (PrependReactor to inject Forbidden response).
+	cs.PrependReactor("list", "secrets", func(action testingaction.Action) (bool, runtime.Object, error) {
+		return true, nil, apierrors.NewForbidden(
+			schema.GroupResource{Resource: "secrets"},
+			"",
+			errors.New("RBAC: forbidden"),
+		)
+	})
+	// Plant a configmap with the helm owner label so the ConfigMap probe finds something.
+	if _, err := cs.CoreV1().ConfigMaps("default").Create(
+		context.Background(),
+		&corev1.ConfigMap{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "sh.helm.release.v1.test.v1",
+				Namespace: "default",
+				Labels:    map[string]string{"owner": "helm", "name": "test", "version": "1"},
+			},
+			Data: map[string]string{"release": "stub"},
+		},
+		metav1.CreateOptions{},
+	); err != nil {
+		t.Fatalf("seed configmap: %v", err)
+	}
+
+	drv, err := resolveHelmDriver(
+		context.Background(), cs,
+		clusters.Cluster{Name: "test-cluster-403"},
+	)
+	if err != nil {
+		t.Fatalf("resolveHelmDriver: %v", err)
+	}
+	if drv != "configmap" {
+		t.Errorf("expected ConfigMap probe to succeed when Secrets is 403; got driver=%q", drv)
+	}
+}
+
+func TestResolveHelmDriver_NetworkErrorShortCircuits(t *testing.T) {
+	// For non-permission errors (network, timeout), keep the existing
+	// short-circuit: don't waste another LIST round-trip on the
+	// ConfigMap probe.
+	helmDriverCacheMu.Lock()
+	delete(helmDriverCache, "test-cluster-network")
+	helmDriverCacheMu.Unlock()
+
+	cs := fake.NewClientset()
+	cs.PrependReactor("list", "secrets", func(action testingaction.Action) (bool, runtime.Object, error) {
+		return true, nil, errors.New("connection refused")
+	})
+	// Plant a ConfigMap that WOULD be picked up if we fell through. The
+	// test asserts we DON'T fall through for network errors.
+	if _, err := cs.CoreV1().ConfigMaps("default").Create(
+		context.Background(),
+		&corev1.ConfigMap{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "sh.helm.release.v1.test.v1",
+				Namespace: "default",
+				Labels:    map[string]string{"owner": "helm"},
+			},
+		},
+		metav1.CreateOptions{},
+	); err != nil {
+		t.Fatalf("seed configmap: %v", err)
+	}
+
+	drv, err := resolveHelmDriver(
+		context.Background(), cs,
+		clusters.Cluster{Name: "test-cluster-network"},
+	)
+	if err != nil {
+		t.Fatalf("resolveHelmDriver: %v", err)
+	}
+	if drv != "secret" {
+		t.Errorf("expected secret default for network error; got %q", drv)
 	}
 }

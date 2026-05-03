@@ -35,11 +35,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"sort"
+	"strings"
 	"strconv"
 	"sync"
 	"time"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 
@@ -189,6 +192,8 @@ type helmDriverProbeResult struct {
 }
 
 var (
+	// helmDriverCache is keyed by cluster name; cardinality is bounded
+	// by the cluster registry (tens at most). No size cap needed.
 	helmDriverCache   = map[string]helmDriverProbeResult{}
 	helmDriverCacheMu sync.Mutex
 )
@@ -433,9 +438,13 @@ func DiffHelmRevisions(ctx context.Context, p credentials.Provider, c clusters.C
 	changes, err := diffYAMLDocuments(from.ManifestYAML, to.ManifestYAML)
 	if err != nil {
 		// Don't fail the whole call — the SPA can still show the raw
-		// diff via monaco. Return an empty changes array and let the
-		// caller decide if the structured layer is required.
-		changes = nil
+		// diff via monaco. Empty changes array means the structured
+		// layer is unavailable for this diff. Log so operators can
+		// debug; the most likely cause is a malformed manifest doc
+		// from a chart that produces non-YAML output for some helper.
+		slog.WarnContext(ctx, "helm diff: structured changes unavailable",
+			"namespace", namespace, "name", name,
+			"from", fromRev, "to", toRev, "err", err)
 	}
 
 	return &HelmDiff{
@@ -464,22 +473,33 @@ func resolveHelmDriver(ctx context.Context, cs kubernetes.Interface, c clusters.
 
 	probeOpts := metav1.ListOptions{LabelSelector: helmOwnerLabel, Limit: 1}
 
-	secrets, err := cs.CoreV1().Secrets("").List(ctx, probeOpts)
-	if err != nil {
-		cacheHelmDriver(c.Name, "secret")
-		return "secret", nil
-	}
-	if len(secrets.Items) > 0 {
+	secrets, secretsErr := cs.CoreV1().Secrets("").List(ctx, probeOpts)
+	if secretsErr == nil && len(secrets.Items) > 0 {
 		cacheHelmDriver(c.Name, "secret")
 		return "secret", nil
 	}
 
-	cms, err := cs.CoreV1().ConfigMaps("").List(ctx, probeOpts)
-	if err == nil && len(cms.Items) > 0 {
+	// Fall through to ConfigMap probe in two cases: (a) Secrets list
+	// succeeded but returned no items (no Secret-driver releases here),
+	// (b) Secrets list returned Forbidden / Unauthorized (the user has
+	// no RBAC for cluster-wide Secret list but might still see the
+	// ConfigMap-driver releases). Other errors (network, timeout)
+	// short-circuit to the Secrets default — re-running the probe is
+	// cheaper than spending another LIST budget.
+	if secretsErr != nil && !apierrors.IsForbidden(secretsErr) && !apierrors.IsUnauthorized(secretsErr) {
+		cacheHelmDriver(c.Name, "secret")
+		return "secret", nil
+	}
+
+	cms, cmsErr := cs.CoreV1().ConfigMaps("").List(ctx, probeOpts)
+	if cmsErr == nil && len(cms.Items) > 0 {
 		cacheHelmDriver(c.Name, "configmap")
 		return "configmap", nil
 	}
 
+	// Neither probe found releases. Default to Secrets driver — the
+	// downstream LIST will surface the actual permission/no-data
+	// distinction (403 vs empty list) in the handler.
 	cacheHelmDriver(c.Name, "secret")
 	return "secret", nil
 }
@@ -633,20 +653,29 @@ func releaseToDetail(r *helmRelease) (*HelmReleaseDetail, error) {
 // from a multi-doc YAML manifest. Skips empty / malformed documents
 // rather than failing the whole parse — a chart with one bad doc
 // shouldn't blank the resource list.
+// parseManifestObjects extracts (apiVersion, kind, namespace, name)
+// from a multi-doc YAML manifest. Splits the manifest on document
+// boundaries first, then decodes each chunk independently — so a
+// malformed YAML doc in the middle drops only itself, not every
+// doc that follows it. (Naive use of yaml.Decoder with break/continue
+// either truncates the rest or loops on the same error indefinitely;
+// per-chunk decode side-steps both.)
+//
+// Document boundary = a line that is exactly "---" (with optional
+// trailing whitespace), per the YAML 1.2 stream format that Helm
+// emits. Edge cases with literal "---" inside multi-line strings
+// would mis-split, but Helm-rendered manifests do not produce these
+// in practice.
 func parseManifestObjects(manifest, releaseNs string) []HelmManifestObject {
 	if manifest == "" {
 		return []HelmManifestObject{}
 	}
-	dec := yamlv3.NewDecoder(bytes.NewReader([]byte(manifest)))
 	out := []HelmManifestObject{}
-	for {
+	for _, chunk := range splitYAMLDocs(manifest) {
 		var doc map[string]interface{}
-		err := dec.Decode(&doc)
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			break
+		if err := yamlv3.Unmarshal([]byte(chunk), &doc); err != nil {
+			// Malformed individual doc — drop it, continue with the rest.
+			continue
 		}
 		if doc == nil {
 			continue
@@ -672,9 +701,34 @@ func parseManifestObjects(manifest, releaseNs string) []HelmManifestObject {
 	return out
 }
 
-// diffYAMLDocuments compares two multi-doc YAML strings and returns
-// dyff's structured change list. Used by DiffHelmRevisions for the
-// agent-tool surface; the SPA's monaco renderer doesn't need this.
+// splitYAMLDocs splits a YAML stream into per-document strings on
+// lines that are exactly "---" (with optional whitespace). Empty
+// chunks are returned as empty strings; the caller skips them.
+func splitYAMLDocs(stream string) []string {
+	lines := strings.Split(stream, "\n")
+	docs := []string{}
+	current := []string{}
+	flush := func() {
+		if len(current) == 0 {
+			return
+		}
+		doc := strings.Join(current, "\n")
+		current = current[:0]
+		if strings.TrimSpace(doc) == "" {
+			return
+		}
+		docs = append(docs, doc)
+	}
+	for _, l := range lines {
+		if strings.TrimSpace(l) == "---" {
+			flush()
+			continue
+		}
+		current = append(current, l)
+	}
+	flush()
+	return docs
+}
 func diffYAMLDocuments(fromYAML, toYAML string) ([]HelmDiffItem, error) {
 	from, err := ytbx.LoadDocuments([]byte(fromYAML))
 	if err != nil {

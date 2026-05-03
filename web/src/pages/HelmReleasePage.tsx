@@ -97,7 +97,7 @@ export function HelmReleasePage() {
           </button>
         ))}
       </div>
-      <div className="flex min-h-0 flex-1">
+      <div className="flex flex-col min-h-0 flex-1">
         {tab === "values" && (
           <MonacoYAML
             value={detail.valuesYaml}
