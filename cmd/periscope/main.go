@@ -25,6 +25,7 @@ import (
 	"github.com/gnana997/periscope/internal/k8s"
 	"github.com/gnana997/periscope/internal/secrets"
 	"github.com/gnana997/periscope/internal/spa"
+	"github.com/gnana997/periscope/internal/sse"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -1282,11 +1283,6 @@ func podLogsHandler(reg *clusters.Registry) credentials.Handler {
 			http.Error(w, "cluster not found", http.StatusNotFound)
 			return
 		}
-		flusher, ok := w.(http.Flusher)
-		if !ok {
-			http.Error(w, "streaming unsupported", http.StatusInternalServerError)
-			return
-		}
 
 		q := r.URL.Query()
 		args := k8s.PodLogsArgs{
@@ -1322,12 +1318,12 @@ func podLogsHandler(reg *clusters.Registry) credentials.Handler {
 		}
 		defer stream.Close()
 
-		w.Header().Set("Content-Type", "text/event-stream")
-		w.Header().Set("Cache-Control", "no-cache, no-transform")
-		w.Header().Set("Connection", "keep-alive")
-		w.Header().Set("X-Accel-Buffering", "no")
-		w.WriteHeader(http.StatusOK)
-		flusher.Flush()
+		sw, err := sse.Open(w)
+		if err != nil {
+			http.Error(w, "streaming unsupported", http.StatusInternalServerError)
+			return
+		}
+		defer sw.Close()
 
 		// Lines are read off the upstream in a goroutine so the main loop
 		// can multiplex line emission with the heartbeat ticker. Only the
@@ -1354,9 +1350,6 @@ func podLogsHandler(reg *clusters.Registry) credentials.Handler {
 			}
 		}()
 
-		heartbeat := time.NewTicker(15 * time.Second)
-		defer heartbeat.Stop()
-
 		type linePayload struct {
 			T string `json:"t,omitempty"`
 			L string `json:"l"`
@@ -1366,24 +1359,19 @@ func podLogsHandler(reg *clusters.Registry) credentials.Handler {
 			select {
 			case <-r.Context().Done():
 				return
-			case <-heartbeat.C:
-				_, _ = fmt.Fprint(w, ": ping\n\n")
-				flusher.Flush()
+			case <-sw.HeartbeatC():
+				_ = sw.Ping()
 			case res := <-lineCh:
 				if res.eof {
 					if res.err != nil && !errors.Is(res.err, context.Canceled) {
-						payload, _ := json.Marshal(map[string]string{"message": res.err.Error()})
-						_, _ = fmt.Fprintf(w, "event: error\ndata: %s\n\n", payload)
+						_ = sw.Event("error", "", map[string]string{"message": res.err.Error()})
 					} else {
-						_, _ = fmt.Fprint(w, "event: done\ndata: {}\n\n")
+						_ = sw.Event("done", "", struct{}{})
 					}
-					flusher.Flush()
 					return
 				}
 				ts, msg := k8s.SplitLogTimestamp(res.line)
-				payload, _ := json.Marshal(linePayload{T: ts, L: msg})
-				_, _ = fmt.Fprintf(w, "data: %s\n\n", payload)
-				flusher.Flush()
+				_ = sw.Event("", "", linePayload{T: ts, L: msg})
 			}
 		}
 	}
