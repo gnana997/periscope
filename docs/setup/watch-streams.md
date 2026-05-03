@@ -58,13 +58,15 @@ The `kinds` value accepts:
 | `"core,workloads"` | Multiple groups, one token each |
 | `"pods,workloads"` | Mixed kinds and groups |
 
-Per-kind tokens (current registry): `pods`, `events`, `deployments`, `statefulsets`, `daemonsets`, `replicasets`, `jobs`, `cronjobs`, `horizontalpodautoscalers`, `poddisruptionbudgets`, `services`, `ingresses`, `networkpolicies`, `endpointslices`.
+Per-kind tokens (current registry): `pods`, `events`, `deployments`, `statefulsets`, `daemonsets`, `replicasets`, `jobs`, `cronjobs`, `horizontalpodautoscalers`, `poddisruptionbudgets`, `services`, `ingresses`, `networkpolicies`, `endpointslices`, `ingressclasses`, `pvs`, `pvcs`, `storageclasses`, `nodes`, `namespaces`, `priorityclasses`, `runtimeclasses`.
 
 Group aliases (current registry):
 
 - `core` = `pods`, `events`
 - `workloads` = `deployments`, `statefulsets`, `daemonsets`, `replicasets`, `jobs`, `cronjobs`, `horizontalpodautoscalers`, `poddisruptionbudgets`
-- `networking` = `services`, `ingresses`, `networkpolicies`, `endpointslices`
+- `networking` = `services`, `ingresses`, `networkpolicies`, `endpointslices`, `ingressclasses`
+- `storage` = `pvs`, `pvcs`, `storageclasses`
+- `cluster` = `nodes`, `namespaces`, `priorityclasses`, `runtimeclasses`
 
 Groups expand as new kinds register; the env grammar is forward-compatible.
 

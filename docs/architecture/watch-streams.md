@@ -54,6 +54,14 @@ same DTO shape, so feature parity is automatic.
 | Ingresses | `/api/clusters/{cluster}/ingresses/watch` | `Ingress` | `internal/k8s/watch.go: WatchIngresses` |
 | NetworkPolicies | `/api/clusters/{cluster}/networkpolicies/watch` | `NetworkPolicy` | `internal/k8s/watch.go: WatchNetworkPolicies` |
 | EndpointSlices | `/api/clusters/{cluster}/endpointslices/watch` | `EndpointSlice` | `internal/k8s/watch.go: WatchEndpointSlices` |
+| IngressClasses | `/api/clusters/{cluster}/ingressclasses/watch` | `IngressClass` | `internal/k8s/watch.go: WatchIngressClasses` |
+| PersistentVolumes | `/api/clusters/{cluster}/pvs/watch` | `PV` | `internal/k8s/watch.go: WatchPVs` |
+| PersistentVolumeClaims | `/api/clusters/{cluster}/pvcs/watch` | `PVC` | `internal/k8s/watch.go: WatchPVCs` |
+| StorageClasses | `/api/clusters/{cluster}/storageclasses/watch` | `StorageClass` | `internal/k8s/watch.go: WatchStorageClasses` |
+| Nodes | `/api/clusters/{cluster}/nodes/watch` | `Node` | `internal/k8s/watch.go: WatchNodes` |
+| Namespaces | `/api/clusters/{cluster}/namespaces/watch` | `Namespace` | `internal/k8s/watch.go: WatchNamespaces` |
+| PriorityClasses | `/api/clusters/{cluster}/priorityclasses/watch` | `PriorityClass` | `internal/k8s/watch.go: WatchPriorityClasses` |
+| RuntimeClasses | `/api/clusters/{cluster}/runtimeclasses/watch` | `RuntimeClass` | `internal/k8s/watch.go: WatchRuntimeClasses` |
 
 Each is a thin wrapper around the generic `watchKind[T, S]` primitive,
 registered in the `watchKinds` slice in `cmd/periscope/main.go`.
