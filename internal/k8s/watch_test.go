@@ -9,8 +9,10 @@ import (
 	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
+	autoscalingv2 "k8s.io/api/autoscaling/v2"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
+	policyv1 "k8s.io/api/policy/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -712,6 +714,327 @@ func TestWatchJobs_SnapshotAndAdded(t *testing.T) {
 }
 
 func ptr32(v int32) *int32 { return &v }
+
+// --- Tier-A workload-controller smoke tests ---
+//
+// Same shape as TestWatchReplicaSets / TestWatchJobs above: one
+// snapshot + one ADDED assertion per kind, just enough to confirm the
+// kind-specific spec wiring (clientset method chain + summary
+// projection) is correct. The generic watchKind primitive is
+// exercised by the WatchPods / WatchEvents suites and need not be
+// duplicated here.
+
+func TestWatchDeployments_SnapshotAndAdded(t *testing.T) {
+	dep := &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{Name: "dep-a", Namespace: "default", ResourceVersion: "1"},
+		Spec:       appsv1.DeploymentSpec{Replicas: ptr32(2)},
+	}
+	cs := fake.NewSimpleClientset(dep)
+	swapNewClientFn(t, cs)
+
+	sink := newTestSink(8)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go func() {
+		_ = WatchDeployments(ctx, stubProvider{}, WatchArgs{
+			Cluster:   clusters.Cluster{Name: "demo", Backend: clusters.BackendKubeconfig},
+			Namespace: "default",
+		}, sink)
+	}()
+
+	snap := awaitEvent(t, sink)
+	if snap.Type != WatchSnapshot {
+		t.Fatalf("first event = %v, want snapshot", snap.Type)
+	}
+	items, ok := snap.Items.([]Deployment)
+	if !ok {
+		t.Fatalf("Items type = %T, want []Deployment", snap.Items)
+	}
+	if len(items) != 1 || items[0].Name != "dep-a" {
+		t.Fatalf("snapshot items = %+v, want one dep-a", items)
+	}
+
+	dep2 := &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{Name: "dep-b", Namespace: "default", ResourceVersion: "2"},
+	}
+	if _, err := cs.AppsV1().Deployments("default").Create(ctx, dep2, metav1.CreateOptions{}); err != nil {
+		t.Fatalf("create deployment: %v", err)
+	}
+
+	got := awaitEvent(t, sink)
+	if got.Type != WatchAdded {
+		t.Fatalf("event = %v, want added", got.Type)
+	}
+	depObj, ok := got.Object.(Deployment)
+	if !ok {
+		t.Fatalf("Object type = %T, want Deployment", got.Object)
+	}
+	if depObj.Name != "dep-b" {
+		t.Errorf("added deployment name = %q, want dep-b", depObj.Name)
+	}
+}
+
+func TestWatchStatefulSets_SnapshotAndAdded(t *testing.T) {
+	sts := &appsv1.StatefulSet{
+		ObjectMeta: metav1.ObjectMeta{Name: "sts-a", Namespace: "default", ResourceVersion: "1"},
+		Spec:       appsv1.StatefulSetSpec{Replicas: ptr32(3)},
+	}
+	cs := fake.NewSimpleClientset(sts)
+	swapNewClientFn(t, cs)
+
+	sink := newTestSink(8)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go func() {
+		_ = WatchStatefulSets(ctx, stubProvider{}, WatchArgs{
+			Cluster:   clusters.Cluster{Name: "demo", Backend: clusters.BackendKubeconfig},
+			Namespace: "default",
+		}, sink)
+	}()
+
+	snap := awaitEvent(t, sink)
+	if snap.Type != WatchSnapshot {
+		t.Fatalf("first event = %v, want snapshot", snap.Type)
+	}
+	items, ok := snap.Items.([]StatefulSet)
+	if !ok {
+		t.Fatalf("Items type = %T, want []StatefulSet", snap.Items)
+	}
+	if len(items) != 1 || items[0].Name != "sts-a" {
+		t.Fatalf("snapshot items = %+v, want one sts-a", items)
+	}
+
+	sts2 := &appsv1.StatefulSet{
+		ObjectMeta: metav1.ObjectMeta{Name: "sts-b", Namespace: "default", ResourceVersion: "2"},
+	}
+	if _, err := cs.AppsV1().StatefulSets("default").Create(ctx, sts2, metav1.CreateOptions{}); err != nil {
+		t.Fatalf("create statefulset: %v", err)
+	}
+
+	got := awaitEvent(t, sink)
+	if got.Type != WatchAdded {
+		t.Fatalf("event = %v, want added", got.Type)
+	}
+	stsObj, ok := got.Object.(StatefulSet)
+	if !ok {
+		t.Fatalf("Object type = %T, want StatefulSet", got.Object)
+	}
+	if stsObj.Name != "sts-b" {
+		t.Errorf("added statefulset name = %q, want sts-b", stsObj.Name)
+	}
+}
+
+func TestWatchDaemonSets_SnapshotAndAdded(t *testing.T) {
+	ds := &appsv1.DaemonSet{
+		ObjectMeta: metav1.ObjectMeta{Name: "ds-a", Namespace: "default", ResourceVersion: "1"},
+	}
+	cs := fake.NewSimpleClientset(ds)
+	swapNewClientFn(t, cs)
+
+	sink := newTestSink(8)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go func() {
+		_ = WatchDaemonSets(ctx, stubProvider{}, WatchArgs{
+			Cluster:   clusters.Cluster{Name: "demo", Backend: clusters.BackendKubeconfig},
+			Namespace: "default",
+		}, sink)
+	}()
+
+	snap := awaitEvent(t, sink)
+	if snap.Type != WatchSnapshot {
+		t.Fatalf("first event = %v, want snapshot", snap.Type)
+	}
+	items, ok := snap.Items.([]DaemonSet)
+	if !ok {
+		t.Fatalf("Items type = %T, want []DaemonSet", snap.Items)
+	}
+	if len(items) != 1 || items[0].Name != "ds-a" {
+		t.Fatalf("snapshot items = %+v, want one ds-a", items)
+	}
+
+	ds2 := &appsv1.DaemonSet{
+		ObjectMeta: metav1.ObjectMeta{Name: "ds-b", Namespace: "default", ResourceVersion: "2"},
+	}
+	if _, err := cs.AppsV1().DaemonSets("default").Create(ctx, ds2, metav1.CreateOptions{}); err != nil {
+		t.Fatalf("create daemonset: %v", err)
+	}
+
+	got := awaitEvent(t, sink)
+	if got.Type != WatchAdded {
+		t.Fatalf("event = %v, want added", got.Type)
+	}
+	dsObj, ok := got.Object.(DaemonSet)
+	if !ok {
+		t.Fatalf("Object type = %T, want DaemonSet", got.Object)
+	}
+	if dsObj.Name != "ds-b" {
+		t.Errorf("added daemonset name = %q, want ds-b", dsObj.Name)
+	}
+}
+
+func TestWatchCronJobs_SnapshotAndAdded(t *testing.T) {
+	cj := &batchv1.CronJob{
+		ObjectMeta: metav1.ObjectMeta{Name: "cj-a", Namespace: "default", ResourceVersion: "1"},
+		Spec:       batchv1.CronJobSpec{Schedule: "*/5 * * * *"},
+	}
+	cs := fake.NewSimpleClientset(cj)
+	swapNewClientFn(t, cs)
+
+	sink := newTestSink(8)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go func() {
+		_ = WatchCronJobs(ctx, stubProvider{}, WatchArgs{
+			Cluster:   clusters.Cluster{Name: "demo", Backend: clusters.BackendKubeconfig},
+			Namespace: "default",
+		}, sink)
+	}()
+
+	snap := awaitEvent(t, sink)
+	if snap.Type != WatchSnapshot {
+		t.Fatalf("first event = %v, want snapshot", snap.Type)
+	}
+	items, ok := snap.Items.([]CronJob)
+	if !ok {
+		t.Fatalf("Items type = %T, want []CronJob", snap.Items)
+	}
+	if len(items) != 1 || items[0].Name != "cj-a" {
+		t.Fatalf("snapshot items = %+v, want one cj-a", items)
+	}
+
+	cj2 := &batchv1.CronJob{
+		ObjectMeta: metav1.ObjectMeta{Name: "cj-b", Namespace: "default", ResourceVersion: "2"},
+		Spec:       batchv1.CronJobSpec{Schedule: "0 * * * *"},
+	}
+	if _, err := cs.BatchV1().CronJobs("default").Create(ctx, cj2, metav1.CreateOptions{}); err != nil {
+		t.Fatalf("create cronjob: %v", err)
+	}
+
+	got := awaitEvent(t, sink)
+	if got.Type != WatchAdded {
+		t.Fatalf("event = %v, want added", got.Type)
+	}
+	cjObj, ok := got.Object.(CronJob)
+	if !ok {
+		t.Fatalf("Object type = %T, want CronJob", got.Object)
+	}
+	if cjObj.Name != "cj-b" {
+		t.Errorf("added cronjob name = %q, want cj-b", cjObj.Name)
+	}
+}
+
+func TestWatchHorizontalPodAutoscalers_SnapshotAndAdded(t *testing.T) {
+	hpa := &autoscalingv2.HorizontalPodAutoscaler{
+		ObjectMeta: metav1.ObjectMeta{Name: "hpa-a", Namespace: "default", ResourceVersion: "1"},
+		Spec: autoscalingv2.HorizontalPodAutoscalerSpec{
+			MinReplicas: ptr32(1),
+			MaxReplicas: 10,
+		},
+	}
+	cs := fake.NewSimpleClientset(hpa)
+	swapNewClientFn(t, cs)
+
+	sink := newTestSink(8)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go func() {
+		_ = WatchHorizontalPodAutoscalers(ctx, stubProvider{}, WatchArgs{
+			Cluster:   clusters.Cluster{Name: "demo", Backend: clusters.BackendKubeconfig},
+			Namespace: "default",
+		}, sink)
+	}()
+
+	snap := awaitEvent(t, sink)
+	if snap.Type != WatchSnapshot {
+		t.Fatalf("first event = %v, want snapshot", snap.Type)
+	}
+	items, ok := snap.Items.([]HPA)
+	if !ok {
+		t.Fatalf("Items type = %T, want []HPA", snap.Items)
+	}
+	if len(items) != 1 || items[0].Name != "hpa-a" {
+		t.Fatalf("snapshot items = %+v, want one hpa-a", items)
+	}
+
+	hpa2 := &autoscalingv2.HorizontalPodAutoscaler{
+		ObjectMeta: metav1.ObjectMeta{Name: "hpa-b", Namespace: "default", ResourceVersion: "2"},
+		Spec: autoscalingv2.HorizontalPodAutoscalerSpec{
+			MinReplicas: ptr32(1),
+			MaxReplicas: 5,
+		},
+	}
+	if _, err := cs.AutoscalingV2().HorizontalPodAutoscalers("default").Create(ctx, hpa2, metav1.CreateOptions{}); err != nil {
+		t.Fatalf("create hpa: %v", err)
+	}
+
+	got := awaitEvent(t, sink)
+	if got.Type != WatchAdded {
+		t.Fatalf("event = %v, want added", got.Type)
+	}
+	hpaObj, ok := got.Object.(HPA)
+	if !ok {
+		t.Fatalf("Object type = %T, want HPA", got.Object)
+	}
+	if hpaObj.Name != "hpa-b" {
+		t.Errorf("added hpa name = %q, want hpa-b", hpaObj.Name)
+	}
+}
+
+func TestWatchPodDisruptionBudgets_SnapshotAndAdded(t *testing.T) {
+	pdb := &policyv1.PodDisruptionBudget{
+		ObjectMeta: metav1.ObjectMeta{Name: "pdb-a", Namespace: "default", ResourceVersion: "1"},
+	}
+	cs := fake.NewSimpleClientset(pdb)
+	swapNewClientFn(t, cs)
+
+	sink := newTestSink(8)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go func() {
+		_ = WatchPodDisruptionBudgets(ctx, stubProvider{}, WatchArgs{
+			Cluster:   clusters.Cluster{Name: "demo", Backend: clusters.BackendKubeconfig},
+			Namespace: "default",
+		}, sink)
+	}()
+
+	snap := awaitEvent(t, sink)
+	if snap.Type != WatchSnapshot {
+		t.Fatalf("first event = %v, want snapshot", snap.Type)
+	}
+	items, ok := snap.Items.([]PDB)
+	if !ok {
+		t.Fatalf("Items type = %T, want []PDB", snap.Items)
+	}
+	if len(items) != 1 || items[0].Name != "pdb-a" {
+		t.Fatalf("snapshot items = %+v, want one pdb-a", items)
+	}
+
+	pdb2 := &policyv1.PodDisruptionBudget{
+		ObjectMeta: metav1.ObjectMeta{Name: "pdb-b", Namespace: "default", ResourceVersion: "2"},
+	}
+	if _, err := cs.PolicyV1().PodDisruptionBudgets("default").Create(ctx, pdb2, metav1.CreateOptions{}); err != nil {
+		t.Fatalf("create pdb: %v", err)
+	}
+
+	got := awaitEvent(t, sink)
+	if got.Type != WatchAdded {
+		t.Fatalf("event = %v, want added", got.Type)
+	}
+	pdbObj, ok := got.Object.(PDB)
+	if !ok {
+		t.Fatalf("Object type = %T, want PDB", got.Object)
+	}
+	if pdbObj.Name != "pdb-b" {
+		t.Errorf("added pdb name = %q, want pdb-b", pdbObj.Name)
+	}
+}
 
 func TestWatchPods_ListErrorPropagates(t *testing.T) {
 	cs := fake.NewSimpleClientset()

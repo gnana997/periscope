@@ -191,7 +191,23 @@ export type YamlKind =
 // WatchStreamKind is the union of resource kinds the backend can serve
 // over a watch SSE endpoint. Mirrors the env-var tokens accepted by
 // PERISCOPE_WATCH_STREAMS server-side.
-export type WatchStreamKind = "pods" | "events" | "replicasets" | "jobs";
+//
+// Adding a kind here is purely a TypeScript declaration — the runtime
+// gate is /api/features.watchStreams. New kinds must also be added
+// to WATCH_STREAM_KINDS in useResource.ts so isWatchStreamKind sees
+// them, and (optionally) to LIST_REFETCH_INTERVAL for the polling
+// fallback cadence.
+export type WatchStreamKind =
+  | "pods"
+  | "events"
+  | "deployments"
+  | "statefulsets"
+  | "daemonsets"
+  | "replicasets"
+  | "jobs"
+  | "cronjobs"
+  | "horizontalpodautoscalers"
+  | "poddisruptionbudgets";
 
 // Features describes server-side capability flags. Fetched once at app
 // boot via api.features and consumed by useResource (Phase 6) to choose
