@@ -1,0 +1,208 @@
+name: Release
+
+# Runs on every tag matching v*, e.g. v0.5.0-rc1, v1.0.0, v1.2.3.
+# Builds + signs + publishes:
+#   - multi-arch container image (linux/amd64, linux/arm64) to ghcr.io
+#   - Helm chart packaged + pushed to ghcr.io as an OCI artifact
+#   - cosign keyless signatures for both
+#   - SPDX SBOM attached to the image as an OCI artifact
+#   - GitHub Release with auto-generated notes from PR titles since
+#     the previous tag
+#
+# Tagging convention: vX.Y.Z (semver). Pre-releases use vX.Y.Z-rcN.
+# Helm rejects non-semver tags so this matches up automatically.
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write       # create the GitHub Release
+  packages: write       # push to ghcr.io
+  id-token: write       # cosign keyless signing via GH OIDC
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}                  # gnana997/periscope
+  CHART_REPO: ${{ github.repository_owner }}/charts     # gnana997/charts
+
+jobs:
+  release:
+    name: Build, sign, and publish
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          # Need full history so the release-notes generator can
+          # diff against the previous tag.
+          fetch-depth: 0
+
+      # ── Container image ─────────────────────────────────────────
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+      - name: Log in to ghcr.io
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract image metadata (tags + labels)
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          # Tags applied:
+          #   v1.2.3        → v1.2.3, 1.2.3, 1.2, 1, latest
+          #   v1.2.3-rc1    → v1.2.3-rc1 only (no latest, no major)
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}},enable=${{ !contains(github.ref, '-') }}
+            type=semver,pattern={{major}},enable=${{ !contains(github.ref, '-') }}
+            type=raw,value=latest,enable=${{ !contains(github.ref, '-') }}
+            type=raw,value=${{ github.ref_name }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.description=Keyless-auth Kubernetes dashboard for EKS
+            org.opencontainers.image.licenses=Apache-2.0
+
+      - name: Build and push image
+        id: build
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            VERSION=${{ github.ref_name }}
+            COMMIT=${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+
+      # Keyless signing — cosign uses the GH Actions OIDC token to
+      # request a short-lived cert from Sigstore's Fulcio CA. No
+      # secrets to manage. Verify with:
+      #   cosign verify ghcr.io/...@<digest> \
+      #     --certificate-identity-regexp="https://github.com/gnana997/periscope" \
+      #     --certificate-oidc-issuer=https://token.actions.githubusercontent.com
+      - name: Sign image
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+          TAGS: ${{ steps.meta.outputs.tags }}
+        run: |
+          for tag in $TAGS; do
+            cosign sign --yes "${tag}@${DIGEST}"
+          done
+
+      # ── SBOM ───────────────────────────────────────────────────
+      - name: Generate SBOM
+        uses: anchore/sbom-action@v0
+        with:
+          image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}
+          format: spdx-json
+          output-file: sbom.spdx.json
+
+      - name: Attach SBOM to image
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          cosign attach sbom \
+            --sbom sbom.spdx.json \
+            --type spdx \
+            "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${DIGEST}"
+          # Sign the SBOM attestation
+          cosign sign --yes \
+            --attachment sbom \
+            "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${DIGEST}"
+
+      # ── Helm chart ─────────────────────────────────────────────
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: latest
+
+      # The chart's version field must match the tag for clean
+      # discovery. Sync Chart.yaml's version + appVersion to the
+      # tag (stripping the leading "v") before packaging.
+      - name: Sync chart version to tag
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          sed -i "s/^version: .*/version: ${VERSION}/" deploy/helm/periscope/Chart.yaml
+          sed -i "s/^appVersion: .*/appVersion: \"${VERSION}\"/" deploy/helm/periscope/Chart.yaml
+
+      - name: Package chart
+        run: |
+          helm package deploy/helm/periscope --destination dist/
+
+      - name: Log in to ghcr.io for Helm
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login \
+            ${{ env.REGISTRY }} \
+            --username ${{ github.actor }} \
+            --password-stdin
+
+      - name: Push chart to OCI registry
+        id: helm_push
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          OUT=$(helm push dist/periscope-${VERSION}.tgz oci://${{ env.REGISTRY }}/${{ env.CHART_REPO }} 2>&1)
+          echo "$OUT"
+          # Capture the chart's pushed digest for cosign signing.
+          DIGEST=$(echo "$OUT" | awk '/Digest:/{print $2}')
+          echo "digest=${DIGEST}" >> "$GITHUB_OUTPUT"
+
+      - name: Sign chart
+        env:
+          DIGEST: ${{ steps.helm_push.outputs.digest }}
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          cosign sign --yes \
+            "${{ env.REGISTRY }}/${{ env.CHART_REPO }}/periscope:${VERSION}@${DIGEST}"
+
+      # ── GitHub Release ─────────────────────────────────────────
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: ${{ github.ref_name }}
+          tag_name: ${{ github.ref_name }}
+          generate_release_notes: true
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          body: |
+            ## Container image
+
+            ```sh
+            docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.ref_name }}
+            ```
+
+            Multi-arch: `linux/amd64`, `linux/arm64`. Cosign-signed (keyless), SBOM attached.
+
+            ## Helm chart
+
+            ```sh
+            helm install periscope \
+              oci://${{ env.REGISTRY }}/${{ env.CHART_REPO }}/periscope \
+              --version ${{ github.ref_name }} \
+              --namespace periscope --create-namespace
+            ```
+
+            Cosign-signed (keyless). Discoverable on [Artifact Hub](https://artifacthub.io/packages/helm/periscope/periscope).
+
+            ## Verification
+
+            ```sh
+            cosign verify \
+              ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.ref_name }} \
+              --certificate-identity-regexp="https://github.com/${{ github.repository }}" \
+              --certificate-oidc-issuer=https://token.actions.githubusercontent.com
+            ```
+          files: |
+            sbom.spdx.json
+            dist/*.tgz

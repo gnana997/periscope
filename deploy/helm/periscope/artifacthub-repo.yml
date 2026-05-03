@@ -1,0 +1,23 @@
+# Artifact Hub repository metadata.
+#
+# Pushed to the OCI registry as a metadata layer with the special
+# `artifacthub.io` tag, so when the chart's repo is registered on
+# Artifact Hub it can find publisher info, ownership claim, and
+# verified-publisher proof. See:
+# https://artifacthub.io/docs/topics/repositories/helm-charts/
+#
+# Push command (run once after the chart's first OCI push):
+#
+#   oras push ghcr.io/gnana997/charts/periscope:artifacthub.io \
+#     --config=/dev/null:application/vnd.cncf.artifacthub.config.v1+yaml \
+#     deploy/helm/periscope/artifacthub-repo.yml:application/vnd.cncf.artifacthub.repository-metadata.layer.v1.yaml
+
+repositoryID: 00000000-0000-0000-0000-000000000000
+# After registering the repo on Artifact Hub, replace the zeros above
+# with the UUID Artifact Hub assigns to the repository. Re-push the
+# metadata layer (same oras command above) to claim the OCI repo
+# under your account.
+
+owners:
+  - name: gnana997
+    email: gnana097@gmail.com
