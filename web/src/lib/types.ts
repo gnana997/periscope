@@ -1298,3 +1298,92 @@ export interface AuditQueryParams {
   limit?: number;
   offset?: number;
 }
+
+// --- Helm release browser (read-only, issue #9) ----------------------
+
+/** One row in the /helm/releases list. Slim — manifest/values fetched
+ *  per detail click. */
+export interface HelmReleaseSummary {
+  name: string;
+  namespace: string;
+  revision: number;
+  status: string;
+  chartName: string;
+  chartVersion: string;
+  appVersion: string;
+  /** RFC3339; "" when the release info block is missing (rare). */
+  updated: string;
+}
+
+export interface HelmReleasesResponse {
+  releases: HelmReleaseSummary[];
+  /** True when the cluster has more than 200 releases — the SPA shows
+   *  a banner so users know the list is incomplete. */
+  truncated: boolean;
+}
+
+/** One (apiVersion, kind, namespace, name) tuple parsed from the
+ *  rendered manifest. Populated on detail blobs; used for the resource
+ *  summary in the detail header and for v2 SAR-gated write ops. */
+export interface HelmManifestObject {
+  apiVersion: string;
+  kind: string;
+  namespace?: string;
+  name: string;
+}
+
+export interface HelmReleaseDetail {
+  name: string;
+  namespace: string;
+  revision: number;
+  status: string;
+  description?: string;
+  chartName: string;
+  chartVersion: string;
+  appVersion: string;
+  /** Optional chart-supplied icon URL. Some charts ship one in
+   *  Chart.yaml; many don't. */
+  icon?: string;
+  updated: string;
+  notes?: string;
+  /** Empty string when the release was installed without overrides;
+   *  the SPA renders the empty state in that case rather than "{}\n". */
+  valuesYaml: string;
+  manifestYaml: string;
+  resources: HelmManifestObject[];
+}
+
+export interface HelmHistoryEntry {
+  revision: number;
+  status: string;
+  chartName: string;
+  chartVersion: string;
+  appVersion: string;
+  description?: string;
+  updated: string;
+}
+
+export interface HelmHistoryResponse {
+  revisions: HelmHistoryEntry[];
+}
+
+export interface HelmDiffSide {
+  revision: number;
+  yaml: string;
+}
+
+/** One entry in the structured change list. `kind` follows dyff:
+ *  "modify" | "add" | "remove" | "order". `path` uses dyff's
+ *  go-patch-style notation. */
+export interface HelmDiffItem {
+  path: string;
+  kind: "modify" | "add" | "remove" | "order" | string;
+  before?: string;
+  after?: string;
+}
+
+export interface HelmDiffResponse {
+  from: HelmDiffSide;
+  to: HelmDiffSide;
+  changes: HelmDiffItem[];
+}

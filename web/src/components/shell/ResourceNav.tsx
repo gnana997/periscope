@@ -103,6 +103,34 @@ export function ResourceNav() {
           </ul>
         </div>
       )}
+      {/* Packages section — chart-grouped workloads. Helm in v1; leaves
+          a slot for Argo/Flux apps later without restructuring the nav. */}
+      {cluster && (
+        <div className="mb-2">
+          <div className="px-3 py-1.5">
+            <span className="text-[10px] font-medium uppercase tracking-[0.08em] text-ink-faint">
+              Packages
+            </span>
+          </div>
+          <ul className="flex flex-col gap-px">
+            <li>
+              <NavLink
+                to={`/clusters/${encodeURIComponent(cluster)}/helm${linkSearch}`}
+                className={({ isActive }) =>
+                  cn(
+                    "flex items-center gap-2 rounded-sm px-3 py-1.5 text-[12px] transition-colors",
+                    isActive
+                      ? "bg-accent-soft text-accent"
+                      : "text-ink-muted hover:bg-surface-2/50 hover:text-ink",
+                  )
+                }
+              >
+                Helm
+              </NavLink>
+            </li>
+          </ul>
+        </div>
+      )}
       {RESOURCE_GROUPS.map((group) => {
         const isOpen = openGroups.has(group);
         const items = resourcesByGroup(group);

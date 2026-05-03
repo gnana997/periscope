@@ -64,6 +64,9 @@ import { RuntimeClassesPage } from "./pages/RuntimeClassesPage";
 import { CRDsPage } from "./pages/CRDsPage";
 import { CustomResourcesPage } from "./pages/CustomResourcesPage";
 import { ExecPage } from "./pages/ExecPage";
+import { HelmReleasesPage } from "./pages/HelmReleasesPage";
+import { HelmReleasePage } from "./pages/HelmReleasePage";
+import { HelmDiffPage } from "./pages/HelmDiffPage";
 
 export const router = createBrowserRouter(
   createRoutesFromElements(
@@ -112,6 +115,9 @@ export const router = createBrowserRouter(
         <Route path="daemonsets/:ns/:name/logs" element={<WithCluster Page={DaemonSetLogsPage} />} />
         <Route path="jobs/:ns/:name/logs" element={<WithCluster Page={JobLogsPage} />} />
         <Route path="pods/:ns/:name/exec" element={<WithCluster Page={ExecPage} />} />
+        <Route path="helm" element={<WithCluster Page={HelmReleasesPage} />} />
+        <Route path="helm/:namespace/:name" element={<HelmReleasePage />} />
+        <Route path="helm/:namespace/:name/diff" element={<HelmDiffPage />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Route>,

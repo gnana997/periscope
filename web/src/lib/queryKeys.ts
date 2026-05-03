@@ -78,6 +78,18 @@ export const queryKeys = {
         ["cluster", c, "kind", kind, "yaml-drift", ns, name] as const,
     }),
 
+    // Helm release browser. Cluster-scoped; the storage Secret/CM
+    // lookup is the actual data source so keys mirror that shape.
+    helm: {
+      list: () => ["cluster", c, "helm", "list"] as const,
+      detail: (ns: string, name: string, revision: number) =>
+        ["cluster", c, "helm", "detail", ns, name, revision] as const,
+      history: (ns: string, name: string) =>
+        ["cluster", c, "helm", "history", ns, name] as const,
+      diff: (ns: string, name: string, from: number, to: number) =>
+        ["cluster", c, "helm", "diff", ns, name, from, to] as const,
+    },
+
     // Custom resources are addressed by GVR (no static registry), so
     // they get a parallel subtree keyed on (group, version, plural).
     cr: (group: string, version: string, plural: string) => ({

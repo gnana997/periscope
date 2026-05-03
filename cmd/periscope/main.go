@@ -194,6 +194,24 @@ func main() {
 	router.Post("/api/clusters/{cluster}/can-i", credentials.Wrap(factory,
 		caniHandler(registry, newCanICache(caniCacheTTL))))
 
+	// --- Helm release browser (read-only) ---
+	//
+	// List releases the user can see; per-revision detail (values +
+	// manifest + chart metadata + parsed resources); history; and
+	// structured diff between two revisions. No write paths in v1 —
+	// rollback/upgrade/uninstall need the compound SAR layer from #7
+	// to land first. See helm_handler.go.
+	helmListCacheTTL := 30 * time.Second
+	helmListC := newHelmListCache(helmListCacheTTL)
+	router.Get("/api/clusters/{cluster}/helm/releases", credentials.Wrap(factory,
+		helmListHandler(registry, helmListC)))
+	router.Get("/api/clusters/{cluster}/helm/releases/{ns}/{name}", credentials.Wrap(factory,
+		helmGetHandler(registry)))
+	router.Get("/api/clusters/{cluster}/helm/releases/{ns}/{name}/history", credentials.Wrap(factory,
+		helmHistoryHandler(registry)))
+	router.Get("/api/clusters/{cluster}/helm/releases/{ns}/{name}/diff", credentials.Wrap(factory,
+		helmDiffHandler(registry)))
+
 	// --- Overview / dashboard ---
 
 	router.Get("/api/clusters/{cluster}/dashboard", credentials.Wrap(factory,
