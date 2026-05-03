@@ -88,7 +88,7 @@ export function HorizontalPodAutoscalersPage({ cluster }: { cluster: string }) {
         actions={
           <ResourceActions
             cluster={cluster}
-            yamlKind="horizontalpodautoscalers"
+            source={{ kind: "builtin", yamlKind: "horizontalpodautoscalers" }}
             namespace={selectedNs}
             name={selectedName}
             onDeleted={() => setParam("sel", null)}

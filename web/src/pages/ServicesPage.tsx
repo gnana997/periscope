@@ -88,7 +88,7 @@ export function ServicesPage({ cluster }: { cluster: string }) {
         actions={
           <ResourceActions
             cluster={cluster}
-            yamlKind="services"
+            source={{ kind: "builtin", yamlKind: "services" }}
             namespace={selectedNs}
             name={selectedName}
             onDeleted={() => setParam("sel", null)}

@@ -147,7 +147,7 @@ export function CronJobsPage({ cluster }: { cluster: string }) {
         actions={
           <ResourceActions
             cluster={cluster}
-            yamlKind="cronjobs"
+            source={{ kind: "builtin", yamlKind: "cronjobs" }}
             namespace={selectedNs}
             name={selectedName}
             onDeleted={() => setParam("sel", null)}

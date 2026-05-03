@@ -77,7 +77,7 @@ export function IngressClassesPage({ cluster }: { cluster: string }) {
       actions={
         <ResourceActions
           cluster={cluster}
-          yamlKind="ingressclasses"
+          source={{ kind: "builtin", yamlKind: "ingressclasses" }}
           namespace={null}
           name={selectedName}
           onDeleted={() => setParam("sel", null)}

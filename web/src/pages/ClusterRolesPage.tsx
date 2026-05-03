@@ -66,7 +66,7 @@ export function ClusterRolesPage({ cluster }: { cluster: string }) {
       actions={
         <ResourceActions
           cluster={cluster}
-          yamlKind="clusterroles"
+          source={{ kind: "builtin", yamlKind: "clusterroles" }}
           namespace={null}
           name={selectedName}
           onDeleted={() => setParam("sel", null)}

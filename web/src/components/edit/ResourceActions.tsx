@@ -8,6 +8,11 @@
 // delete modal — that's still a confirm-and-go interaction that
 // doesn't benefit from being inline.
 //
+// Phase 4: takes a single `source: EditorSource` so built-ins and
+// CRs share one prop shape. Internally uses gvrkFromSource() to
+// resolve the GVRK for the apiserver call without each caller
+// having to thread group/version/resource.
+//
 // Actions are shown unconditionally in v1 — the backend is the
 // authoritative gate (impersonated K8s RBAC). useCanI() is called
 // anyway so when SSAR plumbing lands in v1.x every site upgrades for
@@ -16,17 +21,17 @@
 import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useCanI } from "../../hooks/useCanI";
-import type { ResourceRef, YamlKind } from "../../lib/api";
-import { KIND_REGISTRY } from "../../lib/k8sKinds";
+import type { ResourceRef } from "../../lib/api";
+import {
+  gvrkFromSource,
+  type EditorSource,
+} from "../../lib/customResources";
 import { DeleteResourceModal } from "./DeleteResourceModal";
 import { EditButton } from "../detail/yaml/EditButton";
 
 interface ResourceActionsProps {
   cluster: string;
-  // The YAML kind / URL segment. Drives the GET /yaml endpoint and the
-  // GVRK lookup (group/version/resource/kind) via KIND_REGISTRY — so
-  // pages don't have to repeat that information at every call site.
-  yamlKind: YamlKind;
+  source: EditorSource;
   // null/undefined → cluster-scoped resource.
   namespace: string | null | undefined;
   name: string;
@@ -39,14 +44,15 @@ interface ResourceActionsProps {
 
 export function ResourceActions({
   cluster,
-  yamlKind,
+  source,
   namespace,
   name,
   trailing,
   onDeleted,
 }: ResourceActionsProps) {
   const [showDelete, setShowDelete] = useState(false);
-  const meta = KIND_REGISTRY[yamlKind];
+
+  const meta = gvrkFromSource(source);
   const ns = namespace ?? undefined;
   const resource: ResourceRef = {
     cluster,
@@ -81,7 +87,20 @@ export function ResourceActions({
           resourceRef={resource}
           onClose={() => setShowDelete(false)}
           onDeleted={() => {
-            qc.invalidateQueries({ queryKey: [yamlKind] });
+            // List-cache invalidation key: built-ins use bare yamlKind
+            // (existing convention), CRs use the namespaced source key.
+            const listKey =
+              source.kind === "builtin"
+                ? [source.yamlKind]
+                : [
+                    "customresources",
+                    cluster,
+                    source.cr.group,
+                    source.cr.version,
+                    source.cr.resource,
+                    ns ?? "",
+                  ];
+            qc.invalidateQueries({ queryKey: listKey });
             onDeleted?.();
           }}
         />

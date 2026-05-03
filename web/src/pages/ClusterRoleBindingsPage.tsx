@@ -67,7 +67,7 @@ export function ClusterRoleBindingsPage({ cluster }: { cluster: string }) {
       actions={
         <ResourceActions
           cluster={cluster}
-          yamlKind="clusterrolebindings"
+          source={{ kind: "builtin", yamlKind: "clusterrolebindings" }}
           namespace={null}
           name={selectedName}
           onDeleted={() => setParam("sel", null)}

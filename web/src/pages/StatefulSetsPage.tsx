@@ -111,7 +111,7 @@ export function StatefulSetsPage({ cluster }: { cluster: string }) {
         actions={
           <ResourceActions
             cluster={cluster}
-            yamlKind="statefulsets"
+            source={{ kind: "builtin", yamlKind: "statefulsets" }}
             namespace={selectedNs}
             name={selectedName}
             onDeleted={() => setParam("sel", null)}

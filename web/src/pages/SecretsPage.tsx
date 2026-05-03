@@ -97,7 +97,7 @@ export function SecretsPage({ cluster }: { cluster: string }) {
         actions={
           <ResourceActions
             cluster={cluster}
-            yamlKind="secrets"
+            source={{ kind: "builtin", yamlKind: "secrets" }}
             namespace={selectedNs}
             name={selectedName}
             onDeleted={() => setMany({ sel: null, selNs: null, tab: null })}

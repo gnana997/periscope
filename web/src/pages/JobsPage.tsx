@@ -165,7 +165,7 @@ export function JobsPage({ cluster }: { cluster: string }) {
         actions={
           <ResourceActions
             cluster={cluster}
-            yamlKind="jobs"
+            source={{ kind: "builtin", yamlKind: "jobs" }}
             namespace={selectedNs}
             name={selectedName}
             onDeleted={() => setParam("sel", null)}

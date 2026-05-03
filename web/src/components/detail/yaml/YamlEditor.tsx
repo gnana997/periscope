@@ -31,6 +31,12 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useSearchParams } from "react-router-dom";
 
 import { ApiError, api, type ResourceMeta, type ResourceRef } from "../../../lib/api";
+import {
+  type EditorSource,
+  dirtyChannelKey,
+  invalidateAfterApply,
+  invalidateEditorYaml,
+} from "../../../lib/customResources";
 import { cn } from "../../../lib/cn";
 import {
   buildMonacoSchemaConfig,
@@ -55,7 +61,7 @@ import {
   registerSchema,
   useMonacoTheme,
 } from "../../../lib/monacoSetup";
-import { useOpenAPISchema, useResourceMeta, useYaml } from "../../../hooks/useResource";
+import { useOpenAPISchema, useResourceMeta, useEditorYaml } from "../../../hooks/useResource";
 import { usePublishEditorDirty } from "../../../hooks/useEditorDirty";
 import {
   buildMinimalSSA,
@@ -64,7 +70,6 @@ import {
   type Identity,
   type Op,
 } from "../../../lib/yamlPatch";
-import type { YamlKind } from "../../../lib/api";
 import { ActionBar, type ApplyState } from "./ActionBar";
 import { ProblemsStrip } from "./ProblemsStrip";
 import { ApplyErrorBanner } from "./ApplyErrorBanner";
@@ -79,14 +84,14 @@ import { DetailError, DetailLoading } from "../states";
 
 interface YamlEditorProps {
   cluster: string;
-  yamlKind: YamlKind;
+  source: EditorSource;
   resource: ResourceRef;
 }
 
-export function YamlEditor({ cluster, yamlKind, resource }: YamlEditorProps) {
-  const yamlQuery = useYaml(
+export function YamlEditor({ cluster, source, resource }: YamlEditorProps) {
+  const yamlQuery = useEditorYaml(
+    source,
     cluster,
-    yamlKind,
     resource.namespace ?? "",
     resource.name,
     true,
@@ -102,7 +107,7 @@ export function YamlEditor({ cluster, yamlKind, resource }: YamlEditorProps) {
   return (
     <Editor
       cluster={cluster}
-      yamlKind={yamlKind}
+      source={source}
       resource={resource}
       pristine={stripForEdit(yamlQuery.data)}
     />
@@ -111,12 +116,12 @@ export function YamlEditor({ cluster, yamlKind, resource }: YamlEditorProps) {
 
 interface EditorProps {
   cluster: string;
-  yamlKind: YamlKind;
+  source: EditorSource;
   resource: ResourceRef;
   pristine: string;
 }
 
-function Editor({ cluster, yamlKind, resource, pristine }: EditorProps) {
+function Editor({ cluster, source, resource, pristine }: EditorProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const editorRef = useRef<monaco.editor.IStandaloneCodeEditor | null>(null);
   const [pristineLocked, setPristineLocked] = useState(pristine);
@@ -203,7 +208,7 @@ function Editor({ cluster, yamlKind, resource, pristine }: EditorProps) {
   }, [dirty, opsForCurrentBuffer]);
 
   // Publish dirty bit so the Tab strip can show `yaml*`.
-  usePublishEditorDirty(cluster, yamlKind, resource.namespace, resource.name, dirty);
+  usePublishEditorDirty(cluster, dirtyChannelKey(source), resource.namespace, resource.name, dirty);
 
   useMonacoTheme();
 
@@ -285,10 +290,8 @@ function Editor({ cluster, yamlKind, resource, pristine }: EditorProps) {
     );
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setPristineMeta(metaQuery.data);
-    qc.invalidateQueries({
-      queryKey: ["yaml", cluster, yamlKind, resource.namespace ?? "", resource.name],
-    });
-  }, [drift, dirty, metaQuery.data, qc, cluster, yamlKind, resource.namespace, resource.name]);
+    invalidateEditorYaml(qc, source, cluster, resource.namespace ?? "", resource.name);
+  }, [drift, dirty, metaQuery.data, qc, source, cluster, resource.namespace, resource.name]);
 
   const onDriftDismiss = useCallback(() => {
     if (!metaQuery.data) return;
@@ -309,16 +312,14 @@ function Editor({ cluster, yamlKind, resource, pristine }: EditorProps) {
     setCurrentYaml(pristineLocked);
     if (metaQuery.data) setPristineMeta(metaQuery.data);
     setDismissedAtRV(null);
-    qc.invalidateQueries({
-      queryKey: ["yaml", cluster, yamlKind, resource.namespace ?? "", resource.name],
-    });
+    invalidateEditorYaml(qc, source, cluster, resource.namespace ?? "", resource.name);
   }, [
     dirty,
     pristineLocked,
     metaQuery.data,
     qc,
+    source,
     cluster,
-    yamlKind,
     resource.namespace,
     resource.name,
   ]);
@@ -683,20 +684,8 @@ function Editor({ cluster, yamlKind, resource, pristine }: EditorProps) {
         await api.applyResource({ ...args, dryRun: false, force }, ac.signal);
         setApplyState({ kind: "success" });
 
-        // Invalidate caches so list/detail/events/yaml/meta all refetch.
-        qc.invalidateQueries({ queryKey: [yamlKind] });
-        qc.invalidateQueries({
-          queryKey: ["yaml", cluster, yamlKind, resource.namespace ?? "", resource.name],
-        });
-        qc.invalidateQueries({
-          queryKey: [`${singularize(yamlKind)}-detail`, cluster, resource.namespace ?? "", resource.name],
-        });
-        qc.invalidateQueries({
-          queryKey: ["events", cluster, yamlKind, resource.namespace ?? "", resource.name],
-        });
-        qc.invalidateQueries({
-          queryKey: ["meta", cluster, resource.group, resource.version, resource.resource, resource.namespace ?? "", resource.name],
-        });
+        // Invalidate list/detail/events/yaml/meta so all open views refetch.
+        invalidateAfterApply(qc, source, resource);
 
         // Drop ?edit=1 → unmount → YamlReadView takes over
         setTimeout(() => {
@@ -731,7 +720,7 @@ function Editor({ cluster, yamlKind, resource, pristine }: EditorProps) {
     // ops captured intentionally — we want the snapshot at apply time, not
     // the latest after the user edits while waiting for the response
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [identity, opsForCurrentBuffer, resource, cluster, yamlKind, qc, setParams, parseConflictCauses, ops],
+    [identity, opsForCurrentBuffer, resource, cluster, source, qc, setParams, parseConflictCauses, ops],
   );
 
   // Apply with per-field resolutions from ConflictResolutionView. Filter
@@ -795,19 +784,7 @@ function Editor({ cluster, yamlKind, resource, pristine }: EditorProps) {
       setApplyState({ kind: "applying" });
       await api.applyResource({ ...args, dryRun: false, force }, ac.signal);
       setApplyState({ kind: "success" });
-      qc.invalidateQueries({ queryKey: [yamlKind] });
-      qc.invalidateQueries({
-        queryKey: ["yaml", cluster, yamlKind, resource.namespace ?? "", resource.name],
-      });
-      qc.invalidateQueries({
-        queryKey: [`${singularize(yamlKind)}-detail`, cluster, resource.namespace ?? "", resource.name],
-      });
-      qc.invalidateQueries({
-        queryKey: ["events", cluster, yamlKind, resource.namespace ?? "", resource.name],
-      });
-      qc.invalidateQueries({
-        queryKey: ["meta", cluster, resource.group, resource.version, resource.resource, resource.namespace ?? "", resource.name],
-      });
+      invalidateAfterApply(qc, source, resource);
       setShowTakeover(false);
       setConflicts([]);
       setResolutions(new Map());
@@ -825,7 +802,7 @@ function Editor({ cluster, yamlKind, resource, pristine }: EditorProps) {
       setApplyState({ kind: "error", message });
       setShowTakeover(false);
     }
-  }, [identity, opsForCurrentBuffer, resolutions, opPathToString, resource, cluster, yamlKind, qc, setParams, onCancel]);
+  }, [identity, opsForCurrentBuffer, resolutions, opPathToString, resource, source, qc, setParams, onCancel]);
 
   // Standalone dry-run (the "dry-run" button in ActionBar). Same 409
   // handling as runApply — if the dry-run hits a field-manager
@@ -1041,8 +1018,8 @@ function Editor({ cluster, yamlKind, resource, pristine }: EditorProps) {
 
       {showDriftDiff && (
         <DriftDiffOverlay
+          source={source}
           cluster={cluster}
-          yamlKind={yamlKind}
           namespace={resource.namespace}
           name={resource.name}
           pristineYaml={pristineLocked}
@@ -1093,11 +1070,4 @@ function Editor({ cluster, yamlKind, resource, pristine }: EditorProps) {
       )}
     </div>
   );
-}
-
-// Map plural → singular for invalidating *-detail cache keys on apply
-// success. Mirrors the convention in useResource.ts.
-function singularize(kind: string): string {
-  if (kind.endsWith("s")) return kind.slice(0, -1);
-  return kind;
 }

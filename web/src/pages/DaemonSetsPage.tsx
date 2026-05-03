@@ -124,7 +124,7 @@ export function DaemonSetsPage({ cluster }: { cluster: string }) {
         actions={
           <ResourceActions
             cluster={cluster}
-            yamlKind="daemonsets"
+            source={{ kind: "builtin", yamlKind: "daemonsets" }}
             namespace={selectedNs}
             name={selectedName}
             onDeleted={() => setParam("sel", null)}

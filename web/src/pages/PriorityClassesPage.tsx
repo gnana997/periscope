@@ -78,7 +78,7 @@ export function PriorityClassesPage({ cluster }: { cluster: string }) {
       actions={
         <ResourceActions
           cluster={cluster}
-          yamlKind="priorityclasses"
+          source={{ kind: "builtin", yamlKind: "priorityclasses" }}
           namespace={null}
           name={selectedName}
           onDeleted={() => setParam("sel", null)}

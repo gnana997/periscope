@@ -113,7 +113,7 @@ export function IngressesPage({ cluster }: { cluster: string }) {
         actions={
           <ResourceActions
             cluster={cluster}
-            yamlKind="ingresses"
+            source={{ kind: "builtin", yamlKind: "ingresses" }}
             namespace={selectedNs}
             name={selectedName}
             onDeleted={() => setParam("sel", null)}

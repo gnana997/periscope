@@ -75,7 +75,7 @@ export function LimitRangesPage({ cluster }: { cluster: string }) {
         actions={
           <ResourceActions
             cluster={cluster}
-            yamlKind="limitranges"
+            source={{ kind: "builtin", yamlKind: "limitranges" }}
             namespace={selectedNs}
             name={selectedName}
             onDeleted={() => setParam("sel", null)}

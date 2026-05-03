@@ -72,7 +72,7 @@ export function StorageClassesPage({ cluster }: { cluster: string }) {
       actions={
         <ResourceActions
           cluster={cluster}
-          yamlKind="storageclasses"
+          source={{ kind: "builtin", yamlKind: "storageclasses" }}
           namespace={null}
           name={selectedName}
           onDeleted={() => setParam("sel", null)}

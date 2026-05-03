@@ -146,7 +146,7 @@ export function ReplicaSetsPage({ cluster }: { cluster: string }) {
         actions={
           <ResourceActions
             cluster={cluster}
-            yamlKind="replicasets"
+            source={{ kind: "builtin", yamlKind: "replicasets" }}
             namespace={selectedNs}
             name={selectedName}
             onDeleted={() => setParam("sel", null)}

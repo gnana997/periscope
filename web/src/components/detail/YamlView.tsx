@@ -63,7 +63,7 @@ export function YamlView(props: YamlViewProps) {
       <Suspense fallback={<DetailLoading label="loading editor…" />}>
         <YamlEditor
           cluster={props.cluster}
-          yamlKind={props.kind}
+          source={{ kind: "builtin", yamlKind: props.kind }}
           resource={resource}
         />
       </Suspense>

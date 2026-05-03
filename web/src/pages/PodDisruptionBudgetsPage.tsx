@@ -79,7 +79,7 @@ export function PodDisruptionBudgetsPage({ cluster }: { cluster: string }) {
         actions={
           <ResourceActions
             cluster={cluster}
-            yamlKind="poddisruptionbudgets"
+            source={{ kind: "builtin", yamlKind: "poddisruptionbudgets" }}
             namespace={selectedNs}
             name={selectedName}
             onDeleted={() => setParam("sel", null)}

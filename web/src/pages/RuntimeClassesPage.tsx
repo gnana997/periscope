@@ -68,7 +68,7 @@ export function RuntimeClassesPage({ cluster }: { cluster: string }) {
       actions={
         <ResourceActions
           cluster={cluster}
-          yamlKind="runtimeclasses"
+          source={{ kind: "builtin", yamlKind: "runtimeclasses" }}
           namespace={null}
           name={selectedName}
           onDeleted={() => setParam("sel", null)}

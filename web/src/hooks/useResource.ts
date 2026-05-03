@@ -1,5 +1,6 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { api, type ClusterScopedKind, type OpenAPIDoc, type ResourceMeta, type YamlKind } from "../lib/api";
+import { editorYamlQueryKey, type EditorSource } from "../lib/customResources";
 import type {
   ClusterEventList,
   ClusterRoleBindingDetail,
@@ -554,5 +555,62 @@ export function useCustomResourceDetail(
     queryFn: ({ signal }) =>
       api.getCustomResource(cluster, group, version, plural, namespace, name!, signal),
     enabled: Boolean(name && group && version && plural),
+  });
+}
+
+// --- Editor YAML (built-in or custom resource) ---
+
+// useEditorYaml is the source-aware variant of useYaml used by the
+// inline editor surface (YamlEditor + DriftDiffOverlay). For built-in
+// kinds it shares the same `["yaml", cluster, yamlKind, ns, name]`
+// cache key as useYaml so the read-only YamlView stays on one cache;
+// for CRs it uses `["yaml-cr", cluster, group, version, plural, ns,
+// name]` — fully segregated so plural collisions across CRDs are
+// impossible.
+export function useEditorYaml(
+  source: EditorSource,
+  cluster: string,
+  ns: string,
+  name: string | null,
+  enabled: boolean,
+) {
+  return useQuery<string>({
+    queryKey: editorYamlQueryKey(source, cluster, ns, name ?? ""),
+    queryFn: ({ signal }) => {
+      if (source.kind === "custom") {
+        return api.getCustomResourceYAML(
+          cluster,
+          source.cr.group,
+          source.cr.version,
+          source.cr.resource,
+          ns && ns.length > 0 ? ns : null,
+          name!,
+          signal,
+        );
+      }
+      const k = source.yamlKind;
+      const isClusterScoped = (
+        [
+          "namespaces",
+          "pvs",
+          "storageclasses",
+          "clusterroles",
+          "clusterrolebindings",
+          "ingressclasses",
+          "priorityclasses",
+          "runtimeclasses",
+        ] as ClusterScopedKind[]
+      ).includes(k as ClusterScopedKind);
+      return isClusterScoped
+        ? api.clusterScopedYaml(cluster, k as ClusterScopedKind, name!, signal)
+        : api.yaml(
+            cluster,
+            k as Exclude<YamlKind, ClusterScopedKind>,
+            ns,
+            name!,
+            signal,
+          );
+    },
+    enabled: enabled && Boolean(name),
   });
 }

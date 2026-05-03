@@ -83,7 +83,7 @@ export function NamespacesPage({ cluster }: { cluster: string }) {
       actions={
         <ResourceActions
           cluster={cluster}
-          yamlKind="namespaces"
+          source={{ kind: "builtin", yamlKind: "namespaces" }}
           namespace={null}
           name={selectedName}
           onDeleted={() => setParam("sel", null)}

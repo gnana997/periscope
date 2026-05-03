@@ -75,7 +75,7 @@ export function ResourceQuotasPage({ cluster }: { cluster: string }) {
         actions={
           <ResourceActions
             cluster={cluster}
-            yamlKind="resourcequotas"
+            source={{ kind: "builtin", yamlKind: "resourcequotas" }}
             namespace={selectedNs}
             name={selectedName}
             onDeleted={() => setParam("sel", null)}

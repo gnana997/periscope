@@ -173,7 +173,7 @@ export function PodsPage({ cluster }: { cluster: string }) {
         actions={
           <ResourceActions
             cluster={cluster}
-            yamlKind="pods"
+            source={{ kind: "builtin", yamlKind: "pods" }}
             namespace={selectedNs}
             name={selectedName}
             onDeleted={() => setParam("sel", null)}

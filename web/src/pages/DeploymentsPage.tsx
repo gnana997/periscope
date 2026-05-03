@@ -111,7 +111,7 @@ export function DeploymentsPage({ cluster }: { cluster: string }) {
         actions={
           <ResourceActions
             cluster={cluster}
-            yamlKind="deployments"
+            source={{ kind: "builtin", yamlKind: "deployments" }}
             namespace={selectedNs}
             name={selectedName}
             onDeleted={() => setMany({ sel: null, selNs: null, tab: null })}

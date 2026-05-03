@@ -85,7 +85,7 @@ export function PVsPage({ cluster }: { cluster: string }) {
       actions={
         <ResourceActions
           cluster={cluster}
-          yamlKind="pvs"
+          source={{ kind: "builtin", yamlKind: "pvs" }}
           namespace={null}
           name={selectedName}
           onDeleted={() => setParam("sel", null)}

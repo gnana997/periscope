@@ -85,7 +85,7 @@ export function ConfigMapsPage({ cluster }: { cluster: string }) {
         actions={
           <ResourceActions
             cluster={cluster}
-            yamlKind="configmaps"
+            source={{ kind: "builtin", yamlKind: "configmaps" }}
             namespace={selectedNs}
             name={selectedName}
             onDeleted={() => setParam("sel", null)}

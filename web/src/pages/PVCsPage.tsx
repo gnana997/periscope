@@ -91,7 +91,7 @@ export function PVCsPage({ cluster }: { cluster: string }) {
         actions={
           <ResourceActions
             cluster={cluster}
-            yamlKind="pvcs"
+            source={{ kind: "builtin", yamlKind: "pvcs" }}
             namespace={selectedNs}
             name={selectedName}
             onDeleted={() => setParam("sel", null)}

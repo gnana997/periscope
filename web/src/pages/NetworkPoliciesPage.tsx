@@ -76,7 +76,7 @@ export function NetworkPoliciesPage({ cluster }: { cluster: string }) {
         actions={
           <ResourceActions
             cluster={cluster}
-            yamlKind="networkpolicies"
+            source={{ kind: "builtin", yamlKind: "networkpolicies" }}
             namespace={selectedNs}
             name={selectedName}
             onDeleted={() => setParam("sel", null)}
