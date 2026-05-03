@@ -14,6 +14,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
+	"github.com/gnana997/periscope/internal/audit"
 	"github.com/gnana997/periscope/internal/clusters"
 	"github.com/gnana997/periscope/internal/credentials"
 	execsess "github.com/gnana997/periscope/internal/exec"
@@ -30,8 +31,10 @@ import (
 //	    &command=<base64-json>       (optional; default shell command)
 //	    &tty=true|false              (optional; default true)
 //
-// Audit: emits structured slog records on session_start and session_end with
-// category=audit. See RFC 0001 10 for the schema.
+// Audit: emits exec_open and exec_close events through audit.Emitter.
+// session_end Outcome reflects whether the run errored; close_reason
+// rides in Reason. See RFC 0001 10 for the historical schema; field
+// names are preserved by audit.StdoutSink.
 //
 // PR4 additions:
 //   - Per-cluster Exec config (clusters.Cluster.Exec) overrides global
@@ -43,7 +46,7 @@ import (
 //     built UX (cap dialog, "exec disabled" tag, etc.).
 //   - Audit "transport" field reports which wire (ws_v5 vs spdy)
 //     actually carried the stream.
-func execHandler(reg *clusters.Registry, sessions *execsess.Registry, policy *k8s.Policy) credentials.Handler {
+func execHandler(reg *clusters.Registry, sessions *execsess.Registry, policy *k8s.Policy, auditer *audit.Emitter) credentials.Handler {
 	cfg := execsess.LoadConfig()
 	slog.Info("exec lifecycle config",
 		"heartbeat_seconds", int(cfg.HeartbeatInterval.Seconds()),
@@ -160,20 +163,29 @@ func execHandler(reg *clusters.Registry, sessions *execsess.Registry, policy *k8
 		}
 		defer sessions.Remove(sessionID)
 
-		slog.InfoContext(r.Context(), "pod_exec",
-			"category", "audit",
-			"event", "session_start",
-			"session_id", sessionID,
-			"actor.sub", params.Actor,
-			"cluster", c.Name,
-			"namespace", ns,
-			"pod", pod,
-			"container", container,
-			"tty", tty,
-			"command", command,
-			"k8s_identity", k8sIdentityLabel(c),
-			"started_at", started.Format(time.RFC3339Nano),
-		)
+		// session_start: emitted before the long-lived Run call so
+		// an operator can see who opened a shell even if the
+		// process never returns (network drop, hung command).
+		execActor := actorFromContext(r.Context())
+		execResource := audit.ResourceRef{
+			Group: "", Version: "v1", Resource: "pods",
+			Namespace: ns, Name: pod,
+		}
+		auditer.Record(r.Context(), audit.Event{
+			Actor:    execActor,
+			Verb:     audit.VerbExecOpen,
+			Outcome:  audit.OutcomeSuccess,
+			Cluster:  c.Name,
+			Resource: execResource,
+			Extra: map[string]any{
+				"session_id":   sessionID,
+				"container":    container,
+				"tty":          tty,
+				"command":      command,
+				"k8s_identity": k8sIdentityLabel(c),
+				"started_at":   started.Format(time.RFC3339Nano),
+			},
+		})
 
 		result, stats, runErr := execsess.Run(r.Context(), ws, p, params, effectiveCfg, policy)
 		ended := time.Now().UTC()
@@ -196,28 +208,38 @@ func execHandler(reg *clusters.Registry, sessions *execsess.Registry, policy *k8
 			resolvedContainer = container
 		}
 
-		slog.InfoContext(r.Context(), "pod_exec",
-			"category", "audit",
-			"event", "session_end",
-			"session_id", sessionID,
-			"actor.sub", params.Actor,
-			"cluster", c.Name,
-			"namespace", ns,
-			"pod", pod,
-			"container", resolvedContainer,
-			"tty", tty,
-			"command", commandOrResolved(command, result.Resolved.Command),
-			"k8s_identity", k8sIdentityLabel(c),
-			"transport", string(result.Transport),
-			"started_at", started.Format(time.RFC3339Nano),
-			"ended_at", ended.Format(time.RFC3339Nano),
-			"duration_ms", ended.Sub(started).Milliseconds(),
-			"close_reason", closeReason,
-			"exit_code", result.ExitCode,
-			"bytes_stdin", stats.BytesIn,
-			"bytes_stdout", stats.BytesOut,
-			"err", errString(runErr),
-		)
+		// session_end Outcome reflects whether Run returned an
+		// error. close_reason is the human-friendly disposition
+		// (completed / idle_timeout / abort / server_error) and
+		// rides in Reason so the same field carries the answer to
+		// "why did this end" across success and failure.
+		endOutcome := audit.OutcomeSuccess
+		if runErr != nil {
+			endOutcome = audit.OutcomeFailure
+		}
+		auditer.Record(r.Context(), audit.Event{
+			Actor:    execActor,
+			Verb:     audit.VerbExecClose,
+			Outcome:  endOutcome,
+			Cluster:  c.Name,
+			Resource: execResource,
+			Reason:   closeReason,
+			Extra: map[string]any{
+				"session_id":   sessionID,
+				"container":    resolvedContainer,
+				"tty":          tty,
+				"command":      commandOrResolved(command, result.Resolved.Command),
+				"k8s_identity": k8sIdentityLabel(c),
+				"transport":    string(result.Transport),
+				"started_at":   started.Format(time.RFC3339Nano),
+				"ended_at":     ended.Format(time.RFC3339Nano),
+				"duration_ms":  ended.Sub(started).Milliseconds(),
+				"exit_code":    result.ExitCode,
+				"bytes_stdin":  stats.BytesIn,
+				"bytes_stdout": stats.BytesOut,
+				"err":          errString(runErr),
+			},
+		})
 	}
 }
 

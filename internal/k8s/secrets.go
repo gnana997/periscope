@@ -3,7 +3,6 @@ package k8s
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"sort"
 
 	corev1 "k8s.io/api/core/v1"
@@ -91,8 +90,10 @@ type GetSecretValueArgs struct {
 }
 
 // GetSecretValue returns the decoded bytes of one key of one secret.
-// Audit-logs the read with the actor's identity. Per GROUND_RULES this is
-// a deliberate, reviewable read action — never bundled into other endpoints.
+// Per GROUND_RULES this is a deliberate, reviewable read action —
+// never bundled into other endpoints. Audit emission is the
+// handler's responsibility (cmd/periscope.secretRevealHandler) so
+// the k8s package has no dependency on the audit pipeline.
 func GetSecretValue(ctx context.Context, p credentials.Provider, args GetSecretValueArgs) ([]byte, error) {
 	cs, err := newClientFn(ctx, p, args.Cluster)
 	if err != nil {
@@ -106,16 +107,6 @@ func GetSecretValue(ctx context.Context, p credentials.Provider, args GetSecretV
 	if !ok {
 		return nil, fmt.Errorf("key %q not found in secret %s/%s", args.Key, args.Namespace, args.Name)
 	}
-
-	slog.InfoContext(ctx, "secret reveal",
-		"actor", p.Actor(),
-		"cluster", args.Cluster.Name,
-		"namespace", args.Namespace,
-		"secret", args.Name,
-		"key", args.Key,
-		"size", len(value),
-	)
-
 	return value, nil
 }
 
