@@ -3,9 +3,9 @@
 // to queries that already have data (predicate), so cold loads keep
 // rendering their per-page skeletons without a doubled-up indicator.
 //
-// Mounted as the first child of <main> in AppShell so it sits above
-// the page content but below the global sidebar — implying the
-// content is refreshing, not the static nav.
+// Mounted at the top of the App layout (above the AppShell), so the
+// 2px sweep spans the full viewport whenever any cached query is
+// refetching. Visible above sidebar + content alike.
 //
 // Animation: see `.animate-fetchbar` in src/index.css. Single keyframe
 // + a custom utility — no Tailwind config (we're on v4 CSS-mode) and

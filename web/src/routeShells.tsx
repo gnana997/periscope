@@ -21,6 +21,28 @@ import { useClusters } from "./hooks/useClusters";
 import { queryKeys } from "./lib/queryKeys";
 
 export function AppShell() {
+  const { cluster } = useParams<{ cluster: string }>();
+  const qc = useQueryClient();
+  const prevCluster = useRef<string | undefined>(undefined);
+
+  // Single-cluster-at-a-time UX: when the route's cluster id changes,
+  // evict the prior cluster's subtree so its stale entries don't sit
+  // in the cache (and don't trigger ghost background refetches).
+  // Lives here (the /clusters/:cluster layout) rather than on each
+  // page's WithCluster wrapper because per-page WithClusters unmount
+  // when navigating between pages — the ref would lose its history.
+  // AppShell stays mounted across page changes within a cluster, so
+  // the ref correctly tracks the previous cluster across all
+  // navigations.
+  useEffect(() => {
+    if (cluster && prevCluster.current && prevCluster.current !== cluster) {
+      qc.removeQueries({
+        queryKey: queryKeys.cluster(prevCluster.current).all,
+      });
+    }
+    prevCluster.current = cluster;
+  }, [cluster, qc]);
+
   return (
     <div className="flex h-full">
       <div className="flex h-full shrink-0 flex-col border-r border-border bg-surface">
@@ -44,21 +66,6 @@ export function WithCluster<P extends { cluster: string }>({
   Page: React.ComponentType<P>;
 }) {
   const { cluster } = useParams<{ cluster: string }>();
-  const qc = useQueryClient();
-  const prevCluster = useRef<string | undefined>(undefined);
-
-  // Single-cluster-at-a-time UX: when the route's cluster id changes,
-  // evict the prior cluster's subtree so its stale entries don't sit
-  // in the cache (and don't trigger ghost background refetches).
-  useEffect(() => {
-    if (cluster && prevCluster.current && prevCluster.current !== cluster) {
-      qc.removeQueries({
-        queryKey: queryKeys.cluster(prevCluster.current).all,
-      });
-    }
-    prevCluster.current = cluster;
-  }, [cluster, qc]);
-
   if (!cluster) return null;
   return <Page {...({ cluster } as unknown as P)} />;
 }
