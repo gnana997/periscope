@@ -2,7 +2,7 @@
 //
 // PR2 deliverable. Replaces the legacy <pre>-grid renderer in
 // YamlView.tsx (custom regex highlighter) when ?monaco=1 is in the
-// URL. Same useYaml cache key as the legacy view, so toggling between
+// URL. Shares the useEditorYaml cache key, so toggling between
 // the two modes never re-fetches.
 //
 // Schema-aware features (autocomplete, hover docs, validation) are
@@ -13,8 +13,8 @@
 import { useEffect, useRef, useState } from "react";
 import * as monaco from "monaco-editor";
 
-import { useYaml } from "../../hooks/useResource";
-import type { YamlKind } from "../../lib/api";
+import { useEditorYaml } from "../../hooks/useResource";
+import type { EditorSource } from "../../lib/customResources";
 import { cn } from "../../lib/cn";
 import {
   ensureMonacoConfigured,
@@ -25,13 +25,13 @@ import { DetailError, DetailLoading } from "./states";
 
 interface YamlReadViewProps {
   cluster: string;
-  kind: YamlKind;
+  source: EditorSource;
   ns: string;
   name: string;
 }
 
-export function YamlReadView({ cluster, kind, ns, name }: YamlReadViewProps) {
-  const { data, isLoading, isError, error } = useYaml(cluster, kind, ns, name, true);
+export function YamlReadView({ cluster, source, ns, name }: YamlReadViewProps) {
+  const { data, isLoading, isError, error } = useEditorYaml(source, cluster, ns, name, true);
 
   if (isLoading) return <DetailLoading label="loading yaml…" />;
   if (isError)

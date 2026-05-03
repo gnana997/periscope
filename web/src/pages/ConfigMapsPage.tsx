@@ -18,6 +18,7 @@ import { DetailPane } from "../components/detail/DetailPane";
 import { ConfigMapDescribe } from "../components/detail/describe/ConfigMapDescribe";
 import { YamlView } from "../components/detail/YamlView";
 import { useEditorDirty } from "../hooks/useEditorDirty";
+import { useConfirmDiscard } from "../hooks/useConfirmDiscard";
 import { ResourceActions } from "../components/edit/ResourceActions";
 import { EventsView } from "../components/detail/EventsView";
 import { NamespacePicker } from "../components/shell/NamespacePicker";
@@ -68,6 +69,7 @@ export function ConfigMapsPage({ cluster }: { cluster: string }) {
   ];
 
   const editFlag = useEditorDirty(cluster, "configmaps", selectedNs ?? undefined, selectedName);
+  const confirmDiscard = useConfirmDiscard(editFlag.dirty);
 
   const detail =
     selectedNs && selectedName ? (
@@ -75,11 +77,11 @@ export function ConfigMapsPage({ cluster }: { cluster: string }) {
         title={selectedName}
         subtitle={selectedNs}
         activeTab={activeTab}
-        onTabChange={(id) => setParam("tab", id)}
-        onClose={() => setMany({ sel: null, selNs: null, tab: null })}
+        onTabChange={(id) => confirmDiscard(() => setParam("tab", id))}
+        onClose={() => confirmDiscard(() => setMany({ sel: null, selNs: null, tab: null }))}
         tabs={[
           { id: "describe", label: "describe", ready: true, content: <ConfigMapDescribe cluster={cluster} ns={selectedNs} name={selectedName} /> },
-          { id: "yaml", label: "yaml", ready: true, content: <YamlView cluster={cluster} kind="configmaps" ns={selectedNs} name={selectedName} />, dirty: editFlag.dirty },
+          { id: "yaml", label: "yaml", ready: true, content: <YamlView cluster={cluster} source={{ kind: "builtin", yamlKind: "configmaps" }} ns={selectedNs} name={selectedName} />, dirty: editFlag.dirty },
           { id: "events", label: "events", ready: true, content: <EventsView cluster={cluster} kind="configmaps" ns={selectedNs} name={selectedName} /> },
         ]}
         actions={
@@ -127,7 +129,7 @@ export function ConfigMapsPage({ cluster }: { cluster: string }) {
               columns={columns}
               rows={filtered}
               rowKey={(c) => `${c.namespace}/${c.name}`}
-              onRowClick={(c) => setMany({ sel: c.name, selNs: c.namespace, tab: "describe" })}
+              onRowClick={(c) => confirmDiscard(() => setMany({ sel: c.name, selNs: c.namespace, tab: "describe" }))}
               selectedKey={selectedKey}
             />
           )

@@ -13,6 +13,7 @@ import { DetailPane } from "../components/detail/DetailPane";
 import { PDBDescribe } from "../components/detail/describe/PDBDescribe";
 import { YamlView } from "../components/detail/YamlView";
 import { useEditorDirty } from "../hooks/useEditorDirty";
+import { useConfirmDiscard } from "../hooks/useConfirmDiscard";
 import { ResourceActions } from "../components/edit/ResourceActions";
 import { EventsView } from "../components/detail/EventsView";
 import { NamespacePicker } from "../components/shell/NamespacePicker";
@@ -62,6 +63,7 @@ export function PodDisruptionBudgetsPage({ cluster }: { cluster: string }) {
   const selectedKey = selectedNs && selectedName ? `${selectedNs}/${selectedName}` : null;
 
   const editFlag = useEditorDirty(cluster, "poddisruptionbudgets", selectedNs ?? undefined, selectedName);
+  const confirmDiscard = useConfirmDiscard(editFlag.dirty);
 
   const detail =
     selectedNs && selectedName ? (
@@ -69,11 +71,11 @@ export function PodDisruptionBudgetsPage({ cluster }: { cluster: string }) {
         title={selectedName}
         subtitle={selectedNs}
         activeTab={activeTab}
-        onTabChange={(id) => setParam("tab", id)}
-        onClose={() => setMany({ sel: null, selNs: null, tab: null })}
+        onTabChange={(id) => confirmDiscard(() => setParam("tab", id))}
+        onClose={() => confirmDiscard(() => setMany({ sel: null, selNs: null, tab: null }))}
         tabs={[
           { id: "describe", label: "describe", ready: true, content: <PDBDescribe cluster={cluster} ns={selectedNs} name={selectedName} /> },
-          { id: "yaml", label: "yaml", ready: true, content: <YamlView cluster={cluster} kind="poddisruptionbudgets" ns={selectedNs} name={selectedName} />, dirty: editFlag.dirty },
+          { id: "yaml", label: "yaml", ready: true, content: <YamlView cluster={cluster} source={{ kind: "builtin", yamlKind: "poddisruptionbudgets" }} ns={selectedNs} name={selectedName} />, dirty: editFlag.dirty },
           { id: "events", label: "events", ready: true, content: <EventsView cluster={cluster} kind="poddisruptionbudgets" ns={selectedNs} name={selectedName} /> },
         ]}
         actions={
@@ -106,7 +108,7 @@ export function PodDisruptionBudgetsPage({ cluster }: { cluster: string }) {
             columns={columns}
             rows={filtered}
             rowKey={(r) => `${r.namespace}/${r.name}`}
-            onRowClick={(r) => setMany({ sel: r.name, selNs: r.namespace, tab: "describe" })}
+            onRowClick={(r) => confirmDiscard(() => setMany({ sel: r.name, selNs: r.namespace, tab: "describe" }))}
             selectedKey={selectedKey}
           />
         }

@@ -28,7 +28,7 @@ import {
 } from "react";
 import * as monaco from "monaco-editor";
 import { useQueryClient } from "@tanstack/react-query";
-import { useSearchParams } from "react-router-dom";
+import { useBlocker, useSearchParams } from "react-router-dom";
 
 import { ApiError, api, type ResourceMeta, type ResourceRef } from "../../../lib/api";
 import {
@@ -73,6 +73,7 @@ import {
 import { ActionBar, type ApplyState } from "./ActionBar";
 import { ProblemsStrip } from "./ProblemsStrip";
 import { ApplyErrorBanner } from "./ApplyErrorBanner";
+import { SchemaMissingBanner } from "./SchemaMissingBanner";
 import { DriftBanner } from "./DriftBanner";
 import { DriftDiffOverlay } from "./DriftDiffOverlay";
 import { showToast } from "../../../lib/toastBus";
@@ -861,6 +862,44 @@ function Editor({ cluster, source, resource, pristine }: EditorProps) {
 
 
 
+  // Unsaved-changes guard — three layers:
+  //
+  //   - `beforeunload`: native browser warning on refresh / tab close.
+  //   - `useBlocker` (below): custom confirm on cross-page navigation
+  //     (sidebar click, browser back/forward). Requires the data
+  //     router from main.tsx; throws under legacy <BrowserRouter>.
+  //   - `useConfirmDiscard` in pages: custom confirm on search-param
+  //     changes (row click, tab switch, close button) — those don't
+  //     fire useBlocker since the pathname stays the same.
+  useEffect(() => {
+    if (!dirty) return;
+    function onBeforeUnload(e: BeforeUnloadEvent) {
+      e.preventDefault();
+      e.returnValue = "";
+    }
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => window.removeEventListener("beforeunload", onBeforeUnload);
+  }, [dirty]);
+
+  // Cross-page navigation guard — when the user clicks the sidebar
+  // for a different resource type, or hits browser back/forward, fire
+  // the same custom confirm useConfirmDiscard uses for in-page
+  // search-param changes. Requires the data router (see main.tsx);
+  // useBlocker throws under the legacy <BrowserRouter>.
+  const blocker = useBlocker(
+    ({ currentLocation, nextLocation }) =>
+      dirty && currentLocation.pathname !== nextLocation.pathname,
+  );
+
+  useEffect(() => {
+    if (blocker.state !== "blocked") return;
+    const ok = window.confirm(
+      "You have unsaved YAML edits. Discard and continue?",
+    );
+    if (ok) blocker.proceed();
+    else blocker.reset();
+  }, [blocker]);
+
   // Keyboard shortcuts on the editor instance (Monaco's preferred
   // mechanism — captures inside the editor surface).
   useEffect(() => {
@@ -1026,6 +1065,10 @@ function Editor({ cluster, source, resource, pristine }: EditorProps) {
           onClose={onDriftDiffClose}
           onReload={onDriftReload}
         />
+      )}
+
+      {schemaState === "missing" && mode === "edit" && (
+        <SchemaMissingBanner kindLabel={gvk?.kind} />
       )}
 
       {applyState.kind === "error" && mode !== "conflict" && (

@@ -288,25 +288,6 @@ export function useRevealSecretValue() {
   });
 }
 
-// --- YAML ---
-
-export function useYaml(
-  cluster: string,
-  kind: YamlKind,
-  ns: string,
-  name: string | null,
-  enabled: boolean,
-) {
-  return useQuery<string>({
-    queryKey: ["yaml", cluster, kind, ns, name],
-    queryFn: ({ signal }) =>
-      (["namespaces", "pvs", "storageclasses", "clusterroles", "clusterrolebindings", "ingressclasses", "priorityclasses", "runtimeclasses"] as ClusterScopedKind[]).includes(kind as ClusterScopedKind)
-        ? api.clusterScopedYaml(cluster, kind as ClusterScopedKind, name!, signal)
-        : api.yaml(cluster, kind as Exclude<YamlKind, ClusterScopedKind>, ns, name!, signal),
-    enabled: enabled && Boolean(name),
-  });
-}
-
 
 // --- Resource meta (managedFields + resourceVersion + generation) ---
 
@@ -518,12 +499,13 @@ export function useRuntimeClassDetail(cluster: string, name: string | null) {
 
 // --- CRDs + custom resources ---
 
-export function useCRDs(cluster: string) {
+export function useCRDs(cluster: string, enabled = true) {
   return useQuery({
     queryKey: ["crds", cluster],
     queryFn: ({ signal }) => api.crds(cluster, signal),
     // CRDs change infrequently — cache hit is the common case.
     staleTime: 30_000,
+    enabled: enabled && cluster.length > 0,
   });
 }
 
@@ -560,10 +542,10 @@ export function useCustomResourceDetail(
 
 // --- Editor YAML (built-in or custom resource) ---
 
-// useEditorYaml is the source-aware variant of useYaml used by the
+// useEditorYaml fetches a resource's YAML for the editor + read view, used by
 // inline editor surface (YamlEditor + DriftDiffOverlay). For built-in
 // kinds it shares the same `["yaml", cluster, yamlKind, ns, name]`
-// cache key as useYaml so the read-only YamlView stays on one cache;
+// cache key as the editor invalidations target, so the read-only YamlView stays on one cache;
 // for CRs it uses `["yaml-cr", cluster, group, version, plural, ns,
 // name]` — fully segregated so plural collisions across CRDs are
 // impossible.

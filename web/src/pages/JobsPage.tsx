@@ -22,6 +22,7 @@ import { DetailPane } from "../components/detail/DetailPane";
 import { JobDescribe } from "../components/detail/describe/JobDescribe";
 import { YamlView } from "../components/detail/YamlView";
 import { useEditorDirty } from "../hooks/useEditorDirty";
+import { useConfirmDiscard } from "../hooks/useConfirmDiscard";
 import { ResourceActions } from "../components/edit/ResourceActions";
 import { EventsView } from "../components/detail/EventsView";
 import { WorkloadLogsTab } from "../components/logs/WorkloadLogsTab";
@@ -147,6 +148,7 @@ export function JobsPage({ cluster }: { cluster: string }) {
   };
 
   const editFlag = useEditorDirty(cluster, "jobs", selectedNs ?? undefined, selectedName);
+  const confirmDiscard = useConfirmDiscard(editFlag.dirty);
 
   const detail =
     selectedNs && selectedName ? (
@@ -154,11 +156,11 @@ export function JobsPage({ cluster }: { cluster: string }) {
         title={selectedName}
         subtitle={selectedNs}
         activeTab={activeTab}
-        onTabChange={(id) => setParam("tab", id)}
-        onClose={() => setMany({ sel: null, selNs: null, tab: null })}
+        onTabChange={(id) => confirmDiscard(() => setParam("tab", id))}
+        onClose={() => confirmDiscard(() => setMany({ sel: null, selNs: null, tab: null }))}
         tabs={[
           { id: "describe", label: "describe", ready: true, content: <JobDescribe cluster={cluster} ns={selectedNs} name={selectedName} /> },
-          { id: "yaml", label: "yaml", ready: true, content: <YamlView cluster={cluster} kind="jobs" ns={selectedNs} name={selectedName} />, dirty: editFlag.dirty },
+          { id: "yaml", label: "yaml", ready: true, content: <YamlView cluster={cluster} source={{ kind: "builtin", yamlKind: "jobs" }} ns={selectedNs} name={selectedName} />, dirty: editFlag.dirty },
           { id: "events", label: "events", ready: true, content: <EventsView cluster={cluster} kind="jobs" ns={selectedNs} name={selectedName} /> },
           { id: "logs", label: "logs", ready: true, content: <WorkloadLogsTab kind="job" cluster={cluster} ns={selectedNs} name={selectedName} /> },
         ]}
@@ -215,7 +217,7 @@ export function JobsPage({ cluster }: { cluster: string }) {
               rows={filtered}
               rowKey={(j) => `${j.namespace}/${j.name}`}
               rowTint={rowTint}
-              onRowClick={(j) => setMany({ sel: j.name, selNs: j.namespace, tab: "describe" })}
+              onRowClick={(j) => confirmDiscard(() => setMany({ sel: j.name, selNs: j.namespace, tab: "describe" }))}
               selectedKey={selectedKey}
             />
           )

@@ -3,7 +3,9 @@ import { useMatch, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../../lib/api";
 import { cn } from "../../lib/cn";
-import type { SearchKind, SearchResult } from "../../lib/types";
+import { useCRDs } from "../../hooks/useResource";
+import { nameMatches } from "../../lib/format";
+import type { CRD, SearchKind, SearchResult } from "../../lib/types";
 
 const IS_MAC =
   typeof navigator !== "undefined" &&
@@ -105,6 +107,25 @@ export function SearchPalette({
 
   const results = useMemo(() => data?.results ?? [], [data]);
 
+  // Lazy CRD list — only fetched while the palette is open and a
+  // cluster is in scope. useCRDs already caches for 30s so repeat
+  // opens are instant. Cap matches to keep the palette compact.
+  const crdsQuery = useCRDs(cluster, open && cluster.length > 0);
+  const crdMatches = useMemo<CRD[]>(() => {
+    if (!debounced) return [];
+    const all = crdsQuery.data?.crds ?? [];
+    const out: CRD[] = [];
+    for (const c of all) {
+      const m =
+        nameMatches(c.kind, debounced) ||
+        nameMatches(c.plural, debounced) ||
+        (c.shortNames?.some((s) => nameMatches(s, debounced)) ?? false);
+      if (m) out.push(c);
+      if (out.length >= 6) break;
+    }
+    return out;
+  }, [crdsQuery.data, debounced]);
+
   // Reset highlight to the top result whenever the result set changes
   // (new query OR same query with different result count). activeIndex
   // is also written by arrow-key navigation, so it has to be state;
@@ -113,7 +134,7 @@ export function SearchPalette({
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setActiveIndex(0);
-  }, [results.length, debounced]);
+  }, [results.length, crdMatches.length, debounced]);
 
   useEffect(() => {
     if (!listRef.current) return;
@@ -134,6 +155,14 @@ export function SearchPalette({
     return groups;
   }, [results]);
 
+  function navigateToCRD(c: CRD) {
+    const path = pathForCRD(cluster, c);
+    if (path) {
+      navigate(path);
+      onClose();
+    }
+  }
+
   function navigateToResult(r: SearchResult) {
     const path = pathForResult(cluster, r);
     if (path) {
@@ -150,13 +179,18 @@ export function SearchPalette({
     }
     if (e.key === "Enter") {
       e.preventDefault();
-      const r = results[activeIndex];
-      if (r) navigateToResult(r);
+      if (activeIndex < crdMatches.length) {
+        navigateToCRD(crdMatches[activeIndex]);
+      } else {
+        const r = results[activeIndex - crdMatches.length];
+        if (r) navigateToResult(r);
+      }
       return;
     }
     if (e.key === "ArrowDown") {
       e.preventDefault();
-      setActiveIndex((i) => Math.min(i + 1, Math.max(0, results.length - 1)));
+      const total = crdMatches.length + results.length;
+      setActiveIndex((i) => Math.min(i + 1, Math.max(0, total - 1)));
       return;
     }
     if (e.key === "ArrowUp") {
@@ -234,13 +268,71 @@ export function SearchPalette({
             <Empty>searching…</Empty>
           ) : isError ? (
             <Empty tone="red">search failed — try again</Empty>
-          ) : results.length === 0 ? (
+          ) : crdMatches.length + results.length === 0 ? (
             <Empty>
               no matches for{" "}
               <span className="font-medium text-ink-muted">"{debounced}"</span>
             </Empty>
           ) : (
             <ul ref={listRef}>
+              {crdMatches.length > 0 && (
+                <li>
+                  <div className="border-y border-border bg-surface-2/50 px-4 py-1 font-mono text-[10px] uppercase tracking-[0.08em] text-ink-faint">
+                    custom resources{" "}
+                    <span className="ml-1 normal-case tracking-normal text-ink-faint/70">
+                      ({crdMatches.length})
+                    </span>
+                  </div>
+                  <ul>
+                    {crdMatches.map((c, i) => {
+                      const flatIndex = i;
+                      const isActive = flatIndex === activeIndex;
+                      return (
+                        <li
+                          key={`crd/${c.group}/${c.plural}`}
+                          data-active={isActive ? "true" : undefined}
+                        >
+                          <button
+                            type="button"
+                            onClick={() => navigateToCRD(c)}
+                            onMouseEnter={() => setActiveIndex(flatIndex)}
+                            className={cn(
+                              "flex w-full items-center gap-3 px-4 py-1.5 text-left transition-colors",
+                              isActive
+                                ? "bg-accent-soft"
+                                : "hover:bg-surface-2/40",
+                            )}
+                          >
+                            <span
+                              className={cn(
+                                "shrink-0 rounded-sm border px-1 py-px font-mono text-[9.5px] uppercase tracking-[0.04em]",
+                                isActive
+                                  ? "border-accent/30 bg-surface text-accent"
+                                  : "border-border bg-surface-2/60 text-ink-faint",
+                              )}
+                            >
+                              crd
+                            </span>
+                            <HighlightedName
+                              name={c.kind}
+                              query={debounced}
+                              active={isActive}
+                            />
+                            <span
+                              className={cn(
+                                "shrink-0 font-mono text-[10.5px]",
+                                isActive ? "text-accent/70" : "text-ink-faint",
+                              )}
+                            >
+                              {c.group}
+                            </span>
+                          </button>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </li>
+              )}
               {grouped.map((group) => (
                 <li key={group.kind}>
                   <div className="border-y border-border bg-surface-2/50 px-4 py-1 font-mono text-[10px] uppercase tracking-[0.08em] text-ink-faint">
@@ -251,7 +343,7 @@ export function SearchPalette({
                   </div>
                   <ul>
                     {group.rows.map((r, i) => {
-                      const flatIndex = group.startIndex + i;
+                      const flatIndex = crdMatches.length + group.startIndex + i;
                       const isActive = flatIndex === activeIndex;
                       return (
                         <li
@@ -335,6 +427,11 @@ export function SearchPalette({
 // ---------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------
+
+function pathForCRD(cluster: string, c: CRD): string {
+  const e = encodeURIComponent;
+  return `/clusters/${e(cluster)}/customresources/${e(c.group)}/${e(c.storageVersion)}/${e(c.plural)}`;
+}
 
 function pathForResult(cluster: string, r: SearchResult): string | null {
   const c = encodeURIComponent(cluster);

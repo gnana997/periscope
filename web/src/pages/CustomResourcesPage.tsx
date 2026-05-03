@@ -1,11 +1,12 @@
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import { useParams, useSearchParams, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import {
   useCRDs,
   useCustomResources,
 } from "../hooks/useResource";
-import { api } from "../lib/api";
+import { useEditorDirty } from "../hooks/useEditorDirty";
+import { useConfirmDiscard } from "../hooks/useConfirmDiscard";
 import { ageFrom, nameMatches } from "../lib/format";
 import { cn } from "../lib/cn";
 import { PageHeader } from "../components/page/PageHeader";
@@ -25,8 +26,15 @@ import {
   DetailError,
   DetailLoading,
 } from "../components/detail/states";
+import { YamlView } from "../components/detail/YamlView";
 import { NamespacePicker } from "../components/shell/NamespacePicker";
 import { CustomResourceDescribe } from "../components/detail/describe/CustomResourceDescribe";
+import { ResourceActions } from "../components/edit/ResourceActions";
+import {
+  dirtyChannelKey,
+  refFromCRD,
+  type EditorSource,
+} from "../lib/customResources";
 import type { CRD, CustomResource } from "../lib/types";
 
 interface CRDetailRefProps {
@@ -92,6 +100,17 @@ export function CustomResourcesPage({ cluster }: { cluster: string }) {
   );
 
   const isClusterScoped = crd?.scope === "Cluster";
+
+  // EditorSource for the selected CR — drives YamlView (read+edit)
+  // and ResourceActions (delete + edit nav). null until the CRD
+  // definition arrives so we know the right scope/kind/version.
+  const crSource: EditorSource | null = useMemo(
+    () =>
+      crd && version
+        ? { kind: "custom", cr: refFromCRD(crd, version) }
+        : null,
+    [crd, version],
+  );
 
   const listQuery = useCustomResources(
     cluster,
@@ -159,12 +178,27 @@ export function CustomResourcesPage({ cluster }: { cluster: string }) {
       : null;
 
   const onRowClick = (r: CustomResource) => {
-    setMany({
-      sel: r.name,
-      selNs: isClusterScoped ? null : r.namespace ?? "",
-      tab: "describe",
+    confirmDiscard(() => {
+      setMany({
+        sel: r.name,
+        selNs: isClusterScoped ? null : r.namespace ?? "",
+        tab: "describe",
+      });
     });
   };
+
+  // Editor-dirty pub/sub — the YamlEditor publishes via
+  // dirtyChannelKey(source); read with the same key so the YAML
+  // tab can show `yaml*` while the user has unsaved edits.
+  const editFlag = useEditorDirty(
+    cluster,
+    crSource ? dirtyChannelKey(crSource) : "",
+    selectedNs ?? undefined,
+    selectedName,
+  );
+  const confirmDiscard = useConfirmDiscard(editFlag.dirty);
+
+  const detailNs = isClusterScoped ? null : selectedNs ?? null;
 
   const detail =
     selectedName && (isClusterScoped || selectedNs) ? (
@@ -172,8 +206,19 @@ export function CustomResourcesPage({ cluster }: { cluster: string }) {
         title={selectedName}
         subtitle={isClusterScoped ? "cluster-scoped" : selectedNs ?? ""}
         activeTab={activeTab}
-        onTabChange={(id) => setParam("tab", id)}
-        onClose={() => setMany({ sel: null, selNs: null, tab: null })}
+        onTabChange={(id) => confirmDiscard(() => setParam("tab", id))}
+        onClose={() => confirmDiscard(() => setMany({ sel: null, selNs: null, tab: null }))}
+        actions={
+          crSource ? (
+            <ResourceActions
+              cluster={cluster}
+              source={crSource}
+              namespace={detailNs}
+              name={selectedName}
+              onDeleted={() => setMany({ sel: null, selNs: null, tab: null })}
+            />
+          ) : undefined
+        }
         tabs={[
           {
             id: "describe",
@@ -185,7 +230,7 @@ export function CustomResourcesPage({ cluster }: { cluster: string }) {
                 group={group ?? ""}
                 version={version ?? ""}
                 plural={plural ?? ""}
-                namespace={isClusterScoped ? null : selectedNs ?? null}
+                namespace={detailNs}
                 name={selectedName}
               />
             ),
@@ -194,15 +239,16 @@ export function CustomResourcesPage({ cluster }: { cluster: string }) {
             id: "yaml",
             label: "yaml",
             ready: true,
-            content: (
-              <CustomResourceYamlView
+            dirty: editFlag.dirty,
+            content: crSource ? (
+              <YamlView
                 cluster={cluster}
-                group={group ?? ""}
-                version={version ?? ""}
-                plural={plural ?? ""}
-                namespace={isClusterScoped ? null : selectedNs ?? null}
+                source={crSource}
+                ns={selectedNs ?? ""}
                 name={selectedName}
               />
+            ) : (
+              <DetailLoading label="loading CRD…" />
             ),
           },
           {
@@ -215,7 +261,7 @@ export function CustomResourcesPage({ cluster }: { cluster: string }) {
                 group={group ?? ""}
                 version={version ?? ""}
                 plural={plural ?? ""}
-                namespace={isClusterScoped ? null : selectedNs ?? null}
+                namespace={detailNs}
                 name={selectedName}
               />
             ),
@@ -302,68 +348,6 @@ export function CustomResourcesPage({ cluster }: { cluster: string }) {
   );
 }
 
-
-// ---------------------------------------------------------------------
-// YAML tab — minimal renderer for CR YAML
-// ---------------------------------------------------------------------
-
-function CustomResourceYamlView(props: CRDetailRefProps) {
-  const { cluster, group, version, plural, namespace, name } = props;
-  const yamlQuery = useQuery({
-    queryKey: ["cr-yaml", cluster, group, version, plural, namespace ?? "", name],
-    queryFn: ({ signal }) =>
-      api.getCustomResourceYAML(cluster, group, version, plural, namespace, name, signal),
-    enabled: Boolean(name),
-  });
-  const [copied, setCopied] = useState(false);
-
-  if (yamlQuery.isLoading) return <DetailLoading label="loading yaml…" />;
-  if (yamlQuery.isError)
-    return <DetailError message={(yamlQuery.error as Error)?.message ?? "unknown"} />;
-  if (!yamlQuery.data) return null;
-
-  const data = yamlQuery.data;
-  const lines = data.replace(/\n+$/, "").split("\n");
-
-  const handleCopy = async () => {
-    try {
-      await navigator.clipboard.writeText(data);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
-    } catch {
-      // clipboard unavailable
-    }
-  };
-
-  return (
-    <div className="relative">
-      <div className="pointer-events-none sticky top-0 z-10 flex justify-end">
-        <button
-          type="button"
-          onClick={handleCopy}
-          className={cn(
-            "pointer-events-auto m-2 inline-flex items-center gap-1.5 rounded-md border bg-surface px-2.5 py-1 font-mono text-[11px] shadow-sm transition-colors",
-            copied
-              ? "border-green/40 bg-green-soft text-green"
-              : "border-border text-ink-muted hover:border-border-strong hover:text-ink",
-          )}
-        >
-          {copied ? "✓ copied" : "copy"}
-        </button>
-      </div>
-      <pre className="grid grid-cols-[auto_1fr] gap-x-4 px-4 pb-5 pt-1 font-mono text-[11.5px] leading-[1.55]">
-        {lines.map((line, i) => (
-          <span key={i} className="contents">
-            <span className="select-none text-right text-ink-faint tabular">
-              {i + 1}
-            </span>
-            <code className="whitespace-pre text-ink">{line || " "}</code>
-          </span>
-        ))}
-      </pre>
-    </div>
-  );
-}
 
 // ---------------------------------------------------------------------
 // Events tab — fetches CR-specific events endpoint
