@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"sort"
 
+	appsv1 "k8s.io/api/apps/v1"
+	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -265,6 +267,52 @@ func WatchPods(ctx context.Context, p credentials.Provider, args WatchArgs, sink
 			return cs.CoreV1().Pods(args.Namespace).Watch(ctx, opts)
 		},
 		Summary: podSummary,
+	}, sink)
+}
+
+// WatchReplicaSets runs a list-then-watch loop on ReplicaSets in the
+// given namespace. See watchKind for lifecycle details.
+func WatchReplicaSets(ctx context.Context, p credentials.Provider, args WatchArgs, sink WatchSink) error {
+	cs, err := newClientFn(ctx, p, args.Cluster)
+	if err != nil {
+		return fmt.Errorf("build clientset: %w", err)
+	}
+	return watchKind(ctx, watchSpec[appsv1.ReplicaSet, ReplicaSet]{
+		Kind: "replicasets",
+		List: func(ctx context.Context, opts metav1.ListOptions) ([]appsv1.ReplicaSet, string, error) {
+			list, err := cs.AppsV1().ReplicaSets(args.Namespace).List(ctx, opts)
+			if err != nil {
+				return nil, "", err
+			}
+			return list.Items, list.ResourceVersion, nil
+		},
+		Watch: func(ctx context.Context, opts metav1.ListOptions) (watch.Interface, error) {
+			return cs.AppsV1().ReplicaSets(args.Namespace).Watch(ctx, opts)
+		},
+		Summary: replicaSetSummary,
+	}, sink)
+}
+
+// WatchJobs runs a list-then-watch loop on Jobs in the given namespace.
+// See watchKind for lifecycle details.
+func WatchJobs(ctx context.Context, p credentials.Provider, args WatchArgs, sink WatchSink) error {
+	cs, err := newClientFn(ctx, p, args.Cluster)
+	if err != nil {
+		return fmt.Errorf("build clientset: %w", err)
+	}
+	return watchKind(ctx, watchSpec[batchv1.Job, Job]{
+		Kind: "jobs",
+		List: func(ctx context.Context, opts metav1.ListOptions) ([]batchv1.Job, string, error) {
+			list, err := cs.BatchV1().Jobs(args.Namespace).List(ctx, opts)
+			if err != nil {
+				return nil, "", err
+			}
+			return list.Items, list.ResourceVersion, nil
+		},
+		Watch: func(ctx context.Context, opts metav1.ListOptions) (watch.Interface, error) {
+			return cs.BatchV1().Jobs(args.Namespace).Watch(ctx, opts)
+		},
+		Summary: jobSummary,
 	}, sink)
 }
 

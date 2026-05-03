@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	appsv1 "k8s.io/api/apps/v1"
+	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -483,6 +485,118 @@ func TestWatchEvents_GoneTriggersRelist(t *testing.T) {
 		t.Fatalf("event = %v, want snapshot after relist", got.Type)
 	}
 }
+
+// --- WatchReplicaSets / WatchJobs smoke tests ---
+//
+// The generic watchKind is exercised thoroughly by the WatchPods and
+// WatchEvents suites above. These two tests verify only that the
+// kind-specific spec wiring (clientset method chain + summary
+// function) is hooked up correctly for the new primitives. A single
+// snapshot + ADDED assertion per kind is enough.
+
+func TestWatchReplicaSets_SnapshotAndAdded(t *testing.T) {
+	rs := &appsv1.ReplicaSet{
+		ObjectMeta: metav1.ObjectMeta{Name: "rs-a", Namespace: "default", ResourceVersion: "1"},
+		Spec:       appsv1.ReplicaSetSpec{Replicas: ptr32(1)},
+	}
+	cs := fake.NewSimpleClientset(rs)
+	swapNewClientFn(t, cs)
+
+	sink := newTestSink(8)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go func() {
+		_ = WatchReplicaSets(ctx, stubProvider{}, WatchArgs{
+			Cluster:   clusters.Cluster{Name: "demo", Backend: clusters.BackendKubeconfig},
+			Namespace: "default",
+		}, sink)
+	}()
+
+	snap := awaitEvent(t, sink)
+	if snap.Type != WatchSnapshot {
+		t.Fatalf("first event = %v, want snapshot", snap.Type)
+	}
+	items, ok := snap.Items.([]ReplicaSet)
+	if !ok {
+		t.Fatalf("Items type = %T, want []ReplicaSet", snap.Items)
+	}
+	if len(items) != 1 || items[0].Name != "rs-a" {
+		t.Fatalf("snapshot items = %+v, want one rs-a", items)
+	}
+
+	rs2 := &appsv1.ReplicaSet{
+		ObjectMeta: metav1.ObjectMeta{Name: "rs-b", Namespace: "default", ResourceVersion: "2"},
+		Spec:       appsv1.ReplicaSetSpec{Replicas: ptr32(1)},
+	}
+	if _, err := cs.AppsV1().ReplicaSets("default").Create(ctx, rs2, metav1.CreateOptions{}); err != nil {
+		t.Fatalf("create rs: %v", err)
+	}
+
+	got := awaitEvent(t, sink)
+	if got.Type != WatchAdded {
+		t.Fatalf("event = %v, want added", got.Type)
+	}
+	rsObj, ok := got.Object.(ReplicaSet)
+	if !ok {
+		t.Fatalf("Object type = %T, want ReplicaSet", got.Object)
+	}
+	if rsObj.Name != "rs-b" {
+		t.Errorf("added rs name = %q, want rs-b", rsObj.Name)
+	}
+}
+
+func TestWatchJobs_SnapshotAndAdded(t *testing.T) {
+	job := &batchv1.Job{
+		ObjectMeta: metav1.ObjectMeta{Name: "job-a", Namespace: "default", ResourceVersion: "1"},
+	}
+	cs := fake.NewSimpleClientset(job)
+	swapNewClientFn(t, cs)
+
+	sink := newTestSink(8)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go func() {
+		_ = WatchJobs(ctx, stubProvider{}, WatchArgs{
+			Cluster:   clusters.Cluster{Name: "demo", Backend: clusters.BackendKubeconfig},
+			Namespace: "default",
+		}, sink)
+	}()
+
+	snap := awaitEvent(t, sink)
+	if snap.Type != WatchSnapshot {
+		t.Fatalf("first event = %v, want snapshot", snap.Type)
+	}
+	items, ok := snap.Items.([]Job)
+	if !ok {
+		t.Fatalf("Items type = %T, want []Job", snap.Items)
+	}
+	if len(items) != 1 || items[0].Name != "job-a" {
+		t.Fatalf("snapshot items = %+v, want one job-a", items)
+	}
+
+	job2 := &batchv1.Job{
+		ObjectMeta: metav1.ObjectMeta{Name: "job-b", Namespace: "default", ResourceVersion: "2"},
+	}
+	if _, err := cs.BatchV1().Jobs("default").Create(ctx, job2, metav1.CreateOptions{}); err != nil {
+		t.Fatalf("create job: %v", err)
+	}
+
+	got := awaitEvent(t, sink)
+	if got.Type != WatchAdded {
+		t.Fatalf("event = %v, want added", got.Type)
+	}
+	jobObj, ok := got.Object.(Job)
+	if !ok {
+		t.Fatalf("Object type = %T, want Job", got.Object)
+	}
+	if jobObj.Name != "job-b" {
+		t.Errorf("added job name = %q, want job-b", jobObj.Name)
+	}
+}
+
+func ptr32(v int32) *int32 { return &v }
 
 func TestWatchPods_ListErrorPropagates(t *testing.T) {
 	cs := fake.NewSimpleClientset()

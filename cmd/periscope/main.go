@@ -52,7 +52,11 @@ func main() {
 	}
 
 	watchCfg := parseWatchStreamsEnv(os.Getenv("PERISCOPE_WATCH_STREAMS"))
-	slog.Info("watch streams", "pods", watchCfg.pods, "events", watchCfg.events)
+	slog.Info("watch streams",
+		"pods", watchCfg.pods,
+		"events", watchCfg.events,
+		"replicasets", watchCfg.replicasets,
+		"jobs", watchCfg.jobs)
 
 	// Tracks active watch SSE streams for the /debug/streams page. Lives
 	// for the lifetime of the process; entries register on stream open
@@ -843,6 +847,14 @@ func main() {
 	if watchCfg.events {
 		router.Get("/api/clusters/{cluster}/events/watch",
 			credentials.Wrap(factory, resourceWatchHandler("events", registry, watchHandlerDeps, k8s.WatchEvents)))
+	}
+	if watchCfg.replicasets {
+		router.Get("/api/clusters/{cluster}/replicasets/watch",
+			credentials.Wrap(factory, resourceWatchHandler("replicasets", registry, watchHandlerDeps, k8s.WatchReplicaSets)))
+	}
+	if watchCfg.jobs {
+		router.Get("/api/clusters/{cluster}/jobs/watch",
+			credentials.Wrap(factory, resourceWatchHandler("jobs", registry, watchHandlerDeps, k8s.WatchJobs)))
 	}
 
 	// Debug endpoint listing currently-open watch streams. JSON for
@@ -1822,16 +1834,18 @@ func customResourceEventsHandler(reg *clusters.Registry) credentials.Handler {
 // watchStreamsConfig holds which kinds have the watch SSE route
 // registered. Driven by PERISCOPE_WATCH_STREAMS at startup.
 type watchStreamsConfig struct {
-	pods   bool
-	events bool
+	pods        bool
+	events      bool
+	replicasets bool
+	jobs        bool
 }
 
 // parseWatchStreamsEnv parses the PERISCOPE_WATCH_STREAMS env var.
 //
-//	"" / unset       → all off
-//	"pods"           → pods watch enabled
-//	"pods,events"    → both
-//	"all"            → every supported kind
+//	"" / unset                            → all off
+//	"pods"                                → pods watch enabled
+//	"pods,events,replicasets,jobs"        → each enabled
+//	"all"                                 → every supported kind
 //
 // Unknown tokens are silently dropped — operators get a slog summary
 // at startup so misspellings are obvious.
@@ -1844,6 +1858,8 @@ func parseWatchStreamsEnv(raw string) watchStreamsConfig {
 	if raw == "all" {
 		cfg.pods = true
 		cfg.events = true
+		cfg.replicasets = true
+		cfg.jobs = true
 		return cfg
 	}
 	for _, part := range strings.Split(raw, ",") {
@@ -1852,6 +1868,10 @@ func parseWatchStreamsEnv(raw string) watchStreamsConfig {
 			cfg.pods = true
 		case "events":
 			cfg.events = true
+		case "replicasets":
+			cfg.replicasets = true
+		case "jobs":
+			cfg.jobs = true
 		}
 	}
 	return cfg
