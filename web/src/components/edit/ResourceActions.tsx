@@ -24,7 +24,8 @@
 // instead of having actions silently disappear.
 
 import { useState } from "react";
-import { skipToken, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQueryClient } from "@tanstack/react-query";
+import { useCachedQueryData } from "../../hooks/useCachedQueryData";
 import { ApiError, api, type ResourceRef } from "../../lib/api";
 import {
   gvrkFromSource,
@@ -119,14 +120,21 @@ function BuiltinActions({
     .cluster(cluster)
     .kind(yamlKind)
     .detail(ns ?? "", name);
-  // Subscribe-only read (skipToken = no fetch). When the describe tab
-  // populates the cache, this re-renders so per-kind buttons whose
-  // visibility/text depend on cached fields (suspend, unschedulable)
-  // appear/flip without waiting for the user to toggle the panel.
-  const { data: cachedDetail } = useQuery<DetailLike>({
-    queryKey: detailKey,
-    queryFn: skipToken,
-  });
+  // Subscribe-only read of the detail cache. When the describe tab
+  // populates this key, the action toolbar re-renders so per-kind
+  // buttons whose visibility/text depend on cached fields (suspend,
+  // unschedulable) appear/flip without waiting for the user to toggle
+  // the panel.
+  //
+  // We DON'T register a useQuery observer here on purpose: doing so
+  // with `queryFn: skipToken` poisons the merged query.options.queryFn
+  // (React Query stores one queryFn per Query, taken from the most
+  // recent observer to update). Any subsequent invalidation would
+  // refetch with skipToken and produce a "Missing queryFn" rejection,
+  // leaving the detail panel stuck at its prior payload. See
+  // useCachedQueryData for the cache-only subscription this uses
+  // instead.
+  const cachedDetail = useCachedQueryData<DetailLike>(detailKey);
 
   const scaleMutation = useScaleResource({
     cluster,
