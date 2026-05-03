@@ -3,7 +3,11 @@ import { api, type ClusterScopedKind, type OpenAPIDoc, type ResourceMeta, type W
 import { useIsWatchStreamEnabled } from "../lib/features";
 import { queryKeys } from "../lib/queryKeys";
 import { editorYamlQueryKey, type EditorSource } from "../lib/customResources";
-import { useResourceStream, type StreamStatus } from "./useResourceStream";
+import {
+  useChildPodWatch,
+  useResourceStream,
+  type StreamStatus,
+} from "./useResourceStream";
 import type {
   ClusterEventList,
   ClusterRoleBindingDetail,
@@ -235,6 +239,11 @@ export function usePodDetail(cluster: string, ns: string, name: string | null) {
 }
 
 export function useDeploymentDetail(cluster: string, ns: string, name: string | null) {
+  // Auxiliary Pod stream keeps the embedded child-pods table fresh
+  // while the panel is open: pod state transitions don't touch the
+  // Deployment object's RV, so the deployments stream alone can't see
+  // them. See useChildPodWatch.
+  useChildPodWatch(cluster, ns, Boolean(name));
   return useQuery<DeploymentDetail>({
     queryKey: queryKeys.cluster(cluster).kind("deployments").detail(ns, name ?? ""),
     queryFn: ({ signal }) => api.getDeployment(cluster, ns, name!, signal),
@@ -243,6 +252,7 @@ export function useDeploymentDetail(cluster: string, ns: string, name: string | 
 }
 
 export function useStatefulSetDetail(cluster: string, ns: string, name: string | null) {
+  useChildPodWatch(cluster, ns, Boolean(name));
   return useQuery<StatefulSetDetail>({
     queryKey: queryKeys.cluster(cluster).kind("statefulsets").detail(ns, name ?? ""),
     queryFn: ({ signal }) => api.getStatefulSet(cluster, ns, name!, signal),
@@ -251,6 +261,7 @@ export function useStatefulSetDetail(cluster: string, ns: string, name: string |
 }
 
 export function useDaemonSetDetail(cluster: string, ns: string, name: string | null) {
+  useChildPodWatch(cluster, ns, Boolean(name));
   return useQuery<DaemonSetDetail>({
     queryKey: queryKeys.cluster(cluster).kind("daemonsets").detail(ns, name ?? ""),
     queryFn: ({ signal }) => api.getDaemonSet(cluster, ns, name!, signal),
@@ -259,6 +270,10 @@ export function useDaemonSetDetail(cluster: string, ns: string, name: string | n
 }
 
 export function useServiceDetail(cluster: string, ns: string, name: string | null) {
+  // Service detail embeds selected-by-selector pods; pod transitions
+  // need to flow into the embedded table the same as workload
+  // controllers above.
+  useChildPodWatch(cluster, ns, Boolean(name));
   return useQuery<ServiceDetail>({
     queryKey: queryKeys.cluster(cluster).kind("services").detail(ns, name ?? ""),
     queryFn: ({ signal }) => api.getService(cluster, ns, name!, signal),
@@ -291,6 +306,7 @@ export function useSecretDetail(cluster: string, ns: string, name: string | null
 }
 
 export function useJobDetail(cluster: string, ns: string, name: string | null) {
+  useChildPodWatch(cluster, ns, Boolean(name));
   return useQuery<JobDetail>({
     queryKey: queryKeys.cluster(cluster).kind("jobs").detail(ns, name ?? ""),
     queryFn: ({ signal }) => api.getJob(cluster, ns, name!, signal),
@@ -299,6 +315,10 @@ export function useJobDetail(cluster: string, ns: string, name: string | null) {
 }
 
 export function useCronJobDetail(cluster: string, ns: string, name: string | null) {
+  // CronJob detail surfaces recent Jobs (which surface child pods);
+  // pod-driven invalidation keeps the panel current without depending
+  // on the cronjob's own RV ticking.
+  useChildPodWatch(cluster, ns, Boolean(name));
   return useQuery<CronJobDetail>({
     queryKey: queryKeys.cluster(cluster).kind("cronjobs").detail(ns, name ?? ""),
     queryFn: ({ signal }) => api.getCronJob(cluster, ns, name!, signal),
@@ -558,6 +578,7 @@ export function usePDBDetail(cluster: string, ns: string, name: string | null) {
 }
 
 export function useReplicaSetDetail(cluster: string, ns: string, name: string | null) {
+  useChildPodWatch(cluster, ns, Boolean(name));
   return useQuery<ReplicaSetDetail>({
     queryKey: queryKeys.cluster(cluster).kind("replicasets").detail(ns, name ?? ""),
     queryFn: ({ signal }) => api.getReplicaSet(cluster, ns, name!, signal),
