@@ -18,6 +18,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useCanI } from "../../hooks/useCanI";
 import type { ResourceRef, YamlKind } from "../../lib/api";
 import { KIND_REGISTRY } from "../../lib/k8sKinds";
+import { queryKeys } from "../../lib/queryKeys";
 import { DeleteResourceModal } from "./DeleteResourceModal";
 import { EditButton } from "../detail/yaml/EditButton";
 
@@ -80,8 +81,13 @@ export function ResourceActions({
         <DeleteResourceModal
           resourceRef={resource}
           onClose={() => setShowDelete(false)}
-          onDeleted={() => {
-            qc.invalidateQueries({ queryKey: [yamlKind] });
+          onDeleted={async () => {
+            // Await before calling onDeleted: the parent typically
+            // navigates away, and the new route's queries must see
+            // the post-delete cache to render fresh data.
+            await qc.invalidateQueries({
+              queryKey: queryKeys.cluster(cluster).kind(yamlKind).all,
+            });
             onDeleted?.();
           }}
         />

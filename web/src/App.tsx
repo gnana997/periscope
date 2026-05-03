@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Navigate,
   Outlet,
@@ -7,11 +7,14 @@ import {
   useNavigate,
   useParams,
 } from "react-router-dom";
+import { useQueryClient } from "@tanstack/react-query";
 import { ClusterRail } from "./components/shell/ClusterRail";
 import { Brand } from "./components/shell/Brand";
+import { GlobalFetchingBar } from "./components/shell/GlobalFetchingBar";
 import { Sidebar } from "./components/shell/Sidebar";
 import { ErrorState, NoClustersState } from "./components/table/states";
 import { useClusters } from "./hooks/useClusters";
+import { queryKeys } from "./lib/queryKeys";
 import { useTheme } from "./hooks/useTheme";
 import { OverviewPage } from "./pages/OverviewPage";
 import { ConfigMapsPage } from "./pages/ConfigMapsPage";
@@ -164,6 +167,7 @@ function AppShell() {
         </div>
       </div>
       <main className="flex min-w-0 flex-1 flex-col bg-bg">
+        <GlobalFetchingBar />
         <Outlet />
       </main>
     </div>
@@ -176,6 +180,21 @@ function WithCluster<P extends { cluster: string }>({
   Page: React.ComponentType<P>;
 }) {
   const { cluster } = useParams<{ cluster: string }>();
+  const qc = useQueryClient();
+  const prevCluster = useRef<string | undefined>(undefined);
+
+  // Single-cluster-at-a-time UX: when the route's cluster id changes,
+  // evict the prior cluster's subtree so its stale entries don't sit
+  // in the cache (and don't trigger ghost background refetches).
+  useEffect(() => {
+    if (cluster && prevCluster.current && prevCluster.current !== cluster) {
+      qc.removeQueries({
+        queryKey: queryKeys.cluster(prevCluster.current).all,
+      });
+    }
+    prevCluster.current = cluster;
+  }, [cluster, qc]);
+
   if (!cluster) return null;
   return <Page {...({ cluster } as unknown as P)} />;
 }

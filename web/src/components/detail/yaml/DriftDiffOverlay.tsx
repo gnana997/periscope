@@ -12,6 +12,7 @@ import { useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api, type YamlKind, type ClusterScopedKind } from "../../../lib/api";
 import { cn } from "../../../lib/cn";
+import { queryKeys } from "../../../lib/queryKeys";
 import { stripForEdit } from "../../../lib/stripForEdit";
 import { DetailLoading, DetailError } from "../states";
 import { InlineDiff } from "./InlineDiff";
@@ -62,7 +63,7 @@ export function DriftDiffOverlay({
   // the editor's pristine-flowing yamlQuery. staleTime: 0 + a fresh
   // mount on every open guarantees we see latest server state.
   const freshQuery = useQuery<string>({
-    queryKey: ["yaml-drift-overlay", cluster, yamlKind, namespace ?? "", name],
+    queryKey: queryKeys.cluster(cluster).kind(yamlKind).yamlDrift(namespace ?? "", name),
     queryFn: ({ signal }) =>
       CLUSTER_SCOPED_KINDS.has(yamlKind as ClusterScopedKind)
         ? api.clusterScopedYaml(cluster, yamlKind as ClusterScopedKind, name, signal)

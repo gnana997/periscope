@@ -1,5 +1,6 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { api, type ClusterScopedKind, type OpenAPIDoc, type ResourceMeta, type YamlKind } from "../lib/api";
+import { queryKeys } from "../lib/queryKeys";
 import type {
   ClusterEventList,
   ClusterRoleBindingDetail,
@@ -47,7 +48,7 @@ interface ResourceQueryArgs {
 
 export function useResource({ cluster, resource, namespace }: ResourceQueryArgs) {
   return useQuery<ResourceListResponse>({
-    queryKey: ["resource", cluster, resource, namespace ?? ""],
+    queryKey: queryKeys.cluster(cluster ?? "").kind(resource).list(namespace ?? ""),
     queryFn: ({ signal }): Promise<ResourceListResponse> => {
       switch (resource) {
         case "nodes":
@@ -122,7 +123,7 @@ export function useResource({ cluster, resource, namespace }: ResourceQueryArgs)
 
 export function usePodDetail(cluster: string, ns: string, name: string | null) {
   return useQuery<PodDetail>({
-    queryKey: ["pod-detail", cluster, ns, name],
+    queryKey: queryKeys.cluster(cluster).kind("pods").detail(ns, name ?? ""),
     queryFn: ({ signal }) => api.getPod(cluster, ns, name!, signal),
     enabled: Boolean(name),
   });
@@ -130,7 +131,7 @@ export function usePodDetail(cluster: string, ns: string, name: string | null) {
 
 export function useDeploymentDetail(cluster: string, ns: string, name: string | null) {
   return useQuery<DeploymentDetail>({
-    queryKey: ["deployment-detail", cluster, ns, name],
+    queryKey: queryKeys.cluster(cluster).kind("deployments").detail(ns, name ?? ""),
     queryFn: ({ signal }) => api.getDeployment(cluster, ns, name!, signal),
     enabled: Boolean(name),
   });
@@ -138,7 +139,7 @@ export function useDeploymentDetail(cluster: string, ns: string, name: string | 
 
 export function useStatefulSetDetail(cluster: string, ns: string, name: string | null) {
   return useQuery<StatefulSetDetail>({
-    queryKey: ["statefulset-detail", cluster, ns, name],
+    queryKey: queryKeys.cluster(cluster).kind("statefulsets").detail(ns, name ?? ""),
     queryFn: ({ signal }) => api.getStatefulSet(cluster, ns, name!, signal),
     enabled: Boolean(name),
   });
@@ -146,7 +147,7 @@ export function useStatefulSetDetail(cluster: string, ns: string, name: string |
 
 export function useDaemonSetDetail(cluster: string, ns: string, name: string | null) {
   return useQuery<DaemonSetDetail>({
-    queryKey: ["daemonset-detail", cluster, ns, name],
+    queryKey: queryKeys.cluster(cluster).kind("daemonsets").detail(ns, name ?? ""),
     queryFn: ({ signal }) => api.getDaemonSet(cluster, ns, name!, signal),
     enabled: Boolean(name),
   });
@@ -154,7 +155,7 @@ export function useDaemonSetDetail(cluster: string, ns: string, name: string | n
 
 export function useServiceDetail(cluster: string, ns: string, name: string | null) {
   return useQuery<ServiceDetail>({
-    queryKey: ["service-detail", cluster, ns, name],
+    queryKey: queryKeys.cluster(cluster).kind("services").detail(ns, name ?? ""),
     queryFn: ({ signal }) => api.getService(cluster, ns, name!, signal),
     enabled: Boolean(name),
   });
@@ -162,7 +163,7 @@ export function useServiceDetail(cluster: string, ns: string, name: string | nul
 
 export function useIngressDetail(cluster: string, ns: string, name: string | null) {
   return useQuery<IngressDetail>({
-    queryKey: ["ingress-detail", cluster, ns, name],
+    queryKey: queryKeys.cluster(cluster).kind("ingresses").detail(ns, name ?? ""),
     queryFn: ({ signal }) => api.getIngress(cluster, ns, name!, signal),
     enabled: Boolean(name),
   });
@@ -170,7 +171,7 @@ export function useIngressDetail(cluster: string, ns: string, name: string | nul
 
 export function useConfigMapDetail(cluster: string, ns: string, name: string | null) {
   return useQuery<ConfigMapDetail>({
-    queryKey: ["configmap-detail", cluster, ns, name],
+    queryKey: queryKeys.cluster(cluster).kind("configmaps").detail(ns, name ?? ""),
     queryFn: ({ signal }) => api.getConfigMap(cluster, ns, name!, signal),
     enabled: Boolean(name),
   });
@@ -178,7 +179,7 @@ export function useConfigMapDetail(cluster: string, ns: string, name: string | n
 
 export function useSecretDetail(cluster: string, ns: string, name: string | null) {
   return useQuery<SecretDetail>({
-    queryKey: ["secret-detail", cluster, ns, name],
+    queryKey: queryKeys.cluster(cluster).kind("secrets").detail(ns, name ?? ""),
     queryFn: ({ signal }) => api.getSecret(cluster, ns, name!, signal),
     enabled: Boolean(name),
   });
@@ -186,7 +187,7 @@ export function useSecretDetail(cluster: string, ns: string, name: string | null
 
 export function useJobDetail(cluster: string, ns: string, name: string | null) {
   return useQuery<JobDetail>({
-    queryKey: ["job-detail", cluster, ns, name],
+    queryKey: queryKeys.cluster(cluster).kind("jobs").detail(ns, name ?? ""),
     queryFn: ({ signal }) => api.getJob(cluster, ns, name!, signal),
     enabled: Boolean(name),
   });
@@ -194,7 +195,7 @@ export function useJobDetail(cluster: string, ns: string, name: string | null) {
 
 export function useCronJobDetail(cluster: string, ns: string, name: string | null) {
   return useQuery<CronJobDetail>({
-    queryKey: ["cronjob-detail", cluster, ns, name],
+    queryKey: queryKeys.cluster(cluster).kind("cronjobs").detail(ns, name ?? ""),
     queryFn: ({ signal }) => api.getCronJob(cluster, ns, name!, signal),
     enabled: Boolean(name),
   });
@@ -202,7 +203,7 @@ export function useCronJobDetail(cluster: string, ns: string, name: string | nul
 
 export function useClusterEvents(cluster: string, namespace?: string) {
   return useQuery<ClusterEventList>({
-    queryKey: ["cluster-events", cluster, namespace ?? ""],
+    queryKey: queryKeys.cluster(cluster).clusterEvents(namespace ?? ""),
     queryFn: ({ signal }) => api.clusterEvents(cluster, namespace, signal),
     enabled: Boolean(cluster),
     refetchInterval: 15_000,
@@ -211,7 +212,7 @@ export function useClusterEvents(cluster: string, namespace?: string) {
 
 export function usePVCDetail(cluster: string, ns: string, name: string | null) {
   return useQuery<PVCDetail>({
-    queryKey: ["pvc-detail", cluster, ns, name],
+    queryKey: queryKeys.cluster(cluster).kind("pvcs").detail(ns, name ?? ""),
     queryFn: ({ signal }) => api.getPVC(cluster, ns, name!, signal),
     enabled: Boolean(name),
   });
@@ -219,7 +220,7 @@ export function usePVCDetail(cluster: string, ns: string, name: string | null) {
 
 export function usePVDetail(cluster: string, name: string | null) {
   return useQuery<PVDetail>({
-    queryKey: ["pv-detail", cluster, name],
+    queryKey: queryKeys.cluster(cluster).kind("pvs").detail("", name ?? ""),
     queryFn: ({ signal }) => api.getPV(cluster, name!, signal),
     enabled: Boolean(name),
   });
@@ -227,7 +228,7 @@ export function usePVDetail(cluster: string, name: string | null) {
 
 export function useStorageClassDetail(cluster: string, name: string | null) {
   return useQuery<StorageClassDetail>({
-    queryKey: ["storageclass-detail", cluster, name],
+    queryKey: queryKeys.cluster(cluster).kind("storageclasses").detail("", name ?? ""),
     queryFn: ({ signal }) => api.getStorageClass(cluster, name!, signal),
     enabled: Boolean(name),
   });
@@ -235,7 +236,7 @@ export function useStorageClassDetail(cluster: string, name: string | null) {
 
 export function useNamespaceDetail(cluster: string, name: string | null) {
   return useQuery<NamespaceDetail>({
-    queryKey: ["namespace-detail", cluster, name],
+    queryKey: queryKeys.cluster(cluster).kind("namespaces").detail("", name ?? ""),
     queryFn: ({ signal }) => api.getNamespace(cluster, name!, signal),
     enabled: Boolean(name),
   });
@@ -243,7 +244,7 @@ export function useNamespaceDetail(cluster: string, name: string | null) {
 
 export function useNodeDetail(cluster: string, name: string | null) {
   return useQuery<NodeDetail>({
-    queryKey: ["node-detail", cluster, name],
+    queryKey: queryKeys.cluster(cluster).kind("nodes").detail("", name ?? ""),
     queryFn: ({ signal }) => api.getNode(cluster, name!, signal),
     enabled: Boolean(name),
   });
@@ -251,7 +252,7 @@ export function useNodeDetail(cluster: string, name: string | null) {
 
 export function useNodeMetrics(cluster: string, name: string | null) {
   return useQuery<NodeMetrics>({
-    queryKey: ["node-metrics", cluster, name],
+    queryKey: queryKeys.cluster(cluster).kind("nodes").metrics("", name ?? ""),
     queryFn: ({ signal }) => api.getNodeMetrics(cluster, name!, signal),
     enabled: Boolean(name),
     refetchInterval: 30_000,
@@ -260,7 +261,7 @@ export function useNodeMetrics(cluster: string, name: string | null) {
 
 export function usePodMetrics(cluster: string, ns: string, name: string | null) {
   return useQuery<PodMetrics>({
-    queryKey: ["pod-metrics", cluster, ns, name],
+    queryKey: queryKeys.cluster(cluster).kind("pods").metrics(ns, name ?? ""),
     queryFn: ({ signal }) => api.getPodMetrics(cluster, ns, name!, signal),
     enabled: Boolean(name),
     refetchInterval: 30_000,
@@ -297,7 +298,7 @@ export function useYaml(
   enabled: boolean,
 ) {
   return useQuery<string>({
-    queryKey: ["yaml", cluster, kind, ns, name],
+    queryKey: queryKeys.cluster(cluster).kind(kind).yaml(ns, name ?? ""),
     queryFn: ({ signal }) =>
       (["namespaces", "pvs", "storageclasses", "clusterroles", "clusterrolebindings", "ingressclasses", "priorityclasses", "runtimeclasses"] as ClusterScopedKind[]).includes(kind as ClusterScopedKind)
         ? api.clusterScopedYaml(cluster, kind as ClusterScopedKind, name!, signal)
@@ -311,19 +312,18 @@ export function useYaml(
 
 export function useResourceMeta(
   cluster: string,
+  // `kind` is the YAML/URL plural (matches KIND_REGISTRY). Required so
+  // meta lives under the same kind subtree as list/detail/yaml/events
+  // and a single prefix invalidation sweeps it on apply.
+  kind: YamlKind,
   resource: { group: string; version: string; resource: string; namespace?: string; name: string } | null,
   enabled: boolean,
 ) {
   return useQuery<ResourceMeta>({
-    queryKey: [
-      "meta",
-      cluster,
-      resource?.group,
-      resource?.version,
-      resource?.resource,
-      resource?.namespace ?? "",
-      resource?.name,
-    ],
+    queryKey: queryKeys
+      .cluster(cluster)
+      .kind(kind)
+      .meta(resource?.namespace ?? "", resource?.name ?? ""),
     queryFn: ({ signal }) =>
       api.getMeta(
         {
@@ -360,7 +360,7 @@ export function useOpenAPISchema(
   enabled: boolean,
 ) {
   return useQuery<OpenAPIDoc>({
-    queryKey: ["openapi", cluster, group, version],
+    queryKey: queryKeys.cluster(cluster).openapi(group, version),
     queryFn: ({ signal }) => api.getOpenAPISchema(cluster, group, version, signal),
     enabled: enabled && Boolean(cluster && version),
     // Schemas only change on cluster upgrade — and a backend restart
@@ -374,7 +374,7 @@ export function useOpenAPISchema(
 
 export function useClusterSummary(cluster: string) {
   return useQuery<ClusterSummary>({
-    queryKey: ["cluster-summary", cluster],
+    queryKey: queryKeys.cluster(cluster).summary(),
     queryFn: ({ signal }) => api.getClusterSummary(cluster, signal),
     refetchInterval: 30_000,
   });
@@ -384,7 +384,7 @@ export function useClusterSummary(cluster: string) {
 
 export function useRoleDetail(cluster: string, ns: string, name: string | null) {
   return useQuery<RoleDetail>({
-    queryKey: ["role-detail", cluster, ns, name],
+    queryKey: queryKeys.cluster(cluster).kind("roles").detail(ns, name ?? ""),
     queryFn: ({ signal }) => api.getRoles(cluster, ns, name!, signal),
     enabled: Boolean(name),
   });
@@ -392,7 +392,7 @@ export function useRoleDetail(cluster: string, ns: string, name: string | null) 
 
 export function useClusterRoleDetail(cluster: string, name: string | null) {
   return useQuery<ClusterRoleDetail>({
-    queryKey: ["clusterrole-detail", cluster, name],
+    queryKey: queryKeys.cluster(cluster).kind("clusterroles").detail("", name ?? ""),
     queryFn: ({ signal }) => api.getClusterRole(cluster, name!, signal),
     enabled: Boolean(name),
   });
@@ -400,7 +400,7 @@ export function useClusterRoleDetail(cluster: string, name: string | null) {
 
 export function useRoleBindingDetail(cluster: string, ns: string, name: string | null) {
   return useQuery<RoleBindingDetail>({
-    queryKey: ["rolebinding-detail", cluster, ns, name],
+    queryKey: queryKeys.cluster(cluster).kind("rolebindings").detail(ns, name ?? ""),
     queryFn: ({ signal }) => api.getRoleBinding(cluster, ns, name!, signal),
     enabled: Boolean(name),
   });
@@ -408,7 +408,7 @@ export function useRoleBindingDetail(cluster: string, ns: string, name: string |
 
 export function useClusterRoleBindingDetail(cluster: string, name: string | null) {
   return useQuery<ClusterRoleBindingDetail>({
-    queryKey: ["clusterrolebinding-detail", cluster, name],
+    queryKey: queryKeys.cluster(cluster).kind("clusterrolebindings").detail("", name ?? ""),
     queryFn: ({ signal }) => api.getClusterRoleBinding(cluster, name!, signal),
     enabled: Boolean(name),
   });
@@ -416,7 +416,7 @@ export function useClusterRoleBindingDetail(cluster: string, name: string | null
 
 export function useServiceAccountDetail(cluster: string, ns: string, name: string | null) {
   return useQuery<ServiceAccountDetail>({
-    queryKey: ["serviceaccount-detail", cluster, ns, name],
+    queryKey: queryKeys.cluster(cluster).kind("serviceaccounts").detail(ns, name ?? ""),
     queryFn: ({ signal }) => api.getServiceAccount(cluster, ns, name!, signal),
     enabled: Boolean(name),
   });
@@ -432,7 +432,7 @@ export function useObjectEvents(
   enabled: boolean,
 ) {
   return useQuery<EventList>({
-    queryKey: ["events", cluster, kind, ns, name],
+    queryKey: queryKeys.cluster(cluster).kind(kind).events(ns, name ?? ""),
     queryFn: ({ signal }) =>
       (["namespaces", "pvs", "storageclasses", "clusterroles", "clusterrolebindings", "ingressclasses", "priorityclasses", "runtimeclasses"] as ClusterScopedKind[]).includes(kind as ClusterScopedKind)
         ? api.clusterScopedEvents(cluster, kind as ClusterScopedKind, name!, signal)
@@ -445,7 +445,7 @@ export function useObjectEvents(
 
 export function useHPADetail(cluster: string, ns: string, name: string | null) {
   return useQuery<HPADetail>({
-    queryKey: ["hpa-detail", cluster, ns, name],
+    queryKey: queryKeys.cluster(cluster).kind("horizontalpodautoscalers").detail(ns, name ?? ""),
     queryFn: ({ signal }) => api.getHPA(cluster, ns, name!, signal),
     enabled: Boolean(name),
   });
@@ -453,7 +453,7 @@ export function useHPADetail(cluster: string, ns: string, name: string | null) {
 
 export function usePDBDetail(cluster: string, ns: string, name: string | null) {
   return useQuery<PDBDetail>({
-    queryKey: ["pdb-detail", cluster, ns, name],
+    queryKey: queryKeys.cluster(cluster).kind("poddisruptionbudgets").detail(ns, name ?? ""),
     queryFn: ({ signal }) => api.getPDB(cluster, ns, name!, signal),
     enabled: Boolean(name),
   });
@@ -461,7 +461,7 @@ export function usePDBDetail(cluster: string, ns: string, name: string | null) {
 
 export function useReplicaSetDetail(cluster: string, ns: string, name: string | null) {
   return useQuery<ReplicaSetDetail>({
-    queryKey: ["replicaset-detail", cluster, ns, name],
+    queryKey: queryKeys.cluster(cluster).kind("replicasets").detail(ns, name ?? ""),
     queryFn: ({ signal }) => api.getReplicaSet(cluster, ns, name!, signal),
     enabled: Boolean(name),
   });
@@ -469,7 +469,7 @@ export function useReplicaSetDetail(cluster: string, ns: string, name: string | 
 
 export function useNetworkPolicyDetail(cluster: string, ns: string, name: string | null) {
   return useQuery<NetworkPolicyDetail>({
-    queryKey: ["networkpolicy-detail", cluster, ns, name],
+    queryKey: queryKeys.cluster(cluster).kind("networkpolicies").detail(ns, name ?? ""),
     queryFn: ({ signal }) => api.getNetworkPolicy(cluster, ns, name!, signal),
     enabled: Boolean(name),
   });
@@ -477,7 +477,7 @@ export function useNetworkPolicyDetail(cluster: string, ns: string, name: string
 
 export function useIngressClassDetail(cluster: string, name: string | null) {
   return useQuery<IngressClassDetail>({
-    queryKey: ["ingressclass-detail", cluster, name],
+    queryKey: queryKeys.cluster(cluster).kind("ingressclasses").detail("", name ?? ""),
     queryFn: ({ signal }) => api.getIngressClass(cluster, name!, signal),
     enabled: Boolean(name),
   });
@@ -485,7 +485,7 @@ export function useIngressClassDetail(cluster: string, name: string | null) {
 
 export function useResourceQuotaDetail(cluster: string, ns: string, name: string | null) {
   return useQuery<ResourceQuota>({
-    queryKey: ["resourcequota-detail", cluster, ns, name],
+    queryKey: queryKeys.cluster(cluster).kind("resourcequotas").detail(ns, name ?? ""),
     queryFn: ({ signal }) => api.getResourceQuota(cluster, ns, name!, signal),
     enabled: Boolean(name),
   });
@@ -493,7 +493,7 @@ export function useResourceQuotaDetail(cluster: string, ns: string, name: string
 
 export function useLimitRangeDetail(cluster: string, ns: string, name: string | null) {
   return useQuery<LimitRangeDetail>({
-    queryKey: ["limitrange-detail", cluster, ns, name],
+    queryKey: queryKeys.cluster(cluster).kind("limitranges").detail(ns, name ?? ""),
     queryFn: ({ signal }) => api.getLimitRange(cluster, ns, name!, signal),
     enabled: Boolean(name),
   });
@@ -501,7 +501,7 @@ export function useLimitRangeDetail(cluster: string, ns: string, name: string | 
 
 export function usePriorityClassDetail(cluster: string, name: string | null) {
   return useQuery<PriorityClassDetail>({
-    queryKey: ["priorityclass-detail", cluster, name],
+    queryKey: queryKeys.cluster(cluster).kind("priorityclasses").detail("", name ?? ""),
     queryFn: ({ signal }) => api.getPriorityClass(cluster, name!, signal),
     enabled: Boolean(name),
   });
@@ -509,7 +509,7 @@ export function usePriorityClassDetail(cluster: string, name: string | null) {
 
 export function useRuntimeClassDetail(cluster: string, name: string | null) {
   return useQuery<RuntimeClassDetail>({
-    queryKey: ["runtimeclass-detail", cluster, name],
+    queryKey: queryKeys.cluster(cluster).kind("runtimeclasses").detail("", name ?? ""),
     queryFn: ({ signal }) => api.getRuntimeClass(cluster, name!, signal),
     enabled: Boolean(name),
   });
@@ -519,7 +519,7 @@ export function useRuntimeClassDetail(cluster: string, name: string | null) {
 
 export function useCRDs(cluster: string) {
   return useQuery({
-    queryKey: ["crds", cluster],
+    queryKey: queryKeys.cluster(cluster).crds(),
     queryFn: ({ signal }) => api.crds(cluster, signal),
     // CRDs change infrequently — cache hit is the common case.
     staleTime: 30_000,
@@ -534,7 +534,7 @@ export function useCustomResources(
   namespace?: string,
 ) {
   return useQuery({
-    queryKey: ["customresources", cluster, group, version, plural, namespace ?? ""],
+    queryKey: queryKeys.cluster(cluster).cr(group, version, plural).list(namespace ?? ""),
     queryFn: ({ signal }) =>
       api.customResources(cluster, group, version, plural, namespace, signal),
     enabled: Boolean(group && version && plural),
@@ -550,7 +550,10 @@ export function useCustomResourceDetail(
   name: string | null,
 ) {
   return useQuery({
-    queryKey: ["customresource", cluster, group, version, plural, namespace ?? "", name ?? ""],
+    queryKey: queryKeys
+      .cluster(cluster)
+      .cr(group, version, plural)
+      .detail(namespace ?? "", name ?? ""),
     queryFn: ({ signal }) =>
       api.getCustomResource(cluster, group, version, plural, namespace, name!, signal),
     enabled: Boolean(name && group && version && plural),

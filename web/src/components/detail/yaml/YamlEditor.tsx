@@ -57,6 +57,7 @@ import {
 } from "../../../lib/monacoSetup";
 import { useOpenAPISchema, useResourceMeta, useYaml } from "../../../hooks/useResource";
 import { usePublishEditorDirty } from "../../../hooks/useEditorDirty";
+import { queryKeys } from "../../../lib/queryKeys";
 import {
   buildMinimalSSA,
   computeOps,
@@ -220,6 +221,7 @@ function Editor({ cluster, yamlKind, resource, pristine }: EditorProps) {
   // (configured in useResourceMeta).
   const metaQuery = useResourceMeta(
     cluster,
+    yamlKind,
     {
       group: resource.group,
       version: resource.version,
@@ -286,7 +288,10 @@ function Editor({ cluster, yamlKind, resource, pristine }: EditorProps) {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setPristineMeta(metaQuery.data);
     qc.invalidateQueries({
-      queryKey: ["yaml", cluster, yamlKind, resource.namespace ?? "", resource.name],
+      queryKey: queryKeys
+        .cluster(cluster)
+        .kind(yamlKind)
+        .yaml(resource.namespace ?? "", resource.name),
     });
   }, [drift, dirty, metaQuery.data, qc, cluster, yamlKind, resource.namespace, resource.name]);
 
@@ -310,7 +315,10 @@ function Editor({ cluster, yamlKind, resource, pristine }: EditorProps) {
     if (metaQuery.data) setPristineMeta(metaQuery.data);
     setDismissedAtRV(null);
     qc.invalidateQueries({
-      queryKey: ["yaml", cluster, yamlKind, resource.namespace ?? "", resource.name],
+      queryKey: queryKeys
+        .cluster(cluster)
+        .kind(yamlKind)
+        .yaml(resource.namespace ?? "", resource.name),
     });
   }, [
     dirty,
@@ -683,29 +691,19 @@ function Editor({ cluster, yamlKind, resource, pristine }: EditorProps) {
         await api.applyResource({ ...args, dryRun: false, force }, ac.signal);
         setApplyState({ kind: "success" });
 
-        // Invalidate caches so list/detail/events/yaml/meta all refetch.
-        qc.invalidateQueries({ queryKey: [yamlKind] });
-        qc.invalidateQueries({
-          queryKey: ["yaml", cluster, yamlKind, resource.namespace ?? "", resource.name],
+        // Single hierarchical prefix sweeps list + detail + yaml +
+        // events + meta + metrics for this kind. Awaited so the
+        // post-apply refetch lands before the editor unmounts —
+        // YamlReadView then opens to fresh data without the prior
+        // 400ms race-mitigation timeout.
+        await qc.invalidateQueries({
+          queryKey: queryKeys.cluster(cluster).kind(yamlKind).all,
         });
-        qc.invalidateQueries({
-          queryKey: [`${singularize(yamlKind)}-detail`, cluster, resource.namespace ?? "", resource.name],
-        });
-        qc.invalidateQueries({
-          queryKey: ["events", cluster, yamlKind, resource.namespace ?? "", resource.name],
-        });
-        qc.invalidateQueries({
-          queryKey: ["meta", cluster, resource.group, resource.version, resource.resource, resource.namespace ?? "", resource.name],
-        });
-
-        // Drop ?edit=1 → unmount → YamlReadView takes over
-        setTimeout(() => {
-          setParams((prev) => {
-            const next = new URLSearchParams(prev);
-            next.delete("edit");
-            return next;
-          }, { replace: true });
-        }, 400);
+        setParams((prev) => {
+          const next = new URLSearchParams(prev);
+          next.delete("edit");
+          return next;
+        }, { replace: true });
       } catch (e) {
         if (ac.signal.aborted) return;
         const apiErr = e instanceof ApiError ? e : null;
@@ -795,29 +793,17 @@ function Editor({ cluster, yamlKind, resource, pristine }: EditorProps) {
       setApplyState({ kind: "applying" });
       await api.applyResource({ ...args, dryRun: false, force }, ac.signal);
       setApplyState({ kind: "success" });
-      qc.invalidateQueries({ queryKey: [yamlKind] });
-      qc.invalidateQueries({
-        queryKey: ["yaml", cluster, yamlKind, resource.namespace ?? "", resource.name],
-      });
-      qc.invalidateQueries({
-        queryKey: [`${singularize(yamlKind)}-detail`, cluster, resource.namespace ?? "", resource.name],
-      });
-      qc.invalidateQueries({
-        queryKey: ["events", cluster, yamlKind, resource.namespace ?? "", resource.name],
-      });
-      qc.invalidateQueries({
-        queryKey: ["meta", cluster, resource.group, resource.version, resource.resource, resource.namespace ?? "", resource.name],
+      await qc.invalidateQueries({
+        queryKey: queryKeys.cluster(cluster).kind(yamlKind).all,
       });
       setShowTakeover(false);
       setConflicts([]);
       setResolutions(new Map());
-      setTimeout(() => {
-        setParams((prev) => {
-          const next = new URLSearchParams(prev);
-          next.delete("edit");
-          return next;
-        }, { replace: true });
-      }, 400);
+      setParams((prev) => {
+        const next = new URLSearchParams(prev);
+        next.delete("edit");
+        return next;
+      }, { replace: true });
     } catch (e) {
       if (ac.signal.aborted) return;
       const apiErr = e instanceof ApiError ? e : null;
@@ -1095,9 +1081,3 @@ function Editor({ cluster, yamlKind, resource, pristine }: EditorProps) {
   );
 }
 
-// Map plural → singular for invalidating *-detail cache keys on apply
-// success. Mirrors the convention in useResource.ts.
-function singularize(kind: string): string {
-  if (kind.endsWith("s")) return kind.slice(0, -1);
-  return kind;
-}
