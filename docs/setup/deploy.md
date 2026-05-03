@@ -407,10 +407,10 @@ clusters are registered.
 ### 10.5 Real-time list updates (watch streams)
 
 Periscope's pod, event, replicaset, and job list pages update in
-real time via SSE. The SPA falls back to polling when the
-EventSource fails. **All four kinds are on by default** — set
-`watchStreams.kinds: "off"` to disable everywhere, or list a subset
-to restrict it:
+real time via SSE. **All four kinds are on by default**; the SPA
+falls back to polling when the EventSource fails. The `watchStreams:`
+helm block lets operators opt out (e.g. behind a proxy that
+mishandles long-lived connections) or restrict to a subset:
 
 ```yaml
 watchStreams:
@@ -418,12 +418,10 @@ watchStreams:
   perUserLimit: 30    # concurrent SSE streams per OIDC subject
 ```
 
-The opt-out exists for environments behind HTTP proxies / load
-balancers that buffer responses or kill idle connections under ~30s,
-which can break SSE in ways the in-browser fallback can't always
-paper over.
-
-Architecture / contributor guide:
+Full operator guide:
+[`docs/setup/watch-streams.md`](./watch-streams.md). Contributor /
+architecture view (the `watchKind[T,S]` primitive, how to add a
+kind):
 [`docs/architecture/watch-streams.md`](../architecture/watch-streams.md).
 
 ### 10.6 NetworkPolicy

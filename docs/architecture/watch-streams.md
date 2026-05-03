@@ -2,13 +2,9 @@
 
 This is a **contributor / architecture** doc. The audience is someone
 extending Periscope's real-time list updates to a new resource kind,
-or debugging an existing one. Operator-facing config (the
-`watchStreams:` helm block — `kinds` opt-out and `perUserLimit`) is
-documented inline in
-[`deploy/helm/periscope/values.yaml`](../../deploy/helm/periscope/values.yaml).
-Watch streams are on by default for all four shipped kinds; the
-helm block is for opting out (e.g. behind a proxy that mishandles
-long-lived connections) or restricting to a subset.
+or debugging an existing one. For the **operator** view — the
+`watchStreams:` helm block, when to opt out, troubleshooting — see
+[`docs/setup/watch-streams.md`](../setup/watch-streams.md).
 
 For the SSE plumbing on the frontend (`useResourceStream`,
 `StreamHealthBadge`, drop-in dispatch into React Query), see the
@@ -138,17 +134,14 @@ The handler takes care of:
 
 ## 6. Per-user concurrency cap
 
-`PERISCOPE_WATCH_PER_USER_LIMIT` (helm: `watchStreams.perUserLimit`,
-default 30) caps concurrent watch streams per OIDC subject across
-all clusters and kinds. Exceeding it returns HTTP 429. The cap
-exists to stop a runaway SPA bug from opening hundreds of
-EventSources and exhausting apiserver watch budget on the user's
-behalf.
+`PERISCOPE_WATCH_PER_USER_LIMIT` (default 30) caps concurrent watch
+streams per OIDC subject across all clusters and kinds. Exceeding it
+returns HTTP 429. The cap exists to stop a runaway SPA bug from
+opening hundreds of EventSources and exhausting apiserver watch
+budget on the user's behalf.
 
 The 30-stream default reflects "10 list pages × 3 kinds at peak,"
-which is well above realistic usage. Tune via the helm value if
-your deployment pattern is unusual; setting it to `0` disables the
-cap entirely (not recommended).
+which is well above realistic usage.
 
 ---
 
