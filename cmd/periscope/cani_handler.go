@@ -23,6 +23,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 
@@ -162,6 +163,9 @@ func caniHandler(reg *clusters.Registry, cache *caniCache) func(http.ResponseWri
 			}
 			rules, err := caniListSSRRFn(r.Context(), p, c, ns)
 			if err != nil {
+				if errors.Is(err, context.Canceled) {
+					return
+				}
 				code := ErrorCodeFor(err)
 				slog.Warn("cani SSRR failed",
 					"cluster", c.Name, "namespace", ns, "code", code, "err", err)
@@ -199,6 +203,9 @@ func caniHandler(reg *clusters.Registry, cache *caniCache) func(http.ResponseWri
 			}
 			allowed, reason, err := caniCheckSARFn(r.Context(), p, c, attr)
 			if err != nil {
+				if errors.Is(err, context.Canceled) {
+					return
+				}
 				code := ErrorCodeFor(err)
 				slog.Warn("cani SAR failed",
 					"cluster", c.Name, "verb", ch.Verb, "resource", ch.Resource,

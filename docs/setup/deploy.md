@@ -408,9 +408,20 @@ clusters are registered.
 
 Periscope's pod, event, replicaset, and job list pages update in
 real time via SSE. The SPA falls back to polling when the
-EventSource fails. Both code paths are on by default; no helm config.
-Concurrency is capped per OIDC subject (default 30 streams) to
-prevent runaway-SPA scenarios from exhausting apiserver watch budget.
+EventSource fails. **All four kinds are on by default** — set
+`watchStreams.kinds: "off"` to disable everywhere, or list a subset
+to restrict it:
+
+```yaml
+watchStreams:
+  kinds: ""           # default ("all on"); "off" / "none" disable; "pods,events" restricts
+  perUserLimit: 30    # concurrent SSE streams per OIDC subject
+```
+
+The opt-out exists for environments behind HTTP proxies / load
+balancers that buffer responses or kill idle connections under ~30s,
+which can break SSE in ways the in-browser fallback can't always
+paper over.
 
 Architecture / contributor guide:
 [`docs/architecture/watch-streams.md`](../architecture/watch-streams.md).

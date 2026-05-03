@@ -12,15 +12,21 @@ func TestParseWatchStreamsEnv(t *testing.T) {
 		raw  string
 		want watchStreamsConfig
 	}{
-		{name: "empty", raw: "", want: watchStreamsConfig{}},
-		{name: "whitespace", raw: "   ", want: watchStreamsConfig{}},
+		// Defaults — empty/unset means all on now (was: all off).
+		{name: "empty defaults all on", raw: "", want: watchStreamsConfig{pods: true, events: true, replicasets: true, jobs: true}},
+		{name: "whitespace defaults all on", raw: "   ", want: watchStreamsConfig{pods: true, events: true, replicasets: true, jobs: true}},
+		{name: "all", raw: "all", want: watchStreamsConfig{pods: true, events: true, replicasets: true, jobs: true}},
+		// Explicit opt-out — for operators behind proxies that mishandle long-lived connections.
+		{name: "off", raw: "off", want: watchStreamsConfig{}},
+		{name: "none", raw: "none", want: watchStreamsConfig{}},
+		{name: "off with spaces", raw: "  off  ", want: watchStreamsConfig{}},
+		// Subset selection.
 		{name: "pods", raw: "pods", want: watchStreamsConfig{pods: true}},
 		{name: "events", raw: "events", want: watchStreamsConfig{events: true}},
 		{name: "replicasets", raw: "replicasets", want: watchStreamsConfig{replicasets: true}},
 		{name: "jobs", raw: "jobs", want: watchStreamsConfig{jobs: true}},
 		{name: "pods,events", raw: "pods,events", want: watchStreamsConfig{pods: true, events: true}},
 		{name: "all kinds explicit", raw: "pods,events,replicasets,jobs", want: watchStreamsConfig{pods: true, events: true, replicasets: true, jobs: true}},
-		{name: "all", raw: "all", want: watchStreamsConfig{pods: true, events: true, replicasets: true, jobs: true}},
 		{name: "with spaces", raw: " pods , events ", want: watchStreamsConfig{pods: true, events: true}},
 		{name: "unknown only", raw: "deployments", want: watchStreamsConfig{}},
 		{name: "unknown plus pods", raw: "deployments,pods", want: watchStreamsConfig{pods: true}},

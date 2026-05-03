@@ -111,6 +111,21 @@ spec:
               value: "1"
             {{- end }}
             {{- end }}
+            {{- /*
+              Watch streams: server defaults to "all on" when env is
+              empty/unset. Only render the env when the operator set
+              an explicit value (subset, "off", "none").
+            */}}
+            {{- with .Values.watchStreams }}
+            {{- if .kinds }}
+            - name: PERISCOPE_WATCH_STREAMS
+              value: {{ .kinds | quote }}
+            {{- end }}
+            {{- if .perUserLimit }}
+            - name: PERISCOPE_WATCH_PER_USER_LIMIT
+              value: {{ .perUserLimit | quote }}
+            {{- end }}
+            {{- end }}
             {{- with .Values.env }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
