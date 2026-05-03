@@ -99,6 +99,31 @@ async function getJSON<T>(path: string, signal?: AbortSignal): Promise<T> {
   return (await res.json()) as T;
 }
 
+async function postJSON<T>(
+  path: string,
+  body: unknown,
+  signal?: AbortSignal,
+): Promise<T> {
+  const res = await fetch(path, {
+    method: "POST",
+    signal,
+    headers: {
+      Accept: "application/json",
+      ...(body !== undefined ? { "Content-Type": "application/json" } : {}),
+    },
+    body: body !== undefined ? JSON.stringify(body) : undefined,
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new ApiError(
+      `${res.status} ${res.statusText} on ${path}`,
+      res.status,
+      text,
+    );
+  }
+  return (await res.json()) as T;
+}
+
 async function getText(path: string, signal?: AbortSignal): Promise<string> {
   const res = await fetch(path, { signal });
   if (!res.ok) {
@@ -123,7 +148,7 @@ function clusterScopedURL(c: string, kind: string, name: string, suffix?: string
   return suffix ? `${base}/${suffix}` : base;
 }
 
-export type ClusterScopedKind = "namespaces" | "pvs" | "storageclasses" | "clusterroles" | "clusterrolebindings" | "ingressclasses" | "priorityclasses" | "runtimeclasses";
+export type ClusterScopedKind = "namespaces" | "pvs" | "storageclasses" | "clusterroles" | "clusterrolebindings" | "ingressclasses" | "priorityclasses" | "runtimeclasses" | "nodes";
 
 export type YamlKind =
   | "pods"
@@ -153,7 +178,8 @@ export type YamlKind =
   | "resourcequotas"
   | "limitranges"
   | "priorityclasses"
-  | "runtimeclasses";
+  | "runtimeclasses"
+  | "nodes";
 
 export const api = {
   whoami: (signal?: AbortSignal) => getJSON<Whoami>("/api/whoami", signal),
@@ -579,6 +605,20 @@ export const api = {
     key: string,
     signal?: AbortSignal,
   ) => getText(nsURL(c, "secrets", ns, name, `data/${enc(key)}`), signal),
+
+  // Phase 5: trigger a CronJob now — clones spec.jobTemplate into a
+  // fresh Job. Backend matches `kubectl create job --from=cronjob/X`.
+  triggerCronJob: (
+    cluster: string,
+    namespace: string,
+    name: string,
+    signal?: AbortSignal,
+  ) =>
+    postJSON<{ jobName: string }>(
+      `/api/clusters/${enc(cluster)}/cronjobs/${enc(namespace)}/${enc(name)}/trigger`,
+      undefined,
+      signal,
+    ),
 };
 
 // --- write helpers (kept out of `api` block so the call sites stay readable) ---

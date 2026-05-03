@@ -207,3 +207,95 @@ func childSortTime(j *batchv1.Job) time.Time {
 	}
 	return j.CreationTimestamp.Time
 }
+
+// --- Phase 5: trigger-now -------------------------------------------
+
+// TriggerCronJobArgs carries the identity of the source CronJob plus
+// the impersonated cluster context.
+type TriggerCronJobArgs struct {
+	Cluster   clusters.Cluster
+	Namespace string
+	Name      string
+}
+
+// TriggerCronJobResult reports the new Job's name, so the SPA can
+// pivot to its detail view if needed.
+type TriggerCronJobResult struct {
+	JobName string `json:"jobName"`
+}
+
+// TriggerCronJob clones a CronJob's spec.jobTemplate into a fresh Job,
+// matching the semantics of `kubectl create job <name> --from=cronjob/<src>`:
+//   - copies the JobTemplate's spec, labels, annotations
+//   - inherits ownerReferences pointing back to the CronJob (so the
+//     Job is garbage-collected with the CronJob)
+//   - generates a unique name with a UNIX-second suffix to avoid
+//     collisions when triggered repeatedly within a minute.
+//
+// The CronJob itself isn't mutated. The new Job runs through the
+// normal Job controller path — same as one the schedule would have
+// produced.
+func TriggerCronJob(ctx context.Context, p credentials.Provider, args TriggerCronJobArgs) (TriggerCronJobResult, error) {
+	cs, err := newClientFn(ctx, p, args.Cluster)
+	if err != nil {
+		return TriggerCronJobResult{}, fmt.Errorf("build clientset: %w", err)
+	}
+	cj, err := cs.BatchV1().CronJobs(args.Namespace).Get(ctx, args.Name, metav1.GetOptions{})
+	if err != nil {
+		return TriggerCronJobResult{}, fmt.Errorf("get cronjob: %w", err)
+	}
+	job := &batchv1.Job{
+		ObjectMeta: metav1.ObjectMeta{
+			// kubectl appends a 5-char hash; UNIX seconds is plenty
+			// human-readable and unique within a CronJob's reasonable
+			// trigger frequency. Truncated to fit the 63-char DNS-label
+			// limit (CronJob name itself is bounded at 52 chars by
+			// validation precisely so triggered Jobs fit).
+			Name:        truncateName(args.Name+"-manual-"+fmt.Sprintf("%d", time.Now().Unix()), 63),
+			Namespace:   args.Namespace,
+			Labels:      cj.Spec.JobTemplate.Labels,
+			Annotations: cj.Spec.JobTemplate.Annotations,
+			OwnerReferences: []metav1.OwnerReference{
+				{
+					APIVersion: "batch/v1",
+					Kind:       "CronJob",
+					Name:       cj.Name,
+					UID:        cj.UID,
+					// Triggered jobs are first-class — not "controlled"
+					// by the CronJob (the schedule didn't fire them) but
+					// still owned for GC.
+					Controller:         ptrTo(false),
+					BlockOwnerDeletion: ptrTo(true),
+				},
+			},
+		},
+		Spec: cj.Spec.JobTemplate.Spec,
+	}
+	created, err := cs.BatchV1().Jobs(args.Namespace).Create(ctx, job, metav1.CreateOptions{
+		FieldManager: "periscope-spa",
+	})
+	if err != nil {
+		return TriggerCronJobResult{}, fmt.Errorf("create job: %w", err)
+	}
+	return TriggerCronJobResult{JobName: created.Name}, nil
+}
+
+// truncateName clips a generated name at the K8s DNS-label limit.
+func truncateName(name string, max int) string {
+	if len(name) <= max {
+		return name
+	}
+	return name[:max]
+}
+
+// ptrTo is a small helper for taking a pointer to a literal — needed
+// for OwnerReference.Controller / BlockOwnerDeletion fields.
+func ptrTo[T any](v T) *T { return &v }
+
+// Suppress unused-clientset warning when newClientFn is the only
+// kubernetes-package dependency: we explicitly need it imported.
+var _ = func(_ kubernetes.Interface) {}
+
+// types-only reference so the new file's imports don't drift away
+// from the package's existing set.
+var _ types.PatchType = ""

@@ -425,6 +425,9 @@ func main() {
 				return k8s.GetCronJob(ctx, p, k8s.GetCronJobArgs{Cluster: c, Namespace: ns, Name: name})
 			})))
 
+
+	router.Post("/api/clusters/{cluster}/cronjobs/{ns}/{name}/trigger",
+		credentials.Wrap(factory, triggerCronJobHandler(registry)))
 	router.Get("/api/clusters/{cluster}/pvcs/{ns}/{name}", credentials.Wrap(factory,
 		detailHandler(registry, "pvc",
 			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, ns, name string) (k8s.PVCDetail, error) {
@@ -1095,6 +1098,42 @@ func applyResourceHandler(reg *clusters.Registry) credentials.Handler {
 			"group", args.Group, "version", args.Version, "resource", args.Resource,
 			"ns", args.Namespace, "name", args.Name,
 			"dryRun", args.DryRun, "force", args.Force)
+		writeJSON(w, http.StatusOK, result)
+	}
+}
+
+// triggerCronJobHandler implements POST /api/clusters/{c}/cronjobs/{ns}/{name}/trigger
+// — the SPA's "Trigger now" affordance. Clones the CronJob's
+// JobTemplate into a freshly-named Job, matching the semantics of
+// `kubectl create job <name> --from=cronjob/<src>`. Audit-logged.
+func triggerCronJobHandler(reg *clusters.Registry) credentials.Handler {
+	return func(w http.ResponseWriter, r *http.Request, p credentials.Provider) {
+		c, ok := reg.ByName(chi.URLParam(r, "cluster"))
+		if !ok {
+			http.Error(w, "cluster not found", http.StatusNotFound)
+			return
+		}
+		args := k8s.TriggerCronJobArgs{
+			Cluster:   c,
+			Namespace: chi.URLParam(r, "ns"),
+			Name:      chi.URLParam(r, "name"),
+		}
+		result, err := k8s.TriggerCronJob(r.Context(), p, args)
+		if err != nil {
+			if errors.Is(err, context.Canceled) {
+				return
+			}
+			slog.ErrorContext(r.Context(), "trigger cronjob failed",
+				"err", err, "cluster", c.Name,
+				"ns", args.Namespace, "name", args.Name,
+				"actor", p.Actor())
+			writeAPIError(w, err, httpStatusFor(err))
+			return
+		}
+		slog.InfoContext(r.Context(), "cronjob triggered",
+			"actor", p.Actor(), "cluster", c.Name,
+			"ns", args.Namespace, "name", args.Name,
+			"jobName", result.JobName)
 		writeJSON(w, http.StatusOK, result)
 	}
 }

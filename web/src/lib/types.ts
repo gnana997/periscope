@@ -39,6 +39,7 @@ export interface Node {
   cpuCapacity: string;
   memoryCapacity: string;
   createdAt: string;
+  unschedulable: boolean;
 }
 
 export interface NodeList {

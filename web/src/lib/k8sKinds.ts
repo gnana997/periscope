@@ -70,4 +70,5 @@ export const KIND_REGISTRY: Record<YamlKind, KindMeta> = {
 
   // node.k8s.io/v1
   runtimeclasses:       { group: "node.k8s.io",            version: "v1",       resource: "runtimeclasses",             kind: "RuntimeClass" },
+  nodes:                { group: "",                       version: "v1",       resource: "nodes",                      kind: "Node" },
 };

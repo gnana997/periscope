@@ -18,6 +18,10 @@ type Node struct {
 	CPUCapacity    string    `json:"cpuCapacity"`
 	MemoryCapacity string    `json:"memoryCapacity"`
 	CreatedAt      time.Time `json:"createdAt"`
+	// Unschedulable mirrors spec.unschedulable so the SPA can surface
+	// a "cordoned" badge in the list and detail without a second
+	// fetch. Renamed from the K8s field to be SPA-friendly JSON.
+	Unschedulable bool `json:"unschedulable"`
 }
 
 type NodeList struct {

@@ -20,9 +20,19 @@ import {
 import { isForbidden } from "../components/table/isForbidden";
 import { DetailPane } from "../components/detail/DetailPane";
 import { NodeDescribe } from "../components/detail/describe/NodeDescribe";
+import { ResourceActions } from "../components/edit/ResourceActions";
 import { cn } from "../lib/cn";
 
-function NodeStatusTag({ status }: { status: string }) {
+function NodeStatusTag({
+  status,
+  unschedulable,
+}: {
+  status: string;
+  unschedulable: boolean;
+}) {
+  // NotReady wins over Cordoned for the dot tone — both are abnormal,
+  // but a NotReady node is a louder operational signal. Cordoned is
+  // surfaced as a follow-on badge so the operator can still see it.
   const tone =
     status === "Ready" ? "green" : status === "NotReady" ? "red" : "muted";
   const colorCls =
@@ -32,9 +42,16 @@ function NodeStatusTag({ status }: { status: string }) {
         ? "text-red"
         : "text-ink-muted";
   return (
-    <span className={cn("inline-flex items-center gap-1.5", colorCls)}>
-      <StatusDot tone={tone} />
-      <span>{status}</span>
+    <span className="inline-flex items-center gap-2">
+      <span className={cn("inline-flex items-center gap-1.5", colorCls)}>
+        <StatusDot tone={tone} />
+        <span>{status}</span>
+      </span>
+      {unschedulable && (
+        <span className="rounded-sm border border-yellow/40 bg-yellow/10 px-1.5 py-px font-mono text-[10.5px] uppercase tracking-[0.04em] text-yellow">
+          cordoned
+        </span>
+      )}
     </span>
   );
 }
@@ -79,7 +96,9 @@ export function NodesPage({ cluster }: { cluster: string }) {
       key: "status",
       header: "status",
       weight: 1.2,
-      accessor: (n) => <NodeStatusTag status={n.status} />,
+      accessor: (n) => (
+        <NodeStatusTag status={n.status} unschedulable={n.unschedulable} />
+      ),
     },
     {
       key: "roles",
@@ -128,8 +147,14 @@ export function NodesPage({ cluster }: { cluster: string }) {
     },
   ];
 
-  const rowTint = (n: Node): RowTint =>
-    n.status === "NotReady" ? "red" : null;
+  const rowTint = (n: Node): RowTint => {
+    // NotReady wins over cordoned — a broken node is louder than an
+    // intentionally-cordoned one. Cordoned still gets a yellow tint
+    // so it's visible at a scroll glance.
+    if (n.status === "NotReady") return "red";
+    if (n.unschedulable) return "yellow";
+    return null;
+  };
 
   const detail = selectedName ? (
     <DetailPane
@@ -138,6 +163,15 @@ export function NodesPage({ cluster }: { cluster: string }) {
       activeTab="describe"
       onTabChange={() => {}}
       onClose={() => setMany({ sel: null })}
+      actions={
+        <ResourceActions
+          cluster={cluster}
+          source={{ kind: "builtin", yamlKind: "nodes" }}
+          namespace={null}
+          name={selectedName}
+          onDeleted={() => setMany({ sel: null })}
+        />
+      }
       tabs={[
         {
           id: "describe",
