@@ -1,0 +1,26 @@
+# Code owners for this repository.
+#
+# GitHub uses this file to decide who must review changes when the
+# "Require review from Code Owners" branch ruleset is enabled.
+#
+# Syntax: <path-glob>  <@owner ...>
+# Last matching line wins, so place broad rules first and narrow
+# overrides later.
+
+# Default: the project maintainer owns everything.
+*                                       @gnana997
+
+# Security / auth / audit surfaces — listed explicitly so future
+# co-maintainers can be added with a one-line edit per surface,
+# without changing the catch-all above.
+/internal/auth/                         @gnana997
+/internal/authz/                        @gnana997
+/internal/credentials/                  @gnana997
+/internal/audit/                        @gnana997
+/internal/k8s/exec.go                   @gnana997
+/cmd/periscope/exec_handler.go          @gnana997
+/cmd/periscope/audit_handler.go         @gnana997
+
+# Helm chart + CI surfaces — operator-facing, deserve the same gate.
+/deploy/                                @gnana997
+/.github/                               @gnana997
