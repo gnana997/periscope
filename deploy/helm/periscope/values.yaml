@@ -313,6 +313,42 @@ audit:
     # is sufficient for the v1 single-replica topology.
     storageClass: ""
     accessMode: ReadWriteOnce
+# -----------------------------------------------------------------------------
+# Watch streams (SSE push for live resource lists)
+#
+# Periscope serves the four highest-churn resource lists (pods, events,
+# replicasets, jobs) over Server-Sent Events so the UI updates in real
+# time instead of polling on a 15s tick. The frontend has a tested
+# polling-fallback path for any kind whose stream cannot be opened, so
+# the bad case is graceful degradation, not a hard failure.
+#
+# Default: enabled for all four kinds.
+#
+# Set .Values.watchStreams.kinds to one of:
+#
+#   ""        unset → all four kinds enabled (default)
+#   "all"     same as unset; explicit form
+#   "off"     disable all SSE routes; UI uses polling everywhere
+#   "none"    same as "off"
+#   "pods,events"   comma-separated subset
+#
+# Reasons to opt out: an HTTP proxy / load balancer in front of
+# Periscope that buffers responses or kills idle connections under
+# ~30s, which can break SSE in ways the in-browser fallback can't
+# always paper over. Most Ingress controllers are fine; some
+# corporate-proxy setups are not.
+#
+# Per-user concurrent stream cap (separate concern):
+#   .Values.watchStreams.perUserLimit → PERISCOPE_WATCH_PER_USER_LIMIT
+#   Default 30 covers ~5 tabs × 6 list views per user. Set to 0 to
+#   disable the cap entirely (not recommended).
+# -----------------------------------------------------------------------------
+watchStreams:
+  # Empty / "all" / "off" / "none" / comma-separated subset.
+  # Leave empty to inherit the server default ("all on").
+  kinds: ""
+  perUserLimit: 30
+
 # Pod Disruption Budget
 #
 # v1 is single-replica (in-memory session store) so a node drain takes

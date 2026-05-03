@@ -132,6 +132,22 @@
         }
       }
     },
+    "watchStreams": {
+      "type": "object",
+      "description": "Watch (SSE) push streams for live resource lists. Server defaults to all-on; this block is the operator-facing opt-out / subset / per-user cap.",
+      "properties": {
+        "kinds": {
+          "type": "string",
+          "description": "Empty/unset or 'all' = all on (server default). 'off'/'none' = disable. Comma-separated subset of pods,events,replicasets,jobs is also accepted.",
+          "pattern": "^\\s*$|^\\s*(all|off|none)\\s*$|^\\s*(pods|events|replicasets|jobs)(\\s*,\\s*(pods|events|replicasets|jobs))*\\s*$"
+        },
+        "perUserLimit": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Concurrent SSE streams per OIDC subject. 0 disables the cap (not recommended)."
+        }
+      }
+    },
     "pdb": {
       "type": "object",
       "properties": {
