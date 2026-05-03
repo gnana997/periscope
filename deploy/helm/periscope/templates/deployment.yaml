@@ -81,6 +81,37 @@ spec:
               value: {{ .Values.audit.vacuumInterval | quote }}
             {{- end }}
             {{- /*
+              Pod exec global defaults. Per-cluster overrides live in
+              clusters.yaml (rendered by configmap-clusters.yaml) and
+              are merged on top of these values inside the binary.
+            */}}
+            {{- with .Values.exec }}
+            {{- if .serverIdleSeconds }}
+            - name: PERISCOPE_EXEC_IDLE_SECONDS
+              value: {{ .serverIdleSeconds | quote }}
+            {{- end }}
+            {{- if .idleWarnSeconds }}
+            - name: PERISCOPE_EXEC_IDLE_WARN_SECONDS
+              value: {{ .idleWarnSeconds | quote }}
+            {{- end }}
+            {{- if .heartbeatSeconds }}
+            - name: PERISCOPE_EXEC_HEARTBEAT_SECONDS
+              value: {{ .heartbeatSeconds | quote }}
+            {{- end }}
+            {{- if .maxSessionsPerUser }}
+            - name: PERISCOPE_EXEC_MAX_SESSIONS_PER_USER
+              value: {{ .maxSessionsPerUser | quote }}
+            {{- end }}
+            {{- if .maxSessionsTotal }}
+            - name: PERISCOPE_EXEC_MAX_SESSIONS_TOTAL
+              value: {{ .maxSessionsTotal | quote }}
+            {{- end }}
+            {{- if .probeClustersOnBoot }}
+            - name: PERISCOPE_PROBE_CLUSTERS_ON_BOOT
+              value: "1"
+            {{- end }}
+            {{- end }}
+            {{- /*
               Watch streams: server defaults to "all on" when env is
               empty/unset. Only render the env when the operator set
               an explicit value (subset, "off", "none").

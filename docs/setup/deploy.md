@@ -329,7 +329,121 @@ Notes:
 - **Login bounces forever.** Your IdP's allowed callback URL doesn't
   match `auth.oidc.redirectURL` exactly (trailing slashes, scheme,
   port). Both the IdP and `auth.yaml` must agree.
-- **`AssumeRole denied`** when adding clusters in PR-B. The per-cluster
-  role's trust policy doesn't allow `periscope-base` to assume it, or
-  the EKS Access Entry isn't in place. See the per-cluster setup guide
-  (forthcoming with PR-B).
+- **`AssumeRole denied`** when adding a cluster. The per-cluster role's
+  trust policy doesn't allow `periscope-base` to assume it, or the EKS
+  Access Entry isn't in place. The per-cluster RBAC walkthrough lives
+  in [`docs/setup/cluster-rbac.md`](./cluster-rbac.md).
+
+---
+
+## 10. Feature configuration
+
+The minimum values file in 3 only covers auth, clusters, and
+secrets. The chart also exposes pod exec, audit, NetworkPolicy, and
+PDB knobs — each has its own dedicated guide, summarised here.
+
+### 10.1 Pod exec
+
+Pod exec is on by default for every cluster. Tune the global
+defaults under `exec:` (idle/heartbeat/cap settings) and override
+per-cluster under `clusters[].exec:`. To disable exec on a specific
+cluster, set `clusters[<i>].exec.enabled: false`. There is no global
+"off" switch by design.
+
+```yaml
+exec:
+  serverIdleSeconds: 600       # 10 min
+  maxSessionsPerUser: 5
+  probeClustersOnBoot: false   # pre-warm cold clusters
+
+clusters:
+  - name: prod
+    backend: eks
+    arn: arn:aws:eks:us-east-1:111:cluster/prod
+    exec:
+      serverIdleSeconds: 1800  # 30 min for prod debugging
+```
+
+Full operator guide: [`docs/setup/pod-exec.md`](./pod-exec.md).
+
+### 10.2 Audit log persistence
+
+Off by default — events go to stdout (one JSON line per privileged
+action). Turn on persistence to enable the in-app audit query view
+at `GET /api/audit`:
+
+```yaml
+audit:
+  enabled: true
+  retentionDays: 30
+  maxSizeMB: 1024
+  storage:
+    type: pvc        # or emptyDir for kind/minikube
+    size: 5Gi
+```
+
+Full operator guide: [`docs/setup/audit.md`](./audit.md).
+
+### 10.3 Helm release browser
+
+The chart deploys a read-only Helm release browser. No values to set
+— the SPA shows it under each cluster's "Helm" sidebar group. RBAC
+follows the impersonated user (the browser auto-detects whether the
+cluster uses the `secret` or `configmap` storage driver).
+
+Full guide: [`docs/setup/helm-releases.md`](./helm-releases.md).
+
+### 10.4 Multi-cluster fleet view
+
+`GET /api/fleet` aggregates per-cluster status (nodes ready, pods by
+phase, hot signals) across every registered cluster. The home page
+uses it to render a fleet card grid. The endpoint runs each cluster
+under the user's impersonation in parallel; per-cluster failures
+become per-card error states without breaking the whole page.
+
+There is no helm config for the fleet endpoint — it's automatic once
+clusters are registered.
+
+### 10.5 Real-time list updates (watch streams)
+
+Periscope's pod, event, replicaset, and job list pages update in
+real time via SSE. **All four kinds are on by default**; the SPA
+falls back to polling when the EventSource fails. The `watchStreams:`
+helm block lets operators opt out (e.g. behind a proxy that
+mishandles long-lived connections) or restrict to a subset:
+
+```yaml
+watchStreams:
+  kinds: ""           # default ("all on"); "off" / "none" disable; "pods,events" restricts
+  perUserLimit: 30    # concurrent SSE streams per OIDC subject
+```
+
+Full operator guide:
+[`docs/setup/watch-streams.md`](./watch-streams.md). Contributor /
+architecture view (the `watchKind[T,S]` primitive, how to add a
+kind):
+[`docs/architecture/watch-streams.md`](../architecture/watch-streams.md).
+
+### 10.6 NetworkPolicy
+
+Off by default. Every cluster has different ingress controller
+plumbing and IdP egress targets, so a templated default would either
+be too loose or too tight to use anywhere. Enable when you know your
+environment:
+
+```yaml
+networkPolicy:
+  enabled: true
+  ingress:
+    fromNamespaces:
+      - kubernetes.io/metadata.name: ingress-nginx
+```
+
+Full guide: [`docs/setup/networkpolicy.md`](./networkpolicy.md).
+
+### 10.7 Pod Disruption Budget
+
+On by default with `maxUnavailable: 1` (single-replica v1 topology;
+the PDB makes the drain semantics explicit in cluster audit). Set
+`pdb.enabled: false` to skip. When HA support lands in v1.x, switch
+to `minAvailable` per `replicaCount`.

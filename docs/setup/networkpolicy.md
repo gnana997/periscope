@@ -59,6 +59,27 @@ template a stable rule from chart values. Operators typically either:
 Option 2 is the right answer for regulated environments; option 1 is the
 common starting point.
 
+## Egress for Periscope's other features
+
+The newer features added since v1's first cut don't need additional
+egress rules beyond what's already in your minimum policy. Quick
+sanity check:
+
+| Feature | Egress needed? |
+|---|---|
+| **Pod exec (WebSocket / SPDY)** | EKS API server endpoint (TCP/443). Same target your control plane already needs — no new rule. |
+| **Watch streams (SSE)** | None outbound. The SSE socket is *inbound* to the Periscope pod from the browser; the pod's outbound is the existing apiserver watch connection. |
+| **Helm release browser** | None new. Reads K8s storage objects via the apiserver. |
+| **Fleet endpoint (`/api/fleet`)** | None new. Per-cluster apiserver calls under impersonation. |
+| **Audit query (`/api/audit`)** | None — local SQLite read. |
+| **Audit stdout shipping** | Whatever your log-aggregator agent (Fluent Bit, Vector, etc.) needs — that runs alongside Periscope, not inside it. |
+| **OIDC / IdP** | TCP/443 to the issuer host. Already in the minimum policy above. |
+| **AWS STS / EKS DescribeCluster** | TCP/443 to `sts.amazonaws.com` and the regional EKS endpoints. Already needed for cluster auth. |
+
+In short: the only outbound traffic Periscope generates is to (a) the
+IdP, (b) AWS STS / EKS, and (c) each managed cluster's apiserver.
+The new features all ride those existing channels.
+
 ## Verifying
 
 After enabling:

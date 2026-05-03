@@ -362,3 +362,150 @@ but the rest of the deployment is unchanged.
 - **Drift after chart upgrade.** Chart bumped `periscope-triage` to add
   a verb; your cluster still has the old version. Re-render and apply:
   `helm template ... --show-only templates/cluster-rbac.yaml | kubectl apply -f -`.
+
+---
+
+## Helm release browser RBAC
+
+Periscope ships a read-only Helm release browser
+([`docs/setup/helm-releases.md`](./helm-releases.md)). Releases live
+in K8s storage objects — Secrets by default, ConfigMaps as a
+fallback — under the impersonated user's identity. To see releases
+in the SPA, the user's resolved K8s identity needs `get` and `list`
+on whichever storage kind the cluster uses, scoped to the namespaces
+where releases live (or cluster-wide for the auto-probe to populate
+the SPA's "all releases" list).
+
+The shipped tier ClusterRoles cover the common cases:
+
+| Tier | Secret-driver releases | ConfigMap-driver releases |
+|---|---|---|
+| `read` (`view`) | ❌ — `view` excludes Secret reads | ✅ — `view` covers ConfigMaps |
+| `triage` (custom) | ❌ — no secrets verbs | ✅ — covers ConfigMaps |
+| `write` (`edit`) | ✅ | ✅ |
+| `maintain` (custom) | ✅ | ✅ |
+| `admin` (`cluster-admin`) | ✅ | ✅ |
+
+If you want **read-tier users** to see secret-driver releases (the
+common case — Helm 3 defaults to Secrets), apply this binding to
+each managed cluster:
+
+```yaml
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: periscope-helm-browser
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames: []                # bound by label selector via the API at read time
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: periscope-helm-browser-read
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: periscope-helm-browser
+subjects:
+  - kind: Group
+    name: periscope-tier:read
+    apiGroup: rbac.authorization.k8s.io
+```
+
+This is **opt-in** because granting `secrets: list` cluster-wide is a
+significant escalation from `view`'s defaults — `view` deliberately
+excludes Secret reads to keep "read-only" from leaking credentials.
+Only add the binding if your team's threat model accepts that
+read-tier users will see Helm release storage payloads (which
+include the chart's rendered manifest and merged values, but not
+arbitrary cluster secrets).
+
+For tighter scoping, narrow the binding to a `RoleBinding` in
+specific namespaces — the helm browser then shows only the releases
+in those namespaces for that tier.
+
+---
+
+## Appendix: tier ClusterRole verbs
+
+The chart's `templates/cluster-rbac.yaml` ships the `triage` and
+`maintain` ClusterRoles inline. The other three tiers (`read`,
+`write`, `admin`) bind to the K8s built-ins `view`, `edit`, and
+`cluster-admin` — refer to the upstream K8s docs for those.
+
+This appendix documents what's in the shipped custom roles so you
+can audit or customize them without reading template YAML. If the
+chart bumps these roles, this appendix should be updated alongside.
+
+### `periscope-triage`
+
+**Reads (mirrors `view`):**
+
+| API group | Resources |
+|---|---|
+| `""` (core) | `bindings`, `configmaps`, `endpoints`, `events`, `limitranges`, `namespaces` (+`/status`), `persistentvolumeclaims` (+`/status`), `pods` (+`/log`, `/status`), `replicationcontrollers` (+`/scale`, `/status`), `resourcequotas` (+`/status`), `serviceaccounts`, `services` (+`/status`) |
+| `apps` | `controllerrevisions`, `daemonsets` (+`/status`), `deployments` (+`/scale`, `/status`), `replicasets` (+`/scale`, `/status`), `statefulsets` (+`/scale`, `/status`) |
+| `batch` | `cronjobs` (+`/status`), `jobs` (+`/status`) |
+| `networking.k8s.io` | `ingresses` (+`/status`), `networkpolicies` |
+| `autoscaling` | `horizontalpodautoscalers` (+`/status`) |
+| `policy` | `poddisruptionbudgets` (+`/status`) |
+| `discovery.k8s.io` | `endpointslices` |
+
+Verbs: `get`, `list`, `watch`.
+
+**Debug verbs (the triage-specific gap-filler):**
+
+| Resource | Verb | Purpose |
+|---|---|---|
+| `pods/exec` | `create` | Open Shell |
+| `pods/portforward` | `create` | Port-forward UI |
+| `pods/eviction` | `create` | Evict a stuck pod |
+| `pods` | `delete` | Restart pod (controller recreates) |
+| `apps/deployments/scale`, `apps/statefulsets/scale`, `apps/replicasets/scale` | `update`, `patch` | Scale workloads |
+| `apps/deployments`, `apps/statefulsets`, `apps/daemonsets` | `patch` | Rollout restart (annotation bump) |
+
+**What's NOT in triage:** spec edits (no `pods: patch` for the spec
+itself, no full `deployments: update`), Secret reads, RBAC, anything
+cluster-scoped except via the inherited `view` rules. Triage is
+"diagnose + nudge", not "redeploy".
+
+### `periscope-maintain`
+
+**Reads:** `*` on `*` for `get`, `list`, `watch` (everything
+readable). Cluster-scoped reads explicitly: `nodes` (+`/status`),
+`namespaces`, `persistentvolumes`, storage classes, CSI drivers/nodes,
+volume attachments, priority classes.
+
+**Mutate (namespaced):**
+
+| API group | Resources | Verbs |
+|---|---|---|
+| `""` (core) | `configmaps`, `events`, `persistentvolumeclaims`, `pods` (+`/exec`, `/log`, `/portforward`), `replicationcontrollers` (+`/scale`), `secrets`, `serviceaccounts`, `services` | `*` |
+| `apps` | `*` | `*` |
+| `batch` | `*` | `*` |
+| `networking.k8s.io` | `*` | `*` |
+| `autoscaling` | `*` | `*` |
+| `policy` | `*` | `*` |
+| `rbac.authorization.k8s.io` | `roles`, `rolebindings` | `*` |
+
+**What's intentionally NOT in maintain:** `clusterroles`,
+`clusterrolebindings`, anything CRD-related (apply per cluster if
+needed), workload identity APIs. Granting cluster-level RBAC mutate
+is the line between `maintain` and `admin`.
+
+### Customization
+
+Both roles are operator-tunable. After applying:
+
+```sh
+kubectl --context <cluster> edit clusterrole periscope-triage
+```
+
+Drift between the shipped role (chart `appVersion`) and the cluster
+is the operator's responsibility. The chart's `NOTES.txt` prints the
+shipped-role version on each `helm install` / `helm upgrade` so you
+can pin and re-apply when the chart bumps a verb.

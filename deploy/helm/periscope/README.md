@@ -83,6 +83,26 @@ The chart defaults to a plain ServiceAccount. Pick one path:
 
 The Periscope code is identical for both — same default credential chain.
 
+## Pod exec
+
+Pod exec is enabled on every cluster by default. Tune the global
+defaults under `exec:` (idle/heartbeat/cap settings) and override
+per-cluster under `clusters[].exec:` (partial overrides are fine —
+omitted fields fall back to the global default). Set
+`clusters[<i>].exec.enabled: false` to opt a specific cluster out.
+
+See `docs/setup/pod-exec.md` for the operator guide and RFC 0001 for
+the design.
+
+## Helm release browser
+
+The chart deploys a read-only Helm release browser as part of the
+Periscope binary — it surfaces under `/api/clusters/{cluster}/helm/...`
+and the SPA's "Helm" sidebar group. No additional values; the
+impersonated user's RBAC governs visibility (the browser needs `get`
+on `secrets` in release namespaces, which is the default storage
+driver). See `docs/setup/helm-releases.md`.
+
 ## Values reference
 
 See `values.yaml` for the full surface with inline comments.
