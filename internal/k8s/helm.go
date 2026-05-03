@@ -346,10 +346,22 @@ func listHelmReleaseBlobs(ctx context.Context, cs kubernetes.Interface, drv, nam
 
 // fanOutHelmReleaseBlobs runs listHelmReleaseBlobs across the given
 // namespaces with a bounded concurrency cap, merging the per-namespace
-// results. Per-namespace 403/401 errors are dropped silently — the
-// user simply has no helm visibility there. Other errors are recorded;
-// if every namespace failed with a non-permission error, the first
-// one is returned. Otherwise we return whatever we collected.
+// results.
+//
+// Terminal states (when merged ends up empty):
+//   - ≥1 namespace LIST succeeded → genuine empty (no helm releases
+//     in any namespace the user can see). Returns nil error.
+//   - every LIST was 403/401 → user has no helm visibility anywhere.
+//     Returns the first permission error so the handler can map it to
+//     a 403 and the frontend can render the ForbiddenState rather
+//     than the misleading "no helm releases" empty state.
+//   - every LIST failed with non-permission errors → returns the
+//     first such error so the caller surfaces a real failure.
+//
+// Partial success (some 403, some succeeded with data) is treated as
+// success — the user gets what they're allowed to see. The empty-state
+// copy already calls out that releases in inaccessible namespaces are
+// hidden, so we don't need to fail this case.
 func fanOutHelmReleaseBlobs(ctx context.Context, cs kubernetes.Interface, drv string, namespaces []corev1.Namespace) (map[string]helmLatest, error) {
 	merged := map[string]helmLatest{}
 	if len(namespaces) == 0 {
@@ -357,11 +369,14 @@ func fanOutHelmReleaseBlobs(ctx context.Context, cs kubernetes.Interface, drv st
 	}
 
 	var (
-		mu       sync.Mutex
-		firstErr error
-		nonPermFailures int
-		sem      = make(chan struct{}, helmFanOutConcurrency)
-		wg       sync.WaitGroup
+		mu             sync.Mutex
+		succeeded      int
+		permDenied     int
+		otherFailures  int
+		firstPermErr   error
+		firstOtherErr  error
+		sem            = make(chan struct{}, helmFanOutConcurrency)
+		wg             sync.WaitGroup
 	)
 	for _, ns := range namespaces {
 		ns := ns
@@ -372,18 +387,23 @@ func fanOutHelmReleaseBlobs(ctx context.Context, cs kubernetes.Interface, drv st
 			defer func() { <-sem }()
 			part, err := listHelmReleaseBlobs(ctx, cs, drv, ns.Name)
 			if err != nil {
-				if apierrors.IsForbidden(err) || apierrors.IsUnauthorized(err) {
-					return
-				}
 				mu.Lock()
-				if firstErr == nil {
-					firstErr = err
+				if apierrors.IsForbidden(err) || apierrors.IsUnauthorized(err) {
+					if firstPermErr == nil {
+						firstPermErr = err
+					}
+					permDenied++
+				} else {
+					if firstOtherErr == nil {
+						firstOtherErr = err
+					}
+					otherFailures++
 				}
-				nonPermFailures++
 				mu.Unlock()
 				return
 			}
 			mu.Lock()
+			succeeded++
 			for k, v := range part {
 				if cur, ok := merged[k]; ok && cur.release != nil && v.release != nil && cur.release.Version >= v.release.Version {
 					continue
@@ -395,11 +415,17 @@ func fanOutHelmReleaseBlobs(ctx context.Context, cs kubernetes.Interface, drv st
 	}
 	wg.Wait()
 
-	// Only fail the whole call if every namespace returned a
-	// non-permission error. A partial failure (some namespaces 403,
-	// some succeeded) is fine — the user gets what they can see.
-	if len(merged) == 0 && nonPermFailures == len(namespaces) && firstErr != nil {
-		return nil, firstErr
+	if len(merged) > 0 || succeeded > 0 {
+		// Either we have data, or at least one namespace returned no
+		// releases without erroring — both are "the user has helm
+		// visibility somewhere". Don't synthesize a 403.
+		return merged, nil
+	}
+	if permDenied > 0 {
+		return nil, firstPermErr
+	}
+	if otherFailures > 0 {
+		return nil, firstOtherErr
 	}
 	return merged, nil
 }
