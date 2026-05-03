@@ -148,6 +148,14 @@ func main() {
 	if auditReader != nil {
 		router.Get("/api/audit", auditQueryHandler(auditReader, authzResolver))
 	}
+	// --- Fleet (multi-cluster home page) ---
+	//
+	// Aggregator over every registered cluster. Page-level deny when
+	// the user has no tier; per-cluster status otherwise. See
+	// fleet_handler.go for the failure model.
+	fleetCacheTTL := 10 * time.Second
+	router.Get("/api/fleet", credentials.Wrap(factory,
+		fleetHandler(registry, authzResolver, newFleetCache(fleetCacheTTL))))
 
 	// --- Overview / dashboard ---
 

@@ -69,6 +69,7 @@ import type {
   PriorityClassList,
   RuntimeClassDetail,
   RuntimeClassList,
+  FleetResponse,
 } from "./types";
 
 class ApiError extends Error {
@@ -206,6 +207,14 @@ export const api = {
 
   clusters: (signal?: AbortSignal) =>
     getJSON<ClustersResponse>("/api/clusters", signal),
+
+  /**
+   * Fleet aggregator. Returns rollup + per-cluster status entries.
+   * Errors per cluster are encoded in the response (see FleetClusterEntry.error);
+   * the request itself only fails when the user has no tier (page-level 403).
+   */
+  fleet: (signal?: AbortSignal) =>
+    getJSON<FleetResponse>("/api/fleet", signal),
 
   // --- CRDs + custom resources -------------------------------------
 
