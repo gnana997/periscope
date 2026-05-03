@@ -912,6 +912,7 @@ export type ResourceKind =
   | "poddisruptionbudgets"
   | "replicasets"
   | "networkpolicies"
+  | "endpointslices"
   | "ingressclasses"
   | "resourcequotas"
   | "limitranges"
@@ -945,6 +946,7 @@ export type ResourceListResponse =
   | PDBList
   | ReplicaSetList
   | NetworkPolicyList
+  | EndpointSliceList
   | IngressClassList
   | ResourceQuotaList
   | LimitRangeList
@@ -1020,6 +1022,55 @@ export interface ReplicaSetDetail extends ReplicaSet {
   labels?: Record<string, string>;
   annotations?: Record<string, string>;
   conditions?: DeploymentCondition[];
+}
+
+// --- EndpointSlice (discovery.k8s.io/v1) ---
+
+export interface EndpointSlicePort {
+  name?: string;
+  protocol?: string;
+  port: number;
+  appProtocol?: string;
+}
+
+export interface EndpointSliceTarget {
+  kind: string;
+  name: string;
+  namespace?: string;
+}
+
+export interface EndpointSliceEndpoint {
+  addresses: string[];
+  hostname?: string;
+  nodeName?: string;
+  zone?: string;
+  ready: boolean;
+  serving: boolean;
+  terminating: boolean;
+  targetRef?: EndpointSliceTarget;
+}
+
+export interface EndpointSlice {
+  name: string;
+  namespace: string;
+  /** "IPv4" | "IPv6" | "FQDN". */
+  addressType: string;
+  ports: EndpointSlicePort[];
+  /** Parent Service name from the kubernetes.io/service-name label. */
+  serviceName?: string;
+  readyCount: number;
+  totalCount: number;
+  createdAt: string;
+}
+
+export interface EndpointSliceList {
+  endpointSlices: EndpointSlice[];
+}
+
+export interface EndpointSliceDetail extends EndpointSlice {
+  endpoints?: EndpointSliceEndpoint[];
+  labels?: Record<string, string>;
+  annotations?: Record<string, string>;
 }
 
 // --- NetworkPolicy ---

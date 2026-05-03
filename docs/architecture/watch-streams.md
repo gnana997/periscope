@@ -50,6 +50,10 @@ same DTO shape, so feature parity is automatic.
 | CronJobs | `/api/clusters/{cluster}/cronjobs/watch` | `CronJob` | `internal/k8s/watch.go: WatchCronJobs` |
 | HorizontalPodAutoscalers | `/api/clusters/{cluster}/horizontalpodautoscalers/watch` | `HPA` | `internal/k8s/watch.go: WatchHorizontalPodAutoscalers` |
 | PodDisruptionBudgets | `/api/clusters/{cluster}/poddisruptionbudgets/watch` | `PDB` | `internal/k8s/watch.go: WatchPodDisruptionBudgets` |
+| Services | `/api/clusters/{cluster}/services/watch` | `Service` | `internal/k8s/watch.go: WatchServices` |
+| Ingresses | `/api/clusters/{cluster}/ingresses/watch` | `Ingress` | `internal/k8s/watch.go: WatchIngresses` |
+| NetworkPolicies | `/api/clusters/{cluster}/networkpolicies/watch` | `NetworkPolicy` | `internal/k8s/watch.go: WatchNetworkPolicies` |
+| EndpointSlices | `/api/clusters/{cluster}/endpointslices/watch` | `EndpointSlice` | `internal/k8s/watch.go: WatchEndpointSlices` |
 
 Each is a thin wrapper around the generic `watchKind[T, S]` primitive,
 registered in the `watchKinds` slice in `cmd/periscope/main.go`.

@@ -138,8 +138,8 @@
       "properties": {
         "kinds": {
           "type": "string",
-          "description": "Empty/unset or 'all' = all on (server default). 'off'/'none' = disable. Comma-separated mix of per-kind tokens (pods, events, deployments, statefulsets, daemonsets, replicasets, jobs, cronjobs, horizontalpodautoscalers, poddisruptionbudgets) and group aliases (core, workloads) is also accepted; unknown tokens are silently dropped server-side.",
-          "pattern": "^\\s*$|^\\s*(all|off|none)\\s*$|^\\s*(pods|events|deployments|statefulsets|daemonsets|replicasets|jobs|cronjobs|horizontalpodautoscalers|poddisruptionbudgets|core|workloads)(\\s*,\\s*(pods|events|deployments|statefulsets|daemonsets|replicasets|jobs|cronjobs|horizontalpodautoscalers|poddisruptionbudgets|core|workloads))*\\s*$"
+          "description": "Empty/unset or 'all' = all on (server default). 'off'/'none' = disable. Comma-separated mix of per-kind tokens (pods, events, deployments, statefulsets, daemonsets, replicasets, jobs, cronjobs, horizontalpodautoscalers, poddisruptionbudgets, services, ingresses, networkpolicies, endpointslices) and group aliases (core, workloads, networking) is also accepted; unknown tokens are silently dropped server-side.",
+          "pattern": "^\\s*$|^\\s*(all|off|none)\\s*$|^\\s*(pods|events|deployments|statefulsets|daemonsets|replicasets|jobs|cronjobs|horizontalpodautoscalers|poddisruptionbudgets|services|ingresses|networkpolicies|endpointslices|core|workloads|networking)(\\s*,\\s*(pods|events|deployments|statefulsets|daemonsets|replicasets|jobs|cronjobs|horizontalpodautoscalers|poddisruptionbudgets|services|ingresses|networkpolicies|endpointslices|core|workloads|networking))*\\s*$"
         },
         "perUserLimit": {
           "type": "integer",

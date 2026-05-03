@@ -59,6 +59,8 @@ import type {
   ReplicaSetList,
   NetworkPolicyDetail,
   NetworkPolicyList,
+  EndpointSliceDetail,
+  EndpointSliceList,
   IngressClassDetail,
   IngressClassList,
   ResourceQuota,
@@ -181,6 +183,7 @@ export type YamlKind =
   | "poddisruptionbudgets"
   | "replicasets"
   | "networkpolicies"
+  | "endpointslices"
   | "ingressclasses"
   | "resourcequotas"
   | "limitranges"
@@ -207,7 +210,11 @@ export type WatchStreamKind =
   | "jobs"
   | "cronjobs"
   | "horizontalpodautoscalers"
-  | "poddisruptionbudgets";
+  | "poddisruptionbudgets"
+  | "services"
+  | "ingresses"
+  | "networkpolicies"
+  | "endpointslices";
 
 // Features describes server-side capability flags. Fetched once at app
 // boot via api.features and consumed by useResource (Phase 6) to choose
@@ -598,6 +605,11 @@ export const api = {
     return getJSON<NetworkPolicyList>(`/api/clusters/${enc(cluster)}/networkpolicies${qs}`, signal);
   },
 
+  endpointSlices: (cluster: string, namespace?: string, signal?: AbortSignal) => {
+    const qs = namespace ? `?namespace=${enc(namespace)}` : "";
+    return getJSON<EndpointSliceList>(`/api/clusters/${enc(cluster)}/endpointslices${qs}`, signal);
+  },
+
   resourceQuotas: (cluster: string, namespace?: string, signal?: AbortSignal) => {
     const qs = namespace ? `?namespace=${enc(namespace)}` : "";
     return getJSON<ResourceQuotaList>(`/api/clusters/${enc(cluster)}/resourcequotas${qs}`, signal);
@@ -630,6 +642,9 @@ export const api = {
 
   getNetworkPolicy: (c: string, ns: string, name: string, signal?: AbortSignal) =>
     getJSON<NetworkPolicyDetail>(nsURL(c, "networkpolicies", ns, name), signal),
+
+  getEndpointSlice: (c: string, ns: string, name: string, signal?: AbortSignal) =>
+    getJSON<EndpointSliceDetail>(nsURL(c, "endpointslices", ns, name), signal),
 
   getResourceQuota: (c: string, ns: string, name: string, signal?: AbortSignal) =>
     getJSON<ResourceQuota>(nsURL(c, "resourcequotas", ns, name), signal),
