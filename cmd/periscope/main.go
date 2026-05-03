@@ -57,6 +57,14 @@ func main() {
 	// and remove on stream close.
 	streamTracker := newStreamTracker()
 
+	// Caps concurrent watch SSE streams per OIDC subject so a runaway
+	// tab (or a buggy script) can't exhaust apiserver watch quota for
+	// the whole team. 30 covers ~5 tabs × 6 list views — invisible in
+	// normal use, hard ceiling on accidents.
+	streamLimit := parseIntEnv("PERISCOPE_WATCH_PER_USER_LIMIT", 30)
+	streamLimiter := newUserStreamLimiter(streamLimit)
+	slog.Info("watch stream limit", "per_user", streamLimit)
+
 	authCfg, err := auth.Load(os.Getenv("PERISCOPE_AUTH_FILE"))
 	if err != nil {
 		slog.Error("auth config", "err", err)
@@ -809,7 +817,7 @@ func main() {
 
 	if watchCfg.pods {
 		router.Get("/api/clusters/{cluster}/pods/watch",
-			credentials.Wrap(factory, podsWatchHandler(registry, streamTracker)))
+			credentials.Wrap(factory, podsWatchHandler(registry, streamTracker, streamLimiter)))
 	}
 
 	// Debug endpoint listing currently-open watch streams. JSON for
@@ -1797,6 +1805,71 @@ func parseWatchStreamsEnv(raw string) watchStreamsConfig {
 	return cfg
 }
 
+// userStreamLimiter caps the number of concurrent watch SSE streams
+// per OIDC subject (or other actor identifier). Acquire returns false
+// when the user is already at the cap; the handler responds 429 and
+// returns without opening the stream.
+//
+// max == 0 disables the cap (Acquire always returns true). Negative
+// values are clamped to 0.
+type userStreamLimiter struct {
+	max    int
+	mu     sync.Mutex
+	counts map[string]int
+}
+
+func newUserStreamLimiter(max int) *userStreamLimiter {
+	if max < 0 {
+		max = 0
+	}
+	return &userStreamLimiter{max: max, counts: make(map[string]int)}
+}
+
+// acquire reserves a slot for actor and returns true. Returns false
+// when actor is already at the cap. Pair every successful acquire
+// with a deferred release.
+func (u *userStreamLimiter) acquire(actor string) bool {
+	if u.max == 0 {
+		return true
+	}
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	if u.counts[actor] >= u.max {
+		return false
+	}
+	u.counts[actor]++
+	return true
+}
+
+func (u *userStreamLimiter) release(actor string) {
+	if u.max == 0 {
+		return
+	}
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	if u.counts[actor] > 0 {
+		u.counts[actor]--
+	}
+	if u.counts[actor] == 0 {
+		delete(u.counts, actor)
+	}
+}
+
+// parseIntEnv reads a positive integer from the named env var; returns
+// fallback when the var is unset, empty, malformed, or negative.
+func parseIntEnv(name string, fallback int) int {
+	raw := strings.TrimSpace(os.Getenv(name))
+	if raw == "" {
+		return fallback
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n < 0 {
+		slog.Warn("invalid env var, using default", "name", name, "value", raw, "default", fallback)
+		return fallback
+	}
+	return n
+}
+
 // watchChannelSink implements k8s.WatchSink by pushing into a buffered
 // channel. Send is non-blocking — when the channel is full, the sink
 // records a backpressure flag and returns false so the watch loop
@@ -1907,7 +1980,10 @@ func (t *streamTracker) snapshot() []streamEntry {
 // Lifecycle transitions are slog'd at info level with event names
 // "watch_stream.opened" / "watch_stream.closed" so log-to-metrics
 // agents can derive counters until Prometheus is wired up.
-func podsWatchHandler(reg *clusters.Registry, tracker *streamTracker) credentials.Handler {
+//
+// Per-user concurrency is capped via the limiter; over-cap requests
+// return 429 before any SSE work happens.
+func podsWatchHandler(reg *clusters.Registry, tracker *streamTracker, limiter *userStreamLimiter) credentials.Handler {
 	return func(w http.ResponseWriter, r *http.Request, p credentials.Provider) {
 		c, ok := reg.ByName(chi.URLParam(r, "cluster"))
 		if !ok {
@@ -1915,6 +1991,15 @@ func podsWatchHandler(reg *clusters.Registry, tracker *streamTracker) credential
 			return
 		}
 		ns := r.URL.Query().Get("namespace")
+
+		actor := p.Actor()
+		if !limiter.acquire(actor) {
+			slog.WarnContext(r.Context(), "watch_stream.rate_limited",
+				"actor", actor, "kind", "pods", "cluster", c.Name, "ns", ns)
+			http.Error(w, "too many concurrent watch streams for this user", http.StatusTooManyRequests)
+			return
+		}
+		defer limiter.release(actor)
 
 		sw, err := sse.Open(w)
 		if err != nil {

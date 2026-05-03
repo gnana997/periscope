@@ -63,6 +63,75 @@ func TestStreamTracker_RegisterSnapshotDeregister(t *testing.T) {
 	}
 }
 
+func TestUserStreamLimiter_BasicAcquireRelease(t *testing.T) {
+	l := newUserStreamLimiter(2)
+
+	if !l.acquire("alice") {
+		t.Fatal("first acquire should succeed")
+	}
+	if !l.acquire("alice") {
+		t.Fatal("second acquire should succeed (cap=2)")
+	}
+	if l.acquire("alice") {
+		t.Fatal("third acquire should fail (over cap)")
+	}
+	// Different actor not affected.
+	if !l.acquire("bob") {
+		t.Fatal("bob's first acquire should succeed regardless of alice's count")
+	}
+
+	l.release("alice")
+	if !l.acquire("alice") {
+		t.Fatal("acquire after release should succeed")
+	}
+}
+
+func TestUserStreamLimiter_ZeroDisablesCap(t *testing.T) {
+	l := newUserStreamLimiter(0)
+	for i := 0; i < 1000; i++ {
+		if !l.acquire("alice") {
+			t.Fatalf("acquire #%d should succeed when cap is 0", i)
+		}
+	}
+}
+
+func TestUserStreamLimiter_ReleaseGCsEntry(t *testing.T) {
+	l := newUserStreamLimiter(2)
+	l.acquire("alice")
+	l.release("alice")
+	l.mu.Lock()
+	_, present := l.counts["alice"]
+	l.mu.Unlock()
+	if present {
+		t.Error("counts['alice'] should be deleted after release brings count to 0")
+	}
+}
+
+func TestParseIntEnv(t *testing.T) {
+	tests := []struct {
+		name     string
+		value    string
+		fallback int
+		want     int
+	}{
+		{name: "unset returns fallback", value: "", fallback: 30, want: 30},
+		{name: "valid integer", value: "100", fallback: 30, want: 100},
+		{name: "zero is valid", value: "0", fallback: 30, want: 0},
+		{name: "negative falls back", value: "-1", fallback: 30, want: 30},
+		{name: "garbage falls back", value: "abc", fallback: 30, want: 30},
+		{name: "whitespace falls back", value: "   ", fallback: 30, want: 30},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("PERISCOPE_TEST_INT_ENV", tt.value)
+			got := parseIntEnv("PERISCOPE_TEST_INT_ENV", tt.fallback)
+			if got != tt.want {
+				t.Errorf("parseIntEnv(%q) = %d, want %d", tt.value, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestStreamTracker_ConcurrentSafe(t *testing.T) {
 	// Run with -race. 50 goroutines register + deregister; another 50
 	// snapshot concurrently. No assertions beyond "no race detected".
