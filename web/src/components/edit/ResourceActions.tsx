@@ -14,10 +14,14 @@
 // LIST_ITEMS_KEY) that doesn't generalise to arbitrary CRDs. Adding
 // optimistic CR labels/scale is tracked as a follow-up.
 //
-// Actions are shown unconditionally in v1 — the backend is the
-// authoritative gate (impersonated K8s RBAC). useCanI() is called
-// anyway so when SSAR plumbing lands in v1.x every site upgrades for
-// free. See useCanI for the rationale.
+// Actions render unconditionally — but disabled with a mode-aware
+// tooltip when the user lacks the K8s RBAC permission. useCanIBatch
+// asks the backend for every gated action in one POST so SSRR can
+// batch-route the per-namespace checks. See useCanI / RFC 0002.
+//
+// We deliberately render disabled-not-hidden so the tier model is
+// legible: a triage-tier user *sees* the boundary of their role
+// instead of having actions silently disappear.
 
 import { useState } from "react";
 import { skipToken, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -27,7 +31,7 @@ import {
   type EditorSource,
 } from "../../lib/customResources";
 import { queryKeys } from "../../lib/queryKeys";
-import { useCanI } from "../../hooks/useCanI";
+import { useCanIBatch } from "../../hooks/useCanI";
 import { useScaleResource, isScalable } from "../../hooks/mutations/useScaleResource";
 import { useEditLabels } from "../../hooks/mutations/useEditLabels";
 import { useDeleteResource } from "../../hooks/mutations/useDeleteResource";
@@ -41,6 +45,7 @@ import { ScaleModal } from "./ScaleModal";
 import { EditLabelsModal } from "./EditLabelsModal";
 import { ConfirmActionModal } from "../ui/ConfirmActionModal";
 import { EditButton } from "../detail/yaml/EditButton";
+import { Tooltip } from "../Tooltip";
 
 interface ResourceActionsProps {
   cluster: string;
@@ -100,14 +105,15 @@ function BuiltinActions({
     name,
     kind: meta.kind,
   };
-  const canEdit = useCanI({ verb: "patch", resource: meta.resource, namespace: ns });
-  const canDelete = useCanI({ verb: "delete", resource: meta.resource, namespace: ns });
-  const canScale = useCanI({
-    verb: "patch",
-    resource: `${meta.resource}/scale`,
-    namespace: ns,
-  });
-  const showScaleButton = canScale && isScalable(yamlKind);
+  // One batched can-i call answers every action on this toolbar in
+  // a single round-trip. Order matches `decisions[]` indexing below.
+  const [canEdit, canDelete, canScale, canCreateJobs] = useCanIBatch(cluster, [
+    { verb: "patch", resource: meta.resource, namespace: ns },
+    { verb: "delete", resource: meta.resource, namespace: ns },
+    { verb: "patch", resource: meta.resource, subresource: "scale", namespace: ns },
+    { verb: "create", resource: "jobs", namespace: ns },
+  ]);
+  const showScaleButton = isScalable(yamlKind);
 
   const detailKey = queryKeys
     .cluster(cluster)
@@ -145,17 +151,14 @@ function BuiltinActions({
   // Phase 5: workload-level + node-level + cronjob ops actions.
   // Each hook is gated on the kind so the mutation isn't constructed
   // for kinds that don't support it (still cheap — useMutation is
-  // setup-only — but keeps the React tree reads obvious).
-  const showRestartButton =
-    canEdit && isRestartable(yamlKind);
-  const showSuspendButton = canEdit && yamlKind === "cronjobs";
-  const canCreateJobs = useCanI({
-    verb: "create",
-    resource: "jobs",
-    namespace: ns,
-  });
-  const showTriggerButton = yamlKind === "cronjobs" && canCreateJobs;
-  const showCordonButton = canEdit && yamlKind === "nodes";
+  // setup-only — but keeps the React tree reads obvious). The
+  // RBAC dimension is now handled by per-button disabled state +
+  // tooltip below; the kind dimension stays as visibility gates so
+  // we don't render "scale" on a ConfigMap.
+  const showRestartButton = isRestartable(yamlKind);
+  const showSuspendButton = yamlKind === "cronjobs";
+  const showTriggerButton = yamlKind === "cronjobs";
+  const showCordonButton = yamlKind === "nodes";
 
   const cachedCronJob = cachedDetail as { suspend?: boolean } | undefined;
   const cachedNode = cachedDetail as { unschedulable?: boolean } | undefined;
@@ -184,87 +187,141 @@ function BuiltinActions({
     ? deleteErrorShape(deleteMutation.error)
     : null;
 
+  // Disabled-button styling shared by every gated action. Greys the
+  // button and shows a not-allowed cursor while leaving the DOM node
+  // present so Radix Tooltip's pointer-event capture still works.
+  const disabledCls = "disabled:cursor-not-allowed disabled:opacity-50";
+
+  // Replicas-loading state for scale: distinct from "no permission",
+  // tooltip differs.
+  const replicasLoading = cachedDetail?.replicas === undefined;
+  const scaleDisabled = !canScale.allowed || replicasLoading;
+  const scaleTooltip = canScale.allowed
+    ? replicasLoading
+      ? "loading current replica count…"
+      : `current replicas: ${cachedDetail!.replicas}`
+    : canScale.tooltip;
+
   return (
     <div className="flex items-center gap-1.5">
-      {canEdit && <EditButton />}
-      {canEdit && (
+      <Tooltip content={canEdit.allowed ? null : canEdit.tooltip}>
+        <span className={cn("inline-flex", !canEdit.allowed && "opacity-50 cursor-not-allowed")}>
+          <EditButton disabled={!canEdit.allowed} />
+        </span>
+      </Tooltip>
+      <Tooltip content={canEdit.allowed ? null : canEdit.tooltip}>
         <button
           type="button"
           onClick={() => setShowLabels(true)}
-          className="rounded-sm border border-border-strong px-2.5 py-1 font-mono text-[12px] text-ink-muted transition-colors hover:bg-surface-2 hover:text-ink"
+          disabled={!canEdit.allowed}
+          aria-disabled={!canEdit.allowed}
+          className={cn(
+            "rounded-sm border border-border-strong px-2.5 py-1 font-mono text-[12px] text-ink-muted transition-colors hover:bg-surface-2 hover:text-ink",
+            disabledCls,
+          )}
         >
           labels
         </button>
-      )}
+      </Tooltip>
       {showScaleButton && (
-        <button
-          type="button"
-          onClick={() => setShowScale(true)}
-          disabled={cachedDetail?.replicas === undefined}
-          className="rounded-sm border border-border-strong px-2.5 py-1 font-mono text-[12px] text-ink-muted transition-colors hover:bg-surface-2 hover:text-ink disabled:cursor-not-allowed disabled:opacity-50"
-          title={
-            cachedDetail?.replicas === undefined
-              ? "loading current replica count…"
-              : `current replicas: ${cachedDetail.replicas}`
-          }
-        >
-          scale
-        </button>
+        <Tooltip content={scaleDisabled ? scaleTooltip : null}>
+          <button
+            type="button"
+            onClick={() => setShowScale(true)}
+            disabled={scaleDisabled}
+            aria-disabled={scaleDisabled}
+            className={cn(
+              "rounded-sm border border-border-strong px-2.5 py-1 font-mono text-[12px] text-ink-muted transition-colors hover:bg-surface-2 hover:text-ink",
+              disabledCls,
+            )}
+          >
+            scale
+          </button>
+        </Tooltip>
       )}
-      {canDelete && (
+      <Tooltip content={canDelete.allowed ? null : canDelete.tooltip}>
         <button
           type="button"
           onClick={() => setShowDelete(true)}
-          className="rounded-sm border border-border-strong px-2.5 py-1 font-mono text-[12px] text-red transition-colors hover:bg-red-soft"
+          disabled={!canDelete.allowed}
+          aria-disabled={!canDelete.allowed}
+          className={cn(
+            "rounded-sm border border-border-strong px-2.5 py-1 font-mono text-[12px] text-red transition-colors hover:bg-red-soft",
+            disabledCls,
+          )}
         >
           delete
         </button>
-      )}
+      </Tooltip>
       {showRestartButton && (
-        <button
-          type="button"
-          onClick={() => setShowRestart(true)}
-          className="rounded-sm border border-border-strong px-2.5 py-1 font-mono text-[12px] text-ink-muted transition-colors hover:bg-surface-2 hover:text-ink"
-        >
-          restart
-        </button>
+        <Tooltip content={canEdit.allowed ? null : canEdit.tooltip}>
+          <button
+            type="button"
+            onClick={() => setShowRestart(true)}
+            disabled={!canEdit.allowed}
+            aria-disabled={!canEdit.allowed}
+            className={cn(
+              "rounded-sm border border-border-strong px-2.5 py-1 font-mono text-[12px] text-ink-muted transition-colors hover:bg-surface-2 hover:text-ink",
+              disabledCls,
+            )}
+          >
+            restart
+          </button>
+        </Tooltip>
       )}
       {showSuspendButton && cachedCronJob !== undefined && (
-        <button
-          type="button"
-          onClick={() => setShowSuspend(true)}
-          className={cn(
-            "rounded-sm border px-2.5 py-1 font-mono text-[12px] transition-colors",
-            cachedCronJob.suspend
-              ? "border-yellow/40 bg-yellow/10 text-yellow hover:brightness-110"
-              : "border-border-strong text-ink-muted hover:bg-surface-2 hover:text-ink",
-          )}
-        >
-          {cachedCronJob.suspend ? "resume" : "suspend"}
-        </button>
+        <Tooltip content={canEdit.allowed ? null : canEdit.tooltip}>
+          <button
+            type="button"
+            onClick={() => setShowSuspend(true)}
+            disabled={!canEdit.allowed}
+            aria-disabled={!canEdit.allowed}
+            className={cn(
+              "rounded-sm border px-2.5 py-1 font-mono text-[12px] transition-colors",
+              cachedCronJob.suspend
+                ? "border-yellow/40 bg-yellow/10 text-yellow hover:brightness-110"
+                : "border-border-strong text-ink-muted hover:bg-surface-2 hover:text-ink",
+              disabledCls,
+            )}
+          >
+            {cachedCronJob.suspend ? "resume" : "suspend"}
+          </button>
+        </Tooltip>
       )}
       {showTriggerButton && (
-        <button
-          type="button"
-          onClick={() => setShowTrigger(true)}
-          className="rounded-sm border border-border-strong px-2.5 py-1 font-mono text-[12px] text-ink-muted transition-colors hover:bg-surface-2 hover:text-ink"
-        >
-          trigger now
-        </button>
+        <Tooltip content={canCreateJobs.allowed ? null : canCreateJobs.tooltip}>
+          <button
+            type="button"
+            onClick={() => setShowTrigger(true)}
+            disabled={!canCreateJobs.allowed}
+            aria-disabled={!canCreateJobs.allowed}
+            className={cn(
+              "rounded-sm border border-border-strong px-2.5 py-1 font-mono text-[12px] text-ink-muted transition-colors hover:bg-surface-2 hover:text-ink",
+              disabledCls,
+            )}
+          >
+            trigger now
+          </button>
+        </Tooltip>
       )}
       {showCordonButton && cachedNode !== undefined && (
-        <button
-          type="button"
-          onClick={() => setShowCordon(true)}
-          className={cn(
-            "rounded-sm border px-2.5 py-1 font-mono text-[12px] transition-colors",
-            cachedNode.unschedulable
-              ? "border-yellow/40 bg-yellow/10 text-yellow hover:brightness-110"
-              : "border-border-strong text-ink-muted hover:bg-surface-2 hover:text-ink",
-          )}
-        >
-          {cachedNode.unschedulable ? "uncordon" : "cordon"}
-        </button>
+        <Tooltip content={canEdit.allowed ? null : canEdit.tooltip}>
+          <button
+            type="button"
+            onClick={() => setShowCordon(true)}
+            disabled={!canEdit.allowed}
+            aria-disabled={!canEdit.allowed}
+            className={cn(
+              "rounded-sm border px-2.5 py-1 font-mono text-[12px] transition-colors",
+              cachedNode.unschedulable
+                ? "border-yellow/40 bg-yellow/10 text-yellow hover:brightness-110"
+                : "border-border-strong text-ink-muted hover:bg-surface-2 hover:text-ink",
+              disabledCls,
+            )}
+          >
+            {cachedNode.unschedulable ? "uncordon" : "cordon"}
+          </button>
+        </Tooltip>
       )}
       {trailing}
 
@@ -462,23 +519,35 @@ function CustomResourceActions({
     name,
     kind: meta.kind,
   };
-  const canEdit = useCanI({ verb: "patch", resource: meta.resource, namespace: ns });
-  const canDelete = useCanI({ verb: "delete", resource: meta.resource, namespace: ns });
+  const [canEdit, canDelete] = useCanIBatch(cluster, [
+    { verb: "patch", resource: meta.resource, namespace: ns },
+    { verb: "delete", resource: meta.resource, namespace: ns },
+  ]);
 
   const qc = useQueryClient();
+  const disabledCls = "disabled:cursor-not-allowed disabled:opacity-50";
 
   return (
     <div className="flex items-center gap-1.5">
-      {canEdit && <EditButton />}
-      {canDelete && (
+      <Tooltip content={canEdit.allowed ? null : canEdit.tooltip}>
+        <span className={cn("inline-flex", !canEdit.allowed && "opacity-50 cursor-not-allowed")}>
+          <EditButton disabled={!canEdit.allowed} />
+        </span>
+      </Tooltip>
+      <Tooltip content={canDelete.allowed ? null : canDelete.tooltip}>
         <button
           type="button"
           onClick={() => setShowDelete(true)}
-          className="rounded-sm border border-border-strong px-2.5 py-1 font-mono text-[12px] text-red transition-colors hover:bg-red-soft"
+          disabled={!canDelete.allowed}
+          aria-disabled={!canDelete.allowed}
+          className={cn(
+            "rounded-sm border border-border-strong px-2.5 py-1 font-mono text-[12px] text-red transition-colors hover:bg-red-soft",
+            disabledCls,
+          )}
         >
           delete
         </button>
-      )}
+      </Tooltip>
       {trailing}
 
       {showDelete && (

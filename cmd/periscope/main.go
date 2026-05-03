@@ -181,6 +181,19 @@ func main() {
 	router.Get("/api/fleet", credentials.Wrap(factory,
 		fleetHandler(registry, authzResolver, newFleetCache(fleetCacheTTL))))
 
+	// --- can-i (SAR/SSRR-driven UI gating) ---
+	//
+	// Pre-flight RBAC check the SPA hits to grey out actions the user
+	// cannot perform. Replaces the click → 403 → red banner UX with
+	// disabled-button-with-tooltip. Works identically across shared /
+	// tier / raw modes — see cani_handler.go.
+	caniCacheTTL := authCfg.Authorization.CanICacheTTL
+	if caniCacheTTL == 0 {
+		caniCacheTTL = 30 * time.Second
+	}
+	router.Post("/api/clusters/{cluster}/can-i", credentials.Wrap(factory,
+		caniHandler(registry, newCanICache(caniCacheTTL))))
+
 	// --- Overview / dashboard ---
 
 	router.Get("/api/clusters/{cluster}/dashboard", credentials.Wrap(factory,
@@ -1030,13 +1043,20 @@ func whoamiHandler(auditEnabled bool, resolver *authz.Resolver) func(http.Respon
 		resp := map[string]any{"actor": p.Actor()}
 		resp["auditEnabled"] = auditEnabled
 		scope := "self"
+		s := credentials.SessionFromContext(r.Context())
 		if auditEnabled && resolver != nil {
-			s := credentials.SessionFromContext(r.Context())
 			if resolver.IsAuditAdmin(authz.Identity{Subject: s.Subject, Groups: s.Groups}) {
 				scope = "all"
 			}
 		}
 		resp["auditScope"] = scope
+		// mode + tier let the SPA render mode-aware tooltips on
+		// disabled actions ("your tier (triage) cannot delete pods")
+		// without an extra round-trip. tier is empty outside tier mode.
+		if resolver != nil {
+			resp["mode"] = string(resolver.Mode())
+			resp["tier"] = resolver.ResolvedTier(authz.Identity{Subject: s.Subject, Groups: s.Groups})
+		}
 		writeJSON(w, http.StatusOK, resp)
 	}
 }

@@ -196,6 +196,36 @@ export interface Features {
   watchStreams: WatchStreamKind[];
 }
 
+/**
+ * CanICheck mirrors the backend's authv1.ResourceAttributes shape.
+ * Field names match the K8s authorization API so call sites can read
+ * idiomatically (verb/resource/namespace), and the backend can pass
+ * them through unchanged.
+ */
+export interface CanICheck {
+  verb: "get" | "list" | "watch" | "create" | "update" | "patch" | "delete";
+  /** "" for the core API group ("pods", "services", ...). */
+  group?: string;
+  /** Plural URL segment, e.g. "pods", "deployments". */
+  resource: string;
+  /** "exec" / "log" / etc. Empty for the parent resource itself. */
+  subresource?: string;
+  /** Empty for cluster-scoped resources. */
+  namespace?: string;
+  /** Optional resource name for RBAC ResourceNames-scoped rules. */
+  name?: string;
+}
+
+export interface CanIResult {
+  allowed: boolean;
+  /** Apiserver-supplied explanation when populated; empty otherwise. */
+  reason: string;
+}
+
+export interface CanIResponse {
+  results: CanIResult[];
+}
+
 export const api = {
   whoami: (signal?: AbortSignal) => getJSON<Whoami>("/api/whoami", signal),
 
@@ -232,6 +262,19 @@ export const api = {
   fleet: (signal?: AbortSignal) =>
     getJSON<FleetResponse>("/api/fleet", signal),
 
+  /**
+   * Pre-flight RBAC check (SAR/SSRR-driven). Used by useCanI to grey
+   * out action buttons the user cannot perform. The backend caches
+   * results per (actor, cluster, namespace, impersonation) so polling
+   * this from the SPA is cheap.
+   */
+  canI: (cluster: string, checks: CanICheck[], signal?: AbortSignal) =>
+    postJSON<CanIResponse>(
+      `/api/clusters/${enc(cluster)}/can-i`,
+      { checks },
+      signal,
+    ),
+    
   /**
    * Audit log query. Filters serialize to URL query params; the backend
    * applies them server-side and clamps limit at 500.

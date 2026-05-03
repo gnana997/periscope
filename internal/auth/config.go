@@ -94,6 +94,14 @@ type AuthorizationConfig struct {
 	// GroupPrefix is prepended to each of the user's IdP groups
 	// when impersonating. Default "periscope:".
 	GroupPrefix string `yaml:"groupPrefix"`
+
+	// CanICacheTTL bounds how long a SelfSubjectAccessReview /
+	// SelfSubjectRulesReview result is reused for a given
+	// (actor, cluster, namespace, impersonation) tuple. Zero means
+	// "use the built-in default" (30s) — long enough to span a page's
+	// worth of button-render queries, short enough that revoking a
+	// binding takes effect within a minute.
+	CanICacheTTL time.Duration `yaml:"canICacheTTL"`
 }
 
 // DevConfig only applies to ModeDev. The fields show up in the SPA so

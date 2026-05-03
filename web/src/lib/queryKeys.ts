@@ -47,6 +47,13 @@ export const queryKeys = {
       ["cluster", c, "openapi", group, version] as const,
     search: (q: string) => ["cluster", c, "search", q] as const,
 
+    // Pre-flight RBAC check used by useCanI. Keyed on the sorted check
+    // tuple so two components asking the same question share the cache
+    // entry (the action toolbar and a single button for the same
+    // verb/resource/ns will collapse).
+    canI: (checkKey: string) =>
+      ["cluster", c, "canI", checkKey] as const,
+
     // Per-kind cascade. The `kind` string is the YAML/URL plural
     // ("deployments", "ingresses", …) — the same token the rest of
     // the app uses to address the resource type.
