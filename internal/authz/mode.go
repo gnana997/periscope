@@ -60,6 +60,11 @@ type Config struct {
 	GroupPrefix   string            `yaml:"groupPrefix"`
 	GroupsClaim   string            `yaml:"groupsClaim"`
 	AllowedGroups []string          `yaml:"allowedGroups"`
+	// AuditAdminGroups grants full /api/audit visibility to users in any
+	// of the listed IdP groups. Independent of authz mode — works in
+	// shared, tier, and raw. When empty, audit-admin falls back to
+	// mode-specific defaults (see Resolver.IsAuditAdmin).
+	AuditAdminGroups []string       `yaml:"auditAdminGroups"`
 }
 
 // Identity is the slice of session state authz needs. Avoids importing
@@ -206,4 +211,71 @@ func prefixAll(prefix string, in []string) []string {
 		out = append(out, prefix+s)
 	}
 	return out
+}
+
+// IsAuditAdmin reports whether the user can read every actor's rows
+// from /api/audit. Resolution order (audit-admin is intentionally
+// decoupled from K8s admin so security teams can read history without
+// holding cluster-mutating tiers):
+//
+//  1. AuditAdminGroups non-empty → true iff any of id.Groups is listed.
+//     This is the explicit operator switch and wins regardless of mode.
+//
+//  2. Otherwise, mode-specific fallback:
+//     - tier  → true iff resolved tier == "admin".
+//     - shared → true iff AllowedGroups is non-empty AND id is in it
+//                (the dashboard's existing allowlist gate also gates
+//                 audit-admin in shared mode).
+//     - raw   → false. Raw mode pushes RBAC to K8s; the dashboard has
+//                 no notion of "admin" to consult, so audit-admin must
+//                 be granted explicitly via AuditAdminGroups.
+//
+//  3. Otherwise → false (self-only audit access).
+//
+// "Self-only" here means the audit_handler hard-overrides the actor
+// filter to id.Subject; the user can self-audit but never see what
+// colleagues did.
+func (r *Resolver) IsAuditAdmin(id Identity) bool {
+	// 1. Explicit override wins regardless of mode.
+	if len(r.cfg.AuditAdminGroups) > 0 {
+		return anyGroupIn(id.Groups, r.cfg.AuditAdminGroups)
+	}
+
+	// 2. Mode-specific fallback.
+	switch r.cfg.Mode {
+	case ModeTier:
+		return r.tierForGroups(id.Groups) == TierAdmin
+	case ModeShared:
+		// Default empty AllowedGroups means "any authenticated user can
+		// use the dashboard" — too broad to silently grant audit-admin.
+		// Operators who want shared-mode admin access must either
+		// populate AllowedGroups (treating it as the admin set) or set
+		// AuditAdminGroups explicitly.
+		if len(r.cfg.AllowedGroups) == 0 {
+			return false
+		}
+		return anyGroupIn(id.Groups, r.cfg.AllowedGroups)
+	case ModeRaw:
+		// Raw mode delegates RBAC entirely to K8s; without an explicit
+		// AuditAdminGroups list the dashboard has no opinion on who is
+		// an audit-admin.
+		return false
+	}
+	return false
+}
+
+func anyGroupIn(have, allowed []string) bool {
+	if len(have) == 0 || len(allowed) == 0 {
+		return false
+	}
+	allowSet := make(map[string]struct{}, len(allowed))
+	for _, g := range allowed {
+		allowSet[g] = struct{}{}
+	}
+	for _, g := range have {
+		if _, ok := allowSet[g]; ok {
+			return true
+		}
+	}
+	return false
 }

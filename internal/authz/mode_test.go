@@ -164,3 +164,111 @@ func TestResolvedTierAndAllowedTier(t *testing.T) {
 		t.Errorf("AllowedTier stranger with empty defaultTier should be false")
 	}
 }
+
+func TestResolver_IsAuditAdmin(t *testing.T) {
+	tests := []struct {
+		name string
+		cfg  Config
+		id   Identity
+		want bool
+	}{
+		// --- explicit AuditAdminGroups always wins ---
+		{
+			name: "explicit override matches",
+			cfg:  Config{Mode: ModeShared, AuditAdminGroups: []string{"sec-team"}},
+			id:   Identity{Subject: "alice", Groups: []string{"sec-team", "engineers"}},
+			want: true,
+		},
+		{
+			name: "explicit override no match",
+			cfg:  Config{Mode: ModeShared, AuditAdminGroups: []string{"sec-team"}},
+			id:   Identity{Subject: "bob", Groups: []string{"engineers"}},
+			want: false,
+		},
+		{
+			name: "explicit override beats tier=admin denial",
+			// User has admin tier but is NOT in AuditAdminGroups → denied.
+			// Explicit override means tier admin is NOT auto-granted.
+			cfg: Config{
+				Mode:             ModeTier,
+				GroupTiers:       map[string]string{"admins": "admin"},
+				AuditAdminGroups: []string{"sec-team"},
+			},
+			id:   Identity{Subject: "carol", Groups: []string{"admins"}},
+			want: false,
+		},
+
+		// --- tier mode fallback ---
+		{
+			name: "tier mode + tier=admin",
+			cfg:  Config{Mode: ModeTier, GroupTiers: map[string]string{"admins": "admin"}},
+			id:   Identity{Subject: "dave", Groups: []string{"admins"}},
+			want: true,
+		},
+		{
+			name: "tier mode + tier=triage",
+			cfg:  Config{Mode: ModeTier, GroupTiers: map[string]string{"oncall": "triage"}},
+			id:   Identity{Subject: "eve", Groups: []string{"oncall"}},
+			want: false,
+		},
+		{
+			name: "tier mode + no tier match",
+			cfg:  Config{Mode: ModeTier, GroupTiers: map[string]string{"admins": "admin"}},
+			id:   Identity{Subject: "frank", Groups: []string{"contractors"}},
+			want: false,
+		},
+
+		// --- shared mode fallback ---
+		{
+			name: "shared mode + non-empty AllowedGroups + match",
+			cfg:  Config{Mode: ModeShared, AllowedGroups: []string{"engineers"}},
+			id:   Identity{Subject: "grace", Groups: []string{"engineers"}},
+			want: true,
+		},
+		{
+			name: "shared mode + non-empty AllowedGroups + no match",
+			cfg:  Config{Mode: ModeShared, AllowedGroups: []string{"engineers"}},
+			id:   Identity{Subject: "henry", Groups: []string{"contractors"}},
+			want: false,
+		},
+		{
+			name: "shared mode + empty AllowedGroups → false (safety default)",
+			cfg:  Config{Mode: ModeShared},
+			id:   Identity{Subject: "ivy", Groups: []string{"anyone"}},
+			want: false,
+		},
+
+		// --- raw mode always false without explicit override ---
+		{
+			name: "raw mode + no override → always false",
+			cfg:  Config{Mode: ModeRaw},
+			id:   Identity{Subject: "jack", Groups: []string{"sres", "admins"}},
+			want: false,
+		},
+		{
+			name: "raw mode + AuditAdminGroups override grants",
+			cfg:  Config{Mode: ModeRaw, AuditAdminGroups: []string{"sres"}},
+			id:   Identity{Subject: "kate", Groups: []string{"sres"}},
+			want: true,
+		},
+
+		// --- edge cases ---
+		{
+			name: "empty groups → never admin",
+			cfg:  Config{Mode: ModeShared, AllowedGroups: []string{"engineers"}},
+			id:   Identity{Subject: "leo", Groups: nil},
+			want: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r, err := NewResolver(tt.cfg)
+			if err != nil {
+				t.Fatalf("NewResolver: %v", err)
+			}
+			if got := r.IsAuditAdmin(tt.id); got != tt.want {
+				t.Errorf("IsAuditAdmin(%+v) = %v, want %v", tt.id, got, tt.want)
+			}
+		})
+	}
+}
