@@ -138,8 +138,8 @@
       "properties": {
         "kinds": {
           "type": "string",
-          "description": "Empty/unset or 'all' = all on (server default). 'off'/'none' = disable. Comma-separated mix of per-kind tokens (pods, events, deployments, statefulsets, daemonsets, replicasets, jobs, cronjobs, horizontalpodautoscalers, poddisruptionbudgets, services, ingresses, networkpolicies, endpointslices, ingressclasses, pvs, pvcs, storageclasses, nodes, namespaces, priorityclasses, runtimeclasses) and group aliases (core, workloads, networking, storage, cluster) is also accepted; unknown tokens are silently dropped server-side.",
-          "pattern": "^\\s*$|^\\s*(all|off|none)\\s*$|^\\s*(pods|events|deployments|statefulsets|daemonsets|replicasets|jobs|cronjobs|horizontalpodautoscalers|poddisruptionbudgets|services|ingresses|networkpolicies|endpointslices|ingressclasses|pvs|pvcs|storageclasses|nodes|namespaces|priorityclasses|runtimeclasses|core|workloads|networking|storage|cluster)(\\s*,\\s*(pods|events|deployments|statefulsets|daemonsets|replicasets|jobs|cronjobs|horizontalpodautoscalers|poddisruptionbudgets|services|ingresses|networkpolicies|endpointslices|ingressclasses|pvs|pvcs|storageclasses|nodes|namespaces|priorityclasses|runtimeclasses|core|workloads|networking|storage|cluster))*\\s*$"
+          "description": "Empty/unset or 'all' = all on (server default). 'off'/'none' = disable. Otherwise a comma-separated mix of per-kind tokens (pods, events, deployments, services, …) and group aliases (core, workloads, networking, storage, cluster). The server is the source of truth for the registry — see cmd/periscope/main.go::watchKinds; this schema only enforces the surface character set so unknown tokens reach the server's silent-drop validator.",
+          "pattern": "^\\s*$|^\\s*[a-z][a-z0-9_,\\s-]*$"
         },
         "perUserLimit": {
           "type": "integer",
