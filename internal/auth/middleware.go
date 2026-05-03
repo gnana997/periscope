@@ -162,12 +162,12 @@ func AcceptHTML(r *http.Request) bool {
 // In dev mode, the okta-only routes (login, callback, logout/everywhere)
 // short-circuit with a 200 / redirect so the SPA can call them
 // uniformly without checking mode.
-func RegisterRoutes(r chi.Router, client *OIDCClient, store SessionStore, cfg Config, resolver *authz.Resolver) {
+func RegisterRoutes(r chi.Router, client *OIDCClient, store SessionStore, cfg Config, resolver *authz.Resolver, auditEnabled bool) {
 	r.Get("/api/auth/config", ConfigHandler(cfg))
 	r.Get("/api/auth/login", LoginHandler(client, cfg))
 	r.Get("/api/auth/callback", CallbackHandler(client, store, cfg))
 	r.Get("/api/auth/loggedout", LoggedOutHandler())
 	r.Get("/api/auth/logout", LogoutHandler(store, cfg))
 	r.Get("/api/auth/logout/everywhere", LogoutEverywhereHandler(client, store, cfg))
-	r.Get("/api/auth/whoami", WhoamiHandler(store, cfg, resolver))
+	r.Get("/api/auth/whoami", WhoamiHandler(store, cfg, resolver, auditEnabled))
 }

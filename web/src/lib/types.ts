@@ -25,6 +25,10 @@ export interface ClustersResponse {
 }
 
 export interface Whoami {
+  /** Audit pipeline persistence is enabled. Hide audit nav when false. */
+  auditEnabled?: boolean;
+  /** "self" — user sees only own actions; "all" — user is audit-admin. */
+  auditScope?: "self" | "all";
   actor: string;
 }
 
@@ -1226,4 +1230,69 @@ export interface FleetRollup {
 export interface FleetResponse {
   rollup: FleetRollup;
   clusters: FleetClusterEntry[];
+}
+
+// =====================================================================
+// Audit log — /api/audit
+// =====================================================================
+
+export type AuditOutcome = "success" | "failure" | "denied";
+
+export type AuditVerb =
+  | "apply"
+  | "delete"
+  | "trigger"
+  | "exec_open"
+  | "exec_close"
+  | "secret_reveal"
+  | "log_open";
+
+export interface AuditActor {
+  sub: string;
+  email?: string;
+  groups?: string[];
+}
+
+export interface AuditResourceRef {
+  group?: string;
+  version?: string;
+  resource?: string;
+  namespace?: string;
+  name?: string;
+}
+
+export interface AuditRow {
+  id: number;
+  timestamp: string;          // RFC3339Nano
+  requestId?: string;
+  route?: string;
+  actor: AuditActor;
+  verb: string;               // string not AuditVerb to survive future verbs gracefully
+  outcome: AuditOutcome;
+  cluster?: string;
+  resource: AuditResourceRef;
+  reason?: string;
+  extra?: Record<string, unknown>;
+}
+
+export interface AuditQueryResult {
+  items: AuditRow[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+/** All optional. Frontend always sends at least `cluster` from /clusters/:cluster/audit. */
+export interface AuditQueryParams {
+  cluster?: string;
+  from?: string;              // RFC3339Nano
+  to?: string;                // RFC3339Nano
+  actor?: string;
+  verb?: string;
+  outcome?: AuditOutcome;
+  namespace?: string;
+  name?: string;
+  requestId?: string;
+  limit?: number;
+  offset?: number;
 }

@@ -24,6 +24,8 @@ import { AppShell, WithCluster } from "./routeShells";
 import { FleetPage } from "./pages/FleetPage";
 
 import { OverviewPage } from "./pages/OverviewPage";
+import { AuditPage } from "./pages/AuditPage";
+import { AuditEventDetailPage } from "./pages/AuditEventDetailPage";
 import { ConfigMapsPage } from "./pages/ConfigMapsPage";
 import { CronJobsPage } from "./pages/CronJobsPage";
 import { EventsPage } from "./pages/EventsPage";
@@ -70,6 +72,8 @@ export const router = createBrowserRouter(
       <Route path="/clusters/:cluster" element={<AppShell />}>
         <Route index element={<Navigate to="overview" replace />} />
         <Route path="overview" element={<WithCluster Page={OverviewPage} />} />
+        <Route path="audit" element={<AuditPage />} />
+        <Route path="audit/:eventId" element={<AuditEventDetailPage />} />
         <Route path="pods" element={<WithCluster Page={PodsPage} />} />
         <Route path="deployments" element={<WithCluster Page={DeploymentsPage} />} />
         <Route path="statefulsets" element={<WithCluster Page={StatefulSetsPage} />} />

@@ -4,6 +4,7 @@ import { cn } from "../../lib/cn";
 import { RESOURCE_GROUPS, resourcesByGroup } from "../../lib/resources";
 import type { ResourceGroup } from "../../lib/resources";
 import { CRDSubTree } from "./CRDSubTree";
+import { useAuth } from "../../auth/useAuth";
 
 const STORAGE_KEY = "periscope.sidebar.openGroups";
 const DEFAULT_OPEN: ResourceGroup[] = ["Cluster"];
@@ -40,6 +41,9 @@ export function ResourceNav() {
 
   const [openGroups, setOpenGroups] = useState<Set<ResourceGroup>>(readOpenGroups);
 
+  const { user } = useAuth();
+  const auditEnabled = user?.auditEnabled === true;
+
   // Auto-expand the group of the active route when navigating. Same
   // rationale as CRDSubTree: deriving from the URL each render would
   // make user-toggled-close stick only until the next render. The
@@ -71,6 +75,34 @@ export function ResourceNav() {
 
   return (
     <nav className="flex-1 overflow-y-auto px-2 py-2">
+      {/* History section — global feature views (audit, future events feed).
+          Sits above the per-resource groups because it is meta to them. */}
+      {auditEnabled && cluster && (
+        <div className="mb-2">
+          <div className="px-3 py-1.5">
+            <span className="text-[10px] font-medium uppercase tracking-[0.08em] text-ink-faint">
+              History
+            </span>
+          </div>
+          <ul className="flex flex-col gap-px">
+            <li>
+              <NavLink
+                to={`/clusters/${encodeURIComponent(cluster)}/audit${linkSearch}`}
+                className={({ isActive }) =>
+                  cn(
+                    "flex items-center gap-2 rounded-sm px-3 py-1.5 text-[12px] transition-colors",
+                    isActive
+                      ? "bg-accent-soft text-accent"
+                      : "text-ink-muted hover:bg-surface-2/50 hover:text-ink",
+                  )
+                }
+              >
+                Audit
+              </NavLink>
+            </li>
+          </ul>
+        </div>
+      )}
       {RESOURCE_GROUPS.map((group) => {
         const isOpen = openGroups.has(group);
         const items = resourcesByGroup(group);
