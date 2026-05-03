@@ -135,6 +135,7 @@ func main() {
 	})
 	router.Get("/api/whoami", credentials.Wrap(factory, whoami))
 	router.Get("/api/clusters", listClustersHandler(registry))
+	router.Get("/api/features", featuresHandler(watchCfg))
 
 	// --- Overview / dashboard ---
 
@@ -1828,6 +1829,31 @@ func customResourceEventsHandler(reg *clusters.Registry) credentials.Handler {
 			return
 		}
 		writeJSON(w, http.StatusOK, events)
+	}
+}
+
+// featuresHandler returns the server's feature flags so the frontend
+// can branch on them at boot. Currently surfaces which kinds have
+// the watch SSE route registered, used by useResource to dispatch
+// between polling and streaming. Public (auth middleware applies),
+// no per-cluster scoping — features are server-wide.
+func featuresHandler(cfg watchStreamsConfig) http.HandlerFunc {
+	kinds := make([]string, 0, 4)
+	if cfg.pods {
+		kinds = append(kinds, "pods")
+	}
+	if cfg.events {
+		kinds = append(kinds, "events")
+	}
+	if cfg.replicasets {
+		kinds = append(kinds, "replicasets")
+	}
+	if cfg.jobs {
+		kinds = append(kinds, "jobs")
+	}
+	body := map[string]any{"watchStreams": kinds}
+	return func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(w, http.StatusOK, body)
 	}
 }
 
