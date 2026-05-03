@@ -33,12 +33,28 @@ func main() {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	slog.SetDefault(logger)
 
-	// Audit pipeline: stdout sink today, additional sinks (SQLite,
-	// SIEM shipper) appended in follow-up PRs without touching
-	// emission sites.
-	auditEmitter := audit.New(&audit.StdoutSink{Logger: logger})
-
+	// Audit pipeline: stdout always on; SQLite attached when
+	// PERISCOPE_AUDIT_ENABLED=true. Fail-open per design — if the
+	// SQLite sink can't open (PVC not mounted, disk full, schema
+	// migration error), we log a warning and continue with
+	// stdout-only audit rather than block the pod from booting.
 	ctx := context.Background()
+	auditSinks := []audit.Sink{&audit.StdoutSink{Logger: logger}}
+	auditCfg := audit.LoadSQLiteConfigFromEnv()
+	if auditCfg.Enabled {
+		sqliteSink, err := audit.OpenSQLiteSink(ctx, auditCfg)
+		if err != nil {
+			slog.Warn("audit: sqlite disabled (open failed)",
+				"err", err, "path", auditCfg.Path)
+		} else {
+			auditSinks = append(auditSinks, sqliteSink)
+			slog.Info("audit: sqlite enabled",
+				"path", auditCfg.Path,
+				"retention_days", auditCfg.RetentionDays,
+				"max_size_mb", auditCfg.MaxSizeMB)
+		}
+	}
+	auditEmitter := audit.New(auditSinks...)
 
 	factory, err := credentials.NewSharedIrsaFactory(ctx, nil)
 	if err != nil {

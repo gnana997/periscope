@@ -60,6 +60,18 @@ spec:
                   name: {{ include "periscope.secretName" . }}
                   key: {{ include "periscope.secretKey" . }}
             {{- end }}
+            {{- if .Values.audit.enabled }}
+            - name: PERISCOPE_AUDIT_ENABLED
+              value: "true"
+            - name: PERISCOPE_AUDIT_DB_PATH
+              value: /var/lib/periscope/audit/audit.db
+            - name: PERISCOPE_AUDIT_RETENTION_DAYS
+              value: {{ .Values.audit.retentionDays | quote }}
+            - name: PERISCOPE_AUDIT_MAX_SIZE_MB
+              value: {{ .Values.audit.maxSizeMB | quote }}
+            - name: PERISCOPE_AUDIT_VACUUM_INTERVAL
+              value: {{ .Values.audit.vacuumInterval | quote }}
+            {{- end }}
             {{- with .Values.env }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
@@ -69,6 +81,10 @@ spec:
               readOnly: true
             - name: tmp
               mountPath: /tmp
+            {{- if .Values.audit.enabled }}
+            - name: audit-data
+              mountPath: /var/lib/periscope/audit
+            {{- end }}
           livenessProbe:
             httpGet:
               path: /healthz
@@ -93,6 +109,16 @@ spec:
                   name: {{ include "periscope.fullname" . }}-clusters
         - name: tmp
           emptyDir: {}
+        {{- if .Values.audit.enabled }}
+        - name: audit-data
+          {{- if eq .Values.audit.storage.type "pvc" }}
+          persistentVolumeClaim:
+            claimName: {{ include "periscope.fullname" . }}-audit
+          {{- else }}
+          emptyDir:
+            sizeLimit: {{ .Values.audit.storage.size | default "5Gi" }}
+          {{- end }}
+        {{- end }}
       {{- with .Values.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}

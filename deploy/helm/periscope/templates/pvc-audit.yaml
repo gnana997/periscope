@@ -1,0 +1,17 @@
+{{- if and .Values.audit.enabled (eq .Values.audit.storage.type "pvc") }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "periscope.fullname" . }}-audit
+  labels:
+    {{- include "periscope.labels" . | nindent 4 }}
+spec:
+  accessModes:
+    - {{ .Values.audit.storage.accessMode | default "ReadWriteOnce" }}
+  resources:
+    requests:
+      storage: {{ .Values.audit.storage.size | default "5Gi" }}
+  {{- with .Values.audit.storage.storageClass }}
+  storageClassName: {{ . | quote }}
+  {{- end }}
+{{- end }}
