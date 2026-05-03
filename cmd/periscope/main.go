@@ -1434,11 +1434,6 @@ func workloadLogsHandler(reg *clusters.Registry, kind string, stream workloadStr
 			http.Error(w, "cluster not found", http.StatusNotFound)
 			return
 		}
-		flusher, ok := w.(http.Flusher)
-		if !ok {
-			http.Error(w, "streaming unsupported", http.StatusInternalServerError)
-			return
-		}
 
 		q := r.URL.Query()
 		args := k8s.WorkloadLogsArgs{
@@ -1461,12 +1456,12 @@ func workloadLogsHandler(reg *clusters.Registry, kind string, stream workloadStr
 			}
 		}
 
-		w.Header().Set("Content-Type", "text/event-stream")
-		w.Header().Set("Cache-Control", "no-cache, no-transform")
-		w.Header().Set("Connection", "keep-alive")
-		w.Header().Set("X-Accel-Buffering", "no")
-		w.WriteHeader(http.StatusOK)
-		flusher.Flush()
+		sw, err := sse.Open(w)
+		if err != nil {
+			http.Error(w, "streaming unsupported", http.StatusInternalServerError)
+			return
+		}
+		defer sw.Close()
 
 		eventCh := make(chan deploymentEvent, 4096)
 		sink := &channelSink{ch: eventCh, ctx: r.Context()}
@@ -1478,9 +1473,6 @@ func workloadLogsHandler(reg *clusters.Registry, kind string, stream workloadStr
 			defer close(eventCh)
 			streamErr = stream(r.Context(), p, args, sink)
 		}()
-
-		heartbeat := time.NewTicker(15 * time.Second)
-		defer heartbeat.Stop()
 
 		type linePayload struct {
 			T string `json:"t,omitempty"`
@@ -1496,9 +1488,8 @@ func workloadLogsHandler(reg *clusters.Registry, kind string, stream workloadStr
 			case <-r.Context().Done():
 				<-streamDone
 				return
-			case <-heartbeat.C:
-				_, _ = fmt.Fprint(w, ": ping\n\n")
-				flusher.Flush()
+			case <-sw.HeartbeatC():
+				_ = sw.Ping()
 			case ev, ok := <-eventCh:
 				if !ok {
 					<-streamDone
@@ -1507,24 +1498,19 @@ func workloadLogsHandler(reg *clusters.Registry, kind string, stream workloadStr
 							"kind", kind, "err", streamErr,
 							"cluster", c.Name, "ns", args.Namespace,
 							"name", args.Name, "actor", p.Actor())
-						payload, _ := json.Marshal(map[string]string{"message": streamErr.Error()})
-						_, _ = fmt.Fprintf(w, "event: error\ndata: %s\n\n", payload)
+						_ = sw.Event("error", "", map[string]string{"message": streamErr.Error()})
 					} else {
-						_, _ = fmt.Fprint(w, "event: done\ndata: {}\n\n")
+						_ = sw.Event("done", "", struct{}{})
 					}
-					flusher.Flush()
 					return
 				}
 				switch ev.kind {
 				case "line":
 					ts, msg := k8s.SplitLogTimestamp(ev.line)
-					payload, _ := json.Marshal(linePayload{T: ts, P: ev.pod, L: msg})
-					_, _ = fmt.Fprintf(w, "data: %s\n\n", payload)
+					_ = sw.Event("", "", linePayload{T: ts, P: ev.pod, L: msg})
 				case "podSet":
-					payload, _ := json.Marshal(metaPayload{Pods: ev.pods})
-					_, _ = fmt.Fprintf(w, "event: meta\ndata: %s\n\n", payload)
+					_ = sw.Event("meta", "", metaPayload{Pods: ev.pods})
 				}
-				flusher.Flush()
 			}
 		}
 	}
