@@ -18,6 +18,7 @@ import { DetailPane } from "../components/detail/DetailPane";
 import { ServiceDescribe } from "../components/detail/describe/ServiceDescribe";
 import { YamlView } from "../components/detail/YamlView";
 import { useEditorDirty } from "../hooks/useEditorDirty";
+import { useConfirmDiscard } from "../hooks/useConfirmDiscard";
 import { ResourceActions } from "../components/edit/ResourceActions";
 import { EventsView } from "../components/detail/EventsView";
 import { NamespacePicker } from "../components/shell/NamespacePicker";
@@ -71,6 +72,7 @@ export function ServicesPage({ cluster }: { cluster: string }) {
   ];
 
   const editFlag = useEditorDirty(cluster, "services", selectedNs ?? undefined, selectedName);
+  const confirmDiscard = useConfirmDiscard(editFlag.dirty);
 
   const detail =
     selectedNs && selectedName ? (
@@ -78,17 +80,17 @@ export function ServicesPage({ cluster }: { cluster: string }) {
         title={selectedName}
         subtitle={selectedNs}
         activeTab={activeTab}
-        onTabChange={(id) => setParam("tab", id)}
-        onClose={() => setMany({ sel: null, selNs: null, tab: null })}
+        onTabChange={(id) => confirmDiscard(() => setParam("tab", id))}
+        onClose={() => confirmDiscard(() => setMany({ sel: null, selNs: null, tab: null }))}
         tabs={[
           { id: "describe", label: "describe", ready: true, content: <ServiceDescribe cluster={cluster} ns={selectedNs} name={selectedName} /> },
-          { id: "yaml", label: "yaml", ready: true, content: <YamlView cluster={cluster} kind="services" ns={selectedNs} name={selectedName} />, dirty: editFlag.dirty },
+          { id: "yaml", label: "yaml", ready: true, content: <YamlView cluster={cluster} source={{ kind: "builtin", yamlKind: "services" }} ns={selectedNs} name={selectedName} />, dirty: editFlag.dirty },
           { id: "events", label: "events", ready: true, content: <EventsView cluster={cluster} kind="services" ns={selectedNs} name={selectedName} /> },
         ]}
         actions={
           <ResourceActions
             cluster={cluster}
-            yamlKind="services"
+            source={{ kind: "builtin", yamlKind: "services" }}
             namespace={selectedNs}
             name={selectedName}
             onDeleted={() => setParam("sel", null)}
@@ -130,7 +132,7 @@ export function ServicesPage({ cluster }: { cluster: string }) {
               columns={columns}
               rows={filtered}
               rowKey={(s) => `${s.namespace}/${s.name}`}
-              onRowClick={(s) => setMany({ sel: s.name, selNs: s.namespace, tab: "describe" })}
+              onRowClick={(s) => confirmDiscard(() => setMany({ sel: s.name, selNs: s.namespace, tab: "describe" }))}
               selectedKey={selectedKey}
             />
           )

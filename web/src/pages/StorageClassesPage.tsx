@@ -10,6 +10,7 @@ import { DataTable, type Column } from "../components/table/DataTable";
 import { DetailPane } from "../components/detail/DetailPane";
 import { YamlView } from "../components/detail/YamlView";
 import { useEditorDirty } from "../hooks/useEditorDirty";
+import { useConfirmDiscard } from "../hooks/useConfirmDiscard";
 import { ResourceActions } from "../components/edit/ResourceActions";
 import { EventsView } from "../components/detail/EventsView";
 import { StorageClassDescribe } from "../components/detail/describe/StorageClassDescribe";
@@ -56,23 +57,24 @@ export function StorageClassesPage({ cluster }: { cluster: string }) {
   ];
 
   const editFlag = useEditorDirty(cluster, "storageclasses", undefined, selectedName);
+  const confirmDiscard = useConfirmDiscard(editFlag.dirty);
 
   const detail = selectedName ? (
     <DetailPane
       title={selectedName}
       subtitle="cluster-scoped"
       activeTab={activeTab}
-      onTabChange={(id) => setParam("tab", id)}
-      onClose={() => setMany({ sel: null, tab: null })}
+      onTabChange={(id) => confirmDiscard(() => setParam("tab", id))}
+      onClose={() => confirmDiscard(() => setMany({ sel: null, tab: null }))}
       tabs={[
         { id: "describe", label: "describe", ready: true, content: <StorageClassDescribe cluster={cluster} name={selectedName} /> },
-        { id: "yaml", label: "yaml", ready: true, content: <YamlView cluster={cluster} kind="storageclasses" ns="" name={selectedName} />, dirty: editFlag.dirty },
+        { id: "yaml", label: "yaml", ready: true, content: <YamlView cluster={cluster} source={{ kind: "builtin", yamlKind: "storageclasses" }} ns="" name={selectedName} />, dirty: editFlag.dirty },
         { id: "events", label: "events", ready: true, content: <EventsView cluster={cluster} kind="storageclasses" ns="" name={selectedName} /> },
       ]}
       actions={
         <ResourceActions
           cluster={cluster}
-          yamlKind="storageclasses"
+          source={{ kind: "builtin", yamlKind: "storageclasses" }}
           namespace={null}
           name={selectedName}
           onDeleted={() => setParam("sel", null)}
@@ -111,7 +113,7 @@ export function StorageClassesPage({ cluster }: { cluster: string }) {
               columns={columns}
               rows={filtered}
               rowKey={(s) => s.name}
-              onRowClick={(s) => setMany({ sel: s.name, tab: "describe" })}
+              onRowClick={(s) => confirmDiscard(() => setMany({ sel: s.name, tab: "describe" }))}
               selectedKey={selectedName}
             />
           )

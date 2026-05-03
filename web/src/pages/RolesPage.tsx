@@ -13,6 +13,7 @@ import { DetailPane } from "../components/detail/DetailPane";
 import { RoleDescribe } from "../components/detail/describe/RoleDescribe";
 import { YamlView } from "../components/detail/YamlView";
 import { useEditorDirty } from "../hooks/useEditorDirty";
+import { useConfirmDiscard } from "../hooks/useConfirmDiscard";
 import { ResourceActions } from "../components/edit/ResourceActions";
 import { NamespacePicker } from "../components/shell/NamespacePicker";
 
@@ -57,6 +58,7 @@ export function RolesPage({ cluster }: { cluster: string }) {
   const selectedKey = selectedNs && selectedName ? `${selectedNs}/${selectedName}` : null;
 
   const editFlag = useEditorDirty(cluster, "roles", selectedNs ?? undefined, selectedName);
+  const confirmDiscard = useConfirmDiscard(editFlag.dirty);
 
   const detail =
     selectedNs && selectedName ? (
@@ -64,16 +66,16 @@ export function RolesPage({ cluster }: { cluster: string }) {
         title={selectedName}
         subtitle={selectedNs}
         activeTab={activeTab}
-        onTabChange={(id) => setParam("tab", id)}
-        onClose={() => setMany({ sel: null, selNs: null, tab: null })}
+        onTabChange={(id) => confirmDiscard(() => setParam("tab", id))}
+        onClose={() => confirmDiscard(() => setMany({ sel: null, selNs: null, tab: null }))}
         tabs={[
           { id: "describe", label: "describe", ready: true, content: <RoleDescribe cluster={cluster} ns={selectedNs} name={selectedName} /> },
-          { id: "yaml", label: "yaml", ready: true, content: <YamlView cluster={cluster} kind="roles" ns={selectedNs} name={selectedName} />, dirty: editFlag.dirty },
+          { id: "yaml", label: "yaml", ready: true, content: <YamlView cluster={cluster} source={{ kind: "builtin", yamlKind: "roles" }} ns={selectedNs} name={selectedName} />, dirty: editFlag.dirty },
         ]}
         actions={
           <ResourceActions
             cluster={cluster}
-            yamlKind="roles"
+            source={{ kind: "builtin", yamlKind: "roles" }}
             namespace={selectedNs}
             name={selectedName}
             onDeleted={() => setParam("sel", null)}
@@ -100,7 +102,7 @@ export function RolesPage({ cluster }: { cluster: string }) {
             columns={columns}
             rows={filtered}
             rowKey={(r) => `${r.namespace}/${r.name}`}
-            onRowClick={(r) => setMany({ sel: r.name, selNs: r.namespace, tab: "describe" })}
+            onRowClick={(r) => confirmDiscard(() => setMany({ sel: r.name, selNs: r.namespace, tab: "describe" }))}
             selectedKey={selectedKey}
           />
         }

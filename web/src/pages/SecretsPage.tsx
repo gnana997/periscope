@@ -18,6 +18,7 @@ import { DetailPane } from "../components/detail/DetailPane";
 import { SecretDescribe } from "../components/detail/describe/SecretDescribe";
 import { YamlView } from "../components/detail/YamlView";
 import { useEditorDirty } from "../hooks/useEditorDirty";
+import { useConfirmDiscard } from "../hooks/useConfirmDiscard";
 import { ResourceActions } from "../components/edit/ResourceActions";
 import { EventsView } from "../components/detail/EventsView";
 import { NamespacePicker } from "../components/shell/NamespacePicker";
@@ -80,6 +81,7 @@ export function SecretsPage({ cluster }: { cluster: string }) {
   ];
 
   const editFlag = useEditorDirty(cluster, "secrets", selectedNs ?? undefined, selectedName);
+  const confirmDiscard = useConfirmDiscard(editFlag.dirty);
 
   const detail =
     selectedNs && selectedName ? (
@@ -87,17 +89,17 @@ export function SecretsPage({ cluster }: { cluster: string }) {
         title={selectedName}
         subtitle={selectedNs}
         activeTab={activeTab}
-        onTabChange={(id) => setParam("tab", id)}
-        onClose={() => setMany({ sel: null, selNs: null, tab: null })}
+        onTabChange={(id) => confirmDiscard(() => setParam("tab", id))}
+        onClose={() => confirmDiscard(() => setMany({ sel: null, selNs: null, tab: null }))}
         tabs={[
           { id: "describe", label: "describe", ready: true, content: <SecretDescribe cluster={cluster} ns={selectedNs} name={selectedName} /> },
-          { id: "yaml", label: "yaml", ready: true, content: <YamlView cluster={cluster} kind="secrets" ns={selectedNs} name={selectedName} />, dirty: editFlag.dirty },
+          { id: "yaml", label: "yaml", ready: true, content: <YamlView cluster={cluster} source={{ kind: "builtin", yamlKind: "secrets" }} ns={selectedNs} name={selectedName} />, dirty: editFlag.dirty },
           { id: "events", label: "events", ready: true, content: <EventsView cluster={cluster} kind="secrets" ns={selectedNs} name={selectedName} /> },
         ]}
         actions={
           <ResourceActions
             cluster={cluster}
-            yamlKind="secrets"
+            source={{ kind: "builtin", yamlKind: "secrets" }}
             namespace={selectedNs}
             name={selectedName}
             onDeleted={() => setMany({ sel: null, selNs: null, tab: null })}
@@ -139,7 +141,7 @@ export function SecretsPage({ cluster }: { cluster: string }) {
               columns={columns}
               rows={filtered}
               rowKey={(s) => `${s.namespace}/${s.name}`}
-              onRowClick={(s) => setMany({ sel: s.name, selNs: s.namespace, tab: "describe" })}
+              onRowClick={(s) => confirmDiscard(() => setMany({ sel: s.name, selNs: s.namespace, tab: "describe" }))}
               selectedKey={selectedKey}
             />
           )

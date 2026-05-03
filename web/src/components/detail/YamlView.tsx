@@ -2,19 +2,23 @@
 //
 // Two rendering paths, derived from URL params + RBAC:
 //
-//   ?edit=1  + canEdit  + kind in registry → <YamlEditor>     (inline editor)
-//   default                                 → <YamlReadView>  (Monaco read)
+//   ?edit=1  + canEdit  + identifiable source → <YamlEditor>     (inline editor)
+//   default                                   → <YamlReadView>   (Monaco read)
 //
-// Both children consume the same useYaml cache key, so toggling
-// between modes never re-fetches. `resource` is derived from the
-// YamlKind registry — pages don't need to thread it. `canEdit` comes
-// from useCanI (impersonated SSAR).
+// Both children consume the same useEditorYaml cache key (segregated
+// per source — built-ins keep `["yaml", ...]`, CRs use `["yaml-cr",
+// ...]`), so toggling between modes never re-fetches. `resource` is
+// derived from `gvrkFromSource(source)`. `canEdit` comes from
+// useCanI (impersonated SSAR).
 
 import { lazy, Suspense } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useCanI } from "../../hooks/useCanI";
-import type { ResourceRef, YamlKind } from "../../lib/api";
-import { KIND_REGISTRY } from "../../lib/k8sKinds";
+import {
+  gvrkFromSource,
+  sourceToResourceRef,
+  type EditorSource,
+} from "../../lib/customResources";
 import { DetailLoading } from "./states";
 
 const YamlReadView = lazy(() =>
@@ -27,57 +31,38 @@ const YamlEditor = lazy(() =>
 
 interface YamlViewProps {
   cluster: string;
-  kind: YamlKind;
+  source: EditorSource;
   ns: string;
   name: string;
 }
 
-export function YamlView(props: YamlViewProps) {
+export function YamlView({ cluster, source, ns, name }: YamlViewProps) {
   const [params] = useSearchParams();
   const wantEdit = params.get("edit") === "1";
 
-  const meta = KIND_REGISTRY[props.kind];
-  const resource: ResourceRef | null = meta
-    ? {
-        cluster: props.cluster,
-        group: meta.group,
-        version: meta.version,
-        resource: meta.resource,
-        namespace: props.ns || undefined,
-        name: props.name,
-        kind: meta.kind,
-      }
-    : null;
+  const meta = gvrkFromSource(source);
+  const resource = sourceToResourceRef(source, cluster, ns || null, name);
 
   // SSAR via the existing hook — the same gate ResourceActions uses.
   // Always called for stable hook order; only the editor branch
   // reads it.
   const canEdit = useCanI({
     verb: "patch",
-    resource: meta?.resource ?? "",
-    namespace: props.ns || undefined,
+    resource: meta.resource,
+    namespace: ns || undefined,
   });
 
-  if (wantEdit && resource && canEdit) {
+  if (wantEdit && canEdit) {
     return (
       <Suspense fallback={<DetailLoading label="loading editor…" />}>
-        <YamlEditor
-          cluster={props.cluster}
-          yamlKind={props.kind}
-          resource={resource}
-        />
+        <YamlEditor cluster={cluster} source={source} resource={resource} />
       </Suspense>
     );
   }
 
   return (
     <Suspense fallback={<DetailLoading label="loading editor…" />}>
-      <YamlReadView
-        cluster={props.cluster}
-        kind={props.kind}
-        ns={props.ns}
-        name={props.name}
-      />
+      <YamlReadView cluster={cluster} source={source} ns={ns} name={name} />
     </Suspense>
   );
 }

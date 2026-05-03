@@ -12,6 +12,7 @@ import { PhaseTag } from "../components/table/StatusDot";
 import { DetailPane } from "../components/detail/DetailPane";
 import { YamlView } from "../components/detail/YamlView";
 import { useEditorDirty } from "../hooks/useEditorDirty";
+import { useConfirmDiscard } from "../hooks/useConfirmDiscard";
 import { ResourceActions } from "../components/edit/ResourceActions";
 import { EventsView } from "../components/detail/EventsView";
 import { PVCDescribe } from "../components/detail/describe/PVCDescribe";
@@ -74,6 +75,7 @@ export function PVCsPage({ cluster }: { cluster: string }) {
     p.status === "Lost" ? "red" : p.status === "Pending" ? "yellow" : null;
 
   const editFlag = useEditorDirty(cluster, "pvcs", selectedNs ?? undefined, selectedName);
+  const confirmDiscard = useConfirmDiscard(editFlag.dirty);
 
   const detail =
     selectedNs && selectedName ? (
@@ -81,17 +83,17 @@ export function PVCsPage({ cluster }: { cluster: string }) {
         title={selectedName}
         subtitle={selectedNs}
         activeTab={activeTab}
-        onTabChange={(id) => setParam("tab", id)}
-        onClose={() => setMany({ sel: null, selNs: null, tab: null })}
+        onTabChange={(id) => confirmDiscard(() => setParam("tab", id))}
+        onClose={() => confirmDiscard(() => setMany({ sel: null, selNs: null, tab: null }))}
         tabs={[
           { id: "describe", label: "describe", ready: true, content: <PVCDescribe cluster={cluster} ns={selectedNs} name={selectedName} /> },
-          { id: "yaml", label: "yaml", ready: true, content: <YamlView cluster={cluster} kind="pvcs" ns={selectedNs} name={selectedName} />, dirty: editFlag.dirty },
+          { id: "yaml", label: "yaml", ready: true, content: <YamlView cluster={cluster} source={{ kind: "builtin", yamlKind: "pvcs" }} ns={selectedNs} name={selectedName} />, dirty: editFlag.dirty },
           { id: "events", label: "events", ready: true, content: <EventsView cluster={cluster} kind="pvcs" ns={selectedNs} name={selectedName} /> },
         ]}
         actions={
           <ResourceActions
             cluster={cluster}
-            yamlKind="pvcs"
+            source={{ kind: "builtin", yamlKind: "pvcs" }}
             namespace={selectedNs}
             name={selectedName}
             onDeleted={() => setParam("sel", null)}
@@ -139,7 +141,7 @@ export function PVCsPage({ cluster }: { cluster: string }) {
               rows={filtered}
               rowKey={(p) => `${p.namespace}/${p.name}`}
               rowTint={rowTint}
-              onRowClick={(p) => setMany({ sel: p.name, selNs: p.namespace, tab: "describe" })}
+              onRowClick={(p) => confirmDiscard(() => setMany({ sel: p.name, selNs: p.namespace, tab: "describe" }))}
               selectedKey={selectedKey}
             />
           )

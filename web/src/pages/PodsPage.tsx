@@ -25,6 +25,7 @@ import { PodDescribe } from "../components/detail/describe/PodDescribe";
 import { OpenShellButton } from "../components/exec/OpenShellButton";
 import { YamlView } from "../components/detail/YamlView";
 import { useEditorDirty } from "../hooks/useEditorDirty";
+import { useConfirmDiscard } from "../hooks/useConfirmDiscard";
 import { ResourceActions } from "../components/edit/ResourceActions";
 import { EventsView } from "../components/detail/EventsView";
 import { PodLogsTab } from "../components/logs/PodLogsTab";
@@ -134,6 +135,7 @@ export function PodsPage({ cluster }: { cluster: string }) {
   };
 
   const editFlag = useEditorDirty(cluster, "pods", selectedNs ?? undefined, selectedName);
+  const confirmDiscard = useConfirmDiscard(editFlag.dirty);
 
   const detail =
     selectedNs && selectedName ? (
@@ -141,8 +143,8 @@ export function PodsPage({ cluster }: { cluster: string }) {
         title={selectedName}
         subtitle={selectedNs}
         activeTab={activeTab}
-        onTabChange={(id) => setParam("tab", id)}
-        onClose={() => setMany({ sel: null, selNs: null, tab: null })}
+        onTabChange={(id) => confirmDiscard(() => setParam("tab", id))}
+        onClose={() => confirmDiscard(() => setMany({ sel: null, selNs: null, tab: null }))}
         tabs={[
           {
             id: "describe",
@@ -154,7 +156,7 @@ export function PodsPage({ cluster }: { cluster: string }) {
             id: "yaml",
             label: "yaml",
             ready: true,
-            content: <YamlView cluster={cluster} kind="pods" ns={selectedNs} name={selectedName} />,
+            content: <YamlView cluster={cluster} source={{ kind: "builtin", yamlKind: "pods" }} ns={selectedNs} name={selectedName} />,
             dirty: editFlag.dirty,
           },
           {
@@ -173,7 +175,7 @@ export function PodsPage({ cluster }: { cluster: string }) {
         actions={
           <ResourceActions
             cluster={cluster}
-            yamlKind="pods"
+            source={{ kind: "builtin", yamlKind: "pods" }}
             namespace={selectedNs}
             name={selectedName}
             onDeleted={() => setParam("sel", null)}
@@ -230,7 +232,7 @@ export function PodsPage({ cluster }: { cluster: string }) {
               rows={filtered}
               rowKey={(p) => `${p.namespace}/${p.name}`}
               rowTint={rowTint}
-              onRowClick={(p) => setMany({ sel: p.name, selNs: p.namespace, tab: "describe" })}
+              onRowClick={(p) => confirmDiscard(() => setMany({ sel: p.name, selNs: p.namespace, tab: "describe" }))}
               selectedKey={selectedKey}
             />
           )

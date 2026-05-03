@@ -12,6 +12,7 @@ import { DetailPane } from "../components/detail/DetailPane";
 import { ReplicaSetDescribe } from "../components/detail/describe/ReplicaSetDescribe";
 import { YamlView } from "../components/detail/YamlView";
 import { useEditorDirty } from "../hooks/useEditorDirty";
+import { useConfirmDiscard } from "../hooks/useConfirmDiscard";
 import { ResourceActions } from "../components/edit/ResourceActions";
 import { EventsView } from "../components/detail/EventsView";
 import { NamespacePicker } from "../components/shell/NamespacePicker";
@@ -129,6 +130,7 @@ export function ReplicaSetsPage({ cluster }: { cluster: string }) {
   const selectRS = (rs: ReplicaSet) => setMany({ sel: rs.name, selNs: rs.namespace, tab: "describe" });
 
   const editFlag = useEditorDirty(cluster, "replicasets", selectedNs ?? undefined, selectedName);
+  const confirmDiscard = useConfirmDiscard(editFlag.dirty);
 
   const detail =
     selectedNs && selectedName ? (
@@ -136,17 +138,17 @@ export function ReplicaSetsPage({ cluster }: { cluster: string }) {
         title={selectedName}
         subtitle={selectedNs}
         activeTab={activeTab}
-        onTabChange={(id) => setParam("tab", id)}
-        onClose={() => setMany({ sel: null, selNs: null, tab: null })}
+        onTabChange={(id) => confirmDiscard(() => setParam("tab", id))}
+        onClose={() => confirmDiscard(() => setMany({ sel: null, selNs: null, tab: null }))}
         tabs={[
           { id: "describe", label: "describe", ready: true, content: <ReplicaSetDescribe cluster={cluster} ns={selectedNs} name={selectedName} /> },
-          { id: "yaml", label: "yaml", ready: true, content: <YamlView cluster={cluster} kind="replicasets" ns={selectedNs} name={selectedName} />, dirty: editFlag.dirty },
+          { id: "yaml", label: "yaml", ready: true, content: <YamlView cluster={cluster} source={{ kind: "builtin", yamlKind: "replicasets" }} ns={selectedNs} name={selectedName} />, dirty: editFlag.dirty },
           { id: "events", label: "events", ready: true, content: <EventsView cluster={cluster} kind="replicasets" ns={selectedNs} name={selectedName} /> },
         ]}
         actions={
           <ResourceActions
             cluster={cluster}
-            yamlKind="replicasets"
+            source={{ kind: "builtin", yamlKind: "replicasets" }}
             namespace={selectedNs}
             name={selectedName}
             onDeleted={() => setParam("sel", null)}

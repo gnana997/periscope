@@ -18,6 +18,7 @@ import { DetailPane } from "../components/detail/DetailPane";
 import { IngressDescribe } from "../components/detail/describe/IngressDescribe";
 import { YamlView } from "../components/detail/YamlView";
 import { useEditorDirty } from "../hooks/useEditorDirty";
+import { useConfirmDiscard } from "../hooks/useConfirmDiscard";
 import { ResourceActions } from "../components/edit/ResourceActions";
 import { EventsView } from "../components/detail/EventsView";
 import { NamespacePicker } from "../components/shell/NamespacePicker";
@@ -96,6 +97,7 @@ export function IngressesPage({ cluster }: { cluster: string }) {
   ];
 
   const editFlag = useEditorDirty(cluster, "ingresses", selectedNs ?? undefined, selectedName);
+  const confirmDiscard = useConfirmDiscard(editFlag.dirty);
 
   const detail =
     selectedNs && selectedName ? (
@@ -103,17 +105,17 @@ export function IngressesPage({ cluster }: { cluster: string }) {
         title={selectedName}
         subtitle={selectedNs}
         activeTab={activeTab}
-        onTabChange={(id) => setParam("tab", id)}
-        onClose={() => setMany({ sel: null, selNs: null, tab: null })}
+        onTabChange={(id) => confirmDiscard(() => setParam("tab", id))}
+        onClose={() => confirmDiscard(() => setMany({ sel: null, selNs: null, tab: null }))}
         tabs={[
           { id: "describe", label: "describe", ready: true, content: <IngressDescribe cluster={cluster} ns={selectedNs} name={selectedName} /> },
-          { id: "yaml", label: "yaml", ready: true, content: <YamlView cluster={cluster} kind="ingresses" ns={selectedNs} name={selectedName} />, dirty: editFlag.dirty },
+          { id: "yaml", label: "yaml", ready: true, content: <YamlView cluster={cluster} source={{ kind: "builtin", yamlKind: "ingresses" }} ns={selectedNs} name={selectedName} />, dirty: editFlag.dirty },
           { id: "events", label: "events", ready: true, content: <EventsView cluster={cluster} kind="ingresses" ns={selectedNs} name={selectedName} /> },
         ]}
         actions={
           <ResourceActions
             cluster={cluster}
-            yamlKind="ingresses"
+            source={{ kind: "builtin", yamlKind: "ingresses" }}
             namespace={selectedNs}
             name={selectedName}
             onDeleted={() => setParam("sel", null)}
@@ -155,7 +157,7 @@ export function IngressesPage({ cluster }: { cluster: string }) {
               columns={columns}
               rows={filtered}
               rowKey={(i) => `${i.namespace}/${i.name}`}
-              onRowClick={(i) => setMany({ sel: i.name, selNs: i.namespace, tab: "describe" })}
+              onRowClick={(i) => confirmDiscard(() => setMany({ sel: i.name, selNs: i.namespace, tab: "describe" }))}
               selectedKey={selectedKey}
             />
           )

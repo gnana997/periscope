@@ -22,6 +22,7 @@ import { DetailPane } from "../components/detail/DetailPane";
 import { DaemonSetDescribe } from "../components/detail/describe/DaemonSetDescribe";
 import { YamlView } from "../components/detail/YamlView";
 import { useEditorDirty } from "../hooks/useEditorDirty";
+import { useConfirmDiscard } from "../hooks/useConfirmDiscard";
 import { ResourceActions } from "../components/edit/ResourceActions";
 import { EventsView } from "../components/detail/EventsView";
 import { WorkloadLogsTab } from "../components/logs/WorkloadLogsTab";
@@ -106,6 +107,7 @@ export function DaemonSetsPage({ cluster }: { cluster: string }) {
   };
 
   const editFlag = useEditorDirty(cluster, "daemonsets", selectedNs ?? undefined, selectedName);
+  const confirmDiscard = useConfirmDiscard(editFlag.dirty);
 
   const detail =
     selectedNs && selectedName ? (
@@ -113,18 +115,18 @@ export function DaemonSetsPage({ cluster }: { cluster: string }) {
         title={selectedName}
         subtitle={selectedNs}
         activeTab={activeTab}
-        onTabChange={(id) => setParam("tab", id)}
-        onClose={() => setMany({ sel: null, selNs: null, tab: null })}
+        onTabChange={(id) => confirmDiscard(() => setParam("tab", id))}
+        onClose={() => confirmDiscard(() => setMany({ sel: null, selNs: null, tab: null }))}
         tabs={[
           { id: "describe", label: "describe", ready: true, content: <DaemonSetDescribe cluster={cluster} ns={selectedNs} name={selectedName} /> },
-          { id: "yaml", label: "yaml", ready: true, content: <YamlView cluster={cluster} kind="daemonsets" ns={selectedNs} name={selectedName} />, dirty: editFlag.dirty },
+          { id: "yaml", label: "yaml", ready: true, content: <YamlView cluster={cluster} source={{ kind: "builtin", yamlKind: "daemonsets" }} ns={selectedNs} name={selectedName} />, dirty: editFlag.dirty },
           { id: "events", label: "events", ready: true, content: <EventsView cluster={cluster} kind="daemonsets" ns={selectedNs} name={selectedName} /> },
           { id: "logs", label: "logs", ready: true, content: <WorkloadLogsTab kind="daemonset" cluster={cluster} ns={selectedNs} name={selectedName} /> },
         ]}
         actions={
           <ResourceActions
             cluster={cluster}
-            yamlKind="daemonsets"
+            source={{ kind: "builtin", yamlKind: "daemonsets" }}
             namespace={selectedNs}
             name={selectedName}
             onDeleted={() => setParam("sel", null)}
@@ -167,7 +169,7 @@ export function DaemonSetsPage({ cluster }: { cluster: string }) {
               rows={filtered}
               rowKey={(d) => `${d.namespace}/${d.name}`}
               rowTint={rowTint}
-              onRowClick={(d) => setMany({ sel: d.name, selNs: d.namespace, tab: "describe" })}
+              onRowClick={(d) => confirmDiscard(() => setMany({ sel: d.name, selNs: d.namespace, tab: "describe" }))}
               selectedKey={selectedKey}
             />
           )

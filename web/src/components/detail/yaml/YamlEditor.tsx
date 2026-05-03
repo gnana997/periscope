@@ -28,9 +28,15 @@ import {
 } from "react";
 import * as monaco from "monaco-editor";
 import { useQueryClient } from "@tanstack/react-query";
-import { useSearchParams } from "react-router-dom";
+import { useBlocker, useSearchParams } from "react-router-dom";
 
 import { ApiError, api, type ResourceMeta, type ResourceRef } from "../../../lib/api";
+import {
+  type EditorSource,
+  dirtyChannelKey,
+  invalidateAfterApply,
+  invalidateEditorYaml,
+} from "../../../lib/customResources";
 import { cn } from "../../../lib/cn";
 import {
   buildMonacoSchemaConfig,
@@ -55,9 +61,8 @@ import {
   registerSchema,
   useMonacoTheme,
 } from "../../../lib/monacoSetup";
-import { useOpenAPISchema, useResourceMeta, useYaml } from "../../../hooks/useResource";
+import { useOpenAPISchema, useResourceMeta, useEditorYaml } from "../../../hooks/useResource";
 import { usePublishEditorDirty } from "../../../hooks/useEditorDirty";
-import { queryKeys } from "../../../lib/queryKeys";
 import {
   buildMinimalSSA,
   computeOps,
@@ -65,10 +70,10 @@ import {
   type Identity,
   type Op,
 } from "../../../lib/yamlPatch";
-import type { YamlKind } from "../../../lib/api";
 import { ActionBar, type ApplyState } from "./ActionBar";
 import { ProblemsStrip } from "./ProblemsStrip";
 import { ApplyErrorBanner } from "./ApplyErrorBanner";
+import { SchemaMissingBanner } from "./SchemaMissingBanner";
 import { DriftBanner } from "./DriftBanner";
 import { DriftDiffOverlay } from "./DriftDiffOverlay";
 import { showToast } from "../../../lib/toastBus";
@@ -80,14 +85,14 @@ import { DetailError, DetailLoading } from "../states";
 
 interface YamlEditorProps {
   cluster: string;
-  yamlKind: YamlKind;
+  source: EditorSource;
   resource: ResourceRef;
 }
 
-export function YamlEditor({ cluster, yamlKind, resource }: YamlEditorProps) {
-  const yamlQuery = useYaml(
+export function YamlEditor({ cluster, source, resource }: YamlEditorProps) {
+  const yamlQuery = useEditorYaml(
+    source,
     cluster,
-    yamlKind,
     resource.namespace ?? "",
     resource.name,
     true,
@@ -103,7 +108,7 @@ export function YamlEditor({ cluster, yamlKind, resource }: YamlEditorProps) {
   return (
     <Editor
       cluster={cluster}
-      yamlKind={yamlKind}
+      source={source}
       resource={resource}
       pristine={stripForEdit(yamlQuery.data)}
     />
@@ -112,12 +117,12 @@ export function YamlEditor({ cluster, yamlKind, resource }: YamlEditorProps) {
 
 interface EditorProps {
   cluster: string;
-  yamlKind: YamlKind;
+  source: EditorSource;
   resource: ResourceRef;
   pristine: string;
 }
 
-function Editor({ cluster, yamlKind, resource, pristine }: EditorProps) {
+function Editor({ cluster, source, resource, pristine }: EditorProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const editorRef = useRef<monaco.editor.IStandaloneCodeEditor | null>(null);
   const [pristineLocked, setPristineLocked] = useState(pristine);
@@ -204,7 +209,7 @@ function Editor({ cluster, yamlKind, resource, pristine }: EditorProps) {
   }, [dirty, opsForCurrentBuffer]);
 
   // Publish dirty bit so the Tab strip can show `yaml*`.
-  usePublishEditorDirty(cluster, yamlKind, resource.namespace, resource.name, dirty);
+  usePublishEditorDirty(cluster, dirtyChannelKey(source), resource.namespace, resource.name, dirty);
 
   useMonacoTheme();
 
@@ -221,7 +226,6 @@ function Editor({ cluster, yamlKind, resource, pristine }: EditorProps) {
   // (configured in useResourceMeta).
   const metaQuery = useResourceMeta(
     cluster,
-    yamlKind,
     {
       group: resource.group,
       version: resource.version,
@@ -287,13 +291,8 @@ function Editor({ cluster, yamlKind, resource, pristine }: EditorProps) {
     );
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setPristineMeta(metaQuery.data);
-    qc.invalidateQueries({
-      queryKey: queryKeys
-        .cluster(cluster)
-        .kind(yamlKind)
-        .yaml(resource.namespace ?? "", resource.name),
-    });
-  }, [drift, dirty, metaQuery.data, qc, cluster, yamlKind, resource.namespace, resource.name]);
+    invalidateEditorYaml(qc, source, cluster, resource.namespace ?? "", resource.name);
+  }, [drift, dirty, metaQuery.data, qc, source, cluster, resource.namespace, resource.name]);
 
   const onDriftDismiss = useCallback(() => {
     if (!metaQuery.data) return;
@@ -314,19 +313,14 @@ function Editor({ cluster, yamlKind, resource, pristine }: EditorProps) {
     setCurrentYaml(pristineLocked);
     if (metaQuery.data) setPristineMeta(metaQuery.data);
     setDismissedAtRV(null);
-    qc.invalidateQueries({
-      queryKey: queryKeys
-        .cluster(cluster)
-        .kind(yamlKind)
-        .yaml(resource.namespace ?? "", resource.name),
-    });
+    invalidateEditorYaml(qc, source, cluster, resource.namespace ?? "", resource.name);
   }, [
     dirty,
     pristineLocked,
     metaQuery.data,
     qc,
+    source,
     cluster,
-    yamlKind,
     resource.namespace,
     resource.name,
   ]);
@@ -691,14 +685,10 @@ function Editor({ cluster, yamlKind, resource, pristine }: EditorProps) {
         await api.applyResource({ ...args, dryRun: false, force }, ac.signal);
         setApplyState({ kind: "success" });
 
-        // Single hierarchical prefix sweeps list + detail + yaml +
-        // events + meta + metrics for this kind. Awaited so the
-        // post-apply refetch lands before the editor unmounts —
-        // YamlReadView then opens to fresh data without the prior
-        // 400ms race-mitigation timeout.
-        await qc.invalidateQueries({
-          queryKey: queryKeys.cluster(cluster).kind(yamlKind).all,
-        });
+        // Awaited so the post-apply refetch lands before the editor
+        // unmounts — YamlReadView then opens to fresh data without
+        // the prior 400ms race-mitigation timeout.
+        await invalidateAfterApply(qc, source, resource);
         setParams((prev) => {
           const next = new URLSearchParams(prev);
           next.delete("edit");
@@ -729,7 +719,7 @@ function Editor({ cluster, yamlKind, resource, pristine }: EditorProps) {
     // ops captured intentionally — we want the snapshot at apply time, not
     // the latest after the user edits while waiting for the response
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [identity, opsForCurrentBuffer, resource, cluster, yamlKind, qc, setParams, parseConflictCauses, ops],
+    [identity, opsForCurrentBuffer, resource, cluster, source, qc, setParams, parseConflictCauses, ops],
   );
 
   // Apply with per-field resolutions from ConflictResolutionView. Filter
@@ -793,9 +783,7 @@ function Editor({ cluster, yamlKind, resource, pristine }: EditorProps) {
       setApplyState({ kind: "applying" });
       await api.applyResource({ ...args, dryRun: false, force }, ac.signal);
       setApplyState({ kind: "success" });
-      await qc.invalidateQueries({
-        queryKey: queryKeys.cluster(cluster).kind(yamlKind).all,
-      });
+      await invalidateAfterApply(qc, source, resource);
       setShowTakeover(false);
       setConflicts([]);
       setResolutions(new Map());
@@ -811,7 +799,7 @@ function Editor({ cluster, yamlKind, resource, pristine }: EditorProps) {
       setApplyState({ kind: "error", message });
       setShowTakeover(false);
     }
-  }, [identity, opsForCurrentBuffer, resolutions, opPathToString, resource, cluster, yamlKind, qc, setParams, onCancel]);
+  }, [identity, opsForCurrentBuffer, resolutions, opPathToString, resource, source, qc, setParams, onCancel]);
 
   // Standalone dry-run (the "dry-run" button in ActionBar). Same 409
   // handling as runApply — if the dry-run hits a field-manager
@@ -869,6 +857,44 @@ function Editor({ cluster, yamlKind, resource, pristine }: EditorProps) {
   }, [identity, opsForCurrentBuffer, resource, parseConflictCauses]);
 
 
+
+  // Unsaved-changes guard — three layers:
+  //
+  //   - `beforeunload`: native browser warning on refresh / tab close.
+  //   - `useBlocker` (below): custom confirm on cross-page navigation
+  //     (sidebar click, browser back/forward). Requires the data
+  //     router from main.tsx; throws under legacy <BrowserRouter>.
+  //   - `useConfirmDiscard` in pages: custom confirm on search-param
+  //     changes (row click, tab switch, close button) — those don't
+  //     fire useBlocker since the pathname stays the same.
+  useEffect(() => {
+    if (!dirty) return;
+    function onBeforeUnload(e: BeforeUnloadEvent) {
+      e.preventDefault();
+      e.returnValue = "";
+    }
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => window.removeEventListener("beforeunload", onBeforeUnload);
+  }, [dirty]);
+
+  // Cross-page navigation guard — when the user clicks the sidebar
+  // for a different resource type, or hits browser back/forward, fire
+  // the same custom confirm useConfirmDiscard uses for in-page
+  // search-param changes. Requires the data router (see main.tsx);
+  // useBlocker throws under the legacy <BrowserRouter>.
+  const blocker = useBlocker(
+    ({ currentLocation, nextLocation }) =>
+      dirty && currentLocation.pathname !== nextLocation.pathname,
+  );
+
+  useEffect(() => {
+    if (blocker.state !== "blocked") return;
+    const ok = window.confirm(
+      "You have unsaved YAML edits. Discard and continue?",
+    );
+    if (ok) blocker.proceed();
+    else blocker.reset();
+  }, [blocker]);
 
   // Keyboard shortcuts on the editor instance (Monaco's preferred
   // mechanism — captures inside the editor surface).
@@ -1027,14 +1053,18 @@ function Editor({ cluster, yamlKind, resource, pristine }: EditorProps) {
 
       {showDriftDiff && (
         <DriftDiffOverlay
+          source={source}
           cluster={cluster}
-          yamlKind={yamlKind}
           namespace={resource.namespace}
           name={resource.name}
           pristineYaml={pristineLocked}
           onClose={onDriftDiffClose}
           onReload={onDriftReload}
         />
+      )}
+
+      {schemaState === "missing" && mode === "edit" && (
+        <SchemaMissingBanner kindLabel={gvk?.kind} />
       )}
 
       {applyState.kind === "error" && mode !== "conflict" && (
@@ -1080,4 +1110,3 @@ function Editor({ cluster, yamlKind, resource, pristine }: EditorProps) {
     </div>
   );
 }
-

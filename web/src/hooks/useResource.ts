@@ -1,6 +1,7 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { api, type ClusterScopedKind, type OpenAPIDoc, type ResourceMeta, type YamlKind } from "../lib/api";
 import { queryKeys } from "../lib/queryKeys";
+import { editorYamlQueryKey, type EditorSource } from "../lib/customResources";
 import type {
   ClusterEventList,
   ClusterRoleBindingDetail,
@@ -288,41 +289,27 @@ export function useRevealSecretValue() {
   });
 }
 
-// --- YAML ---
-
-export function useYaml(
-  cluster: string,
-  kind: YamlKind,
-  ns: string,
-  name: string | null,
-  enabled: boolean,
-) {
-  return useQuery<string>({
-    queryKey: queryKeys.cluster(cluster).kind(kind).yaml(ns, name ?? ""),
-    queryFn: ({ signal }) =>
-      (["namespaces", "pvs", "storageclasses", "clusterroles", "clusterrolebindings", "ingressclasses", "priorityclasses", "runtimeclasses"] as ClusterScopedKind[]).includes(kind as ClusterScopedKind)
-        ? api.clusterScopedYaml(cluster, kind as ClusterScopedKind, name!, signal)
-        : api.yaml(cluster, kind as Exclude<YamlKind, ClusterScopedKind>, ns, name!, signal),
-    enabled: enabled && Boolean(name),
-  });
-}
-
 
 // --- Resource meta (managedFields + resourceVersion + generation) ---
 
 export function useResourceMeta(
   cluster: string,
-  // `kind` is the YAML/URL plural (matches KIND_REGISTRY). Required so
-  // meta lives under the same kind subtree as list/detail/yaml/events
-  // and a single prefix invalidation sweeps it on apply.
-  kind: YamlKind,
   resource: { group: string; version: string; resource: string; namespace?: string; name: string } | null,
   enabled: boolean,
 ) {
+  // Cache key nests under .kind(resource.resource) — i.e. the URL
+  // plural — for both built-ins and CRs. This means a single prefix
+  // invalidation via queryKeys.cluster(c).kind(plural).all sweeps
+  // meta along with list/detail/yaml/events for that resource type.
+  // The plural-namespace risk between built-ins and CRDs is low (no
+  // real-world overlap in the K8s/cert-manager/argo/flux ecosystem),
+  // and the alternative — branching on whether the resource is a CR
+  // here — would require threading the EditorSource through every
+  // call site for marginal benefit.
   return useQuery<ResourceMeta>({
     queryKey: queryKeys
       .cluster(cluster)
-      .kind(kind)
+      .kind(resource?.resource ?? "")
       .meta(resource?.namespace ?? "", resource?.name ?? ""),
     queryFn: ({ signal }) =>
       api.getMeta(
@@ -517,12 +504,13 @@ export function useRuntimeClassDetail(cluster: string, name: string | null) {
 
 // --- CRDs + custom resources ---
 
-export function useCRDs(cluster: string) {
+export function useCRDs(cluster: string, enabled = true) {
   return useQuery({
     queryKey: queryKeys.cluster(cluster).crds(),
     queryFn: ({ signal }) => api.crds(cluster, signal),
     // CRDs change infrequently — cache hit is the common case.
     staleTime: 30_000,
+    enabled: enabled && cluster.length > 0,
   });
 }
 
@@ -557,5 +545,62 @@ export function useCustomResourceDetail(
     queryFn: ({ signal }) =>
       api.getCustomResource(cluster, group, version, plural, namespace, name!, signal),
     enabled: Boolean(name && group && version && plural),
+  });
+}
+
+// --- Editor YAML (built-in or custom resource) ---
+
+// useEditorYaml fetches a resource's YAML for the editor + read view, used by
+// inline editor surface (YamlEditor + DriftDiffOverlay). For built-in
+// kinds it shares the same `["yaml", cluster, yamlKind, ns, name]`
+// cache key as the editor invalidations target, so the read-only YamlView stays on one cache;
+// for CRs it uses `["yaml-cr", cluster, group, version, plural, ns,
+// name]` — fully segregated so plural collisions across CRDs are
+// impossible.
+export function useEditorYaml(
+  source: EditorSource,
+  cluster: string,
+  ns: string,
+  name: string | null,
+  enabled: boolean,
+) {
+  return useQuery<string>({
+    queryKey: editorYamlQueryKey(source, cluster, ns, name ?? ""),
+    queryFn: ({ signal }) => {
+      if (source.kind === "custom") {
+        return api.getCustomResourceYAML(
+          cluster,
+          source.cr.group,
+          source.cr.version,
+          source.cr.resource,
+          ns && ns.length > 0 ? ns : null,
+          name!,
+          signal,
+        );
+      }
+      const k = source.yamlKind;
+      const isClusterScoped = (
+        [
+          "namespaces",
+          "pvs",
+          "storageclasses",
+          "clusterroles",
+          "clusterrolebindings",
+          "ingressclasses",
+          "priorityclasses",
+          "runtimeclasses",
+        ] as ClusterScopedKind[]
+      ).includes(k as ClusterScopedKind);
+      return isClusterScoped
+        ? api.clusterScopedYaml(cluster, k as ClusterScopedKind, name!, signal)
+        : api.yaml(
+            cluster,
+            k as Exclude<YamlKind, ClusterScopedKind>,
+            ns,
+            name!,
+            signal,
+          );
+    },
+    enabled: enabled && Boolean(name),
   });
 }

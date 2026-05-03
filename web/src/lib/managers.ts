@@ -79,6 +79,47 @@ const REGISTRY: Record<string, Omit<ManagerInfo, "name">> = {
     prefer: "Edit via ArgoCD UI/CLI to keep the Application state coherent.",
   },
 
+  "argocd-applicationset-controller": {
+    category: "GITOPS",
+    display: "argocd-applicationset-controller",
+    source: "argo-cd",
+    consequence: "ArgoCD's ApplicationSet controller regenerates Applications from the generator; force-applying on a generated Application desyncs the set.",
+    prefer: "Edit the ApplicationSet generator (Git/cluster/list) instead of the generated Application.",
+  },
+
+  // Flux v2 — image automation
+  "image-reflector-controller": {
+    category: "GITOPS",
+    display: "image-reflector-controller",
+    source: "flux-system",
+    consequence: "Flux's image-reflector-controller manages this; reverts on next reconcile.",
+    prefer: "Update the ImageRepository spec in Git instead.",
+  },
+  "image-automation-controller": {
+    category: "GITOPS",
+    display: "image-automation-controller",
+    source: "flux-system",
+    consequence: "Flux's image-automation-controller manages this; reverts on next reconcile.",
+    prefer: "Update the ImageUpdateAutomation spec in Git instead.",
+  },
+
+  // CRD ecosystems whose manager names lack a -controller suffix and
+  // would otherwise fall through to UNKNOWN
+  "cert-manager": {
+    category: "CONTROLLER",
+    display: "cert-manager",
+    source: "cert-manager",
+    consequence: "cert-manager continuously reconciles Issuer/Certificate state; status fields will be reset on the next pass.",
+    prefer: "Edit the spec — status fields (issued certs, conditions) are managed by the controller.",
+  },
+  "external-secrets": {
+    category: "CONTROLLER",
+    display: "external-secrets",
+    source: "external-secrets",
+    consequence: "external-secrets reconciles values from upstream stores; force-applied secret data is overwritten on next sync.",
+    prefer: "Update the value in the upstream store (AWS Secrets Manager, Vault, etc.).",
+  },
+
   // K8s control loops
   "horizontal-pod-autoscaler": {
     category: "CONTROLLER",
@@ -217,6 +258,18 @@ export function classifyManager(name: string): ManagerInfo {
   const exact = REGISTRY[name];
   if (exact) return { name, ...exact };
 
+  // Flux ecosystem prefix — must run before *-controller so
+  // flux-kustomize-controller etc. classify as GITOPS, not CONTROLLER.
+  if (/^flux/i.test(name)) {
+    return {
+      name,
+      category: "GITOPS",
+      display: name,
+      source: "flux-system",
+      consequence: "Flux manages this; reverts on next reconcile.",
+      prefer: "Edit the source repo instead of forcing here.",
+    };
+  }
   // Heuristic: anything ending in -controller is likely a controller-loop
   if (/-controller$/i.test(name)) {
     return {

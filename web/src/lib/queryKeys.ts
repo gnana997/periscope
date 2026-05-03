@@ -83,6 +83,13 @@ export const queryKeys = {
         ["cluster", c, "cr", group, version, plural, "yaml", ns, name] as const,
       events: (ns: string, name: string) =>
         ["cluster", c, "cr", group, version, plural, "events", ns, name] as const,
+      meta: (ns: string, name: string) =>
+        ["cluster", c, "cr", group, version, plural, "meta", ns, name] as const,
+      // Side-channel YAML fetch for the drift-diff modal — distinct
+      // from `yaml(...)` so it doesn't compete with the editor's
+      // pristine-flowing yamlQuery.
+      yamlDrift: (ns: string, name: string) =>
+        ["cluster", c, "cr", group, version, plural, "yaml-drift", ns, name] as const,
     }),
   }),
 

@@ -33,12 +33,24 @@ export function stripForEdit(yaml: string): string {
   for (const line of lines) {
     const indent = line.search(/\S/);
 
-    // Active block-skip (continuing to drop a managedFields/status block)
+    // Active block-skip (continuing to drop a managedFields/status block).
+    // The same-indent `- ` case is critical for compact list style:
+    // some K8s serializers (cert-manager, Argo) emit list items at the
+    // SAME column as the parent key (e.g. `managedFields:` at indent 2,
+    // `- apiVersion: ...` also at indent 2). Without this, the orphan
+    // list item leaks past the strip and corrupts the post-strip YAML
+    // (metadata: would end up containing a stray `- ` sibling, breaking
+    // the parse). Built-in apiserver output uses indented-list style so
+    // this only bit Custom Resources.
     if (skipUntilDedentTo !== null) {
-      if (indent === -1 || indent > skipUntilDedentTo) continue;
+      const trimmedForSkip = line.trimStart();
+      const stillInside =
+        indent === -1 ||
+        indent > skipUntilDedentTo ||
+        (indent === skipUntilDedentTo && trimmedForSkip.startsWith("- "));
+      if (stillInside) continue;
       skipUntilDedentTo = null;
     }
-
     // Track entry/exit of the top-level metadata block by indent.
     if (metadataAt !== null && indent !== -1 && indent <= metadataAt) {
       metadataAt = null;

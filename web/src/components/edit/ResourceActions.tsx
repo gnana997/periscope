@@ -2,12 +2,17 @@
 // Centralises styling + RBAC gating + mutation wiring so the
 // per-kind detail components stay declarative.
 //
-// Lane 2 expanded the surface from {Edit YAML, Delete} to
-// {Edit YAML, Edit labels, Scale (scalable kinds only), Delete}.
-// Each destructive / write action has its own dedicated mutation
-// hook (useEditLabels, useScaleResource, useDeleteResource) that
-// optimistically updates the React Query cache before the network
-// call lands, so the UI feels instant on slow links.
+// For built-in kinds: shows {Edit YAML, Edit labels, Scale (scalable
+// kinds only), Delete}. Each destructive / write action runs through
+// a dedicated mutation hook (useEditLabels, useScaleResource,
+// useDeleteResource) that optimistically updates the React Query
+// cache before the network call lands, so the UI feels instant on
+// slow links.
+//
+// For Custom Resources: shows {Edit YAML, Delete} only — Scale and
+// Edit Labels assume a built-in cache shape (KIND_REGISTRY,
+// LIST_ITEMS_KEY) that doesn't generalise to arbitrary CRDs. Adding
+// optimistic CR labels/scale is tracked as a follow-up.
 //
 // Actions are shown unconditionally in v1 — the backend is the
 // authoritative gate (impersonated K8s RBAC). useCanI() is called
@@ -15,12 +20,14 @@
 // free. See useCanI for the rationale.
 
 import { useState } from "react";
-import { ApiError } from "../../lib/api";
-import type { ResourceRef, YamlKind } from "../../lib/api";
-import { KIND_REGISTRY } from "../../lib/k8sKinds";
-import { useCanI } from "../../hooks/useCanI";
 import { useQueryClient } from "@tanstack/react-query";
+import { ApiError, api, type ResourceRef } from "../../lib/api";
+import {
+  gvrkFromSource,
+  type EditorSource,
+} from "../../lib/customResources";
 import { queryKeys } from "../../lib/queryKeys";
+import { useCanI } from "../../hooks/useCanI";
 import { useScaleResource, isScalable } from "../../hooks/mutations/useScaleResource";
 import { useEditLabels } from "../../hooks/mutations/useEditLabels";
 import { useDeleteResource } from "../../hooks/mutations/useDeleteResource";
@@ -31,10 +38,7 @@ import { EditButton } from "../detail/yaml/EditButton";
 
 interface ResourceActionsProps {
   cluster: string;
-  // The YAML kind / URL segment. Drives the GET /yaml endpoint and the
-  // GVRK lookup (group/version/resource/kind) via KIND_REGISTRY — so
-  // pages don't have to repeat that information at every call site.
-  yamlKind: YamlKind;
+  source: EditorSource;
   // null/undefined → cluster-scoped resource.
   namespace: string | null | undefined;
   name: string;
@@ -45,23 +49,37 @@ interface ResourceActionsProps {
   onDeleted?: () => void;
 }
 
+export function ResourceActions(props: ResourceActionsProps) {
+  // Branch on source kind. Built-ins use the full Lane 2 mutation
+  // wiring; CRs use a simpler delete-only path that doesn't depend
+  // on KIND_REGISTRY / list-shape lookups.
+  if (props.source.kind === "builtin") {
+    return <BuiltinActions {...props} source={props.source} />;
+  }
+  return <CustomResourceActions {...props} source={props.source} />;
+}
+
 interface DetailLike {
   replicas?: number;
   labels?: Record<string, string>;
 }
 
-export function ResourceActions({
+function BuiltinActions({
   cluster,
-  yamlKind,
+  source,
   namespace,
   name,
   trailing,
   onDeleted,
-}: ResourceActionsProps) {
+}: ResourceActionsProps & {
+  source: Extract<EditorSource, { kind: "builtin" }>;
+}) {
   const [showDelete, setShowDelete] = useState(false);
   const [showScale, setShowScale] = useState(false);
   const [showLabels, setShowLabels] = useState(false);
-  const meta = KIND_REGISTRY[yamlKind];
+
+  const yamlKind = source.yamlKind;
+  const meta = gvrkFromSource(source);
   const ns = namespace ?? undefined;
   const resource: ResourceRef = {
     cluster,
@@ -188,6 +206,91 @@ export function ResourceActions({
           initialLabels={cachedDetail?.labels ?? {}}
           onClose={() => setShowLabels(false)}
           onSubmit={(labels) => labelsMutation.mutate({ labels })}
+        />
+      )}
+    </div>
+  );
+}
+
+function CustomResourceActions({
+  cluster,
+  source,
+  namespace,
+  name,
+  trailing,
+  onDeleted,
+}: ResourceActionsProps & {
+  source: Extract<EditorSource, { kind: "custom" }>;
+}) {
+  const [showDelete, setShowDelete] = useState(false);
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<{ status?: number; message: string } | null>(null);
+
+  const meta = gvrkFromSource(source);
+  const ns = namespace ?? undefined;
+  const resource: ResourceRef = {
+    cluster,
+    group: meta.group,
+    version: meta.version,
+    resource: meta.resource,
+    namespace: ns,
+    name,
+    kind: meta.kind,
+  };
+  const canEdit = useCanI({ verb: "patch", resource: meta.resource, namespace: ns });
+  const canDelete = useCanI({ verb: "delete", resource: meta.resource, namespace: ns });
+
+  const qc = useQueryClient();
+
+  return (
+    <div className="flex items-center gap-1.5">
+      {canEdit && <EditButton />}
+      {canDelete && (
+        <button
+          type="button"
+          onClick={() => setShowDelete(true)}
+          className="rounded-sm border border-border-strong px-2.5 py-1 font-mono text-[12px] text-red transition-colors hover:bg-red-soft"
+        >
+          delete
+        </button>
+      )}
+      {trailing}
+
+      {showDelete && (
+        <DeleteResourceModal
+          resourceRef={resource}
+          pending={pending}
+          error={error}
+          onClose={() => {
+            if (pending) return;
+            setError(null);
+            setShowDelete(false);
+          }}
+          onConfirm={async () => {
+            setPending(true);
+            setError(null);
+            try {
+              await api.deleteResource({
+                cluster,
+                group: meta.group,
+                version: meta.version,
+                resource: meta.resource,
+                namespace: ns,
+                name,
+              });
+              await qc.invalidateQueries({
+                queryKey: queryKeys
+                  .cluster(cluster)
+                  .cr(source.cr.group, source.cr.version, source.cr.resource).all,
+              });
+              setShowDelete(false);
+              onDeleted?.();
+            } catch (e) {
+              setError(deleteErrorShape(e instanceof Error ? e : new Error(String(e))));
+            } finally {
+              setPending(false);
+            }
+          }}
         />
       )}
     </div>

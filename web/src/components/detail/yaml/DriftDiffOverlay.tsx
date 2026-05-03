@@ -9,28 +9,17 @@
 // editor's cached pristine flow.
 
 import { useQuery } from "@tanstack/react-query";
-import { api, type YamlKind, type ClusterScopedKind } from "../../../lib/api";
+import { api, type ClusterScopedKind, type YamlKind } from "../../../lib/api";
 import { cn } from "../../../lib/cn";
-import { queryKeys } from "../../../lib/queryKeys";
+import { driftYamlQueryKey, isClusterScoped, type EditorSource } from "../../../lib/customResources";
 import { stripForEdit } from "../../../lib/stripForEdit";
 import { DetailLoading, DetailError } from "../states";
 import { Modal } from "../../ui/Modal";
 import { InlineDiff } from "./InlineDiff";
 
-const CLUSTER_SCOPED_KINDS = new Set<ClusterScopedKind>([
-  "namespaces",
-  "pvs",
-  "storageclasses",
-  "clusterroles",
-  "clusterrolebindings",
-  "ingressclasses",
-  "priorityclasses",
-  "runtimeclasses",
-]);
-
 interface DriftDiffOverlayProps {
+  source: EditorSource;
   cluster: string;
-  yamlKind: YamlKind;
   namespace: string | undefined;
   name: string;
   pristineYaml: string;
@@ -39,8 +28,8 @@ interface DriftDiffOverlayProps {
 }
 
 export function DriftDiffOverlay({
+  source,
   cluster,
-  yamlKind,
   namespace,
   name,
   pristineYaml,
@@ -51,11 +40,30 @@ export function DriftDiffOverlay({
   // the editor's pristine-flowing yamlQuery. staleTime: 0 + a fresh
   // mount on every open guarantees we see latest server state.
   const freshQuery = useQuery<string>({
-    queryKey: queryKeys.cluster(cluster).kind(yamlKind).yamlDrift(namespace ?? "", name),
-    queryFn: ({ signal }) =>
-      CLUSTER_SCOPED_KINDS.has(yamlKind as ClusterScopedKind)
-        ? api.clusterScopedYaml(cluster, yamlKind as ClusterScopedKind, name, signal)
-        : api.yaml(cluster, yamlKind as Exclude<YamlKind, ClusterScopedKind>, namespace ?? "", name, signal),
+    queryKey: driftYamlQueryKey(source, cluster, namespace ?? "", name),
+    queryFn: ({ signal }) => {
+      if (source.kind === "custom") {
+        return api.getCustomResourceYAML(
+          cluster,
+          source.cr.group,
+          source.cr.version,
+          source.cr.resource,
+          namespace && namespace.length > 0 ? namespace : null,
+          name,
+          signal,
+        );
+      }
+      const k = source.yamlKind;
+      return isClusterScoped(source)
+        ? api.clusterScopedYaml(cluster, k as ClusterScopedKind, name, signal)
+        : api.yaml(
+            cluster,
+            k as Exclude<YamlKind, ClusterScopedKind>,
+            namespace ?? "",
+            name,
+            signal,
+          );
+    },
     staleTime: 0,
     refetchOnMount: "always",
     gcTime: 0,

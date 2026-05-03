@@ -58,7 +58,6 @@ export function ScaleModal({
   // Pull managedFields to spot HPA ownership of spec.replicas.
   const metaQuery = useResourceMeta(
     cluster,
-    kind,
     {
       group: meta.group,
       version: meta.version,

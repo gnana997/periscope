@@ -11,6 +11,7 @@ import { PhaseTag } from "../components/table/StatusDot";
 import { DetailPane } from "../components/detail/DetailPane";
 import { YamlView } from "../components/detail/YamlView";
 import { useEditorDirty } from "../hooks/useEditorDirty";
+import { useConfirmDiscard } from "../hooks/useConfirmDiscard";
 import { ResourceActions } from "../components/edit/ResourceActions";
 import { EventsView } from "../components/detail/EventsView";
 import { PVDescribe } from "../components/detail/describe/PVDescribe";
@@ -69,23 +70,24 @@ export function PVsPage({ cluster }: { cluster: string }) {
     p.status === "Failed" ? "red" : p.status === "Released" ? "yellow" : null;
 
   const editFlag = useEditorDirty(cluster, "pvs", undefined, selectedName);
+  const confirmDiscard = useConfirmDiscard(editFlag.dirty);
 
   const detail = selectedName ? (
     <DetailPane
       title={selectedName}
       subtitle="cluster-scoped"
       activeTab={activeTab}
-      onTabChange={(id) => setParam("tab", id)}
-      onClose={() => setMany({ sel: null, tab: null })}
+      onTabChange={(id) => confirmDiscard(() => setParam("tab", id))}
+      onClose={() => confirmDiscard(() => setMany({ sel: null, tab: null }))}
       tabs={[
         { id: "describe", label: "describe", ready: true, content: <PVDescribe cluster={cluster} name={selectedName} /> },
-        { id: "yaml", label: "yaml", ready: true, content: <YamlView cluster={cluster} kind="pvs" ns="" name={selectedName} />, dirty: editFlag.dirty },
+        { id: "yaml", label: "yaml", ready: true, content: <YamlView cluster={cluster} source={{ kind: "builtin", yamlKind: "pvs" }} ns="" name={selectedName} />, dirty: editFlag.dirty },
         { id: "events", label: "events", ready: true, content: <EventsView cluster={cluster} kind="pvs" ns="" name={selectedName} /> },
       ]}
       actions={
         <ResourceActions
           cluster={cluster}
-          yamlKind="pvs"
+          source={{ kind: "builtin", yamlKind: "pvs" }}
           namespace={null}
           name={selectedName}
           onDeleted={() => setParam("sel", null)}
@@ -132,7 +134,7 @@ export function PVsPage({ cluster }: { cluster: string }) {
               rows={filtered}
               rowKey={(p) => p.name}
               rowTint={rowTint}
-              onRowClick={(p) => setMany({ sel: p.name, tab: "describe" })}
+              onRowClick={(p) => confirmDiscard(() => setMany({ sel: p.name, tab: "describe" }))}
               selectedKey={selectedName}
             />
           )

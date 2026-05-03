@@ -13,6 +13,7 @@ import { DetailPane } from "../components/detail/DetailPane";
 import { RoleBindingDescribe } from "../components/detail/describe/RoleBindingDescribe";
 import { YamlView } from "../components/detail/YamlView";
 import { useEditorDirty } from "../hooks/useEditorDirty";
+import { useConfirmDiscard } from "../hooks/useConfirmDiscard";
 import { ResourceActions } from "../components/edit/ResourceActions";
 import { NamespacePicker } from "../components/shell/NamespacePicker";
 
@@ -58,6 +59,7 @@ export function RoleBindingsPage({ cluster }: { cluster: string }) {
   const selectedKey = selectedNs && selectedName ? `${selectedNs}/${selectedName}` : null;
 
   const editFlag = useEditorDirty(cluster, "rolebindings", selectedNs ?? undefined, selectedName);
+  const confirmDiscard = useConfirmDiscard(editFlag.dirty);
 
   const detail =
     selectedNs && selectedName ? (
@@ -65,16 +67,16 @@ export function RoleBindingsPage({ cluster }: { cluster: string }) {
         title={selectedName}
         subtitle={selectedNs}
         activeTab={activeTab}
-        onTabChange={(id) => setParam("tab", id)}
-        onClose={() => setMany({ sel: null, selNs: null, tab: null })}
+        onTabChange={(id) => confirmDiscard(() => setParam("tab", id))}
+        onClose={() => confirmDiscard(() => setMany({ sel: null, selNs: null, tab: null }))}
         tabs={[
           { id: "describe", label: "describe", ready: true, content: <RoleBindingDescribe cluster={cluster} ns={selectedNs} name={selectedName} /> },
-          { id: "yaml", label: "yaml", ready: true, content: <YamlView cluster={cluster} kind="rolebindings" ns={selectedNs} name={selectedName} />, dirty: editFlag.dirty },
+          { id: "yaml", label: "yaml", ready: true, content: <YamlView cluster={cluster} source={{ kind: "builtin", yamlKind: "rolebindings" }} ns={selectedNs} name={selectedName} />, dirty: editFlag.dirty },
         ]}
         actions={
           <ResourceActions
             cluster={cluster}
-            yamlKind="rolebindings"
+            source={{ kind: "builtin", yamlKind: "rolebindings" }}
             namespace={selectedNs}
             name={selectedName}
             onDeleted={() => setParam("sel", null)}
@@ -101,7 +103,7 @@ export function RoleBindingsPage({ cluster }: { cluster: string }) {
             columns={columns}
             rows={filtered}
             rowKey={(r) => `${r.namespace}/${r.name}`}
-            onRowClick={(r) => setMany({ sel: r.name, selNs: r.namespace, tab: "describe" })}
+            onRowClick={(r) => confirmDiscard(() => setMany({ sel: r.name, selNs: r.namespace, tab: "describe" }))}
             selectedKey={selectedKey}
           />
         }

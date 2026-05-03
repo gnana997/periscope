@@ -12,6 +12,7 @@ import { DetailPane } from "../components/detail/DetailPane";
 import { ClusterRoleBindingDescribe } from "../components/detail/describe/ClusterRoleBindingDescribe";
 import { YamlView } from "../components/detail/YamlView";
 import { useEditorDirty } from "../hooks/useEditorDirty";
+import { useConfirmDiscard } from "../hooks/useConfirmDiscard";
 import { ResourceActions } from "../components/edit/ResourceActions";
 import { cn } from "../lib/cn";
 
@@ -52,22 +53,23 @@ export function ClusterRoleBindingsPage({ cluster }: { cluster: string }) {
   ];
 
   const editFlag = useEditorDirty(cluster, "clusterrolebindings", undefined, selectedName);
+  const confirmDiscard = useConfirmDiscard(editFlag.dirty);
 
   const detail = selectedName ? (
     <DetailPane
       title={selectedName}
       subtitle="cluster-scoped"
       activeTab={activeTab}
-      onTabChange={(id) => setParam("tab", id)}
-      onClose={() => setMany({ sel: null, tab: null })}
+      onTabChange={(id) => confirmDiscard(() => setParam("tab", id))}
+      onClose={() => confirmDiscard(() => setMany({ sel: null, tab: null }))}
       tabs={[
         { id: "describe", label: "describe", ready: true, content: <ClusterRoleBindingDescribe cluster={cluster} name={selectedName} /> },
-        { id: "yaml", label: "yaml", ready: true, content: <YamlView cluster={cluster} kind="clusterrolebindings" ns="" name={selectedName} />, dirty: editFlag.dirty },
+        { id: "yaml", label: "yaml", ready: true, content: <YamlView cluster={cluster} source={{ kind: "builtin", yamlKind: "clusterrolebindings" }} ns="" name={selectedName} />, dirty: editFlag.dirty },
       ]}
       actions={
         <ResourceActions
           cluster={cluster}
-          yamlKind="clusterrolebindings"
+          source={{ kind: "builtin", yamlKind: "clusterrolebindings" }}
           namespace={null}
           name={selectedName}
           onDeleted={() => setParam("sel", null)}
@@ -109,7 +111,7 @@ export function ClusterRoleBindingsPage({ cluster }: { cluster: string }) {
             columns={columns}
             rows={filtered}
             rowKey={(r) => r.name}
-            onRowClick={(r) => setMany({ sel: r.name, tab: "describe" })}
+            onRowClick={(r) => confirmDiscard(() => setMany({ sel: r.name, tab: "describe" }))}
             selectedKey={selectedName}
           />
         }
