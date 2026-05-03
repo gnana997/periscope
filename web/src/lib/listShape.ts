@@ -50,6 +50,9 @@ export const LIST_ITEMS_KEY: Record<string, string> = {
   ingressclasses: "ingressClasses",
   networkpolicies: "networkPolicies",
 
+  // discovery.k8s.io/v1
+  endpointslices: "endpointSlices",
+
   // rbac.authorization.k8s.io/v1
   roles: "roles",
   rolebindings: "roleBindings",
