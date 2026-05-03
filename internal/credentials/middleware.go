@@ -4,6 +4,8 @@ import (
 	"context"
 	"log/slog"
 	"net/http"
+
+	"github.com/gnana997/periscope/internal/audit"
 )
 
 // Handler is the signature for HTTP handlers that need a Provider. The
@@ -38,7 +40,18 @@ const sessionKey ctxKey = 1
 // The Session here is the *identity* slice — Subject/Email/Groups —
 // not credentials. Tokens never reach this layer; the AWS provider is
 // resolved separately through the Factory.
+//
+// As a side-effect, WithSession also patches the audit.RequestContext
+// (planted earlier by httpx.AuditBegin) with the resolved Actor so
+// audit emissions downstream don't have to re-derive it. The patch
+// is in-place on the pointer stored in ctx, so AuditBegin's
+// downstream chain sees it.
 func WithSession(ctx context.Context, s Session) context.Context {
+	audit.PatchActor(ctx, audit.Actor{
+		Sub:    s.Subject,
+		Email:  s.Email,
+		Groups: s.Groups,
+	})
 	return context.WithValue(ctx, sessionKey, s)
 }
 

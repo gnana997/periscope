@@ -16,6 +16,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/gnana997/periscope/internal/audit"
 	"github.com/gnana997/periscope/internal/auth"
 	"github.com/gnana997/periscope/internal/authz"
 	"github.com/gnana997/periscope/internal/clusters"
@@ -31,6 +32,11 @@ import (
 func main() {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	slog.SetDefault(logger)
+
+	// Audit pipeline: stdout sink today, additional sinks (SQLite,
+	// SIEM shipper) appended in follow-up PRs without touching
+	// emission sites.
+	auditEmitter := audit.New(&audit.StdoutSink{Logger: logger})
 
 	ctx := context.Background()
 
@@ -427,7 +433,7 @@ func main() {
 
 
 	router.Post("/api/clusters/{cluster}/cronjobs/{ns}/{name}/trigger",
-		credentials.Wrap(factory, triggerCronJobHandler(registry)))
+		credentials.Wrap(factory, triggerCronJobHandler(registry, auditEmitter)))
 	router.Get("/api/clusters/{cluster}/pvcs/{ns}/{name}", credentials.Wrap(factory,
 		detailHandler(registry, "pvc",
 			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, ns, name string) (k8s.PVCDetail, error) {
@@ -795,7 +801,7 @@ func main() {
 	// --- Secret reveal endpoint (audit-logged, per-key) ---
 
 	router.Get("/api/clusters/{cluster}/secrets/{ns}/{name}/data/{key}",
-		credentials.Wrap(factory, secretRevealHandler(registry)))
+		credentials.Wrap(factory, secretRevealHandler(registry, auditEmitter)))
 
 	// --- Generic resource mutation endpoints (PR-D) ---
 	//
@@ -808,13 +814,13 @@ func main() {
 	// URL segments can't be empty). Namespaced and cluster-scoped have
 	// separate route patterns because chi doesn't allow optional URL params.
 	router.Patch("/api/clusters/{cluster}/resources/{group}/{version}/{resource}/{ns}/{name}",
-		credentials.Wrap(factory, applyResourceHandler(registry)))
+		credentials.Wrap(factory, applyResourceHandler(registry, auditEmitter)))
 	router.Patch("/api/clusters/{cluster}/resources/{group}/{version}/{resource}/{name}",
-		credentials.Wrap(factory, applyResourceHandler(registry)))
+		credentials.Wrap(factory, applyResourceHandler(registry, auditEmitter)))
 	router.Delete("/api/clusters/{cluster}/resources/{group}/{version}/{resource}/{ns}/{name}",
-		credentials.Wrap(factory, deleteResourceHandler(registry)))
+		credentials.Wrap(factory, deleteResourceHandler(registry, auditEmitter)))
 	router.Delete("/api/clusters/{cluster}/resources/{group}/{version}/{resource}/{name}",
-		credentials.Wrap(factory, deleteResourceHandler(registry)))
+		credentials.Wrap(factory, deleteResourceHandler(registry, auditEmitter)))
 
 	// --- Resource meta (resourceVersion + generation + managedFields) ---
 	// Drives the inline editor's per-field ownership badges and (Phase 3)
@@ -839,7 +845,7 @@ func main() {
 	execSessions := execsess.NewRegistry()
 	execPolicy := k8s.NewPolicy(k8s.PolicyConfig{}) // defaults: 3 WS fails / 30m SPDY pin
 	router.Get("/api/clusters/{cluster}/pods/{ns}/{name}/exec",
-		credentials.Wrap(factory, execHandler(registry, execSessions, execPolicy)))
+		credentials.Wrap(factory, execHandler(registry, execSessions, execPolicy, auditEmitter)))
 	if os.Getenv("PERISCOPE_PROBE_CLUSTERS_ON_BOOT") == "1" {
 		go probeClustersOnBoot(ctx, factory, registry, execPolicy)
 	}
@@ -1042,7 +1048,7 @@ func eventsHandler(reg *clusters.Registry, kind string) credentials.Handler {
 //
 // Group "core" in the URL is normalised to the empty string before
 // reaching ApplyResource, mirroring how K8s itself models the v1 group.
-func applyResourceHandler(reg *clusters.Registry) credentials.Handler {
+func applyResourceHandler(reg *clusters.Registry, auditer *audit.Emitter) credentials.Handler {
 	return func(w http.ResponseWriter, r *http.Request, p credentials.Provider) {
 		c, ok := reg.ByName(chi.URLParam(r, "cluster"))
 		if !ok {
@@ -1069,17 +1075,31 @@ func applyResourceHandler(reg *clusters.Registry) credentials.Handler {
 			DryRun:    r.URL.Query().Get("dryRun") == "true",
 			Force:     r.URL.Query().Get("force") == "true",
 		}
+		// TODO: derive create vs update vs patch from result.Object's
+		// resourceVersion and request shape. For v1 we use Patch (the
+		// HTTP method). The SQLite schema in PR2 will benefit from the
+		// distinction.
+		evt := audit.Event{
+			Actor:   actorFromContext(r.Context()),
+			Verb:    audit.VerbPatch,
+			Cluster: c.Name,
+			Resource: audit.ResourceRef{
+				Group: args.Group, Version: args.Version, Resource: args.Resource,
+				Namespace: args.Namespace, Name: args.Name,
+			},
+			Extra: map[string]any{
+				"dryRun": args.DryRun,
+				"force":  args.Force,
+			},
+		}
 		result, err := k8s.ApplyResource(r.Context(), p, args)
 		if err != nil {
 			if errors.Is(err, context.Canceled) {
 				return
 			}
-			slog.ErrorContext(r.Context(), "apply resource failed",
-				"err", err, "cluster", c.Name,
-				"group", args.Group, "version", args.Version, "resource", args.Resource,
-				"ns", args.Namespace, "name", args.Name,
-				"dryRun", args.DryRun, "force", args.Force,
-				"actor", p.Actor())
+			evt.Outcome = outcomeFor(err)
+			evt.Reason = err.Error()
+			auditer.Record(r.Context(), evt)
 			// L1/L2 errors don't satisfy kerrors.* so they default to 500;
 			// detect our own error prefix and surface as 400 instead so
 			// the SPA can show "your YAML was malformed" rather than a
@@ -1091,13 +1111,8 @@ func applyResourceHandler(reg *clusters.Registry) credentials.Handler {
 			writeAPIError(w, err, status)
 			return
 		}
-		// Audit-trail write: tied to the action, not the request envelope.
-		// When the audit DB ships, this becomes a structured row.
-		slog.InfoContext(r.Context(), "resource applied",
-			"actor", p.Actor(), "cluster", c.Name,
-			"group", args.Group, "version", args.Version, "resource", args.Resource,
-			"ns", args.Namespace, "name", args.Name,
-			"dryRun", args.DryRun, "force", args.Force)
+		evt.Outcome = audit.OutcomeSuccess
+		auditer.Record(r.Context(), evt)
 		writeJSON(w, http.StatusOK, result)
 	}
 }
@@ -1106,7 +1121,7 @@ func applyResourceHandler(reg *clusters.Registry) credentials.Handler {
 // — the SPA's "Trigger now" affordance. Clones the CronJob's
 // JobTemplate into a freshly-named Job, matching the semantics of
 // `kubectl create job <name> --from=cronjob/<src>`. Audit-logged.
-func triggerCronJobHandler(reg *clusters.Registry) credentials.Handler {
+func triggerCronJobHandler(reg *clusters.Registry, auditer *audit.Emitter) credentials.Handler {
 	return func(w http.ResponseWriter, r *http.Request, p credentials.Provider) {
 		c, ok := reg.ByName(chi.URLParam(r, "cluster"))
 		if !ok {
@@ -1118,29 +1133,36 @@ func triggerCronJobHandler(reg *clusters.Registry) credentials.Handler {
 			Namespace: chi.URLParam(r, "ns"),
 			Name:      chi.URLParam(r, "name"),
 		}
+		evt := audit.Event{
+			Actor:   actorFromContext(r.Context()),
+			Verb:    audit.VerbTrigger,
+			Cluster: c.Name,
+			Resource: audit.ResourceRef{
+				Group: "batch", Version: "v1", Resource: "cronjobs",
+				Namespace: args.Namespace, Name: args.Name,
+			},
+		}
 		result, err := k8s.TriggerCronJob(r.Context(), p, args)
 		if err != nil {
 			if errors.Is(err, context.Canceled) {
 				return
 			}
-			slog.ErrorContext(r.Context(), "trigger cronjob failed",
-				"err", err, "cluster", c.Name,
-				"ns", args.Namespace, "name", args.Name,
-				"actor", p.Actor())
+			evt.Outcome = outcomeFor(err)
+			evt.Reason = err.Error()
+			auditer.Record(r.Context(), evt)
 			writeAPIError(w, err, httpStatusFor(err))
 			return
 		}
-		slog.InfoContext(r.Context(), "cronjob triggered",
-			"actor", p.Actor(), "cluster", c.Name,
-			"ns", args.Namespace, "name", args.Name,
-			"jobName", result.JobName)
+		evt.Outcome = audit.OutcomeSuccess
+		evt.Extra = map[string]any{"jobName": result.JobName}
+		auditer.Record(r.Context(), evt)
 		writeJSON(w, http.StatusOK, result)
 	}
 }
 
 // deleteResourceHandler is the symmetric DELETE entry point. Same
 // route-param handling as applyResourceHandler. Audit-logged.
-func deleteResourceHandler(reg *clusters.Registry) credentials.Handler {
+func deleteResourceHandler(reg *clusters.Registry, auditer *audit.Emitter) credentials.Handler {
 	return func(w http.ResponseWriter, r *http.Request, p credentials.Provider) {
 		c, ok := reg.ByName(chi.URLParam(r, "cluster"))
 		if !ok {
@@ -1159,21 +1181,27 @@ func deleteResourceHandler(reg *clusters.Registry) credentials.Handler {
 			Namespace: chi.URLParam(r, "ns"),
 			Name:      chi.URLParam(r, "name"),
 		}
+		evt := audit.Event{
+			Actor:   actorFromContext(r.Context()),
+			Verb:    audit.VerbDelete,
+			Cluster: c.Name,
+			Resource: audit.ResourceRef{
+				Group: args.Group, Version: args.Version, Resource: args.Resource,
+				Namespace: args.Namespace, Name: args.Name,
+			},
+		}
 		if err := k8s.DeleteResource(r.Context(), p, args); err != nil {
 			if errors.Is(err, context.Canceled) {
 				return
 			}
-			slog.ErrorContext(r.Context(), "delete resource failed",
-				"err", err, "cluster", c.Name,
-				"group", args.Group, "version", args.Version, "resource", args.Resource,
-				"ns", args.Namespace, "name", args.Name, "actor", p.Actor())
+			evt.Outcome = outcomeFor(err)
+			evt.Reason = err.Error()
+			auditer.Record(r.Context(), evt)
 			http.Error(w, err.Error(), httpStatusFor(err))
 			return
 		}
-		slog.InfoContext(r.Context(), "resource deleted",
-			"actor", p.Actor(), "cluster", c.Name,
-			"group", args.Group, "version", args.Version, "resource", args.Resource,
-			"ns", args.Namespace, "name", args.Name)
+		evt.Outcome = audit.OutcomeSuccess
+		auditer.Record(r.Context(), evt)
 		w.WriteHeader(http.StatusNoContent)
 	}
 }
@@ -1276,10 +1304,11 @@ func readApplyBody(r *http.Request) ([]byte, error) {
 	return body, nil
 }
 
-// secretRevealHandler wraps GetSecretValue. Audit logging is performed
-// inside GetSecretValue itself so it's tied to the read action, not just
-// the HTTP request envelope.
-func secretRevealHandler(reg *clusters.Registry) credentials.Handler {
+// secretRevealHandler wraps GetSecretValue. Audit emission lives
+// here (not inside the k8s package) so the audit pipeline stays at
+// the handler layer alongside apply/delete/exec, and the k8s
+// package has no awareness of audit.
+func secretRevealHandler(reg *clusters.Registry, auditer *audit.Emitter) credentials.Handler {
 	return func(w http.ResponseWriter, r *http.Request, p credentials.Provider) {
 		c, ok := reg.ByName(chi.URLParam(r, "cluster"))
 		if !ok {
@@ -1289,6 +1318,16 @@ func secretRevealHandler(reg *clusters.Registry) credentials.Handler {
 		ns := chi.URLParam(r, "ns")
 		name := chi.URLParam(r, "name")
 		key := chi.URLParam(r, "key")
+		evt := audit.Event{
+			Actor:   actorFromContext(r.Context()),
+			Verb:    audit.VerbSecretReveal,
+			Cluster: c.Name,
+			Resource: audit.ResourceRef{
+				Group: "", Version: "v1", Resource: "secrets",
+				Namespace: ns, Name: name,
+			},
+			Extra: map[string]any{"key": key},
+		}
 		value, err := k8s.GetSecretValue(r.Context(), p, k8s.GetSecretValueArgs{
 			Cluster: c, Namespace: ns, Name: name, Key: key,
 		})
@@ -1296,12 +1335,15 @@ func secretRevealHandler(reg *clusters.Registry) credentials.Handler {
 			if errors.Is(err, context.Canceled) {
 				return
 			}
-			slog.ErrorContext(r.Context(), "secret reveal failed",
-				"err", err, "cluster", c.Name, "ns", ns, "name", name, "key", key,
-				"actor", p.Actor())
+			evt.Outcome = outcomeFor(err)
+			evt.Reason = err.Error()
+			auditer.Record(r.Context(), evt)
 			http.Error(w, "operation failed", httpStatusFor(err))
 			return
 		}
+		evt.Outcome = audit.OutcomeSuccess
+		evt.Extra["size"] = len(value)
+		auditer.Record(r.Context(), evt)
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		w.Header().Set("Cache-Control", "no-store")
 		w.WriteHeader(http.StatusOK)

@@ -1,11 +1,15 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
 
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
+
+	"github.com/gnana997/periscope/internal/audit"
+	"github.com/gnana997/periscope/internal/credentials"
 )
 
 // httpStatusFor maps a k8s client-go error to the appropriate HTTP
@@ -34,6 +38,29 @@ func httpStatusFor(err error) int {
 		return http.StatusBadRequest
 	}
 	return http.StatusInternalServerError
+}
+
+// outcomeFor maps a Kubernetes client-go error to an audit Outcome.
+// Forbidden / Unauthorized are forensically interesting denials and
+// get their own outcome class so an operator can query "denied"
+// rows separately from generic failures (validation errors, network
+// timeouts, conflicts).
+func outcomeFor(err error) audit.Outcome {
+	switch {
+	case kerrors.IsForbidden(err), kerrors.IsUnauthorized(err):
+		return audit.OutcomeDenied
+	default:
+		return audit.OutcomeFailure
+	}
+}
+
+// actorFromContext returns an audit.Actor sourced from the Session
+// on context — Subject, Email, Groups all in one shot. Returns the
+// "anonymous" zero shape if no session was planted (which is what
+// credentials.SessionFromContext already guarantees).
+func actorFromContext(ctx context.Context) audit.Actor {
+	s := credentials.SessionFromContext(ctx)
+	return audit.Actor{Sub: s.Subject, Email: s.Email, Groups: s.Groups}
 }
 
 // writeAPIError surfaces a kerrors.StatusError as the structured
