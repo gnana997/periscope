@@ -97,6 +97,45 @@ export function removeRowFromList(
   return { ...obj, [field]: next } as unknown as ResourceListResponse;
 }
 
+// Returns a shallow-cloned list with `row` appended (or replaced if a
+// row with the same name+namespace already exists — common when an
+// ADDED watch event arrives for a row already inserted by an earlier
+// optimistic update or by a snapshot that landed late).
+//
+// Returns the original reference unchanged if the kind has no known
+// field — the watch handler can safely treat the result as
+// "successfully applied" since there's nothing to add to.
+export function addRowToList<T extends NamedRow>(
+  list: ResourceListResponse | undefined,
+  kind: string,
+  row: T,
+): ResourceListResponse | undefined {
+  if (!list) return list;
+  const field = LIST_ITEMS_KEY[kind];
+  if (!field) return list;
+  const obj = list as unknown as ListLike;
+  const items = obj[field];
+  if (!Array.isArray(items)) return list;
+  const idx = items.findIndex((existing) => {
+    const r = existing as NamedRow;
+    return (
+      r.name === row.name &&
+      (r.namespace ?? undefined) === (row.namespace ?? undefined)
+    );
+  });
+  let next: unknown[];
+  if (idx >= 0) {
+    // Replace in place. The new row is the source of truth (just
+    // arrived from the apiserver via watch); preserves order so the
+    // table doesn't reshuffle.
+    next = items.slice();
+    next[idx] = row;
+  } else {
+    next = [...items, row];
+  }
+  return { ...obj, [field]: next } as unknown as ResourceListResponse;
+}
+
 // Returns a shallow-cloned list with the row matching (name, namespace)
 // patched via `patch(row)`. Returns the original reference unchanged if
 // the kind has no known field or the row doesn't match.
