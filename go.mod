@@ -15,6 +15,7 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/homeport/dyff v1.12.0
 	go.yaml.in/yaml/v3 v3.0.4
+	go.uber.org/goleak v1.3.0
 	golang.org/x/oauth2 v0.36.0
 	gopkg.in/yaml.v3 v3.0.1
 	k8s.io/api v0.36.0
