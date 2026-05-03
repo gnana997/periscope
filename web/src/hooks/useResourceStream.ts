@@ -199,6 +199,14 @@ export function useResourceStream(
       qc.setQueryData<ResourceListResponse | undefined>(queryKey, (current) =>
         applyDeltas(current, resource, deltas),
       );
+      // First delta arrival on a resumed stream signals "live": the
+      // backend skipped the Snapshot because it accepted our
+      // Last-Event-ID, so the snapshot handler never fires. Treat
+      // any arriving delta as proof the stream is healthy. Idempotent
+      // when status is already "live".
+      setStatus("live");
+      reconnectAttempts = 0;
+      lastErrorAt = 0;
     };
 
     const scheduleFlush = () => {
