@@ -7,6 +7,7 @@ import (
 	"sort"
 
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/watch"
 
@@ -44,8 +45,8 @@ const (
 //	Added / Modified / Deleted → ResourceVersion + Object
 //	Relist                     → no fields
 //
-// Object and Items are typed any so the same shape carries Pods today
-// and Events / ReplicaSets / Jobs in later phases. The watch handler
+// Object and Items are typed any so the same shape carries Pods,
+// Events, ReplicaSets, Jobs, and any future kinds. The watch handler
 // owns JSON marshalling.
 type WatchEvent struct {
 	Type            WatchEventType
@@ -74,9 +75,41 @@ type WatchArgs struct {
 	Namespace string
 }
 
-// WatchPods runs a list-then-watch loop on Pods in the given namespace,
-// translating apiserver events into WatchEvents and delivering them to
-// sink.
+// watchSpec is the kind-specific surface that watchKind needs in order
+// to run a generic list-then-watch loop. Each Watch* exported function
+// is a thin wrapper that builds a watchSpec from its clientset method
+// chain and the appropriate summary helper.
+//
+// Type parameters:
+//
+//	T = the K8s API type (e.g. corev1.Pod, corev1.Event)
+//	S = the list-view DTO emitted to the sink (e.g. Pod, ClusterEvent)
+type watchSpec[T any, S any] struct {
+	// Kind labels the resource for error messages and observability.
+	Kind string
+
+	// List runs an apiserver List against the typed client and returns
+	// the items + the list's resourceVersion. Both errors and empty
+	// results are valid; the watcher decides what to do.
+	List func(ctx context.Context, opts metav1.ListOptions) ([]T, string, error)
+
+	// Watch opens an apiserver watch starting at opts.ResourceVersion
+	// (set by watchKind) with allowWatchBookmarks already requested.
+	Watch func(ctx context.Context, opts metav1.ListOptions) (watch.Interface, error)
+
+	// Summary projects the API type to the list-view DTO. Same function
+	// is used for the initial snapshot and per-event deltas, so the
+	// frontend cache patches against shape-identical objects.
+	Summary func(*T) S
+
+	// PostList is an optional transform on the snapshot's summarized
+	// items before they're sent. Used by Events to sort newest-first
+	// and cap; pod-shaped resources leave it nil.
+	PostList func([]S) []S
+}
+
+// watchKind runs the canonical k8s list-then-watch loop using a
+// kind-specific watchSpec.
 //
 // Lifecycle:
 //
@@ -91,41 +124,39 @@ type WatchArgs struct {
 //  7. Any other error → return it. The caller (SSE handler) decides
 //     whether to surface it as event:error or close silently.
 //
-// WatchPods does not retry transient network errors itself — the SSE
+// watchKind does not retry transient network errors itself — the SSE
 // transport is the right place for that, since the browser's
 // EventSource will reconnect automatically.
-func WatchPods(ctx context.Context, p credentials.Provider, args WatchArgs, sink WatchSink) error {
-	cs, err := newClientFn(ctx, p, args.Cluster)
-	if err != nil {
-		return fmt.Errorf("build clientset: %w", err)
-	}
-
+func watchKind[T any, S any](ctx context.Context, spec watchSpec[T, S], sink WatchSink) error {
 	for {
-		list, err := cs.CoreV1().Pods(args.Namespace).List(ctx, metav1.ListOptions{})
+		items, rv, err := spec.List(ctx, metav1.ListOptions{})
 		if err != nil {
-			return fmt.Errorf("list pods: %w", err)
+			return fmt.Errorf("list %s: %w", spec.Kind, err)
 		}
-		items := make([]Pod, 0, len(list.Items))
-		for i := range list.Items {
-			items = append(items, podSummary(&list.Items[i]))
+		summarized := make([]S, 0, len(items))
+		for i := range items {
+			summarized = append(summarized, spec.Summary(&items[i]))
+		}
+		if spec.PostList != nil {
+			summarized = spec.PostList(summarized)
 		}
 		if !sink.Send(WatchEvent{
 			Type:            WatchSnapshot,
-			ResourceVersion: list.ResourceVersion,
-			Items:           items,
+			ResourceVersion: rv,
+			Items:           summarized,
 		}) {
 			return nil
 		}
 
-		watcher, err := cs.CoreV1().Pods(args.Namespace).Watch(ctx, metav1.ListOptions{
-			ResourceVersion:     list.ResourceVersion,
+		watcher, err := spec.Watch(ctx, metav1.ListOptions{
+			ResourceVersion:     rv,
 			AllowWatchBookmarks: true,
 		})
 		if err != nil {
-			return fmt.Errorf("watch pods: %w", err)
+			return fmt.Errorf("watch %s: %w", spec.Kind, err)
 		}
 
-		relist, err := drainPodWatcher(ctx, watcher, sink)
+		relist, err := drainWatcher(ctx, watcher, spec.Summary, sink)
 		watcher.Stop()
 		if err != nil {
 			return err
@@ -136,15 +167,19 @@ func WatchPods(ctx context.Context, p credentials.Provider, args WatchArgs, sink
 	}
 }
 
-// drainPodWatcher consumes events from a single watcher.
-// Returns (relist=true) when the apiserver signals 410 Gone or closes
-// the watch channel cleanly; the caller should then list again and
-// reopen the watch.
-// Returns (relist=false, err=nil) when ctx is cancelled or sink.Send
-// returns false.
-// Returns (relist=false, err=non-nil) on apiserver-side errors that
-// should propagate.
-func drainPodWatcher(ctx context.Context, watcher watch.Interface, sink WatchSink) (bool, error) {
+// drainWatcher consumes events from a single watcher until ctx is
+// cancelled, sink.Send returns false, the apiserver signals 410 Gone
+// (returns relist=true), or another apiserver error fires.
+//
+// The summary function is identical to watchSpec.Summary; it lives as
+// a parameter rather than re-passing the whole spec because that's all
+// drainWatcher needs.
+func drainWatcher[T any, S any](
+	ctx context.Context,
+	watcher watch.Interface,
+	summary func(*T) S,
+	sink WatchSink,
+) (bool, error) {
 	for {
 		select {
 		case <-ctx.Done():
@@ -174,11 +209,18 @@ func drainPodWatcher(ctx context.Context, watcher watch.Interface, sink WatchSin
 				return false, errors.New("watch error: unknown status object")
 			}
 
-			pod, ok := event.Object.(*corev1.Pod)
+			// Generic type assertion: event.Object is runtime.Object,
+			// and *T does not statically satisfy runtime.Object inside
+			// a generic body (Go type-system limitation). Cast through
+			// any and assert to *T concretely.
+			obj, ok := any(event.Object).(*T)
 			if !ok {
 				continue
 			}
-			summary := podSummary(pod)
+			acc, err := meta.Accessor(event.Object)
+			if err != nil {
+				continue
+			}
 
 			var t WatchEventType
 			switch event.Type {
@@ -194,8 +236,8 @@ func drainPodWatcher(ctx context.Context, watcher watch.Interface, sink WatchSin
 
 			if !sink.Send(WatchEvent{
 				Type:            t,
-				ResourceVersion: pod.ResourceVersion,
-				Object:          summary,
+				ResourceVersion: acc.GetResourceVersion(),
+				Object:          summary(obj),
 			}) {
 				return false, nil
 			}
@@ -203,15 +245,33 @@ func drainPodWatcher(ctx context.Context, watcher watch.Interface, sink WatchSin
 	}
 }
 
+// WatchPods runs a list-then-watch loop on Pods in the given namespace.
+// See watchKind for lifecycle details.
+func WatchPods(ctx context.Context, p credentials.Provider, args WatchArgs, sink WatchSink) error {
+	cs, err := newClientFn(ctx, p, args.Cluster)
+	if err != nil {
+		return fmt.Errorf("build clientset: %w", err)
+	}
+	return watchKind(ctx, watchSpec[corev1.Pod, Pod]{
+		Kind: "pods",
+		List: func(ctx context.Context, opts metav1.ListOptions) ([]corev1.Pod, string, error) {
+			list, err := cs.CoreV1().Pods(args.Namespace).List(ctx, opts)
+			if err != nil {
+				return nil, "", err
+			}
+			return list.Items, list.ResourceVersion, nil
+		},
+		Watch: func(ctx context.Context, opts metav1.ListOptions) (watch.Interface, error) {
+			return cs.CoreV1().Pods(args.Namespace).Watch(ctx, opts)
+		},
+		Summary: podSummary,
+	}, sink)
+}
+
 // WatchEvents runs a list-then-watch loop on cluster Events. The
 // initial snapshot is sorted newest-Last first and capped at
 // clusterEventCap to match the existing ListClusterEvents semantics —
 // frontend cache patches stay shape-identical to polled list responses.
-//
-// Lifecycle is identical to WatchPods (see that doc for details). The
-// only kind-specific differences are the clientset method chain
-// (CoreV1().Events vs CoreV1().Pods) and the summary conversion
-// (eventSummary vs podSummary).
 //
 // Delta events emit raw eventSummary'd objects with no cap or sort —
 // the frontend's cache patcher reconciles them into the capped list.
@@ -223,103 +283,27 @@ func WatchEvents(ctx context.Context, p credentials.Provider, args WatchArgs, si
 	if err != nil {
 		return fmt.Errorf("build clientset: %w", err)
 	}
-
-	for {
-		list, err := cs.CoreV1().Events(args.Namespace).List(ctx, metav1.ListOptions{})
-		if err != nil {
-			return fmt.Errorf("list events: %w", err)
-		}
-		items := make([]ClusterEvent, 0, len(list.Items))
-		for i := range list.Items {
-			items = append(items, eventSummary(&list.Items[i]))
-		}
-		sort.Slice(items, func(i, j int) bool {
-			return items[i].Last.After(items[j].Last)
-		})
-		if len(items) > clusterEventCap {
-			items = items[:clusterEventCap]
-		}
-		if !sink.Send(WatchEvent{
-			Type:            WatchSnapshot,
-			ResourceVersion: list.ResourceVersion,
-			Items:           items,
-		}) {
-			return nil
-		}
-
-		watcher, err := cs.CoreV1().Events(args.Namespace).Watch(ctx, metav1.ListOptions{
-			ResourceVersion:     list.ResourceVersion,
-			AllowWatchBookmarks: true,
-		})
-		if err != nil {
-			return fmt.Errorf("watch events: %w", err)
-		}
-
-		relist, err := drainEventWatcher(ctx, watcher, sink)
-		watcher.Stop()
-		if err != nil {
-			return err
-		}
-		if !relist {
-			return nil
-		}
-	}
-}
-
-// drainEventWatcher is the Event variant of drainPodWatcher. The
-// duplication is intentional and short-lived: phase 5 factors a
-// generic drainWatcher[T,S] once we have three concrete drains to
-// observe the right shape from.
-func drainEventWatcher(ctx context.Context, watcher watch.Interface, sink WatchSink) (bool, error) {
-	for {
-		select {
-		case <-ctx.Done():
-			return false, nil
-		case event, ok := <-watcher.ResultChan():
-			if !ok {
-				return true, nil
+	return watchKind(ctx, watchSpec[corev1.Event, ClusterEvent]{
+		Kind: "events",
+		List: func(ctx context.Context, opts metav1.ListOptions) ([]corev1.Event, string, error) {
+			list, err := cs.CoreV1().Events(args.Namespace).List(ctx, opts)
+			if err != nil {
+				return nil, "", err
 			}
-			switch event.Type {
-			case watch.Bookmark:
-				continue
-			case watch.Error:
-				if status, ok := event.Object.(*metav1.Status); ok {
-					if status.Reason == metav1.StatusReasonGone || status.Code == 410 {
-						if !sink.Send(WatchEvent{Type: WatchRelist}) {
-							return false, nil
-						}
-						return true, nil
-					}
-					return false, fmt.Errorf("watch error: %s", status.Message)
-				}
-				return false, errors.New("watch error: unknown status object")
+			return list.Items, list.ResourceVersion, nil
+		},
+		Watch: func(ctx context.Context, opts metav1.ListOptions) (watch.Interface, error) {
+			return cs.CoreV1().Events(args.Namespace).Watch(ctx, opts)
+		},
+		Summary: eventSummary,
+		PostList: func(events []ClusterEvent) []ClusterEvent {
+			sort.Slice(events, func(i, j int) bool {
+				return events[i].Last.After(events[j].Last)
+			})
+			if len(events) > clusterEventCap {
+				events = events[:clusterEventCap]
 			}
-
-			ev, ok := event.Object.(*corev1.Event)
-			if !ok {
-				continue
-			}
-			summary := eventSummary(ev)
-
-			var t WatchEventType
-			switch event.Type {
-			case watch.Added:
-				t = WatchAdded
-			case watch.Modified:
-				t = WatchModified
-			case watch.Deleted:
-				t = WatchDeleted
-			default:
-				continue
-			}
-
-			if !sink.Send(WatchEvent{
-				Type:            t,
-				ResourceVersion: ev.ResourceVersion,
-				Object:          summary,
-			}) {
-				return false, nil
-			}
-		}
-	}
+			return events
+		},
+	}, sink)
 }
