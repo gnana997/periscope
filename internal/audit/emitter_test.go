@@ -32,7 +32,7 @@ func TestEmitter_StampsTimestampWhenZero(t *testing.T) {
 	s := &recordingSink{}
 	e := New(s)
 	before := time.Now().UTC()
-	e.Record(context.Background(), Event{Verb: VerbCreate, Outcome: OutcomeSuccess})
+	e.Record(context.Background(), Event{Verb: VerbApply, Outcome: OutcomeSuccess})
 	after := time.Now().UTC()
 
 	if len(s.events) != 1 {
@@ -50,7 +50,7 @@ func TestEmitter_PreservesExplicitTimestamp(t *testing.T) {
 	when := time.Date(2030, 1, 2, 3, 4, 5, 0, time.UTC)
 	e.Record(context.Background(), Event{
 		Timestamp: when,
-		Verb:      VerbCreate,
+		Verb:      VerbApply,
 		Outcome:   OutcomeSuccess,
 	})
 
@@ -94,7 +94,7 @@ func TestEmitter_HandlerActorWinsOverRequestContext(t *testing.T) {
 		Actor: Actor{Sub: "session-sub"},
 	})
 	e.Record(ctx, Event{
-		Verb:    VerbCreate,
+		Verb:    VerbApply,
 		Outcome: OutcomeSuccess,
 		Actor:   Actor{Sub: "explicit-sub"},
 	})
@@ -107,10 +107,10 @@ func TestEmitter_HandlerActorWinsOverRequestContext(t *testing.T) {
 func TestEmitter_NilIsNoOp(t *testing.T) {
 	var e *Emitter
 	// Must not panic.
-	e.Record(context.Background(), Event{Verb: VerbCreate, Outcome: OutcomeSuccess})
+	e.Record(context.Background(), Event{Verb: VerbApply, Outcome: OutcomeSuccess})
 }
 
 func TestEmitter_EmptySinksIsNoOp(t *testing.T) {
 	e := New()
-	e.Record(context.Background(), Event{Verb: VerbCreate, Outcome: OutcomeSuccess})
+	e.Record(context.Background(), Event{Verb: VerbApply, Outcome: OutcomeSuccess})
 }

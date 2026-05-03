@@ -24,12 +24,19 @@ import "time"
 // should be added explicitly here rather than passed as a free string,
 // so downstream queries (and the future SQLite schema) can index on
 // it.
+//
+// Note that VerbApply covers create-and-update through Server-Side
+// Apply — Periscope's mutation surface (PATCH with
+// application/apply-patch+yaml) does not split create vs update at
+// the API level, and we don't synthesize the distinction client-side.
+// The forensic question "did this row create or modify the
+// resource?" is answerable by joining audit rows: the first
+// successful apply for a given (cluster, ns, group, version,
+// resource, name) is the create; everything after is an update.
 type Verb string
 
 const (
-	VerbCreate       Verb = "create"
-	VerbUpdate       Verb = "update"
-	VerbPatch        Verb = "patch"
+	VerbApply        Verb = "apply"
 	VerbDelete       Verb = "delete"
 	VerbTrigger      Verb = "trigger"
 	VerbExecOpen     Verb = "exec_open"

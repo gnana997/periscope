@@ -1075,13 +1075,9 @@ func applyResourceHandler(reg *clusters.Registry, auditer *audit.Emitter) creden
 			DryRun:    r.URL.Query().Get("dryRun") == "true",
 			Force:     r.URL.Query().Get("force") == "true",
 		}
-		// TODO: derive create vs update vs patch from result.Object's
-		// resourceVersion and request shape. For v1 we use Patch (the
-		// HTTP method). The SQLite schema in PR2 will benefit from the
-		// distinction.
 		evt := audit.Event{
 			Actor:   actorFromContext(r.Context()),
-			Verb:    audit.VerbPatch,
+			Verb:    audit.VerbApply,
 			Cluster: c.Name,
 			Resource: audit.ResourceRef{
 				Group: args.Group, Version: args.Version, Resource: args.Resource,

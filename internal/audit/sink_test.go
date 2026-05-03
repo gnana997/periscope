@@ -113,7 +113,7 @@ func TestStdoutSink_NilLoggerUsesDefault(t *testing.T) {
 	// stderr; we don't care about contents here.
 	sink := &StdoutSink{}
 	sink.Record(context.Background(), Event{
-		Verb: VerbCreate, Outcome: OutcomeSuccess,
+		Verb: VerbApply, Outcome: OutcomeSuccess,
 		Actor: Actor{Sub: "u"},
 	})
 }
@@ -122,7 +122,7 @@ func TestStdoutSink_EmitsRequestContextFields(t *testing.T) {
 	var buf bytes.Buffer
 	sink := captureSink(&buf)
 	sink.Record(context.Background(), Event{
-		Verb:      VerbPatch,
+		Verb:      VerbApply,
 		Outcome:   OutcomeDenied,
 		Actor:     Actor{Sub: "u", Email: "u@x", Groups: []string{"sre"}},
 		RequestID: "req-1",
