@@ -316,6 +316,16 @@ function patchDetailFromRows(
       // (pods, containers, conditions, …) we want to keep.
       return { ...(current as Record<string, unknown>), ...row };
     });
+    // Cancel any fetch in flight for this detail key. Its result was
+    // started before the apiserver published the event we just
+    // patched, so letting it settle would overwrite our fresh patch
+    // with stale data — the user would see top-stats flick to the
+    // new value and then snap back to the prior one. The subsequent
+    // invalidateRelated call in flush() restarts a fresh fetch
+    // (now idle, so cancelRefetch:false doesn’t make it piggyback
+    // on a non-existent fetch); that fresh fetch returns at least as
+    // new as our patched state.
+    void qc.cancelQueries({ queryKey: detailKey, exact: true });
   }
 }
 
