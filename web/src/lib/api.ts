@@ -214,7 +214,15 @@ export type WatchStreamKind =
   | "services"
   | "ingresses"
   | "networkpolicies"
-  | "endpointslices";
+  | "endpointslices"
+  | "ingressclasses"
+  | "pvs"
+  | "pvcs"
+  | "storageclasses"
+  | "nodes"
+  | "namespaces"
+  | "priorityclasses"
+  | "runtimeclasses";
 
 // Features describes server-side capability flags. Fetched once at app
 // boot via api.features and consumed by useResource (Phase 6) to choose

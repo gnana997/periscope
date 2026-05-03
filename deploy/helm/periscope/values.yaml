@@ -419,11 +419,18 @@ exec:
 # Per-kind tokens (current registry): pods, events, deployments,
 # statefulsets, daemonsets, replicasets, jobs, cronjobs,
 # horizontalpodautoscalers, poddisruptionbudgets, services,
-# ingresses, networkpolicies, endpointslices.
-# Group aliases (current registry): core (= pods, events),
-# workloads (= deployments, statefulsets, daemonsets, replicasets,
-# jobs, cronjobs, horizontalpodautoscalers, poddisruptionbudgets),
-# networking (= services, ingresses, networkpolicies, endpointslices).
+# ingresses, networkpolicies, endpointslices, ingressclasses,
+# pvs, pvcs, storageclasses, nodes, namespaces, priorityclasses,
+# runtimeclasses.
+# Group aliases (current registry):
+#   core       = pods, events
+#   workloads  = deployments, statefulsets, daemonsets, replicasets,
+#                jobs, cronjobs, horizontalpodautoscalers,
+#                poddisruptionbudgets
+#   networking = services, ingresses, networkpolicies, endpointslices,
+#                ingressclasses
+#   storage    = pvs, pvcs, storageclasses
+#   cluster    = nodes, namespaces, priorityclasses, runtimeclasses
 #
 # Reasons to opt out: an HTTP proxy / load balancer in front of
 # Periscope that buffers responses or kills idle connections under

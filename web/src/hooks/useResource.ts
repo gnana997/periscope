@@ -83,6 +83,21 @@ const LIST_REFETCH_INTERVAL: Partial<Record<ResourceKind, number>> = {
   ingresses: 30_000,
   networkpolicies: 30_000,
   endpointslices: 15_000,
+  ingressclasses: 60_000,
+  // Storage — PVCs follow pod lifecycle (Bound/Pending transitions on
+  // workload startup), so 30s polling. PVs/StorageClasses are largely
+  // static cluster admin objects; 60s is fine.
+  pvs: 60_000,
+  pvcs: 30_000,
+  storageclasses: 60_000,
+  // Cluster admin — Nodes change on autoscaling/maintenance windows
+  // (poll at 30s as a meaningful fallback during cluster ops);
+  // Namespaces and PriorityClasses/RuntimeClasses are essentially
+  // static (60s is plenty when the stream is down).
+  nodes: 30_000,
+  namespaces: 60_000,
+  priorityclasses: 60_000,
+  runtimeclasses: 60_000,
 };
 
 // WATCH_STREAM_KINDS mirrors the WatchStreamKind union; lifted here so
@@ -102,6 +117,14 @@ const WATCH_STREAM_KINDS: ReadonlyArray<ResourceKind> = [
   "ingresses",
   "networkpolicies",
   "endpointslices",
+  "ingressclasses",
+  "pvs",
+  "pvcs",
+  "storageclasses",
+  "nodes",
+  "namespaces",
+  "priorityclasses",
+  "runtimeclasses",
 ];
 
 function isWatchStreamKind(k: ResourceKind): k is WatchStreamKind {

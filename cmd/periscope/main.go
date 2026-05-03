@@ -2331,6 +2331,14 @@ var watchKinds = []kindReg{
 	{Name: "ingresses", Group: "networking", Watch: k8s.WatchIngresses},
 	{Name: "networkpolicies", Group: "networking", Watch: k8s.WatchNetworkPolicies},
 	{Name: "endpointslices", Group: "networking", Watch: k8s.WatchEndpointSlices},
+	{Name: "ingressclasses", Group: "networking", Watch: k8s.WatchIngressClasses},
+	{Name: "pvs", Group: "storage", Watch: k8s.WatchPVs},
+	{Name: "pvcs", Group: "storage", Watch: k8s.WatchPVCs},
+	{Name: "storageclasses", Group: "storage", Watch: k8s.WatchStorageClasses},
+	{Name: "nodes", Group: "cluster", Watch: k8s.WatchNodes},
+	{Name: "namespaces", Group: "cluster", Watch: k8s.WatchNamespaces},
+	{Name: "priorityclasses", Group: "cluster", Watch: k8s.WatchPriorityClasses},
+	{Name: "runtimeclasses", Group: "cluster", Watch: k8s.WatchRuntimeClasses},
 }
 
 // resourceWatchHandler is the kind-agnostic SSE handler for resource

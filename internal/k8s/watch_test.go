@@ -14,7 +14,10 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	discoveryv1 "k8s.io/api/discovery/v1"
 	networkingv1 "k8s.io/api/networking/v1"
+	nodev1 "k8s.io/api/node/v1"
 	policyv1 "k8s.io/api/policy/v1"
+	schedulingv1 "k8s.io/api/scheduling/v1"
+	storagev1 "k8s.io/api/storage/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -1240,6 +1243,327 @@ func TestWatchEndpointSlices_SnapshotAndAdded(t *testing.T) {
 	}
 	if esObj.Name != "es-b" {
 		t.Errorf("added endpointslice name = %q, want es-b", esObj.Name)
+	}
+}
+
+// --- Tier-C cluster-scoped + storage smoke tests ---
+
+func TestWatchNodes_SnapshotAndAdded(t *testing.T) {
+	n := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node-a", ResourceVersion: "1"}}
+	cs := fake.NewSimpleClientset(n)
+	swapNewClientFn(t, cs)
+
+	sink := newTestSink(8)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() {
+		_ = WatchNodes(ctx, stubProvider{}, WatchArgs{
+			Cluster: clusters.Cluster{Name: "demo", Backend: clusters.BackendKubeconfig},
+		}, sink)
+	}()
+
+	snap := awaitEvent(t, sink)
+	if snap.Type != WatchSnapshot {
+		t.Fatalf("first event = %v, want snapshot", snap.Type)
+	}
+	items, ok := snap.Items.([]Node)
+	if !ok || len(items) != 1 || items[0].Name != "node-a" {
+		t.Fatalf("snapshot items = %+v, want one node-a", snap.Items)
+	}
+
+	n2 := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node-b", ResourceVersion: "2"}}
+	if _, err := cs.CoreV1().Nodes().Create(ctx, n2, metav1.CreateOptions{}); err != nil {
+		t.Fatalf("create node: %v", err)
+	}
+	got := awaitEvent(t, sink)
+	if got.Type != WatchAdded {
+		t.Fatalf("event = %v, want added", got.Type)
+	}
+	nObj, ok := got.Object.(Node)
+	if !ok || nObj.Name != "node-b" {
+		t.Errorf("added node = %+v, want node-b", got.Object)
+	}
+}
+
+func TestWatchNamespaces_SnapshotAndAdded(t *testing.T) {
+	ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "ns-a", ResourceVersion: "1"}}
+	cs := fake.NewSimpleClientset(ns)
+	swapNewClientFn(t, cs)
+
+	sink := newTestSink(8)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() {
+		_ = WatchNamespaces(ctx, stubProvider{}, WatchArgs{
+			Cluster: clusters.Cluster{Name: "demo", Backend: clusters.BackendKubeconfig},
+		}, sink)
+	}()
+
+	snap := awaitEvent(t, sink)
+	if snap.Type != WatchSnapshot {
+		t.Fatalf("first event = %v, want snapshot", snap.Type)
+	}
+	items, ok := snap.Items.([]Namespace)
+	if !ok || len(items) != 1 || items[0].Name != "ns-a" {
+		t.Fatalf("snapshot items = %+v, want one ns-a", snap.Items)
+	}
+
+	ns2 := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "ns-b", ResourceVersion: "2"}}
+	if _, err := cs.CoreV1().Namespaces().Create(ctx, ns2, metav1.CreateOptions{}); err != nil {
+		t.Fatalf("create namespace: %v", err)
+	}
+	got := awaitEvent(t, sink)
+	if got.Type != WatchAdded {
+		t.Fatalf("event = %v, want added", got.Type)
+	}
+	nsObj, ok := got.Object.(Namespace)
+	if !ok || nsObj.Name != "ns-b" {
+		t.Errorf("added namespace = %+v, want ns-b", got.Object)
+	}
+}
+
+func TestWatchPVs_SnapshotAndAdded(t *testing.T) {
+	pv := &corev1.PersistentVolume{ObjectMeta: metav1.ObjectMeta{Name: "pv-a", ResourceVersion: "1"}}
+	cs := fake.NewSimpleClientset(pv)
+	swapNewClientFn(t, cs)
+
+	sink := newTestSink(8)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() {
+		_ = WatchPVs(ctx, stubProvider{}, WatchArgs{
+			Cluster: clusters.Cluster{Name: "demo", Backend: clusters.BackendKubeconfig},
+		}, sink)
+	}()
+
+	snap := awaitEvent(t, sink)
+	if snap.Type != WatchSnapshot {
+		t.Fatalf("first event = %v, want snapshot", snap.Type)
+	}
+	items, ok := snap.Items.([]PV)
+	if !ok || len(items) != 1 || items[0].Name != "pv-a" {
+		t.Fatalf("snapshot items = %+v, want one pv-a", snap.Items)
+	}
+
+	pv2 := &corev1.PersistentVolume{ObjectMeta: metav1.ObjectMeta{Name: "pv-b", ResourceVersion: "2"}}
+	if _, err := cs.CoreV1().PersistentVolumes().Create(ctx, pv2, metav1.CreateOptions{}); err != nil {
+		t.Fatalf("create pv: %v", err)
+	}
+	got := awaitEvent(t, sink)
+	if got.Type != WatchAdded {
+		t.Fatalf("event = %v, want added", got.Type)
+	}
+	pvObj, ok := got.Object.(PV)
+	if !ok || pvObj.Name != "pv-b" {
+		t.Errorf("added pv = %+v, want pv-b", got.Object)
+	}
+}
+
+func TestWatchPVCs_SnapshotAndAdded(t *testing.T) {
+	pvc := &corev1.PersistentVolumeClaim{
+		ObjectMeta: metav1.ObjectMeta{Name: "pvc-a", Namespace: "default", ResourceVersion: "1"},
+	}
+	cs := fake.NewSimpleClientset(pvc)
+	swapNewClientFn(t, cs)
+
+	sink := newTestSink(8)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() {
+		_ = WatchPVCs(ctx, stubProvider{}, WatchArgs{
+			Cluster:   clusters.Cluster{Name: "demo", Backend: clusters.BackendKubeconfig},
+			Namespace: "default",
+		}, sink)
+	}()
+
+	snap := awaitEvent(t, sink)
+	if snap.Type != WatchSnapshot {
+		t.Fatalf("first event = %v, want snapshot", snap.Type)
+	}
+	items, ok := snap.Items.([]PVC)
+	if !ok || len(items) != 1 || items[0].Name != "pvc-a" {
+		t.Fatalf("snapshot items = %+v, want one pvc-a", snap.Items)
+	}
+
+	pvc2 := &corev1.PersistentVolumeClaim{
+		ObjectMeta: metav1.ObjectMeta{Name: "pvc-b", Namespace: "default", ResourceVersion: "2"},
+	}
+	if _, err := cs.CoreV1().PersistentVolumeClaims("default").Create(ctx, pvc2, metav1.CreateOptions{}); err != nil {
+		t.Fatalf("create pvc: %v", err)
+	}
+	got := awaitEvent(t, sink)
+	if got.Type != WatchAdded {
+		t.Fatalf("event = %v, want added", got.Type)
+	}
+	pvcObj, ok := got.Object.(PVC)
+	if !ok || pvcObj.Name != "pvc-b" {
+		t.Errorf("added pvc = %+v, want pvc-b", got.Object)
+	}
+}
+
+func TestWatchStorageClasses_SnapshotAndAdded(t *testing.T) {
+	sc := &storagev1.StorageClass{
+		ObjectMeta:  metav1.ObjectMeta{Name: "sc-a", ResourceVersion: "1"},
+		Provisioner: "kubernetes.io/example",
+	}
+	cs := fake.NewSimpleClientset(sc)
+	swapNewClientFn(t, cs)
+
+	sink := newTestSink(8)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() {
+		_ = WatchStorageClasses(ctx, stubProvider{}, WatchArgs{
+			Cluster: clusters.Cluster{Name: "demo", Backend: clusters.BackendKubeconfig},
+		}, sink)
+	}()
+
+	snap := awaitEvent(t, sink)
+	if snap.Type != WatchSnapshot {
+		t.Fatalf("first event = %v, want snapshot", snap.Type)
+	}
+	items, ok := snap.Items.([]StorageClass)
+	if !ok || len(items) != 1 || items[0].Name != "sc-a" {
+		t.Fatalf("snapshot items = %+v, want one sc-a", snap.Items)
+	}
+
+	sc2 := &storagev1.StorageClass{
+		ObjectMeta:  metav1.ObjectMeta{Name: "sc-b", ResourceVersion: "2"},
+		Provisioner: "kubernetes.io/example",
+	}
+	if _, err := cs.StorageV1().StorageClasses().Create(ctx, sc2, metav1.CreateOptions{}); err != nil {
+		t.Fatalf("create storageclass: %v", err)
+	}
+	got := awaitEvent(t, sink)
+	if got.Type != WatchAdded {
+		t.Fatalf("event = %v, want added", got.Type)
+	}
+	scObj, ok := got.Object.(StorageClass)
+	if !ok || scObj.Name != "sc-b" {
+		t.Errorf("added storageclass = %+v, want sc-b", got.Object)
+	}
+}
+
+func TestWatchIngressClasses_SnapshotAndAdded(t *testing.T) {
+	ic := &networkingv1.IngressClass{ObjectMeta: metav1.ObjectMeta{Name: "ic-a", ResourceVersion: "1"}}
+	cs := fake.NewSimpleClientset(ic)
+	swapNewClientFn(t, cs)
+
+	sink := newTestSink(8)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() {
+		_ = WatchIngressClasses(ctx, stubProvider{}, WatchArgs{
+			Cluster: clusters.Cluster{Name: "demo", Backend: clusters.BackendKubeconfig},
+		}, sink)
+	}()
+
+	snap := awaitEvent(t, sink)
+	if snap.Type != WatchSnapshot {
+		t.Fatalf("first event = %v, want snapshot", snap.Type)
+	}
+	items, ok := snap.Items.([]IngressClass)
+	if !ok || len(items) != 1 || items[0].Name != "ic-a" {
+		t.Fatalf("snapshot items = %+v, want one ic-a", snap.Items)
+	}
+
+	ic2 := &networkingv1.IngressClass{ObjectMeta: metav1.ObjectMeta{Name: "ic-b", ResourceVersion: "2"}}
+	if _, err := cs.NetworkingV1().IngressClasses().Create(ctx, ic2, metav1.CreateOptions{}); err != nil {
+		t.Fatalf("create ingressclass: %v", err)
+	}
+	got := awaitEvent(t, sink)
+	if got.Type != WatchAdded {
+		t.Fatalf("event = %v, want added", got.Type)
+	}
+	icObj, ok := got.Object.(IngressClass)
+	if !ok || icObj.Name != "ic-b" {
+		t.Errorf("added ingressclass = %+v, want ic-b", got.Object)
+	}
+}
+
+func TestWatchPriorityClasses_SnapshotAndAdded(t *testing.T) {
+	pc := &schedulingv1.PriorityClass{
+		ObjectMeta: metav1.ObjectMeta{Name: "pc-a", ResourceVersion: "1"},
+		Value:      1000,
+	}
+	cs := fake.NewSimpleClientset(pc)
+	swapNewClientFn(t, cs)
+
+	sink := newTestSink(8)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() {
+		_ = WatchPriorityClasses(ctx, stubProvider{}, WatchArgs{
+			Cluster: clusters.Cluster{Name: "demo", Backend: clusters.BackendKubeconfig},
+		}, sink)
+	}()
+
+	snap := awaitEvent(t, sink)
+	if snap.Type != WatchSnapshot {
+		t.Fatalf("first event = %v, want snapshot", snap.Type)
+	}
+	items, ok := snap.Items.([]PriorityClass)
+	if !ok || len(items) != 1 || items[0].Name != "pc-a" {
+		t.Fatalf("snapshot items = %+v, want one pc-a", snap.Items)
+	}
+
+	pc2 := &schedulingv1.PriorityClass{
+		ObjectMeta: metav1.ObjectMeta{Name: "pc-b", ResourceVersion: "2"},
+		Value:      500,
+	}
+	if _, err := cs.SchedulingV1().PriorityClasses().Create(ctx, pc2, metav1.CreateOptions{}); err != nil {
+		t.Fatalf("create priorityclass: %v", err)
+	}
+	got := awaitEvent(t, sink)
+	if got.Type != WatchAdded {
+		t.Fatalf("event = %v, want added", got.Type)
+	}
+	pcObj, ok := got.Object.(PriorityClass)
+	if !ok || pcObj.Name != "pc-b" {
+		t.Errorf("added priorityclass = %+v, want pc-b", got.Object)
+	}
+}
+
+func TestWatchRuntimeClasses_SnapshotAndAdded(t *testing.T) {
+	rc := &nodev1.RuntimeClass{
+		ObjectMeta: metav1.ObjectMeta{Name: "rc-a", ResourceVersion: "1"},
+		Handler:    "runc",
+	}
+	cs := fake.NewSimpleClientset(rc)
+	swapNewClientFn(t, cs)
+
+	sink := newTestSink(8)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() {
+		_ = WatchRuntimeClasses(ctx, stubProvider{}, WatchArgs{
+			Cluster: clusters.Cluster{Name: "demo", Backend: clusters.BackendKubeconfig},
+		}, sink)
+	}()
+
+	snap := awaitEvent(t, sink)
+	if snap.Type != WatchSnapshot {
+		t.Fatalf("first event = %v, want snapshot", snap.Type)
+	}
+	items, ok := snap.Items.([]RuntimeClass)
+	if !ok || len(items) != 1 || items[0].Name != "rc-a" {
+		t.Fatalf("snapshot items = %+v, want one rc-a", snap.Items)
+	}
+
+	rc2 := &nodev1.RuntimeClass{
+		ObjectMeta: metav1.ObjectMeta{Name: "rc-b", ResourceVersion: "2"},
+		Handler:    "kata",
+	}
+	if _, err := cs.NodeV1().RuntimeClasses().Create(ctx, rc2, metav1.CreateOptions{}); err != nil {
+		t.Fatalf("create runtimeclass: %v", err)
+	}
+	got := awaitEvent(t, sink)
+	if got.Type != WatchAdded {
+		t.Fatalf("event = %v, want added", got.Type)
+	}
+	rcObj, ok := got.Object.(RuntimeClass)
+	if !ok || rcObj.Name != "rc-b" {
+		t.Errorf("added runtimeclass = %+v, want rc-b", got.Object)
 	}
 }
 
