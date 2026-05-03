@@ -824,20 +824,25 @@ func main() {
 	serverCtx, cancelServer := context.WithCancel(context.Background())
 	defer cancelServer()
 
-	// sessionValid is the auth-revalidation hook the watch handler ticks
-	// every 60s mid-stream. Captured as a closure so handler doesn't
-	// import auth or the session store directly.
-	sessionValid := func(r *http.Request) bool {
-		return auth.SessionValid(r, sessionStore, authCfg)
+	// watchHandlerDeps bundles the cross-cutting dependencies the kind-
+	// agnostic resourceWatchHandler needs. Shared across every watch
+	// route so adding a new kind is one router.Get line.
+	watchHandlerDeps := &watchDeps{
+		Tracker:   streamTracker,
+		Limiter:   streamLimiter,
+		ServerCtx: serverCtx,
+		SessionValid: func(r *http.Request) bool {
+			return auth.SessionValid(r, sessionStore, authCfg)
+		},
 	}
 
 	if watchCfg.pods {
 		router.Get("/api/clusters/{cluster}/pods/watch",
-			credentials.Wrap(factory, podsWatchHandler(registry, streamTracker, streamLimiter, serverCtx, sessionValid)))
+			credentials.Wrap(factory, resourceWatchHandler("pods", registry, watchHandlerDeps, k8s.WatchPods)))
 	}
 	if watchCfg.events {
 		router.Get("/api/clusters/{cluster}/events/watch",
-			credentials.Wrap(factory, eventsWatchHandler(registry, streamTracker, streamLimiter, serverCtx, sessionValid)))
+			credentials.Wrap(factory, resourceWatchHandler("events", registry, watchHandlerDeps, k8s.WatchEvents)))
 	}
 
 	// Debug endpoint listing currently-open watch streams. JSON for
@@ -2001,16 +2006,31 @@ func (t *streamTracker) snapshot() []streamEntry {
 	return out
 }
 
-// podsWatchHandler streams pod ADDED/MODIFIED/DELETED events as Server-Sent
-// Events. Wire format (frozen — frontend depends on it):
+// watchDeps bundles the cross-cutting dependencies every watch SSE
+// handler needs. Built once at startup and shared across kinds.
+type watchDeps struct {
+	Tracker      *streamTracker
+	Limiter      *userStreamLimiter
+	ServerCtx    context.Context
+	SessionValid func(*http.Request) bool
+}
+
+// watchFn matches the signature of every k8s.Watch* primitive
+// (WatchPods, WatchEvents, WatchReplicaSets, WatchJobs). The handler
+// uses it as an opaque function value, so each route registration just
+// passes the appropriate primitive without further wrapping.
+type watchFn func(ctx context.Context, p credentials.Provider, args k8s.WatchArgs, sink k8s.WatchSink) error
+
+// resourceWatchHandler is the kind-agnostic SSE handler for resource
+// watch streams. Wire format (frozen — frontend depends on it):
 //
 //	event: snapshot
 //	id: <resourceVersion>
-//	data: {"resourceVersion":"<rv>","items":[<Pod>...]}
+//	data: {"resourceVersion":"<rv>","items":[<DTO>...]}
 //
 //	event: added | modified | deleted
 //	id: <resourceVersion>
-//	data: {"object":<Pod>}
+//	data: {"object":<DTO>}
 //
 //	event: relist
 //	data: {"reason":"gone_410"}
@@ -2018,34 +2038,22 @@ func (t *streamTracker) snapshot() []streamEntry {
 //	event: backpressure
 //	data: {}
 //
+//	event: server_shutdown | auth_expired
+//	data: {}
+//
 //	event: error
 //	data: {"message":"..."}
 //
-// <Pod> is the same DTO returned by GET /api/clusters/{c}/pods, so the
-// frontend cache patches with type-identical objects.
+// <DTO> is whatever the corresponding k8s.Watch* primitive emits in
+// WatchEvent.Object / .Items — same shape returned by the matching
+// list endpoint, so the frontend cache patches against type-identical
+// objects.
 //
 // Lifecycle transitions are slog'd at info level with event names
-// "watch_stream.opened" / "watch_stream.closed" so log-to-metrics
-// agents can derive counters until Prometheus is wired up.
-//
-// Per-user concurrency is capped via the limiter; over-cap requests
-// return 429 before any SSE work happens.
-//
-// serverCtx is cancelled on SIGTERM/SIGINT so the handler can emit
-// "event: server_shutdown" before the http.Server.Shutdown drain
-// closes the connection — clients see an explicit signal that the
-// disconnect was server-initiated and can adjust reconnect UX.
-//
-// sessionValid is invoked every 60s to detect session expiry mid-stream.
-// On invalid the handler emits "event: auth_expired" and closes; the
-// frontend redirects to login on receipt.
-func podsWatchHandler(
-	reg *clusters.Registry,
-	tracker *streamTracker,
-	limiter *userStreamLimiter,
-	serverCtx context.Context,
-	sessionValid func(*http.Request) bool,
-) credentials.Handler {
+// "watch_stream.opened" / "watch_stream.closed" / "watch_stream.relist"
+// / "watch_stream.auth_expired" / "watch_stream.rate_limited" so
+// log-to-metrics agents can derive counters until Prometheus is wired up.
+func resourceWatchHandler(kind string, reg *clusters.Registry, deps *watchDeps, watch watchFn) credentials.Handler {
 	return func(w http.ResponseWriter, r *http.Request, p credentials.Provider) {
 		c, ok := reg.ByName(chi.URLParam(r, "cluster"))
 		if !ok {
@@ -2053,15 +2061,15 @@ func podsWatchHandler(
 			return
 		}
 		ns := r.URL.Query().Get("namespace")
-
 		actor := p.Actor()
-		if !limiter.acquire(actor) {
+
+		if !deps.Limiter.acquire(actor) {
 			slog.WarnContext(r.Context(), "watch_stream.rate_limited",
-				"actor", actor, "kind", "pods", "cluster", c.Name, "ns", ns)
+				"actor", actor, "kind", kind, "cluster", c.Name, "ns", ns)
 			http.Error(w, "too many concurrent watch streams for this user", http.StatusTooManyRequests)
 			return
 		}
-		defer limiter.release(actor)
+		defer deps.Limiter.release(actor)
 
 		sw, err := sse.Open(w)
 		if err != nil {
@@ -2070,16 +2078,16 @@ func podsWatchHandler(
 		}
 		defer sw.Close()
 
-		id, deregister := tracker.register(streamEntry{
-			Actor:     p.Actor(),
+		id, deregister := deps.Tracker.register(streamEntry{
+			Actor:     actor,
 			Cluster:   c.Name,
-			Kind:      "pods",
+			Kind:      kind,
 			Namespace: ns,
 			OpenedAt:  time.Now(),
 		})
 		defer deregister()
 		slog.InfoContext(r.Context(), "watch_stream.opened",
-			"id", id, "kind", "pods", "cluster", c.Name, "ns", ns, "actor", p.Actor())
+			"id", id, "kind", kind, "cluster", c.Name, "ns", ns, "actor", actor)
 
 		eventCh := make(chan k8s.WatchEvent, 256)
 		sink := &watchChannelSink{ctx: r.Context(), ch: eventCh}
@@ -2089,7 +2097,7 @@ func podsWatchHandler(
 		go func() {
 			defer close(streamDone)
 			defer close(eventCh)
-			streamErr = k8s.WatchPods(r.Context(), p, k8s.WatchArgs{
+			streamErr = watch(r.Context(), p, k8s.WatchArgs{
 				Cluster:   c,
 				Namespace: ns,
 			}, sink)
@@ -2098,8 +2106,8 @@ func podsWatchHandler(
 		closeReason := "ctx_done"
 		defer func() {
 			slog.InfoContext(r.Context(), "watch_stream.closed",
-				"id", id, "kind", "pods", "cluster", c.Name, "ns", ns,
-				"actor", p.Actor(), "reason", closeReason)
+				"id", id, "kind", kind, "cluster", c.Name, "ns", ns,
+				"actor", actor, "reason", closeReason)
 		}()
 
 		// Tick the auth-revalidation check independently of the SSE
@@ -2115,15 +2123,15 @@ func podsWatchHandler(
 			case <-r.Context().Done():
 				<-streamDone
 				return
-			case <-serverCtx.Done():
+			case <-deps.ServerCtx.Done():
 				closeReason = "server_shutdown"
 				_ = sw.Event("server_shutdown", "", struct{}{})
 				return
 			case <-authCheck.C:
-				if !sessionValid(r) {
+				if !deps.SessionValid(r) {
 					closeReason = "auth_expired"
 					slog.InfoContext(r.Context(), "watch_stream.auth_expired",
-						"id", id, "kind", "pods", "cluster", c.Name, "ns", ns, "actor", p.Actor())
+						"id", id, "kind", kind, "cluster", c.Name, "ns", ns, "actor", actor)
 					_ = sw.Event("auth_expired", "", struct{}{})
 					return
 				}
@@ -2135,8 +2143,8 @@ func podsWatchHandler(
 					switch {
 					case streamErr != nil && !errors.Is(streamErr, context.Canceled):
 						closeReason = "error"
-						slog.ErrorContext(r.Context(), "pods watch failed",
-							"err", streamErr, "cluster", c.Name, "ns", ns, "actor", p.Actor())
+						slog.ErrorContext(r.Context(), "watch_stream.failed",
+							"kind", kind, "err", streamErr, "cluster", c.Name, "ns", ns, "actor", actor)
 						_ = sw.Event("error", "", map[string]string{"message": streamErr.Error()})
 					case sink.closedByBackpressure:
 						closeReason = "backpressure"
@@ -2148,19 +2156,22 @@ func podsWatchHandler(
 				}
 				if ev.Type == k8s.WatchRelist {
 					slog.InfoContext(r.Context(), "watch_stream.relist",
-						"id", id, "kind", "pods", "cluster", c.Name, "ns", ns)
+						"id", id, "kind", kind, "cluster", c.Name, "ns", ns)
 				}
-				emitPodWatchEvent(sw, ev)
+				emitWatchEvent(sw, ev)
 			}
 		}
 	}
 }
 
-// emitPodWatchEvent translates a k8s.WatchEvent into the SSE wire
-// format. Errors from sw.Event are intentionally ignored — a write
-// failure means the connection has dropped and the next iteration of
-// the handler loop will observe ctx cancellation and exit cleanly.
-func emitPodWatchEvent(sw *sse.Writer, ev k8s.WatchEvent) {
+// emitWatchEvent translates a k8s.WatchEvent into the SSE wire format.
+// Errors from sw.Event are intentionally ignored — a write failure
+// means the connection has dropped and the next iteration of the
+// handler loop will observe ctx cancellation and exit cleanly.
+//
+// Kind-agnostic: ev.Object and ev.Items pass through as any, JSON-
+// marshalled by sw.Event.
+func emitWatchEvent(sw *sse.Writer, ev k8s.WatchEvent) {
 	switch ev.Type {
 	case k8s.WatchSnapshot:
 		_ = sw.Event("snapshot", ev.ResourceVersion, struct {
@@ -2173,127 +2184,5 @@ func emitPodWatchEvent(sw *sse.Writer, ev k8s.WatchEvent) {
 		}{Object: ev.Object})
 	case k8s.WatchRelist:
 		_ = sw.Event("relist", "", map[string]string{"reason": "gone_410"})
-	}
-}
-
-// eventsWatchHandler streams cluster Events as Server-Sent Events.
-// Wire format and lifecycle are byte-identical to podsWatchHandler;
-// the only differences are the underlying watch primitive (k8s.WatchEvents)
-// and the ClusterEvent DTO carried in snapshot/added/modified/deleted
-// events.
-//
-// The duplication with podsWatchHandler is intentional and short-lived:
-// Phase 5 factors a generic resourceWatchHandler[F] once we have three
-// concrete handlers (events, replicasets, jobs) to confirm the right
-// shape.
-func eventsWatchHandler(
-	reg *clusters.Registry,
-	tracker *streamTracker,
-	limiter *userStreamLimiter,
-	serverCtx context.Context,
-	sessionValid func(*http.Request) bool,
-) credentials.Handler {
-	return func(w http.ResponseWriter, r *http.Request, p credentials.Provider) {
-		c, ok := reg.ByName(chi.URLParam(r, "cluster"))
-		if !ok {
-			http.Error(w, "cluster not found", http.StatusNotFound)
-			return
-		}
-		ns := r.URL.Query().Get("namespace")
-
-		actor := p.Actor()
-		if !limiter.acquire(actor) {
-			slog.WarnContext(r.Context(), "watch_stream.rate_limited",
-				"actor", actor, "kind", "events", "cluster", c.Name, "ns", ns)
-			http.Error(w, "too many concurrent watch streams for this user", http.StatusTooManyRequests)
-			return
-		}
-		defer limiter.release(actor)
-
-		sw, err := sse.Open(w)
-		if err != nil {
-			http.Error(w, "streaming unsupported", http.StatusInternalServerError)
-			return
-		}
-		defer sw.Close()
-
-		id, deregister := tracker.register(streamEntry{
-			Actor:     actor,
-			Cluster:   c.Name,
-			Kind:      "events",
-			Namespace: ns,
-			OpenedAt:  time.Now(),
-		})
-		defer deregister()
-		slog.InfoContext(r.Context(), "watch_stream.opened",
-			"id", id, "kind", "events", "cluster", c.Name, "ns", ns, "actor", actor)
-
-		eventCh := make(chan k8s.WatchEvent, 256)
-		sink := &watchChannelSink{ctx: r.Context(), ch: eventCh}
-
-		var streamErr error
-		streamDone := make(chan struct{})
-		go func() {
-			defer close(streamDone)
-			defer close(eventCh)
-			streamErr = k8s.WatchEvents(r.Context(), p, k8s.WatchArgs{
-				Cluster:   c,
-				Namespace: ns,
-			}, sink)
-		}()
-
-		closeReason := "ctx_done"
-		defer func() {
-			slog.InfoContext(r.Context(), "watch_stream.closed",
-				"id", id, "kind", "events", "cluster", c.Name, "ns", ns,
-				"actor", actor, "reason", closeReason)
-		}()
-
-		authCheck := time.NewTicker(60 * time.Second)
-		defer authCheck.Stop()
-
-		for {
-			select {
-			case <-r.Context().Done():
-				<-streamDone
-				return
-			case <-serverCtx.Done():
-				closeReason = "server_shutdown"
-				_ = sw.Event("server_shutdown", "", struct{}{})
-				return
-			case <-authCheck.C:
-				if !sessionValid(r) {
-					closeReason = "auth_expired"
-					slog.InfoContext(r.Context(), "watch_stream.auth_expired",
-						"id", id, "kind", "events", "cluster", c.Name, "ns", ns, "actor", actor)
-					_ = sw.Event("auth_expired", "", struct{}{})
-					return
-				}
-			case <-sw.HeartbeatC():
-				_ = sw.Ping()
-			case ev, ok := <-eventCh:
-				if !ok {
-					<-streamDone
-					switch {
-					case streamErr != nil && !errors.Is(streamErr, context.Canceled):
-						closeReason = "error"
-						slog.ErrorContext(r.Context(), "events watch failed",
-							"err", streamErr, "cluster", c.Name, "ns", ns, "actor", actor)
-						_ = sw.Event("error", "", map[string]string{"message": streamErr.Error()})
-					case sink.closedByBackpressure:
-						closeReason = "backpressure"
-						_ = sw.Event("backpressure", "", struct{}{})
-					default:
-						closeReason = "eof"
-					}
-					return
-				}
-				if ev.Type == k8s.WatchRelist {
-					slog.InfoContext(r.Context(), "watch_stream.relist",
-						"id", id, "kind", "events", "cluster", c.Name, "ns", ns)
-				}
-				emitPodWatchEvent(sw, ev)
-			}
-		}
 	}
 }
