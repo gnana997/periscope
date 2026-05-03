@@ -206,3 +206,44 @@ func TestEmpty(t *testing.T) {
 		t.Errorf("Empty().ByName returned ok=true")
 	}
 }
+
+func TestLoadFromFile_environmentAndTags(t *testing.T) {
+	p := writeTempFile(t, `
+clusters:
+  - name: prod
+    arn: arn:aws:eks:us-east-1:123456789012:cluster/prod
+    region: us-east-1
+    environment: prod
+    tags:
+      team: platform
+      costcenter: "42"
+  - name: dev
+    arn: arn:aws:eks:us-east-1:123456789012:cluster/dev
+    region: us-east-1
+`)
+	r, err := LoadFromFile(p)
+	if err != nil {
+		t.Fatalf("LoadFromFile: %v", err)
+	}
+	prod, ok := r.ByName("prod")
+	if !ok {
+		t.Fatal("ByName(prod) not found")
+	}
+	if prod.Environment != "prod" {
+		t.Errorf("Environment = %q, want %q", prod.Environment, "prod")
+	}
+	if got := prod.Tags["team"]; got != "platform" {
+		t.Errorf("Tags[team] = %q, want platform", got)
+	}
+	if got := prod.Tags["costcenter"]; got != "42" {
+		t.Errorf("Tags[costcenter] = %q, want 42", got)
+	}
+
+	dev, _ := r.ByName("dev")
+	if dev.Environment != "" {
+		t.Errorf("dev.Environment = %q, want empty", dev.Environment)
+	}
+	if dev.Tags != nil && len(dev.Tags) != 0 {
+		t.Errorf("dev.Tags = %v, want nil/empty", dev.Tags)
+	}
+}

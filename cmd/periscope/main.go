@@ -113,6 +113,15 @@ func main() {
 	router.Get("/api/whoami", credentials.Wrap(factory, whoami))
 	router.Get("/api/clusters", listClustersHandler(registry))
 
+	// --- Fleet (multi-cluster home page) ---
+	//
+	// Aggregator over every registered cluster. Page-level deny when
+	// the user has no tier; per-cluster status otherwise. See
+	// fleet_handler.go for the failure model.
+	fleetCacheTTL := 10 * time.Second
+	router.Get("/api/fleet", credentials.Wrap(factory,
+		fleetHandler(registry, authzResolver, newFleetCache(fleetCacheTTL))))
+
 	// --- Overview / dashboard ---
 
 	router.Get("/api/clusters/{cluster}/dashboard", credentials.Wrap(factory,

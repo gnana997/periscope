@@ -11,13 +11,11 @@
 //                  default page once the cluster list resolves
 
 import { useEffect, useRef } from "react";
-import { Outlet, useNavigate, useParams } from "react-router-dom";
+import { Outlet, useParams } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import { Brand } from "./components/shell/Brand";
 import { ClusterRail } from "./components/shell/ClusterRail";
 import { Sidebar } from "./components/shell/Sidebar";
-import { ErrorState, NoClustersState } from "./components/table/states";
-import { useClusters } from "./hooks/useClusters";
 import { queryKeys } from "./lib/queryKeys";
 
 export function AppShell() {
@@ -70,54 +68,3 @@ export function WithCluster<P extends { cluster: string }>({
   return <Page {...({ cluster } as unknown as P)} />;
 }
 
-export function RootRedirect() {
-  const { data, isLoading, isError, error } = useClusters();
-  const navigate = useNavigate();
-
-  useEffect(() => {
-    if (data && data.clusters.length > 0) {
-      navigate(`/clusters/${data.clusters[0].name}/pods`, { replace: true });
-    }
-  }, [data, navigate]);
-
-  if (isLoading) {
-    return (
-      <div className="flex h-full items-center justify-center bg-bg">
-        <div className="flex items-center gap-3 text-[13px] text-ink-muted">
-          <span
-            aria-hidden
-            className="block size-3.5 animate-spin rounded-full border-[1.5px] border-border-strong border-t-accent"
-          />
-          loading clusters…
-        </div>
-      </div>
-    );
-  }
-  if (isError) {
-    return (
-      <div className="flex h-full bg-bg">
-        <ErrorState
-          title="couldn't reach periscope backend"
-          message={(error as Error)?.message ?? "unknown"}
-          hint={
-            <>
-              Is the backend running on{" "}
-              <code className="rounded bg-surface-2 px-1 py-0.5 font-mono">
-                :8080
-              </code>
-              ?
-            </>
-          }
-        />
-      </div>
-    );
-  }
-  if (data && data.clusters.length === 0) {
-    return (
-      <div className="flex h-full bg-bg">
-        <NoClustersState />
-      </div>
-    );
-  }
-  return null;
-}
