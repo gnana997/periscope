@@ -34,6 +34,7 @@ export const RESOURCES: ResourceMeta[] = [
   { id: "poddisruptionbudgets",     label: "PodDisruptionBudgets",     group: "Workloads",  ready: true  },
   { id: "services",     label: "Services",     group: "Networking", ready: true  },
   { id: "ingresses",    label: "Ingresses",    group: "Networking", ready: true  },
+  { id: "endpointslices",   label: "EndpointSlices",   group: "Networking", ready: true  },
   { id: "networkpolicies",  label: "NetworkPolicies",  group: "Networking", ready: true  },
   { id: "ingressclasses",   label: "IngressClasses",   group: "Networking", ready: true  },
   { id: "configmaps",    label: "ConfigMaps",    group: "Config",   ready: true  },

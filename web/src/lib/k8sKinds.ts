@@ -50,6 +50,9 @@ export const KIND_REGISTRY: Record<YamlKind, KindMeta> = {
   ingressclasses:       { group: "networking.k8s.io",      version: "v1",       resource: "ingressclasses",             kind: "IngressClass" },
   networkpolicies:      { group: "networking.k8s.io",      version: "v1",       resource: "networkpolicies",            kind: "NetworkPolicy" },
 
+  // discovery.k8s.io/v1
+  endpointslices:       { group: "discovery.k8s.io",       version: "v1",       resource: "endpointslices",             kind: "EndpointSlice" },
+
   // rbac.authorization.k8s.io/v1
   roles:                { group: "rbac.authorization.k8s.io", version: "v1",    resource: "roles",                      kind: "Role" },
   rolebindings:         { group: "rbac.authorization.k8s.io", version: "v1",    resource: "rolebindings",               kind: "RoleBinding" },
