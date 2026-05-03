@@ -17,6 +17,7 @@
 import { useEffect, useRef, useState } from "react";
 import { cn } from "../../../lib/cn";
 import { classifyManager } from "../../../lib/managers";
+import { Modal } from "../../ui/Modal";
 
 interface TakeoverDialogProps {
   fields: Array<{ path: string; manager: string }>;
@@ -34,18 +35,6 @@ export function TakeoverDialog({ fields, onCancel, onConfirm }: TakeoverDialogPr
     const t = setTimeout(() => inputRef.current?.focus(), 50);
     return () => clearTimeout(t);
   }, []);
-
-  // Esc to cancel. Doesn't catch when typing — typing flows through.
-  useEffect(() => {
-    function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") {
-        e.preventDefault();
-        onCancel();
-      }
-    }
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onCancel]);
 
   // Decide whether to require the typing gate. Skip if every field
   // being seized is owned by a HUMAN-category manager (kubectl-edit,
@@ -67,16 +56,8 @@ export function TakeoverDialog({ fields, onCancel, onConfirm }: TakeoverDialogPr
   const ok = !requireGate || typed.trim().toLowerCase() === "force";
 
   return (
-    <div
-      className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 px-4"
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="takeover-title"
-      onClick={(e) => {
-        if (e.target === e.currentTarget) onCancel();
-      }}
-    >
-      <div className="w-full max-w-[560px] rounded-md border border-border-strong bg-surface px-6 py-5 shadow-2xl">
+    <Modal open onClose={onCancel} labelledBy="takeover-title" size="md" z={60}>
+      <div className="px-6 py-5">
         <div className="font-mono text-[10px] uppercase tracking-[0.10em] text-red">
           take ownership · deliberate action
         </div>
@@ -179,6 +160,6 @@ export function TakeoverDialog({ fields, onCancel, onConfirm }: TakeoverDialogPr
           </button>
         </div>
       </div>
-    </div>
+    </Modal>
   );
 }

@@ -8,17 +8,13 @@
 // via a one-shot useQuery with its own key so we don't disturb the
 // editor's cached pristine flow.
 
-import { useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api, type ClusterScopedKind, type YamlKind } from "../../../lib/api";
 import { cn } from "../../../lib/cn";
-import {
-  isClusterScoped,
-  sourceCacheKey,
-  type EditorSource,
-} from "../../../lib/customResources";
+import { driftYamlQueryKey, isClusterScoped, type EditorSource } from "../../../lib/customResources";
 import { stripForEdit } from "../../../lib/stripForEdit";
 import { DetailLoading, DetailError } from "../states";
+import { Modal } from "../../ui/Modal";
 import { InlineDiff } from "./InlineDiff";
 
 interface DriftDiffOverlayProps {
@@ -40,29 +36,11 @@ export function DriftDiffOverlay({
   onClose,
   onReload,
 }: DriftDiffOverlayProps) {
-  // Esc to close.
-  useEffect(() => {
-    function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") {
-        e.preventDefault();
-        onClose();
-      }
-    }
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
-
   // Independent fetch — separate cache key so we don't compete with
   // the editor's pristine-flowing yamlQuery. staleTime: 0 + a fresh
   // mount on every open guarantees we see latest server state.
   const freshQuery = useQuery<string>({
-    queryKey: [
-      "yaml-drift-overlay",
-      sourceCacheKey(source),
-      cluster,
-      namespace ?? "",
-      name,
-    ],
+    queryKey: driftYamlQueryKey(source, cluster, namespace ?? "", name),
     queryFn: ({ signal }) => {
       if (source.kind === "custom") {
         return api.getCustomResourceYAML(
@@ -94,16 +72,15 @@ export function DriftDiffOverlay({
   const freshStripped = freshQuery.data ? stripForEdit(freshQuery.data) : null;
 
   return (
-    <div
-      className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 px-4 py-6"
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="drift-diff-title"
-      onClick={(e) => {
-        if (e.target === e.currentTarget) onClose();
-      }}
+    <Modal
+      open
+      onClose={onClose}
+      labelledBy="drift-diff-title"
+      size="lg"
+      z={60}
+      panelClassName="flex h-full max-h-[820px] flex-col overflow-hidden"
     >
-      <div className="flex h-full max-h-[820px] w-full max-w-[1100px] flex-col overflow-hidden rounded-md border border-border-strong bg-surface shadow-2xl">
+      <>
         {/* Header */}
         <header className="shrink-0 border-b border-border bg-surface px-5 py-3">
           <div className="font-mono text-[10px] uppercase tracking-[0.10em] text-yellow-700 dark:text-yellow-300">
@@ -161,7 +138,7 @@ export function DriftDiffOverlay({
             reload from cluster
           </button>
         </footer>
-      </div>
-    </div>
+      </>
+    </Modal>
   );
 }

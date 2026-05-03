@@ -3,6 +3,7 @@ import { useMatch, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../../lib/api";
 import { cn } from "../../lib/cn";
+import { queryKeys } from "../../lib/queryKeys";
 import { useCRDs } from "../../hooks/useResource";
 import { nameMatches } from "../../lib/format";
 import type { CRD, SearchKind, SearchResult } from "../../lib/types";
@@ -98,7 +99,7 @@ export function SearchPalette({
   }, [query]);
 
   const { data, isFetching, isError } = useQuery({
-    queryKey: ["search", cluster, debounced],
+    queryKey: queryKeys.cluster(cluster).search(debounced),
     enabled: Boolean(open && cluster && debounced.length > 0),
     queryFn: ({ signal }) =>
       api.search(cluster, debounced, { limit: 10 }, signal),

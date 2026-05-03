@@ -685,17 +685,15 @@ function Editor({ cluster, source, resource, pristine }: EditorProps) {
         await api.applyResource({ ...args, dryRun: false, force }, ac.signal);
         setApplyState({ kind: "success" });
 
-        // Invalidate list/detail/events/yaml/meta so all open views refetch.
-        invalidateAfterApply(qc, source, resource);
-
-        // Drop ?edit=1 → unmount → YamlReadView takes over
-        setTimeout(() => {
-          setParams((prev) => {
-            const next = new URLSearchParams(prev);
-            next.delete("edit");
-            return next;
-          }, { replace: true });
-        }, 400);
+        // Awaited so the post-apply refetch lands before the editor
+        // unmounts — YamlReadView then opens to fresh data without
+        // the prior 400ms race-mitigation timeout.
+        await invalidateAfterApply(qc, source, resource);
+        setParams((prev) => {
+          const next = new URLSearchParams(prev);
+          next.delete("edit");
+          return next;
+        }, { replace: true });
       } catch (e) {
         if (ac.signal.aborted) return;
         const apiErr = e instanceof ApiError ? e : null;
@@ -785,17 +783,15 @@ function Editor({ cluster, source, resource, pristine }: EditorProps) {
       setApplyState({ kind: "applying" });
       await api.applyResource({ ...args, dryRun: false, force }, ac.signal);
       setApplyState({ kind: "success" });
-      invalidateAfterApply(qc, source, resource);
+      await invalidateAfterApply(qc, source, resource);
       setShowTakeover(false);
       setConflicts([]);
       setResolutions(new Map());
-      setTimeout(() => {
-        setParams((prev) => {
-          const next = new URLSearchParams(prev);
-          next.delete("edit");
-          return next;
-        }, { replace: true });
-      }, 400);
+      setParams((prev) => {
+        const next = new URLSearchParams(prev);
+        next.delete("edit");
+        return next;
+      }, { replace: true });
     } catch (e) {
       if (ac.signal.aborted) return;
       const apiErr = e instanceof ApiError ? e : null;

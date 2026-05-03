@@ -10,6 +10,7 @@
 
 import { skipToken, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect } from "react";
+import { queryKeys } from "../lib/queryKeys";
 
 interface DirtyState {
   dirty: boolean;
@@ -18,7 +19,7 @@ interface DirtyState {
 const DEFAULT: DirtyState = { dirty: false };
 
 function dirtyKey(cluster: string, kind: string, ns: string | undefined, name: string) {
-  return ["edit", cluster, kind, ns ?? "", name];
+  return queryKeys.edit(cluster, kind, ns ?? "", name);
 }
 
 /**

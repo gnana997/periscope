@@ -139,6 +139,22 @@ pre,
   }
 }
 
+/* fetchbar — indeterminate left-to-right sweep used by GlobalFetchingBar
+   to signal background refetches. The bar element is 33% wide; the
+   keyframe slides it from -100% to 200% so it traverses the full
+   viewport width regardless of container size. */
+@keyframes fetchbar {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(300%);
+  }
+}
+.animate-fetchbar {
+  animation: fetchbar 1.2s ease-in-out infinite;
+}
+
 /* Owner-glyph margin — colored 4px bars in Monaco's gutter showing
    which K8s SSA field manager owns each line. Categories map to the
    accent palette also used in ConflictResolutionView's manager

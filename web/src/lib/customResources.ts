@@ -11,6 +11,7 @@ import type { QueryClient } from "@tanstack/react-query";
 import type { CRD } from "./types";
 import type { ResourceRef, YamlKind, ClusterScopedKind } from "./api";
 import { KIND_REGISTRY } from "./k8sKinds";
+import { queryKeys } from "./queryKeys";
 
 const CLUSTER_SCOPED_BUILTINS: ReadonlySet<YamlKind> = new Set<YamlKind>([
   "namespaces",
@@ -142,10 +143,12 @@ export function sourceToResourceRef(
   };
 }
 
-/** Query key for the editor's YAML fetch. Built-in retains the
- *  existing `["yaml", cluster, yamlKind, ns, name]` shape so the
- *  read-only YamlView and other consumers share the cache. CRs use
- *  `["yaml-cr", ...]` — fully segregated. */
+/** Query key for the editor's YAML fetch. Built-ins land under
+ *  queryKeys.cluster(c).kind(yamlKind).yaml(...); CRs under
+ *  queryKeys.cluster(c).cr(group, version, plural).yaml(...). Both
+ *  share the `.all` prefix for prefix invalidation, but the key
+ *  shapes are otherwise segregated so plural collisions across
+ *  built-ins and CRDs are impossible. */
 export function editorYamlQueryKey(
   s: EditorSource,
   cluster: string,
@@ -153,9 +156,29 @@ export function editorYamlQueryKey(
   name: string,
 ): readonly unknown[] {
   if (s.kind === "builtin") {
-    return ["yaml", cluster, s.yamlKind, ns, name];
+    return queryKeys.cluster(cluster).kind(s.yamlKind).yaml(ns, name);
   }
-  return ["yaml-cr", cluster, s.cr.group, s.cr.version, s.cr.resource, ns, name];
+  const { group, version, resource } = s.cr;
+  return queryKeys.cluster(cluster).cr(group, version, resource).yaml(ns, name);
+}
+
+/** Side-channel YAML fetch key for the drift-diff overlay (distinct
+ *  from the editor's pristine-flowing yaml query, but still under the
+ *  same kind/cr subtree so prefix invalidation sweeps it). */
+export function driftYamlQueryKey(
+  s: EditorSource,
+  cluster: string,
+  ns: string,
+  name: string,
+): readonly unknown[] {
+  if (s.kind === "builtin") {
+    return queryKeys.cluster(cluster).kind(s.yamlKind).yamlDrift(ns, name);
+  }
+  const { group, version, resource } = s.cr;
+  return queryKeys
+    .cluster(cluster)
+    .cr(group, version, resource)
+    .yamlDrift(ns, name);
 }
 
 /** Invalidate only the editor's YAML cache. Used by drift
@@ -172,47 +195,35 @@ export function invalidateEditorYaml(
 
 /** Invalidate everything that should refresh after a successful
  *  apply: list cache, detail cache, YAML cache, events cache, meta
- *  cache. Source-aware — CRs use their own query-key shapes. */
-export function invalidateAfterApply(
+ *  cache. One prefix invalidation per source kind sweeps all of them
+ *  — `.kind(plural).all` for built-ins, `.cr(g, v, p).all` for CRs.
+ *  Plus `.kind(resource.resource).meta(...)` since useResourceMeta
+ *  shares the kind subtree (see useResource.ts). */
+export async function invalidateAfterApply(
   qc: QueryClient,
   s: EditorSource,
   ref: ResourceRef,
-): void {
-  const ns = ref.namespace ?? "";
+): Promise<void> {
+  // Awaited so the post-apply refetch lands before the editor
+  // unmounts — YamlReadView then opens to fresh data without the
+  // race-mitigation setTimeout that the previous design relied on.
   if (s.kind === "builtin") {
-    const k = s.yamlKind;
-    qc.invalidateQueries({ queryKey: [k] });
-    qc.invalidateQueries({ queryKey: ["yaml", ref.cluster, k, ns, ref.name] });
-    qc.invalidateQueries({
-      queryKey: [`${singularize(k)}-detail`, ref.cluster, ns, ref.name],
+    await qc.invalidateQueries({
+      queryKey: queryKeys.cluster(ref.cluster).kind(s.yamlKind).all,
     });
-    qc.invalidateQueries({ queryKey: ["events", ref.cluster, k, ns, ref.name] });
   } else {
     const { group, version, resource } = s.cr;
-    qc.invalidateQueries({
-      queryKey: ["customresources", ref.cluster, group, version, resource, ns],
-    });
-    qc.invalidateQueries({
-      queryKey: ["customresource", ref.cluster, group, version, resource, ns, ref.name],
-    });
-    qc.invalidateQueries({
-      queryKey: ["yaml-cr", ref.cluster, group, version, resource, ns, ref.name],
+    await qc.invalidateQueries({
+      queryKey: queryKeys.cluster(ref.cluster).cr(group, version, resource).all,
     });
   }
-  // meta cache key shape is GVR-keyed already (built-ins + CRs share).
-  qc.invalidateQueries({
-    queryKey: [
-      "meta",
-      ref.cluster,
-      ref.group,
-      ref.version,
-      ref.resource,
-      ns,
-      ref.name,
-    ],
-  });
-}
-
-function singularize(kind: string): string {
-  return kind.endsWith("s") ? kind.slice(0, -1) : kind;
+  // useResourceMeta keys via .kind(resource.resource) for both built-
+  // ins and CRs (see comment in useResource.ts), so this sweeps meta
+  // for either source type. Skipped when source is built-in and
+  // s.yamlKind === ref.resource (already covered by the first call).
+  if (s.kind === "custom" || s.yamlKind !== ref.resource) {
+    await qc.invalidateQueries({
+      queryKey: queryKeys.cluster(ref.cluster).kind(ref.resource).all,
+    });
+  }
 }

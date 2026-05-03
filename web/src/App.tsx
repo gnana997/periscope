@@ -1,9 +1,9 @@
 // App — root layout for the data router.
 //
 // Owns app-wide chrome: the Cmd+K palette, the exec drawer, the
-// toaster, and the auth/theme/loading gates. Route definitions live
-// in routes.tsx (createRoutesFromElements) and render through the
-// Outlet below.
+// toaster, the global fetching indicator, and the auth/theme/loading
+// gates. Route definitions live in routes.tsx
+// (createRoutesFromElements) and render through the Outlet below.
 
 import { useEffect, useState } from "react";
 import { Outlet } from "react-router-dom";
@@ -11,6 +11,7 @@ import { ExecSessionsProvider } from "./exec/ExecSessionsContext";
 import { Drawer } from "./exec/Drawer";
 import { Toaster } from "./lib/toast";
 import { SearchPalette } from "./components/search/SearchPalette";
+import { GlobalFetchingBar } from "./components/shell/GlobalFetchingBar";
 import { useAuth } from "./auth/useAuth";
 import { LoginScreen } from "./auth/LoginScreen";
 import { useTheme } from "./hooks/useTheme";
@@ -55,6 +56,7 @@ export default function App() {
   return (
     <ExecSessionsProvider>
       <div className="flex h-full flex-col">
+        <GlobalFetchingBar />
         <div className="min-h-0 flex-1 overflow-hidden">
           <Outlet />
         </div>

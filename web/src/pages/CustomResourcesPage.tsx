@@ -9,6 +9,7 @@ import { useEditorDirty } from "../hooks/useEditorDirty";
 import { useConfirmDiscard } from "../hooks/useConfirmDiscard";
 import { ageFrom, nameMatches } from "../lib/format";
 import { cn } from "../lib/cn";
+import { queryKeys } from "../lib/queryKeys";
 import { PageHeader } from "../components/page/PageHeader";
 import { SplitPane } from "../components/page/SplitPane";
 import {
@@ -356,7 +357,7 @@ export function CustomResourcesPage({ cluster }: { cluster: string }) {
 function CustomResourceEventsView(props: CRDetailRefProps) {
   const { cluster, group, version, plural, namespace, name } = props;
   const eventsQuery = useQuery({
-    queryKey: ["cr-events", cluster, group, version, plural, namespace ?? "", name],
+    queryKey: queryKeys.cluster(cluster).cr(group, version, plural).events(namespace ?? "", name),
     queryFn: async ({ signal }) => {
       const ns = namespace && namespace.length > 0 ? namespace : "_";
       const url = `/api/clusters/${encodeURIComponent(cluster)}/customresources/${encodeURIComponent(group)}/${encodeURIComponent(version)}/${encodeURIComponent(plural)}/${encodeURIComponent(ns)}/${encodeURIComponent(name)}/events`;
