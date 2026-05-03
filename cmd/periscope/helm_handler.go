@@ -23,6 +23,7 @@ package main
 // blob is the foundation for that.
 
 import (
+	"context"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -82,6 +83,9 @@ func helmListHandler(reg *clusters.Registry, cache *helmListCache) func(http.Res
 
 		releases, truncated, err := k8s.ListHelmReleases(r.Context(), p, c, helmListCap)
 		if err != nil {
+			if errors.Is(err, context.Canceled) {
+				return
+			}
 			slog.Warn("helm list failed", "cluster", c.Name, "err", err)
 			writeAPIError(w, err, httpStatusFor(err))
 			return
@@ -118,6 +122,9 @@ func helmGetHandler(reg *clusters.Registry) func(http.ResponseWriter, *http.Requ
 
 		detail, err := k8s.GetHelmRelease(r.Context(), p, c, ns, name, revision, helmDetailMaxBytes)
 		if err != nil {
+			if errors.Is(err, context.Canceled) {
+				return
+			}
 			slog.Warn("helm get failed",
 				"cluster", c.Name, "namespace", ns, "name", name, "revision", revision, "err", err)
 			writeAPIError(w, err, httpStatusFor(err))
@@ -157,6 +164,9 @@ func helmHistoryHandler(reg *clusters.Registry) func(http.ResponseWriter, *http.
 
 		entries, err := k8s.GetHelmHistory(r.Context(), p, c, ns, name, max)
 		if err != nil {
+			if errors.Is(err, context.Canceled) {
+				return
+			}
 			slog.Warn("helm history failed",
 				"cluster", c.Name, "namespace", ns, "name", name, "err", err)
 			writeAPIError(w, err, httpStatusFor(err))
@@ -200,6 +210,9 @@ func helmDiffHandler(reg *clusters.Registry) func(http.ResponseWriter, *http.Req
 
 		diff, err := k8s.DiffHelmRevisions(r.Context(), p, c, ns, name, fromRev, toRev, helmDetailMaxBytes)
 		if err != nil {
+			if errors.Is(err, context.Canceled) {
+				return
+			}
 			slog.Warn("helm diff failed",
 				"cluster", c.Name, "namespace", ns, "name", name,
 				"from", fromRev, "to", toRev, "err", err)

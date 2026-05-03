@@ -12,6 +12,7 @@
 // access to `useBlocker` (used by YamlEditor for the unsaved-changes
 // guard on cross-page navigation).
 
+import { Suspense } from "react";
 import {
   Navigate,
   Route,
@@ -21,57 +22,60 @@ import {
 
 import App from "./App";
 import { AppShell, WithCluster } from "./routeShells";
-import { FleetPage } from "./pages/FleetPage";
+import { lazyNamed } from "./lib/lazyNamed";
+import { LoadingState } from "./components/table/states";
 
-import { OverviewPage } from "./pages/OverviewPage";
-import { AuditPage } from "./pages/AuditPage";
-import { AuditEventDetailPage } from "./pages/AuditEventDetailPage";
-import { ConfigMapsPage } from "./pages/ConfigMapsPage";
-import { CronJobsPage } from "./pages/CronJobsPage";
-import { EventsPage } from "./pages/EventsPage";
-import { DaemonSetsPage } from "./pages/DaemonSetsPage";
-import { DeploymentsPage } from "./pages/DeploymentsPage";
-import { IngressesPage } from "./pages/IngressesPage";
-import { JobsPage } from "./pages/JobsPage";
-import { NamespacesPage } from "./pages/NamespacesPage";
-import { NodesPage } from "./pages/NodesPage";
-import { PodsPage } from "./pages/PodsPage";
-import { SecretsPage } from "./pages/SecretsPage";
-import { ServicesPage } from "./pages/ServicesPage";
-import { StatefulSetsPage } from "./pages/StatefulSetsPage";
-import { PVCsPage } from "./pages/PVCsPage";
-import { PVsPage } from "./pages/PVsPage";
-import { StorageClassesPage } from "./pages/StorageClassesPage";
-import { RolesPage } from "./pages/RolesPage";
-import { ClusterRolesPage } from "./pages/ClusterRolesPage";
-import { RoleBindingsPage } from "./pages/RoleBindingsPage";
-import { ClusterRoleBindingsPage } from "./pages/ClusterRoleBindingsPage";
-import { ServiceAccountsPage } from "./pages/ServiceAccountsPage";
-import { PodLogsPage } from "./pages/PodLogsPage";
-import { DeploymentLogsPage } from "./pages/DeploymentLogsPage";
-import { StatefulSetLogsPage } from "./pages/StatefulSetLogsPage";
-import { DaemonSetLogsPage } from "./pages/DaemonSetLogsPage";
-import { JobLogsPage } from "./pages/JobLogsPage";
-import { HorizontalPodAutoscalersPage } from "./pages/HorizontalPodAutoscalersPage";
-import { PodDisruptionBudgetsPage } from "./pages/PodDisruptionBudgetsPage";
-import { ReplicaSetsPage } from "./pages/ReplicaSetsPage";
-import { NetworkPoliciesPage } from "./pages/NetworkPoliciesPage";
-import { IngressClassesPage } from "./pages/IngressClassesPage";
-import { ResourceQuotasPage } from "./pages/ResourceQuotasPage";
-import { LimitRangesPage } from "./pages/LimitRangesPage";
-import { PriorityClassesPage } from "./pages/PriorityClassesPage";
-import { RuntimeClassesPage } from "./pages/RuntimeClassesPage";
-import { CRDsPage } from "./pages/CRDsPage";
-import { CustomResourcesPage } from "./pages/CustomResourcesPage";
-import { ExecPage } from "./pages/ExecPage";
-import { HelmReleasesPage } from "./pages/HelmReleasesPage";
-import { HelmReleasePage } from "./pages/HelmReleasePage";
-import { HelmDiffPage } from "./pages/HelmDiffPage";
+const FleetPage = lazyNamed(() => import("./pages/FleetPage"), "FleetPage");
+
+const OverviewPage = lazyNamed(() => import("./pages/OverviewPage"), "OverviewPage");
+const AuditPage = lazyNamed(() => import("./pages/AuditPage"), "AuditPage");
+const AuditEventDetailPage = lazyNamed(() => import("./pages/AuditEventDetailPage"), "AuditEventDetailPage");
+const ConfigMapsPage = lazyNamed(() => import("./pages/ConfigMapsPage"), "ConfigMapsPage");
+const CronJobsPage = lazyNamed(() => import("./pages/CronJobsPage"), "CronJobsPage");
+const EventsPage = lazyNamed(() => import("./pages/EventsPage"), "EventsPage");
+const DaemonSetsPage = lazyNamed(() => import("./pages/DaemonSetsPage"), "DaemonSetsPage");
+const DeploymentsPage = lazyNamed(() => import("./pages/DeploymentsPage"), "DeploymentsPage");
+const IngressesPage = lazyNamed(() => import("./pages/IngressesPage"), "IngressesPage");
+const JobsPage = lazyNamed(() => import("./pages/JobsPage"), "JobsPage");
+const NamespacesPage = lazyNamed(() => import("./pages/NamespacesPage"), "NamespacesPage");
+const NodesPage = lazyNamed(() => import("./pages/NodesPage"), "NodesPage");
+const PodsPage = lazyNamed(() => import("./pages/PodsPage"), "PodsPage");
+const SecretsPage = lazyNamed(() => import("./pages/SecretsPage"), "SecretsPage");
+const ServicesPage = lazyNamed(() => import("./pages/ServicesPage"), "ServicesPage");
+const StatefulSetsPage = lazyNamed(() => import("./pages/StatefulSetsPage"), "StatefulSetsPage");
+const PVCsPage = lazyNamed(() => import("./pages/PVCsPage"), "PVCsPage");
+const PVsPage = lazyNamed(() => import("./pages/PVsPage"), "PVsPage");
+const StorageClassesPage = lazyNamed(() => import("./pages/StorageClassesPage"), "StorageClassesPage");
+const RolesPage = lazyNamed(() => import("./pages/RolesPage"), "RolesPage");
+const ClusterRolesPage = lazyNamed(() => import("./pages/ClusterRolesPage"), "ClusterRolesPage");
+const RoleBindingsPage = lazyNamed(() => import("./pages/RoleBindingsPage"), "RoleBindingsPage");
+const ClusterRoleBindingsPage = lazyNamed(() => import("./pages/ClusterRoleBindingsPage"), "ClusterRoleBindingsPage");
+const ServiceAccountsPage = lazyNamed(() => import("./pages/ServiceAccountsPage"), "ServiceAccountsPage");
+const PodLogsPage = lazyNamed(() => import("./pages/PodLogsPage"), "PodLogsPage");
+const DeploymentLogsPage = lazyNamed(() => import("./pages/DeploymentLogsPage"), "DeploymentLogsPage");
+const StatefulSetLogsPage = lazyNamed(() => import("./pages/StatefulSetLogsPage"), "StatefulSetLogsPage");
+const DaemonSetLogsPage = lazyNamed(() => import("./pages/DaemonSetLogsPage"), "DaemonSetLogsPage");
+const JobLogsPage = lazyNamed(() => import("./pages/JobLogsPage"), "JobLogsPage");
+const HorizontalPodAutoscalersPage = lazyNamed(() => import("./pages/HorizontalPodAutoscalersPage"), "HorizontalPodAutoscalersPage");
+const PodDisruptionBudgetsPage = lazyNamed(() => import("./pages/PodDisruptionBudgetsPage"), "PodDisruptionBudgetsPage");
+const ReplicaSetsPage = lazyNamed(() => import("./pages/ReplicaSetsPage"), "ReplicaSetsPage");
+const NetworkPoliciesPage = lazyNamed(() => import("./pages/NetworkPoliciesPage"), "NetworkPoliciesPage");
+const IngressClassesPage = lazyNamed(() => import("./pages/IngressClassesPage"), "IngressClassesPage");
+const ResourceQuotasPage = lazyNamed(() => import("./pages/ResourceQuotasPage"), "ResourceQuotasPage");
+const LimitRangesPage = lazyNamed(() => import("./pages/LimitRangesPage"), "LimitRangesPage");
+const PriorityClassesPage = lazyNamed(() => import("./pages/PriorityClassesPage"), "PriorityClassesPage");
+const RuntimeClassesPage = lazyNamed(() => import("./pages/RuntimeClassesPage"), "RuntimeClassesPage");
+const CRDsPage = lazyNamed(() => import("./pages/CRDsPage"), "CRDsPage");
+const CustomResourcesPage = lazyNamed(() => import("./pages/CustomResourcesPage"), "CustomResourcesPage");
+const ExecPage = lazyNamed(() => import("./pages/ExecPage"), "ExecPage");
+const HelmReleasesPage = lazyNamed(() => import("./pages/HelmReleasesPage"), "HelmReleasesPage");
+const HelmReleasePage = lazyNamed(() => import("./pages/HelmReleasePage"), "HelmReleasePage");
+const HelmDiffPage = lazyNamed(() => import("./pages/HelmDiffPage"), "HelmDiffPage");
 
 export const router = createBrowserRouter(
   createRoutesFromElements(
     <Route element={<App />}>
-      <Route path="/" element={<FleetPage />} />
+      <Route path="/" element={<Suspense fallback={<LoadingState resource="page" />}><FleetPage /></Suspense>} />
       <Route path="/clusters/:cluster" element={<AppShell />}>
         <Route index element={<Navigate to="overview" replace />} />
         <Route path="overview" element={<WithCluster Page={OverviewPage} />} />
