@@ -13,7 +13,34 @@ tag.
 
 ## [Unreleased]
 
-_Nothing yet._
+### Added
+
+- **Exec on agent-managed clusters.** `kubectl exec` now works on
+  `backend: agent` clusters end-to-end. Closes #42 (agent multi-
+  cluster epic) and #43 (exec follow-up); the two collapse into one
+  v1.x.0 ship per RFC 0004 10. Two production bugs surfaced + fixed
+  during validation:
+  - Loopback CONNECT proxy (`internal/k8s/agent_exec_proxy.go`):
+    client-go's WebSocket and SPDY executors build their own dialers
+    internally and ignore `rest.Config.Transport`. Pre-fix, exec on
+    agent-backed clusters dialed apiserver via DNS and got "no such
+    host". The new loopback proxy honours `cfg.Proxy` (the only ext-
+    config knob the upgrade dialers consult) and translates per-
+    cluster CONNECT requests into tunnel dials. Plain HTTP traffic
+    (Pod GET / list / watch) keeps using `cfg.Transport` directly —
+    no perf cost on the hot path.
+  - Agent `responseRecorder` now implements `http.Hijacker`
+    (`cmd/periscope-agent/observability.go`). Pre-fix, the access-log
+    middleware's ResponseWriter wrapper failed every WS / SPDY
+    upgrade with "can't switch protocols using non-Hijacker
+    ResponseWriter". Now delegates Hijack to the underlying writer.
+- **RFC 0004 + validation harness** for exec-on-agent: in-tree at
+  `docs/rfcs/0004-exec-over-agent-tunnel-poc.md` (design + findings);
+  Tier 1 protocol coverage at `internal/k8s/exec_tunnel_test.go`
+  (race-clean against an in-process tunnel + fake apiserver); Tier 2
+  e2e harness at `hack/poc-exec-tunnel/` (kind-based, drives the real
+  `remotecommand.NewWebSocketExecutor` end-to-end through the agent
+  tunnel against a real busybox pod).
 
 ## [1.0.0]
 

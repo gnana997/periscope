@@ -6,7 +6,7 @@
 // kind harness; run.sh starts a kubectl port-forward to the periscope
 // pod's :8080 before invoking this binary.
 //
-// Wire format (RFC 0001 §6, see also internal/exec/session.go):
+// Wire format (RFC 0001 6, see also internal/exec/session.go):
 //
 //	binary frames  →  stdin (in) / merged stdout+stderr (out)
 //	text frames    →  JSON control: {type:hello}, {type:closed}, {type:resize}, {type:close}, ...

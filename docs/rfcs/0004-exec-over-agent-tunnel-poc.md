@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | Draft — Tier 1 landed; integration gap surfaced |
+| **Status** | Landed — Tiers 1+2 green; both production bugs fixed; closes #42 + #43 |
 | **Owner** | @gnana997 |
 | **Started** | 2026-05-04 |
 | **Targets** | v1.x.0 (collapse #43 into #42 if the harness passes) |
@@ -259,13 +259,39 @@ Tracked separately so this RFC can land its findings without bundling the produc
 
 ---
 
+## 9b. Findings (Tier 2, 2026-05-04)
+
+Tier 2 (`hack/poc-exec-tunnel/`) brought up the full chain on a kind cluster — server + agent both in-cluster, agent dialing the in-cluster tunnel Service, probe driving real `remotecommand.NewWebSocketExecutor` through the loopback CONNECT proxy. The probe asserts the hello frame, stdin echo, clean close, and exit 0.
+
+First run surfaced a SECOND production bug:
+
+> The agent's access-log middleware wraps the ResponseWriter in a `responseRecorder` for byte/status counting. `responseRecorder` did not implement `http.Hijacker`, so `httputil.ReverseProxy` failed every WebSocket / SPDY upgrade with `"can't switch protocols using non-Hijacker ResponseWriter"`. The file even had a TODO comment from the observability PR explicitly deferring Hijack until exec landed.
+
+Fix: `cmd/periscope-agent/observability.go` now implements `Hijack()` delegating to the underlying ResponseWriter (which `net/http.Server` always implements). With both fixes — the 7 loopback CONNECT proxy AND the agent Hijack implementation — the probe runs green on kind, and exec on `backend: agent` is fully functional.
+
+Probe transcript:
+
+```
+probe: hello received
+probe: stdin sent (31 bytes)
+probe: token observed on stdout
+probe: close sent
+probe: closed frame received cleanly
+probe: PASS
+```
+
 ## 10. Decision after POC
 
-If Tier 1 + Tier 2 both pass, in the same PR series:
+Tier 1 + Tier 2 both passed; this PR ships:
 
-1. Default `exec.enabled: true` for `backend: agent` clusters in `deploy/helm/periscope/values.yaml`.
-2. Remove the "exec not yet supported on agent-managed clusters" tooltip from the SPA — `web/src/components/exec/OpenShellButton.tsx` already hides cleanly when `execEnabled` is true; likely just a values-file flip + chart docs.
-3. Add the agent-backed exec case to the existing smoke matrix in #42.
-4. Close #43 and reference this RFC + the validation harness as the regression guard.
+1. **Loopback CONNECT proxy** + `cfg.Proxy` plumbing on agent-backed `rest.Config` (`internal/k8s/agent_exec_proxy.go` + `internal/k8s/agent_transport.go`). Closes the 9 gap.
+2. **Agent `responseRecorder` implements `http.Hijacker`** (`cmd/periscope-agent/observability.go`). Closes the 9b gap.
+3. **RFC 0004 + harness** (this file + `internal/k8s/exec_tunnel_test.go` + `hack/poc-exec-tunnel/`).
+4. **Smoke matrix entry** for kind covered by the Tier 2 probe; cloud target deferred to operator validation.
 
-Resulting v1.x.0 release ships with a fully-functional agent backend including exec — collapsing #43 into #42 with no separate v1.x.1.
+What the PR does NOT need to do:
+
+- The `deploy/helm/periscope/values.yaml` field `exec.enabled` already defaults to `true` per-cluster (`internal/clusters/cluster.go`'s `Cluster.ExecEnabled()`), and the chart never special-cased `backend: agent` to false. The originally-planned chart flip was a no-op once exec actually worked.
+- The "exec not yet supported on agent-managed clusters" SPA tooltip was never shipped in code (the gate was deferred-by-plan in #42 / #43 but the tooltip code path never landed). `web/src/components/exec/OpenShellButton.tsx` reads `execEnabled` from the backend, which is `true` by default. No SPA change needed.
+
+Resulting v1.x.0 release ships with a fully-functional agent backend including exec — collapsing #43 into #42 with no separate v1.x.1, exactly as planned.
