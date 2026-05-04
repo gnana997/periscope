@@ -260,7 +260,8 @@ going healthy, the fastest path to a root cause is to enable per-
 request logs on the agent:
 
 ```sh
-kubectl -n periscope set env deploy/periscope-agent PERISCOPE_LOG_LEVEL=debug
+helm upgrade periscope-agent oci://ghcr.io/gnana997/charts/periscope-agent \
+  -n periscope --reuse-values --set agent.logLevel=debug
 kubectl -n periscope rollout status deploy/periscope-agent
 kubectl -n periscope logs -l app.kubernetes.io/name=periscope-agent -f | jq .
 ```
@@ -277,7 +278,8 @@ in the server's audit DB and stdout slog for end-to-end correlation.
 Reset to default once you're done:
 
 ```sh
-kubectl -n periscope set env deploy/periscope-agent PERISCOPE_LOG_LEVEL-
+helm upgrade periscope-agent oci://ghcr.io/gnana997/charts/periscope-agent \
+  -n periscope --reuse-values --set agent.logLevel=""
 ```
 
 

@@ -44,7 +44,7 @@ shape itself), see [`docs/setup/deploy.md`](deploy.md).
 | `PERISCOPE_AGENT_NAMESPACE` | _(in-pod namespace)_ | Where the agent persists state | `(derived)` |
 | `PERISCOPE_AGENT_SECRET_NAME` | `periscope-agent-state` | State Secret name (cert + key + server CA) | `agent.stateSecretName` |
 | `PERISCOPE_AGENT_HEALTH_ADDR` | `:8081` | Bind addr for /healthz | `agent.healthAddr` |
-| `PERISCOPE_LOG_LEVEL` | `info` | Log level for the agent: debug/info/warn/error | _(via env: array)_ |
+| `PERISCOPE_LOG_LEVEL` | `info` | Log level for the agent: debug/info/warn/error | `agent.logLevel` |
 | `PERISCOPE_REGISTRATION_URL` | _(derive from serverURL)_ | URL for the unauth registration POST when split from tunnel | `agent.registrationURL` |
 | `PERISCOPE_SERVER_CA_HASH` | _(unset = system roots)_ | SPKI hash for kubeadm-style pinning on registration TLS | `agent.serverCAHash` |
 
@@ -532,13 +532,12 @@ Levels:
   aggregation pipelines where the agent should only speak up on
   trouble.
 
-Helm rendering: pass through the chart's escape-hatch `env` array
-(no dedicated values field — keeping the surface minimal). Example:
+Helm rendering: `agent.logLevel`. Schema enum-validated against
+the four canonical values; empty (default) means "use the binary's
+default" (no env var rendered, agent picks `info`). Example:
 
-```yaml
-env:
-  - name: PERISCOPE_LOG_LEVEL
-    value: debug
+```sh
+helm upgrade ... --set agent.logLevel=debug
 ```
 
 Bonus: every agent log line carries `request_id` taken from the

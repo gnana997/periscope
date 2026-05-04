@@ -63,6 +63,11 @@
           "type": "string",
           "pattern": "^:[0-9]+$",
           "description": "Bind addr for the kubelet probe target. Format ':PORT'."
+        },
+        "logLevel": {
+          "type": "string",
+          "enum": ["", "debug", "info", "warn", "error"],
+          "description": "Optional agent log level. Empty = use the binary default (info). Set debug to enable per-request access logs through the proxy."
         }
       },
       "additionalProperties": false

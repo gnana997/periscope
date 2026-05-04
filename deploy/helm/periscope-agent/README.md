@@ -73,6 +73,7 @@ typos surface immediately, not at pod-start.
 |---|---|
 | `agent.registrationURL` | URL for the unauth registration POST. Set when central server splits HTTP and mTLS onto different load balancers (ALB+NLB topology). Empty = derive from `serverURL` via wss/ws → https/http translation. |
 | `agent.serverCAHash` | SPKI hash for kubeadm-style pinning on the registration TLS dial. Format: `sha256:<64 hex chars>`. Bootstraps the agent against a self-signed central server endpoint without distributing the full CA bundle. |
+| `agent.logLevel` | Optional log level: `debug`, `info`, `warn`, `error`. Default empty = `info`. Set `debug` to add per-request access logs through the proxy with `request_id` correlation to the central server's audit DB. |
 
 Three deployment topologies — pick the one matching your central
 server's LB shape:
