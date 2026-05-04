@@ -1,3 +1,10 @@
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://periscopehq.vercel.app/readme-banner-dark.png">
+    <img alt="periscope · one dashboard. every cluster." src="https://periscopehq.vercel.app/readme-banner-light.png" width="100%">
+  </picture>
+</p>
+
 # Periscope
 
 > A multi-cluster Kubernetes console — keyless on EKS via Pod Identity / IRSA, anything-with-egress via the periscope-agent tunnel.
