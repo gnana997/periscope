@@ -91,5 +91,13 @@ Initial stable release.
     filesystem, all capabilities dropped, `RuntimeDefault`
     seccomp profile in the Helm chart.
 
+### Security
+
+- OIDC session and PKCE/state generation now propagate `crypto/rand`
+  failures as errors instead of panicking the pod (#35). Login
+  callbacks return 500 on the (vanishingly rare) RNG failure path
+  rather than crashing the process and dropping every active
+  session on the same replica.
+
 [Unreleased]: https://github.com/gnana997/periscope/compare/v1.0.0...HEAD
 [1.0.0]: https://github.com/gnana997/periscope/releases/tag/v1.0.0
