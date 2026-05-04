@@ -253,6 +253,36 @@ with the correct value.
 
 ## Troubleshooting
 
+### Turn on debug logging on the agent
+
+When something goes wrong between agent registration and the cluster
+going healthy, the fastest path to a root cause is to enable per-
+request logs on the agent:
+
+```sh
+helm upgrade periscope-agent oci://ghcr.io/gnana997/charts/periscope-agent \
+  -n periscope --reuse-values --set agent.logLevel=debug
+kubectl -n periscope rollout status deploy/periscope-agent
+kubectl -n periscope logs -l app.kubernetes.io/name=periscope-agent -f | jq .
+```
+
+You'll see one `proxy.request_in` and one `proxy.request_out` per
+request flowing through the agent, plus a `proxy.apiserver_error`
+(at WARN level — visible even at the default `info` log level)
+whenever the apiserver returns 4xx/5xx.
+
+Each line carries a `request_id` matching the `X-Request-Id` the
+central server's middleware sets on every API call — grep the same id
+in the server's audit DB and stdout slog for end-to-end correlation.
+
+Reset to default once you're done:
+
+```sh
+helm upgrade periscope-agent oci://ghcr.io/gnana997/charts/periscope-agent \
+  -n periscope --reuse-values --set agent.logLevel=""
+```
+
+
 ### `tls: failed to verify certificate: x509: certificate signed by unknown authority`
 
 The agent is dialing a self-signed registration endpoint without a

@@ -21,7 +21,6 @@ package k8s
 
 import (
 	"context"
-	"crypto/tls"
 	"errors"
 	"fmt"
 	"net"
@@ -78,13 +77,20 @@ func currentAgentLookup() AgentTunnelLookup {
 // buildAgentRestConfig constructs a *rest.Config whose Transport is
 // the tunnel-bound RoundTripper. The clientset built from this config
 // looks identical to a kubeconfig-built one to handler code; only the
-// bytes flow differently.
 //
-// The Host is a sentinel ("https://apiserver.<cluster>.tunnel") that
-// the agent ignores when it dials the local apiserver — it's there
-// because rest.Config.Host is required, but the tunnel transport
-// short-circuits the actual dial so the value never leaves the
-// process.
+// The Host is a sentinel ("http://apiserver.<cluster>.tunnel") that
+// the agent's local HTTP proxy receives — it's there because
+// rest.Config.Host is required, but the tunnel transport short-
+// circuits the actual dial so the value never leaves the process.
+//
+// Why http:// (not https://): TLS now terminates at the agent's
+// local reverse proxy on the managed cluster (#59 fix). The agent
+// re-issues each incoming request to the local apiserver over
+// HTTPS using the kubelet-mounted CA bundle, with the agent's SA
+// bearer token attached. Pre-#59 the server tried to do end-to-end
+// TLS to the apiserver through the tunnel with no auth headers —
+// the apiserver rejected every request with 401/403 before
+// impersonation was even evaluated.
 func buildAgentRestConfig(_ context.Context, p credentials.Provider, c clusters.Cluster) (*rest.Config, error) {
 	dial, err := currentAgentLookup()(c.Name)
 	if err != nil {
@@ -93,25 +99,18 @@ func buildAgentRestConfig(_ context.Context, p credentials.Provider, c clusters.
 
 	cfg := &rest.Config{
 		Host: agentHostSentinel(c.Name),
-		// rest.Config.Transport pre-empts every other dial/TLS setting,
-		// which is exactly what we want. Do NOT set TLSClientConfig here
-		// — client-go refuses to build a clientset when both Transport
-		// and TLSClientConfig are set ("using a custom transport with TLS
-		// certificate options or the insecure flag is not allowed").
-		//
-		// The tunnel RoundTripper handles TLS internally: the outer hop
-		// (this process → tunnel) skips TLS because the bytes never leave
-		// the process; the inner hop (agent → real apiserver) uses the
-		// agent's in-cluster CA bundle, which is the actual trust boundary.
+		// rest.Config.Transport pre-empts every other dial/TLS setting.
+		// We deliberately set NO TLSClientConfig — client-go refuses
+		// to build a clientset when both Transport and TLSClientConfig
+		// are set, AND the tunnel + agent-proxy chain handles auth and
+		// TLS itself: the outer hop (server → tunnel) is plain bytes
+		// inside this process; the inner hop (agent → apiserver) is
+		// HTTPS with the kubelet's CA bundle, terminated at the agent.
 		Transport: tunnel.NewRoundTripper(
 			func(ctx context.Context, network, addr string) (net.Conn, error) {
 				return dial(ctx, network, addr)
 			},
-			tunnel.RoundTripperOptions{
-				// Skip TLS on the tunnel-side connection; the inner
-				// hop (agent → apiserver) carries the real TLS.
-				TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, //nolint:gosec
-			},
+			tunnel.RoundTripperOptions{},
 		),
 	}
 	applyImpersonation(cfg, p)
@@ -121,7 +120,10 @@ func buildAgentRestConfig(_ context.Context, p credentials.Provider, c clusters.
 // agentHostSentinel produces the placeholder Host the rest.Config
 // requires. The transport short-circuits the dial, so the actual
 // hostname is never resolved or contacted — it only needs to be a
-// syntactically-valid URL for client-go's request building.
+// syntactically-valid URL for client-go's request building. The
+// http:// scheme matters: client-go uses it to decide whether to
+// negotiate TLS on the (intercepted) outbound dial, and we want it
+// to NOT, since TLS terminates at the agent's reverse proxy.
 func agentHostSentinel(cluster string) string {
-	return "https://apiserver." + cluster + ".tunnel"
+	return "http://apiserver." + cluster + ".tunnel"
 }

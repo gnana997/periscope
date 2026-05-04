@@ -54,6 +54,10 @@ spec:
               value: {{ .Values.agent.stateSecretName | quote }}
             - name: PERISCOPE_AGENT_HEALTH_ADDR
               value: {{ .Values.agent.healthAddr | quote }}
+            {{- if .Values.agent.logLevel }}
+            - name: PERISCOPE_LOG_LEVEL
+              value: {{ .Values.agent.logLevel | quote }}
+            {{- end }}
             {{- if .Values.agent.registrationURL }}
             - name: PERISCOPE_REGISTRATION_URL
               value: {{ .Values.agent.registrationURL | quote }}

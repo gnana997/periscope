@@ -75,6 +75,20 @@ agent:
   # Health probe port (kubelet liveness + readiness target).
   healthAddr: ":8081"
 
+  # Optional: agent log level. Empty = use the binary's default
+  # (info). Accepts: debug, info, warn, error. Set debug when
+  # debugging an apiserver-rejection or "request not reaching
+  # apiserver" issue — adds per-request access logs through the
+  # proxy:
+  #
+  #   helm upgrade ... --set agent.logLevel=debug
+  #
+  # Each log line carries a request_id matching X-Request-Id from
+  # the central server's middleware, so one id grepped across the
+  # server's audit DB + server stdout + agent stdout gives a single
+  # end-to-end trace.
+  logLevel: ""
+
 # ─── deployment shape ───────────────────────────────────────────────
 replicaCount: 1   # tunnel sessions are 1:1 with agent pods; HA needs server-side peer routing (v1.5+)
 

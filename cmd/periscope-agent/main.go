@@ -65,6 +65,7 @@ const (
 )
 
 func main() {
+	configureLogger() // wire PERISCOPE_LOG_LEVEL → slog default before any log fires
 	if err := run(); err != nil {
 		slog.Error("agent exited with error", "err", err)
 		os.Exit(1)
@@ -90,6 +91,7 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("in-cluster config: %w", err)
 	}
+	logBootDiagnostic(inClusterCfg)
 	kc, err := kubernetes.NewForConfig(inClusterCfg)
 	if err != nil {
 		return fmt.Errorf("kube client: %w", err)
@@ -109,13 +111,23 @@ func run() error {
 	}
 
 	// Local apiserver dialer — every server-requested dial routes
-	// here. We ignore the requested address (it's the
-	// "apiserver.<cluster>.tunnel" sentinel) and always connect to
-	// the kubelet-published apiserver host.
-	apiHost := apiserverHost(inClusterCfg)
+	// here. With the #59 fix, dials no longer go to the apiserver
+	// directly; they go to a localhost reverse proxy that injects
+	// the agent SA bearer token before forwarding to the apiserver.
+	// See proxy.go for the proxy implementation.
+	const apiProxyAddr = "127.0.0.1:7443"
+	go func() {
+		if err := startAPIProxy(inClusterCfg, apiProxyAddr); err != nil {
+			// startAPIProxy returns nil on graceful shutdown, error on
+			// fatal startup failure. Log + exit so the pod restarts and
+			// the operator notices via the kubelet probe.
+			slog.Error("agent api proxy exited", "err", err)
+			os.Exit(1)
+		}
+	}()
 	localDial := func(ctx context.Context, network, _ string) (net.Conn, error) {
 		var d net.Dialer
-		return d.DialContext(ctx, network, apiHost)
+		return d.DialContext(ctx, network, apiProxyAddr)
 	}
 
 	client, err := tunnel.NewClient(tunnel.ClientOptions{
@@ -131,7 +143,7 @@ func run() error {
 
 	go serveHealth(ctx, cfg.HealthAddr)
 
-	slog.Info("opening tunnel", "server", cfg.ServerURL, "apiserver_host", apiHost)
+	slog.Info("opening tunnel", "server", cfg.ServerURL, "api_proxy_addr", apiProxyAddr)
 	return client.Run(ctx)
 }
 
@@ -283,18 +295,6 @@ func buildTLSConfig(state *agentState) (*tls.Config, error) {
 		RootCAs:      pool,
 		MinVersion:   tls.VersionTLS12,
 	}, nil
-}
-
-// apiserverHost returns "host:port" the agent should dial to reach
-// its local apiserver. Pulled from in-cluster config so we don't
-// hardcode kubernetes.default.svc — works on kind, EKS, GKE, etc.
-func apiserverHost(cfg *rest.Config) string {
-	host := strings.TrimPrefix(cfg.Host, "https://")
-	host = strings.TrimPrefix(host, "http://")
-	if !strings.Contains(host, ":") {
-		host += ":443"
-	}
-	return host
 }
 
 // serveHealth runs a tiny readiness/liveness probe handler. Reports

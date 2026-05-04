@@ -61,6 +61,9 @@ func TestSetAgentTunnelLookup_HappyPath(t *testing.T) {
 	if cfg.Host == "" {
 		t.Fatal("rest.Config.Host is empty (clientset would refuse)")
 	}
+	if !strings.HasPrefix(cfg.Host, "http://") {
+		t.Fatalf("Host = %q, want http:// scheme (TLS terminates at agent proxy now per #59)", cfg.Host)
+	}
 	if !strings.Contains(cfg.Host, "prod-eu") {
 		t.Fatalf("Host = %q, want it to embed the cluster name", cfg.Host)
 	}

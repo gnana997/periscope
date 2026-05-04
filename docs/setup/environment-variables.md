@@ -44,6 +44,7 @@ shape itself), see [`docs/setup/deploy.md`](deploy.md).
 | `PERISCOPE_AGENT_NAMESPACE` | _(in-pod namespace)_ | Where the agent persists state | `(derived)` |
 | `PERISCOPE_AGENT_SECRET_NAME` | `periscope-agent-state` | State Secret name (cert + key + server CA) | `agent.stateSecretName` |
 | `PERISCOPE_AGENT_HEALTH_ADDR` | `:8081` | Bind addr for /healthz | `agent.healthAddr` |
+| `PERISCOPE_LOG_LEVEL` | `info` | Log level for the agent: debug/info/warn/error | `agent.logLevel` |
 | `PERISCOPE_REGISTRATION_URL` | _(derive from serverURL)_ | URL for the unauth registration POST when split from tunnel | `agent.registrationURL` |
 | `PERISCOPE_SERVER_CA_HASH` | _(unset = system roots)_ | SPKI hash for kubeadm-style pinning on registration TLS | `agent.serverCAHash` |
 
@@ -511,6 +512,46 @@ doesn't break the pin (RFC 7469).
 Helm rendering: `agent.serverCAHash`. Schema rejects values that
 don't match `^sha256:[0-9a-fA-F]{64}$`.
 
+#### `PERISCOPE_LOG_LEVEL`
+
+Optional. Default `info`. Accepts: `debug`, `info`, `warn`, `error`
+(case-insensitive). Drives `slog.Default()`'s level for every log
+line the agent emits.
+
+Levels:
+
+- **`info`** (default) — boot events, tunnel connect/disconnect,
+  registration completion, apiserver-side errors (4xx/5xx). Suitable
+  for production.
+- **`debug`** — adds per-request access logs through the proxy:
+  - `proxy.request_in` (method, path, impersonate-user, request_id)
+  - `proxy.request_out` (method, path, status, latency_ms, bytes, request_id)
+  Use when debugging an apiserver-rejection or "request not reaching
+  apiserver" issue.
+- **`warn`** / **`error`** — silence info; useful in noisy log-
+  aggregation pipelines where the agent should only speak up on
+  trouble.
+
+Helm rendering: `agent.logLevel`. Schema enum-validated against
+the four canonical values; empty (default) means "use the binary's
+default" (no env var rendered, agent picks `info`). Example:
+
+```sh
+helm upgrade ... --set agent.logLevel=debug
+```
+
+Bonus: every agent log line carries `request_id` taken from the
+`X-Request-Id` header that the central server's chi middleware sets
+on every API call. Same id appears on the server's audit row (RFC
+0003 §6 — `requestId`). One id grepped across server audit DB +
+server stdout slog + agent stdout slog gives a single end-to-end
+trace for any user click.
+
+Server-side `PERISCOPE_LOG_LEVEL` parity is a v1.x.+ follow-up — the
+agent is the binary that's currently blind to per-request issues, so
+it ships observability first.
+
+
 
 ---
 
@@ -520,9 +561,10 @@ Likely additions in v1.x:
 
 - `PERISCOPE_SESSION_STORE=redis` plus `PERISCOPE_SESSION_DSN=...`
   when the multi-replica session store lands.
-- `PERISCOPE_LOG_LEVEL` for runtime log-level tuning. Today the
-  binary uses `slog.Default()` at info; level overrides require a
-  rebuild.
+- `PERISCOPE_LOG_LEVEL` parity for the central server. The agent
+  already supports it (see §11); extending to the server is a
+  ~10-LoC follow-up tracked alongside the next agent observability
+  iteration.
 
 These will be additive — operators who don't set them get the
 SQLite / in-memory / info-level defaults that v1.0 ships with.
