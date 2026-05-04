@@ -63,6 +63,9 @@ import (
 
 	"github.com/gorilla/websocket"
 
+	"k8s.io/client-go/tools/remotecommand"
+
+	"github.com/gnana997/periscope/internal/clusters"
 	"github.com/gnana997/periscope/internal/tunnel"
 )
 
@@ -283,6 +286,14 @@ func TestTunnelCarriesWebSocketExec_Resize(t *testing.T) {
 	// Clean up: half-close stdin so the handler exits.
 	_ = conn.WriteMessage(websocket.BinaryMessage,
 		[]byte{wsChClose, wsChStdin})
+
+	// Sync: wait for the handler to write Status{Success} on the error
+	// channel before returning. Otherwise the deferred conn.Close() races
+	// with rancher/remotedialer's internal close-vs-write coordination
+	// (connection.go:49 vs connection.go:82) — only the resize test hits
+	// this because every other test reads until the error channel before
+	// exiting, providing the sync naturally.
+	_, _ = readUntilChannel(conn, wsChError, 2*time.Second)
 }
 
 // TestTunnelCarriesWebSocketExec_TunnelDropMidStream verifies that
@@ -726,5 +737,116 @@ func firstDiff(a, b []byte) int {
 		return n
 	}
 	return -1
+}
+
+
+// ─── e2e: real client-go executor through the loopback proxy ──────────
+
+// TestExecPodE2EThroughTunnel is the load-bearing claim of RFC 0004 §9
+// after the production fix: client-go's remotecommand WebSocket
+// executor — which builds its own dialer and ignores rest.Config.
+// Transport — successfully routes through the agent tunnel via the
+// loopback CONNECT proxy.
+//
+// Wires the full real chain end-to-end:
+//
+//	remotecommand.NewWebSocketExecutor (real client-go)
+//	  → cfg.Proxy = loopback CONNECT proxy   (real, agent_exec_proxy.go)
+//	  → CONNECT apiserver.<cluster>.tunnel:80
+//	  → currentAgentLookup() → tunnel.Server.DialerFor (real)
+//	  → tunnel WebSocket session (real, in-process)
+//	  → fake apiserver speaking v5.channel.k8s.io
+//
+// If this test passes, exec on backend: agent works in production
+// modulo the chart values flip.
+func TestExecPodE2EThroughTunnel(t *testing.T) {
+	if raceBuild {
+		// rancher/remotedialer v0.6.1 has an unsynchronised
+		// close-vs-write race in its (*connection) state
+		// (connection.go:49 vs :82) that triggers under the
+		// aggressive teardown this test does — proxy stop, then
+		// agent disconnect, then tunnel session cleanup all
+		// running back-to-back. Production never tears down between
+		// exec calls, so the race is purely a test-time artifact.
+		// Tracked in RFC 0004 §9. The test runs without -race; the
+		// no-race lane in CI is the regression guard.
+		t.Skip("upstream rancher/remotedialer race under -race teardown — see RFC 0004 §9")
+	}
+	const cluster = "e2e-cluster"
+
+	// Stand up the in-process tunnel + fake apiserver.
+	stack := newTunneledStack(t, cluster, newWSExecHandler(t, wsExecOpts{}))
+	defer stack.close(t)
+
+	// Wire the agent lookup so buildAgentRestConfig can reach the
+	// in-process tunnel server.
+	prevLookup := currentAgentLookup()
+	SetAgentTunnelLookup(func(name string) (AgentDialFunc, error) {
+		if name != cluster {
+			return nil, fmt.Errorf("test lookup: unknown cluster %q", name)
+		}
+		return stack.tunSrv.DialerFor(name)
+	})
+	defer SetAgentTunnelLookup(prevLookup)
+
+	// Start the loopback CONNECT proxy — same code path production uses.
+	proxyCtx, proxyCancel := context.WithCancel(context.Background())
+	defer proxyCancel()
+	proxyStop, err := StartAgentExecProxy(proxyCtx)
+	if err != nil {
+		t.Fatalf("StartAgentExecProxy: %v", err)
+	}
+	// Stop drains in-flight pipeBidi goroutines before letting
+	// stack.close (and its tunnel teardown) run; required to keep
+	// -race clean against the upstream rancher/remotedialer race.
+	defer proxyStop()
+	// Wait briefly for the URL to become available — bind is sync but
+	// the package var is set right after, no real race in practice.
+	deadline := time.Now().Add(2 * time.Second)
+	for agentExecProxyURL() == nil {
+		if time.Now().After(deadline) {
+			t.Fatal("proxy URL never became available")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	// Build the rest.Config exactly the way production handlers do.
+	cfg, err := buildAgentRestConfig(context.Background(),
+		stubProvider{},
+		clusters.Cluster{Name: cluster, Backend: clusters.BackendAgent})
+	if err != nil {
+		t.Fatalf("buildAgentRestConfig: %v", err)
+	}
+	// Sanity: cfg.Proxy must be set; if not, the production fix isn't
+	// engaged and we'd accidentally test a direct dial.
+	if cfg.Proxy == nil {
+		t.Fatal("cfg.Proxy is nil — agentExecProxyURL not picked up")
+	}
+
+	// Drive the REAL client-go WebSocket executor.
+	execURL, _ := url.Parse(cfg.Host + "/api/v1/namespaces/default/pods/busybox/exec")
+	exec, err := remotecommand.NewWebSocketExecutor(cfg, "POST", execURL.String())
+	if err != nil {
+		t.Fatalf("NewWebSocketExecutor: %v", err)
+	}
+
+	// Drive a stdin → stdout echo. The fake apiserver writes Status
+	// {Success} on the error channel when stdin half-closes; client-go's
+	// Stream returns nil on Status{Success}, non-nil on any other terminal.
+	var stdout bytes.Buffer
+	streamCtx, streamCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer streamCancel()
+	stdin := strings.NewReader("hello-e2e\n")
+	streamErr := exec.StreamWithContext(streamCtx, remotecommand.StreamOptions{
+		Stdin:  stdin,
+		Stdout: &stdout,
+	})
+	if streamErr != nil {
+		t.Fatalf("StreamWithContext: %v", streamErr)
+	}
+	if got := stdout.String(); !strings.Contains(got, "hello-e2e") {
+		t.Fatalf("stdout = %q, want it to contain 'hello-e2e'", got)
+	}
+
 }
 

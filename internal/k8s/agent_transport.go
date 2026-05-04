@@ -24,6 +24,8 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/http"
+	"net/url"
 	"sync"
 
 	"k8s.io/client-go/rest"
@@ -114,6 +116,24 @@ func buildAgentRestConfig(_ context.Context, p credentials.Provider, c clusters.
 		),
 	}
 	applyImpersonation(cfg, p)
+
+	// Exec uses client-go's remotecommand.NewWebSocketExecutor /
+	// NewSPDYExecutor — both build their own dialers internally and
+	// ignore cfg.Transport, but DO honour cfg.Proxy. We point Proxy at
+	// the loopback CONNECT proxy started by StartAgentExecProxy; that
+	// proxy translates per-cluster CONNECTs into tunnel dials. Plain
+	// HTTP traffic (Pod GET, watch, etc.) keeps using cfg.Transport
+	// directly — Proxy is only consulted by the upgrade dialers that
+	// bypass Transport. See internal/k8s/agent_exec_proxy.go for the
+	// rationale + the upstream client-go references.
+	if px := agentExecProxyURL(); px != nil {
+		// Copy so a concurrent setAgentExecProxyURL can't race the
+		// closure. cfg.Proxy is called once per upgrade, no perf concern.
+		proxyURL := *px
+		cfg.Proxy = func(_ *http.Request) (*url.URL, error) {
+			return &proxyURL, nil
+		}
+	}
 	return cfg, nil
 }
 
