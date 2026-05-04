@@ -13,7 +13,41 @@ tag.
 
 ## [Unreleased]
 
-_Nothing yet._
+### Documentation
+
+- Added [`docs/architecture/README.md`](docs/architecture/README.md) —
+  top-level architecture overview: component map, source-tree
+  guide, suggested reading order for new contributors, and
+  cross-cutting design choices (single binary + embedded SPA,
+  stateless w.r.t. credentials, impersonation everywhere,
+  pre-flight RBAC, audit-before-action).
+- Added [`docs/setup/values.md`](docs/setup/values.md) — flat
+  reference for every value in the periscope and periscope-agent
+  Helm charts, organised by section, with type / default / notes
+  per field. Single page operators can grep during a `helm upgrade`.
+- Extended [`docs/setup/pod-exec.md`](docs/setup/pod-exec.md) with a
+  dedicated "Operator notes for agent-backed clusters" section
+  (transport path, RBAC, audit, latency, disconnect behavior) and
+  an agent-specific troubleshooting bullet for the
+  `cmd/periscope-agent/observability.go` Hijack shim regression.
+- Stamped [RFC 0004](docs/rfcs/0004-exec-over-agent-tunnel-poc.md)
+  status as "Implemented in v1.0.0".
+- Normalized version nomenclature in operator-facing docs: `v1.x.0`
+  / `v1.x.+` / `v1.x.1` collapsed to `v1.0` / `post-1.0` / `v1.x`
+  per consistency.
+- Tightened the `POST /api/agents/register` description in
+  [`docs/api.md`](docs/api.md) to clarify "before registration"
+  rather than the ambiguous "does not yet."
+- README: explicit note that pod exec works on every backend
+  including `agent`; new top-level architecture-overview link.
+
+### Repository
+
+- Added GitHub issue templates (`bug_report.yml`,
+  `feature_request.yml`) and a pull-request template under
+  `.github/`. Bug reports require backend, OIDC provider, and
+  Periscope version up front; PR template prompts surfaces
+  touched and a tested-paths summary.
 
 ## [1.0.0]
 

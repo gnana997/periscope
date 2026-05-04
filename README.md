@@ -89,7 +89,7 @@ Both signed (cosign keyless) and discoverable on [Artifact Hub](https://artifact
 **Browsing & inspection**
 - Common resources (pods, deployments, services, configmaps, secrets, jobs, ingresses, RBAC, …) plus full Custom Resource catalog
 - Live events, describe view, logs (with follow + filtering)
-- In-browser pod shell (`exec`) with reconnect on transient disconnects
+- In-browser pod shell (`exec`) with reconnect on transient disconnects — works on every backend (eks, kubeconfig, in-cluster, agent)
 - Cmd+K palette: search resources by name across the active cluster
 
 **Real-time updates (watch streams)**
@@ -124,6 +124,7 @@ Both signed (cosign keyless) and discoverable on [Artifact Hub](https://artifact
 
 **Setup**
 - [Configuration & deployment](docs/setup/deploy.md)
+- [Helm values reference](docs/setup/values.md)
 - [Environment variables reference](docs/setup/environment-variables.md)
 - [OIDC setup — Auth0](docs/setup/auth0.md)
 - [OIDC setup — Okta](docs/setup/okta.md)
@@ -136,6 +137,7 @@ Both signed (cosign keyless) and discoverable on [Artifact Hub](https://artifact
 - [Multi-cluster onboarding (agent)](docs/setup/agent-onboarding.md) — register a managed cluster via the periscope-agent tunnel
 
 **Architecture**
+- [Architecture overview](docs/architecture/README.md) — component map, source-tree guide, reading order for new contributors
 - [Watch streams — push model, fallback, RBAC](docs/architecture/watch-streams.md)
 - [Agent tunnel — multi-cluster transport, PKI, registration](docs/architecture/agent-tunnel.md)
 

@@ -547,7 +547,7 @@ on every API call. Same id appears on the server's audit row (RFC
 server stdout slog + agent stdout slog gives a single end-to-end
 trace for any user click.
 
-Server-side `PERISCOPE_LOG_LEVEL` parity is a v1.x.+ follow-up — the
+Server-side `PERISCOPE_LOG_LEVEL` parity is a post-1.0 follow-up — the
 agent is the binary that's currently blind to per-request issues, so
 it ships observability first.
 

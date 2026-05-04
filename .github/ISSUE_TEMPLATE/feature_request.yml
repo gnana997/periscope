@@ -1,0 +1,59 @@
+name: Feature request
+description: Propose a new feature or enhancement.
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Open an issue describing the use case before writing the code, especially for
+        anything that affects the backend API, auth model, or audit shape — see
+        [CONTRIBUTING.md](../../CONTRIBUTING.md).
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem are you trying to solve?
+      description: |
+        The use case, not the proposed solution. "I want to do X but the SPA does Y" is
+        more useful than "add button Z."
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: What you'd like Periscope to do. Sketches / mockups welcome.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Other approaches you weighed and why this one wins.
+
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Surface affected
+      multiple: true
+      options:
+        - SPA (browser UI)
+        - HTTP API
+        - Helm chart / operator config
+        - Agent
+        - Audit / observability
+        - Auth / RBAC
+        - Documentation
+        - Other
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: confirmations
+    attributes:
+      label: Confirmations
+      options:
+        - label: I have searched [existing issues](https://github.com/gnana997/periscope/issues?q=is%3Aissue) and this is not a duplicate.
+          required: true

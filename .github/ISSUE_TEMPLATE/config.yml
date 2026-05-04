@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Question or discussion
+    url: https://github.com/gnana997/periscope/discussions
+    about: For usage questions, deployment help, or open-ended discussion, please use Discussions instead of Issues.
+  - name: Security vulnerability
+    url: https://github.com/gnana997/periscope/security/policy
+    about: Do NOT open a public issue. See SECURITY.md for the responsible-disclosure process.
