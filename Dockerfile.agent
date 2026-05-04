@@ -1,0 +1,44 @@
+# syntax=docker/dockerfile:1.7
+
+# Dockerfile.agent — image for cmd/periscope-agent (#42).
+#
+# Separate Dockerfile (vs a multi-output build of the main one) so:
+#   - the agent image stays tiny — no embedded SPA, no web build step
+#   - the agent's release cadence is independent of the server's
+#   - operators can pin the agent at a different tag than the server
+#     within the supported N/N-1 skew window
+#
+# Mirrors the server Dockerfile's build pattern: --platform=$BUILDPLATFORM
+# on the builder stage so go cross-compiles via GOARCH instead of
+# running under QEMU.
+
+FROM --platform=$BUILDPLATFORM golang:1.26-alpine AS go-builder
+WORKDIR /src
+
+RUN apk add --no-cache git ca-certificates
+
+COPY go.mod go.sum ./
+RUN go mod download
+
+COPY . .
+
+ARG VERSION=dev
+ARG COMMIT=unknown
+ARG TARGETARCH
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} go build \
+    -trimpath \
+    -ldflags "-s -w -X main.version=${VERSION} -X main.commit=${COMMIT}" \
+    -o /out/periscope-agent \
+    ./cmd/periscope-agent
+
+# Distroless static — minimal base, no shell, non-root by default.
+FROM gcr.io/distroless/static-debian12:nonroot AS runtime
+COPY --from=go-builder /out/periscope-agent /periscope-agent
+
+USER 65532:65532
+
+# 8081 = healthz (kubelet probes); the tunnel itself is outbound
+# only, so no other ports are exposed.
+EXPOSE 8081
+
+ENTRYPOINT ["/periscope-agent"]

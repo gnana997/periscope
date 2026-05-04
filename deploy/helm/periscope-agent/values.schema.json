@@ -1,0 +1,102 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "periscope-agent Helm values",
+  "description": "Values for the periscope-agent chart (#42). Validates required fields at install time so operators get a clear error instead of a template-side fail.",
+  "type": "object",
+  "required": ["agent"],
+  "properties": {
+    "image": {
+      "type": "object",
+      "properties": {
+        "repository": { "type": "string", "minLength": 1 },
+        "tag":        { "type": "string" },
+        "pullPolicy": { "type": "string", "enum": ["Always", "IfNotPresent", "Never"] }
+      },
+      "additionalProperties": false
+    },
+    "imagePullSecrets": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name"],
+        "properties": { "name": { "type": "string", "minLength": 1 } },
+        "additionalProperties": false
+      }
+    },
+    "agent": {
+      "type": "object",
+      "required": ["serverURL", "clusterName"],
+      "properties": {
+        "serverURL": {
+          "type": "string",
+          "pattern": "^(wss?|https?)://",
+          "description": "Central Periscope tunnel URL. wss:// in production; ws:// only for kind/dev. Both http(s):// also accepted (the agent translates to ws:// for the WebSocket upgrade)."
+        },
+        "clusterName": {
+          "type": "string",
+          "pattern": "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$",
+          "minLength": 1,
+          "maxLength": 63,
+          "description": "Cluster name as registered with the central server. Must match a clusters[].name entry of backend: agent. Validated against the same DNS-1123-ish rule the server enforces."
+        },
+        "registrationToken": {
+          "type": "string",
+          "description": "Bootstrap token from POST /api/agents/tokens. Required on first install only — leave empty on subsequent upgrades. Single-use, 15-min TTL."
+        },
+        "stateSecretName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 253,
+          "description": "Name of the K8s Secret the agent persists its mTLS cert + key + server CA into."
+        },
+        "healthAddr": {
+          "type": "string",
+          "pattern": "^:[0-9]+$",
+          "description": "Bind addr for the kubelet probe target. Format ':PORT'."
+        }
+      },
+      "additionalProperties": false
+    },
+    "replicaCount": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 1,
+      "description": "Tunnel sessions are 1:1 with agent pods; HA needs server-side peer routing (v1.5+). Single replica only for v1.x."
+    },
+    "serviceAccount": {
+      "type": "object",
+      "properties": {
+        "create":      { "type": "boolean" },
+        "name":        { "type": "string" },
+        "annotations": { "type": "object" }
+      },
+      "additionalProperties": false
+    },
+    "clusterRole": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean", "description": "When true, the chart binds a ClusterRole granting the agent SA cluster-wide read + impersonate. Set false to ship a tighter custom ClusterRole and bind it yourself." }
+      },
+      "additionalProperties": false
+    },
+    "resources": {
+      "type": "object",
+      "properties": {
+        "requests": { "type": "object" },
+        "limits":   { "type": "object" }
+      }
+    },
+    "podSecurityContext":       { "type": "object" },
+    "containerSecurityContext": { "type": "object" },
+    "nodeSelector":             { "type": "object" },
+    "tolerations":              { "type": "array" },
+    "affinity":                 { "type": "object" },
+    "podAnnotations":           { "type": "object" },
+    "env": {
+      "type": "array",
+      "description": "Extra env vars appended to the container's env list. Use for future PERISCOPE_* knobs that don't yet have a dedicated values field.",
+      "items": { "type": "object" }
+    }
+  },
+  "additionalProperties": false
+}

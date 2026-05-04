@@ -62,6 +62,8 @@ func buildRestConfig(ctx context.Context, p credentials.Provider, c clusters.Clu
 		return buildKubeconfigRestConfig(p, c)
 	case clusters.BackendInCluster:
 		return buildInClusterRestConfig(p, c)
+	case clusters.BackendAgent:
+		return buildAgentRestConfig(ctx, p, c)
 	case clusters.BackendEKS, "":
 		return buildEKSRestConfig(ctx, p, c)
 	default:

@@ -525,3 +525,49 @@ clusterRBAC:
   # principal to on each managed cluster. The chart-rendered
   # ClusterRoleBinding for periscope-impersonator references this name.
   bridgeGroup: periscope-bridge
+
+# -----------------------------------------------------------------------------
+# Agent backend (#42) — per-cluster periscope-agent that dials out to
+# the central server over a long-lived WebSocket. Enabling this:
+#   - Opens a dedicated TLS listener on `agent.listenAddr` (separate
+#     from the main HTTP port; serves /api/agents/connect with mTLS).
+#   - Mounts /api/agents/tokens (admin-only) and /api/agents/register
+#     on the main router.
+#   - Pre-creates an empty Secret for the per-deployment CA, plus
+#     RBAC granting the server SA get/update on it.
+#
+# Leave disabled if you don't yet have managed clusters running an
+# agent. Existing eks/kubeconfig/in-cluster backends keep working
+# regardless.
+# -----------------------------------------------------------------------------
+agent:
+  enabled: false
+
+  # The server's bind address for the dedicated TLS listener. Default
+  # ":8443". Operators expose this externally via:
+  #   - a second Service of type LoadBalancer (NLB recommended,
+  #     TLS-passthrough since mTLS terminates at the pod), or
+  #   - a separate Ingress with TLS passthrough, or
+  #   - kubectl port-forward for local testing.
+  listenAddr: ":8443"
+
+  # SAN(s) baked into the server cert agents present on the tunnel.
+  # Agents validate the server's cert against the CA they got at
+  # registration; the SAN must match whatever DNS name the agent
+  # connects to. Comma-separated.
+  #   localhost              kind / port-forward smoke testing
+  #   agents.example.com     production with NLB + Route53 record
+  tunnelSANs: "localhost"
+
+  # K8s Secret that holds the per-deployment CA. The chart pre-creates
+  # this empty; the server fills it on first boot via Update.
+  caSecretName: "periscope-agent-ca"
+
+  # Optional second Service for exposing the tunnel listener
+  # externally. Default disabled — operators wire their own NLB or
+  # use kubectl port-forward for first-cluster testing.
+  tunnelService:
+    enabled: false
+    type: LoadBalancer
+    port: 8443
+    annotations: {}

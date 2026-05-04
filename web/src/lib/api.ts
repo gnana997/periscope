@@ -965,4 +965,31 @@ async function deleteResourceFetch(
   }
 }
 
+// ─── agent backend (#42) ────────────────────────────────────────
+//
+// mintAgentToken posts to the admin-tier-only token endpoint and
+// returns the bootstrap token + expiry. The token is single-use and
+// has a 15-min TTL — show it to the operator immediately and don't
+// store it.
+
+export interface AgentTokenIssuance {
+  token: string;
+  cluster: string;
+  expiresAt: string; // RFC3339
+}
+
+export async function mintAgentToken(cluster: string, signal?: AbortSignal): Promise<AgentTokenIssuance> {
+  const res = await fetch("/api/agents/tokens", {
+    method: "POST",
+    signal,
+    headers: { Accept: "application/json", "Content-Type": "application/json" },
+    body: JSON.stringify({ cluster }),
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new ApiError(`${res.status} ${res.statusText} on /api/agents/tokens`, res.status, text);
+  }
+  return (await res.json()) as AgentTokenIssuance;
+}
+
 export { ApiError };

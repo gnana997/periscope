@@ -1,0 +1,43 @@
+# agent-values.example.yaml
+#
+# Sample values for the periscope-agent chart. Apply on the managed
+# cluster (the one you want Periscope to see):
+#
+#   helm upgrade --install periscope-agent oci://ghcr.io/gnana997/charts/periscope-agent \
+#     --version <X.Y.Z> \
+#     --namespace periscope --create-namespace \
+#     --values agent-values.example.yaml \
+#     --set agent.registrationToken=<TOKEN-FROM-MINT-STEP>
+#
+# The `agent.registrationToken` lives in the --set rather than this
+# YAML so it doesn't get committed to git accidentally.
+
+agent:
+  serverURL: "wss://agents.periscope.example.com:8443"
+  clusterName: "prod-eu"
+
+  # Filled at install time via --set, NOT committed to YAML.
+  # Single-use, 15-min TTL — mint via:
+  #   curl -X POST https://periscope.example.com/api/agents/tokens \
+  #     -H "Cookie: periscope_session=..." \
+  #     -H "Content-Type: application/json" \
+  #     -d '{"cluster":"prod-eu"}'
+  registrationToken: ""
+
+  # Persisted state Secret (cert + key + server CA). Survives pod
+  # restarts; helm.sh/resource-policy: keep on the chart's own
+  # template prevents `helm uninstall` from wiping it.
+  stateSecretName: "periscope-agent-state"
+
+clusterRole:
+  # Default cluster-wide read + impersonate. Tighten if your security
+  # model wants stricter defaults — e.g. per-namespace bindings.
+  enabled: true
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    cpu: 500m
+    memory: 256Mi

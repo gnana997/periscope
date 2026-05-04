@@ -1,0 +1,95 @@
+{{- if not .Values.agent.serverURL -}}
+{{- fail "agent.serverURL is required (e.g. wss://agents.periscope.example.com:8443)" }}
+{{- end }}
+{{- if not .Values.agent.clusterName -}}
+{{- fail "agent.clusterName is required (must match a backend: agent entry in the central server's registry)" }}
+{{- end }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "periscope-agent.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "periscope-agent.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "periscope-agent.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "periscope-agent.selectorLabels" . | nindent 8 }}
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      serviceAccountName: {{ include "periscope-agent.serviceAccountName" . }}
+      automountServiceAccountToken: true
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: agent
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          ports:
+            - name: health
+              containerPort: {{ trimPrefix ":" .Values.agent.healthAddr | atoi | default 8081 }}
+              protocol: TCP
+          env:
+            - name: PERISCOPE_SERVER_URL
+              value: {{ .Values.agent.serverURL | quote }}
+            - name: PERISCOPE_CLUSTER_NAME
+              value: {{ .Values.agent.clusterName | quote }}
+            - name: PERISCOPE_AGENT_SECRET_NAME
+              value: {{ .Values.agent.stateSecretName | quote }}
+            - name: PERISCOPE_AGENT_HEALTH_ADDR
+              value: {{ .Values.agent.healthAddr | quote }}
+            {{- if .Values.agent.registrationToken }}
+            # Bootstrap token — only needed on first boot. After
+            # registration completes, the agent ignores this and
+            # uses the persisted cert from stateSecretName instead.
+            - name: PERISCOPE_REGISTRATION_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "periscope-agent.bootstrapSecretName" . }}
+                  key: token
+            {{- end }}
+            {{- with .Values.env }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: health
+            initialDelaySeconds: 5
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: health
+            initialDelaySeconds: 2
+            periodSeconds: 10
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

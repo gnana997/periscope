@@ -17,6 +17,8 @@ import {
 } from "../components/fleet/FleetEmptyStates";
 import { useFleet } from "../hooks/useFleet";
 import { usePinnedClusters } from "../hooks/usePinnedClusters";
+import { OnboardClusterModal } from "../components/fleet/OnboardClusterModal";
+import { useAuth } from "../auth/useAuth";
 import { queryKeys } from "../lib/queryKeys";
 import type { FleetClusterEntry, FleetStatus } from "../lib/types";
 
@@ -38,6 +40,9 @@ export function FleetPage() {
 
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<string | null>(null);
+  const [onboardOpen, setOnboardOpen] = useState(false);
+  const auth = useAuth();
+  const isAdmin = auth.user?.tier === "admin";
 
   const refetchAll = () =>
     queryClient.invalidateQueries({ queryKey: queryKeys.fleet() });
@@ -108,7 +113,22 @@ export function FleetPage() {
 
   return (
     <div className="flex flex-1 flex-col">
-      <PageHeader title="Fleet" subtitle={subtitle} />
+      <PageHeader
+        title="Fleet"
+        subtitle={subtitle}
+        trailing={
+          isAdmin ? (
+            <button
+              type="button"
+              onClick={() => setOnboardOpen(true)}
+              className="rounded-sm border border-accent bg-accent-soft px-3 py-1 font-mono text-xs text-accent transition-colors hover:bg-accent hover:text-surface"
+              title="Mint a bootstrap token + show the agent install command (admin only)"
+            >
+              + onboard cluster
+            </button>
+          ) : null
+        }
+      />
       <FilterStrip
         search={search}
         onSearch={setSearch}
@@ -175,6 +195,7 @@ export function FleetPage() {
           </div>
         )}
       </div>
+      <OnboardClusterModal open={onboardOpen} onClose={() => setOnboardOpen(false)} />
     </div>
   );
 }

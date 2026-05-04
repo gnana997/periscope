@@ -1,0 +1,30 @@
+Periscope agent installed.
+
+  Cluster name (claimed): {{ .Values.agent.clusterName }}
+  Server tunnel URL:      {{ .Values.agent.serverURL }}
+
+Watch the agent connect:
+
+  kubectl -n {{ .Release.Namespace }} logs -l app.kubernetes.io/name=periscope-agent -f
+
+Then on the central server, the cluster should appear in the fleet
+view within a few seconds. If it doesn't, check:
+
+  kubectl -n {{ .Release.Namespace }} get secret {{ .Values.agent.stateSecretName }}
+    → exists once registration succeeded
+  kubectl -n {{ .Release.Namespace }} describe deploy {{ include "periscope-agent.fullname" . }}
+    → look for ImagePullBackOff / CrashLoopBackOff
+
+After successful first registration the bootstrap-token Secret is
+single-use spent and can be deleted:
+
+  kubectl -n {{ .Release.Namespace }} delete secret {{ include "periscope-agent.bootstrapSecretName" . }}
+
+To re-register (e.g. cert lost / state Secret deleted), mint a fresh
+bootstrap token from the central server first:
+
+  curl -X POST https://periscope.example.com/api/agents/tokens \
+    -H "Content-Type: application/json" \
+    -d '{"cluster":"{{ .Values.agent.clusterName }}"}'
+
+Then `helm upgrade` this chart with --set agent.registrationToken=<new>.

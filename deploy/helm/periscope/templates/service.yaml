@@ -11,5 +11,11 @@ spec:
       port: {{ .Values.service.port }}
       targetPort: http
       protocol: TCP
+{{- if .Values.agent.enabled }}
+    - name: tunnel
+      port: {{ trimPrefix ":" .Values.agent.listenAddr | atoi | default 8443 }}
+      targetPort: tunnel
+      protocol: TCP
+{{- end }}
   selector:
     {{- include "periscope.selectorLabels" . | nindent 4 }}

@@ -76,9 +76,15 @@ func LoadFromFile(path string) (*Registry, error) {
 			// No required fields. The credential source is the pod's
 			// in-cluster ServiceAccount, mounted by the kubelet at
 			// /var/run/secrets/kubernetes.io/serviceaccount/.
+		case BackendAgent:
+			// No required fields here. The agent registers itself at
+			// runtime; the registry just records that this cluster name
+			// will be served by a tunnel session. internal/k8s/client.go
+			// resolves the live session per-request via the tunnel
+			// lookup hook (see #42 / buildAgentRestConfig).
 		default:
-			return nil, fmt.Errorf("cluster %q: unknown backend %q (must be %q, %q, or %q)",
-				c.Name, c.Backend, BackendEKS, BackendKubeconfig, BackendInCluster)
+			return nil, fmt.Errorf("cluster %q: unknown backend %q (must be %q, %q, %q, or %q)",
+				c.Name, c.Backend, BackendEKS, BackendKubeconfig, BackendInCluster, BackendAgent)
 		}
 
 		if _, dup := byName[c.Name]; dup {

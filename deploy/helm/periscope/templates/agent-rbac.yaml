@@ -1,0 +1,39 @@
+{{- if .Values.agent.enabled -}}
+# Agent backend RBAC (#42) — grants the server SA get/update on the
+# per-deployment CA Secret in its own namespace.
+#
+# Why update (not create): the chart pre-creates the empty Secret in
+# this same render so the server only ever needs to read + populate
+# it. Restricting to update keeps the blast radius minimal — the
+# server cannot create arbitrary Secrets.
+#
+# Why limit by resourceName: even if the server is compromised, this
+# rule only lets it touch the one named Secret, not every secret in
+# the namespace.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "periscope.fullname" . }}-agent-ca
+  labels:
+    {{- include "periscope.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames: ["{{ .Values.agent.caSecretName }}"]
+    verbs: ["get", "update"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "periscope.fullname" . }}-agent-ca
+  labels:
+    {{- include "periscope.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "periscope.fullname" . }}-agent-ca
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "periscope.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
+{{- end }}

@@ -1,0 +1,64 @@
+# server-values.example.yaml
+#
+# Sample values for the periscope (server) chart enabling the agent
+# backend (#42). Apply on the central cluster:
+#
+#   helm upgrade --install periscope oci://ghcr.io/gnana997/charts/periscope \
+#     --version <X.Y.Z> \
+#     --namespace periscope --create-namespace \
+#     --values server-values.example.yaml
+#
+# Most fields below match the defaults in deploy/helm/periscope/values.yaml;
+# only the agent.* block + a sample backend:agent cluster entry are
+# specifically for this onboarding flow.
+
+clusters:
+  # Pre-register every cluster you intend to onboard. The agent's
+  # mTLS CN must match an entry here; otherwise the tunnel is rejected.
+  - name: prod-eu
+    backend: agent
+    environment: prod
+  - name: stage-us
+    backend: agent
+    environment: stage
+
+agent:
+  enabled: true
+
+  # Bind addr for the dedicated TLS listener hosting /api/agents/connect.
+  # Default ":8443". Operators expose this externally via:
+  #   - a second Service of type LoadBalancer (NLB recommended, TLS
+  #     passthrough — ALB strips client certs and breaks mTLS), or
+  #   - a separate Ingress with TLS passthrough, or
+  #   - kubectl port-forward for kind/dev testing.
+  listenAddr: ":8443"
+
+  # Comma-separated DNS names baked into the server cert SANs. Agents
+  # validate the server's cert against these, so the SAN must match
+  # whatever hostname agents dial. For prod, your tunnel's public DNS;
+  # always include "localhost" too if you want kubectl-port-forward to
+  # work for smoke testing.
+  tunnelSANs: "agents.periscope.example.com,localhost"
+
+  # K8s Secret holding the per-deployment CA. Pre-created empty by
+  # the chart; server fills on first boot via UPDATE.
+  caSecretName: "periscope-agent-ca"
+
+  # Optional: expose the tunnel listener via a second LoadBalancer
+  # Service. Don't enable if you're using a separate Ingress / NLB
+  # set up out-of-band.
+  tunnelService:
+    enabled: true
+    type: LoadBalancer
+    port: 8443
+    annotations:
+      # AWS NLB with TLS passthrough — this is the right shape for
+      # mTLS-terminated-at-pod. The Load Balancer Controller honours
+      # nlb-target-type=ip when the tunnel pod runs on Fargate or
+      # when you prefer in-place pod traffic.
+      service.beta.kubernetes.io/aws-load-balancer-type: external
+      service.beta.kubernetes.io/aws-load-balancer-nlb-target-type: ip
+      service.beta.kubernetes.io/aws-load-balancer-scheme: internet-facing
+      # external-dns: have it manage the Route53 record automatically
+      # if external-dns is installed; remove if managing DNS by hand.
+      external-dns.alpha.kubernetes.io/hostname: agents.periscope.example.com

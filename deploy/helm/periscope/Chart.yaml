@@ -27,12 +27,16 @@ annotations:
   artifacthub.io/license: Apache-2.0
   artifacthub.io/operator: "false"
   artifacthub.io/links: |
+    - name: Setup guide
+      url: https://github.com/gnana997/periscope/blob/main/docs/setup/deploy.md
     - name: Documentation
       url: https://periscopehq.dev/docs
     - name: Source code
       url: https://github.com/gnana997/periscope
     - name: Changelog
       url: https://periscopehq.dev/changelog
+    - name: Companion — agent chart (multi-cluster)
+      url: https://artifacthub.io/packages/helm/periscope/periscope-agent
     - name: Issues
       url: https://github.com/gnana997/periscope/issues
   # The release.yaml workflow updates this annotation on every tag
