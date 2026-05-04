@@ -34,6 +34,16 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+// version is set via -ldflags "-X main.version=v1.x.y" at build time
+// (see Dockerfile + .github/workflows/release.yaml). Defaults to "dev"
+// for local builds without ldflags. Surfaced to the SPA via
+// /api/features so the brand row in the header reads the deployed
+// version dynamically instead of a stale literal.
+var (
+	version = "dev"
+	commit  = "unknown"
+)
+
 func main() {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	slog.SetDefault(logger)
@@ -2075,7 +2085,19 @@ func featuresHandler(cfg watchStreamsConfig) http.HandlerFunc {
 			kinds = append(kinds, k.Name)
 		}
 	}
-	body := map[string]any{"watchStreams": kinds}
+	channel := "stable"
+	if strings.Contains(version, "-") {
+		channel = "prerelease"
+	}
+	if version == "dev" {
+		channel = "dev"
+	}
+	body := map[string]any{
+		"watchStreams": kinds,
+		"version":      version,
+		"commit":       commit,
+		"channel":      channel,
+	}
 	return func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusOK, body)
 	}

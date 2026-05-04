@@ -212,6 +212,46 @@ The handler is `tunnel.MTLSAuthorizer.Authorize` (defense-in-depth
 also checks the cert carries `ExtKeyUsageClientAuth`, calls the
 operator's `NameAllowed` callback to gate on registry membership),
 plugged into `tunnel.ServerOptions.Authorizer`. Returning `true`
+
+### 5.1 LB topology and bootstrap trust (#48)
+
+The two server endpoints — `:8080` for the HTTP API including
+`/api/agents/register`, and `:8443` for `/api/agents/connect`
+(mTLS-required) — naturally map to two different load balancers in
+production. The agent's bootstrap flow needs to dial both, which
+forces a design decision about how the agent knows which URL to
+use for which call.
+
+The agent supports three deployment topologies controlled by two
+chart values:
+
+| Topology | `agent.serverURL` | `agent.registrationURL` | `agent.serverCAHash` |
+|---|---|---|---|
+| **A** — single LB, public cert | `wss://periscope.example.com:8443` | _unset_ (derived) | _unset_ |
+| **B** — split LBs (ALB + NLB) | `wss://agents.periscope.example.com:8443` | `https://periscope.example.com` | _unset_ |
+| **C** — single LB, self-signed | `wss://periscope.example.com:8443` | _unset_ (derived) | `sha256:...` |
+
+When `registrationURL` is unset, the agent derives the registration
+URL from `serverURL` by translating `wss://` → `https://` and
+`ws://` → `http://`. This is the right behaviour for Topology A and
+C (single LB) and the wrong behaviour for B (the derived URL would
+hit the mTLS endpoint, which rejects unauth POSTs). Topology B
+operators set `registrationURL` explicitly to point at the public
+ALB.
+
+When `serverCAHash` is set, the agent does kubeadm-style
+SubjectPublicKeyInfo pinning (RFC 7469) on the registration TLS
+dial — `tls.Config{InsecureSkipVerify: true, VerifyPeerCertificate: ...}`
+that compares the SHA-256 of the leaf cert's SPKI against the
+configured hash. The pin replaces standard chain validation
+exclusively for the registration dial; once registration succeeds,
+the agent has the server's CA bundle and uses standard chain
+validation for the long-lived tunnel. SPKI (not full-cert) hashing
+means cert rotation that preserves the key doesn't break the pin.
+
+The operator-facing how-to with topology examples lives in
+[`docs/setup/agent-onboarding.md`](../setup/agent-onboarding.md).
+
 admits the WebSocket session keyed by the cluster name.
 
 ## 6. mTLS handshake + session lifecycle

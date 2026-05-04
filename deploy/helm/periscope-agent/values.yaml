@@ -32,6 +32,39 @@ agent:
   # on subsequent upgrades.
   registrationToken: ""
 
+  # Optional: the URL the agent uses for the unauthenticated
+  # registration POST (#48). When set, registration goes here while
+  # the long-lived mTLS tunnel still uses serverURL. Required when
+  # the central server splits HTTP and mTLS onto different load
+  # balancers — e.g. ALB (port 443, public ACM cert) for HTTP API
+  # and NLB (port 8443, TLS passthrough, self-signed cert) for the
+  # tunnel. Leave empty for the single-LB topology, where the agent
+  # derives the registration URL from serverURL automatically
+  # (wss/ws → https/http).
+  #
+  # Example:
+  #   serverURL:       wss://agents.periscope.example.com:8443
+  #   registrationURL: https://periscope.example.com
+  registrationURL: ""
+
+  # Optional: SHA-256 hash of the registration endpoint's server
+  # certificate's SubjectPublicKeyInfo, format "sha256:<64 hex>".
+  # When set, the agent uses kubeadm-style SPKI pinning on the
+  # registration TLS dial — bypasses standard CA-chain validation,
+  # so this is how you bootstrap against a self-signed central
+  # server endpoint without distributing the full CA bundle.
+  #
+  # Compute from the central server with:
+  #   openssl x509 -pubkey -in server.crt \
+  #     | openssl rsa -pubin -outform DER 2>/dev/null \
+  #     | sha256sum | awk '{print "sha256:"$1}'
+  #
+  # SPKI (not cert) hash means cert rotation that preserves the key
+  # doesn't invalidate the pin. Used only for the bootstrap
+  # registration dial; after registration the agent has the real CA
+  # and uses standard chain validation for the tunnel.
+  serverCAHash: ""
+
   # K8s Secret holding the persisted client cert + key + server CA.
   # Created by the agent itself on first registration; survives pod
   # restarts. `helm.sh/resource-policy: keep` is set so a `helm

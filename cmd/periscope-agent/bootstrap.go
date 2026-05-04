@@ -55,7 +55,17 @@ func registerAndSign(ctx context.Context, cfg agentConfig) (*agentState, error) 
 	}
 
 	// 3. POST to /api/agents/register.
-	registerURL, err := registerEndpoint(cfg.ServerURL)
+	//
+	// Endpoint resolution: prefer cfg.RegistrationURL when set
+	// (operator opt-in for the ALB+NLB topology where HTTP and
+	// mTLS terminate on different load balancers — #48). Falls
+	// back to wss/ws → https/http translation of cfg.ServerURL,
+	// which is correct for the single-LB topology.
+	endpointSource := cfg.RegistrationURL
+	if endpointSource == "" {
+		endpointSource = cfg.ServerURL
+	}
+	registerURL, err := registerEndpoint(endpointSource)
 	if err != nil {
 		return nil, err
 	}
@@ -71,13 +81,20 @@ func registerAndSign(ctx context.Context, cfg agentConfig) (*agentState, error) 
 	}
 	req.Header.Set("Content-Type", "application/json")
 
-	httpClient := &http.Client{
-		Timeout: 30 * time.Second,
-		// On first boot we don't yet know the server's CA — fall
-		// back to system roots, which works in the common case where
-		// the operator put a public-CA cert on the ALB / ingress.
-		// For self-signed central-server scenarios we'd need a
-		// CABundle Helm value to seed; tracked as a follow-up.
+	// TLS strategy on the registration dial:
+	//   - cfg.ServerCAHash set → SPKI-hash pinning (kubeadm-style).
+	//     The pin replaces chain validation; appropriate for self-
+	//     signed central-server endpoints.
+	//   - otherwise → standard chain validation against system roots.
+	//     Works when the registration endpoint sits behind a public-
+	//     cert ALB (the common production case).
+	httpClient := &http.Client{Timeout: 30 * time.Second}
+	if cfg.ServerCAHash != "" {
+		tlsCfg, err := pinningTLSConfig(cfg.ServerCAHash)
+		if err != nil {
+			return nil, fmt.Errorf("build SPKI pin: %w", err)
+		}
+		httpClient.Transport = &http.Transport{TLSClientConfig: tlsCfg}
 	}
 	resp, err := httpClient.Do(req)
 	if err != nil {

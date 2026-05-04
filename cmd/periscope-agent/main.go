@@ -143,6 +143,23 @@ type agentConfig struct {
 	Namespace         string
 	SecretName        string
 	HealthAddr        string
+
+	// RegistrationURL overrides the URL used for the unauth
+	// registration POST (#48). Defaults to ServerURL with wss/ws
+	// translated to https/http. Set explicitly when the server
+	// hosts the registration endpoint behind a different load
+	// balancer than the tunnel listener (e.g. ALB for HTTPS API +
+	// NLB for mTLS tunnel).
+	RegistrationURL string
+
+	// ServerCAHash, if set, enables SPKI-hash pinning on the
+	// registration TLS dial (kubeadm-style). Format: "sha256:<64
+	// hex chars>". Bypasses standard CA-chain validation; use
+	// when the registration endpoint presents a self-signed cert
+	// the agent has no prior trust anchor for. After registration
+	// the agent has the real CA bundle and uses it for the
+	// long-lived tunnel — the pin is only for the bootstrap dial.
+	ServerCAHash string
 }
 
 func loadAgentConfig() (agentConfig, error) {
@@ -153,6 +170,8 @@ func loadAgentConfig() (agentConfig, error) {
 		Namespace:         strings.TrimSpace(os.Getenv("PERISCOPE_AGENT_NAMESPACE")),
 		SecretName:        strings.TrimSpace(os.Getenv("PERISCOPE_AGENT_SECRET_NAME")),
 		HealthAddr:        strings.TrimSpace(os.Getenv("PERISCOPE_AGENT_HEALTH_ADDR")),
+		RegistrationURL:   strings.TrimSpace(os.Getenv("PERISCOPE_REGISTRATION_URL")),
+		ServerCAHash:      strings.TrimSpace(os.Getenv("PERISCOPE_SERVER_CA_HASH")),
 	}
 	if cfg.ServerURL == "" {
 		return cfg, errors.New("PERISCOPE_SERVER_URL required")

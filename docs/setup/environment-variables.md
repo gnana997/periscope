@@ -44,6 +44,8 @@ shape itself), see [`docs/setup/deploy.md`](deploy.md).
 | `PERISCOPE_AGENT_NAMESPACE` | _(in-pod namespace)_ | Where the agent persists state | `(derived)` |
 | `PERISCOPE_AGENT_SECRET_NAME` | `periscope-agent-state` | State Secret name (cert + key + server CA) | `agent.stateSecretName` |
 | `PERISCOPE_AGENT_HEALTH_ADDR` | `:8081` | Bind addr for /healthz | `agent.healthAddr` |
+| `PERISCOPE_REGISTRATION_URL` | _(derive from serverURL)_ | URL for the unauth registration POST when split from tunnel | `agent.registrationURL` |
+| `PERISCOPE_SERVER_CA_HASH` | _(unset = system roots)_ | SPKI hash for kubeadm-style pinning on registration TLS | `agent.serverCAHash` |
 
 Empty / unset values fall back to the documented default. Negative or
 non-numeric values where a positive integer is expected fall back to
@@ -462,6 +464,53 @@ Bind addr for the kubelet probe target (`/healthz`). Default
 bootstrap; the tunnel state itself is reflected in pod logs (see
 the `tunnel.client_connected` / `tunnel.client_disconnected`
 slog lines).
+
+#### `PERISCOPE_REGISTRATION_URL`
+
+Optional. The URL the agent uses for the unauthenticated
+registration POST (#48). Format: `https://host[:port]` or
+`http://host[:port]` (no path; the agent appends
+`/api/agents/register`). When unset, the agent derives the
+registration URL from `PERISCOPE_SERVER_URL` by translating
+`wss://` → `https://` and `ws://` → `http://`.
+
+Set explicitly when the central server splits HTTP and mTLS onto
+different load balancers (e.g. ALB-on-443 for the HTTP API +
+NLB-on-8443 for the mTLS tunnel — the recommended AWS production
+shape). Without this, the agent posts registration at the mTLS
+endpoint and gets `tls: certificate required` because it has no
+client cert yet.
+
+Helm rendering: `agent.registrationURL`. Schema accepts only
+http(s):// URLs.
+
+#### `PERISCOPE_SERVER_CA_HASH`
+
+Optional. SHA-256 hash of the registration endpoint's server
+cert's SubjectPublicKeyInfo, format `sha256:<64 hex chars>`. When
+set, the agent does kubeadm-style SPKI pinning on the registration
+TLS dial — bypasses standard CA-chain validation, instead
+validating the server's cert against this exact hash. Used only
+for the bootstrap registration dial; after registration the agent
+has the real CA bundle and uses standard chain validation for the
+long-lived tunnel.
+
+Compute on the central cluster:
+
+```sh
+kubectl -n periscope exec deploy/periscope -- \
+  cat /etc/periscope-server/tls.crt | \
+  openssl x509 -pubkey | \
+  openssl rsa -pubin -outform DER 2>/dev/null | \
+  sha256sum | awk '{print "sha256:"$1}'
+```
+
+SPKI (not cert) hash means cert rotation that preserves the key
+doesn't break the pin (RFC 7469).
+
+Helm rendering: `agent.serverCAHash`. Schema rejects values that
+don't match `^sha256:[0-9a-fA-F]{64}$`.
+
 
 ---
 

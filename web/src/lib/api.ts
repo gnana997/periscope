@@ -227,8 +227,18 @@ export type WatchStreamKind =
 // Features describes server-side capability flags. Fetched once at app
 // boot via api.features and consumed by useResource (Phase 6) to choose
 // between polling and streaming per kind.
+// Server-wide capability flags + version metadata fetched on first
+// SPA load. Surfaced via /api/features. Used by the Brand component
+// (header version display), the OnboardClusterModal (chart version),
+// and useResource (watch-stream gating).
 export interface Features {
   watchStreams: WatchStreamKind[];
+  /** Server binary version, e.g. "v1.0.0-rc4". "dev" for builds without ldflags. */
+  version?: string;
+  /** Source-code commit the server was built from. "unknown" without ldflags. */
+  commit?: string;
+  /** Release channel: "stable" (no `-` in version), "prerelease" (e.g. -rc4), or "dev". */
+  channel?: "stable" | "prerelease" | "dev";
 }
 
 /**

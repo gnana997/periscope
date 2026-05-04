@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
 	"crypto/x509"
+	"encoding/hex"
 	"encoding/pem"
 	"net/http"
 	"net/http/httptest"
@@ -120,4 +122,125 @@ func TestRegisterEndpoint_RejectsBadScheme(t *testing.T) {
 	if _, err := registerEndpoint("ftp://nope"); err == nil {
 		t.Fatal("registerEndpoint accepted ftp:// scheme")
 	}
+}
+
+// TestRegisterAndSign_UsesRegistrationURLOverServerURL proves that
+// when both URLs are set, the registration POST goes to
+// RegistrationURL (the ALB+NLB topology fix from #48). We stand up
+// two servers; the agent should hit the registration one and ignore
+// the tunnel one.
+func TestRegisterAndSign_UsesRegistrationURLOverServerURL(t *testing.T) {
+	store := tunnel.NewTokenStore(tunnel.TokenStoreOptions{ReapInterval: -1})
+	ca, _, _ := tunnel.GenerateCA("test-ca", tunnel.CertValidity{})
+
+	// Real registration server (mounts the handler).
+	regMux := http.NewServeMux()
+	regMux.HandleFunc("/api/agents/register", tunnel.RegisterHandler(store, ca, 0))
+	regSrv := httptest.NewServer(regMux)
+	defer regSrv.Close()
+
+	// "Tunnel" server that intentionally fails — if the agent ever
+	// hits this URL for registration the test fails fast.
+	tunnelSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Errorf("agent posted registration to ServerURL %q (path %q); should have used RegistrationURL", r.Host, r.URL.Path)
+		http.Error(w, "wrong endpoint", http.StatusTeapot)
+	}))
+	defer tunnelSrv.Close()
+
+	iss, err := store.MintToken("prod-eu")
+	if err != nil {
+		t.Fatalf("MintToken: %v", err)
+	}
+
+	cfg := agentConfig{
+		ServerURL:         tunnelSrv.URL, // would be wrong
+		RegistrationURL:   regSrv.URL,    // expected
+		ClusterName:       "prod-eu",
+		RegistrationToken: iss.Token,
+	}
+	if _, err := registerAndSign(context.Background(), cfg); err != nil {
+		t.Fatalf("registerAndSign: %v", err)
+	}
+}
+
+// TestRegisterAndSign_FallsBackToServerURL confirms backward
+// compatibility — when only ServerURL is set, registration uses it.
+func TestRegisterAndSign_FallsBackToServerURL(t *testing.T) {
+	store := tunnel.NewTokenStore(tunnel.TokenStoreOptions{ReapInterval: -1})
+	ca, _, _ := tunnel.GenerateCA("test-ca", tunnel.CertValidity{})
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/agents/register", tunnel.RegisterHandler(store, ca, 0))
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	iss, _ := store.MintToken("prod-eu")
+	cfg := agentConfig{
+		ServerURL:         srv.URL, // RegistrationURL deliberately unset
+		ClusterName:       "prod-eu",
+		RegistrationToken: iss.Token,
+	}
+	if _, err := registerAndSign(context.Background(), cfg); err != nil {
+		t.Fatalf("registerAndSign: %v", err)
+	}
+}
+
+// TestRegisterAndSign_SPKIPinning proves the agent succeeds against
+// a self-signed registration endpoint when a correct hash is
+// supplied, and fails clearly with a wrong one.
+func TestRegisterAndSign_SPKIPinning(t *testing.T) {
+	store := tunnel.NewTokenStore(tunnel.TokenStoreOptions{ReapInterval: -1})
+	ca, _, _ := tunnel.GenerateCA("test-ca", tunnel.CertValidity{})
+
+	// httptest.NewTLSServer uses a self-signed cert — exactly the
+	// shape SPKI pinning is meant for.
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/agents/register", tunnel.RegisterHandler(store, ca, 0))
+	srv := httptest.NewTLSServer(mux)
+	defer srv.Close()
+
+	leaf := srv.Certificate()
+	sum := sha256.Sum256(leaf.RawSubjectPublicKeyInfo)
+	correctHash := "sha256:" + hex.EncodeToString(sum[:])
+
+	t.Run("matching pin", func(t *testing.T) {
+		iss, _ := store.MintToken("c")
+		cfg := agentConfig{
+			ServerURL:         srv.URL,
+			ClusterName:       "c",
+			RegistrationToken: iss.Token,
+			ServerCAHash:      correctHash,
+		}
+		if _, err := registerAndSign(context.Background(), cfg); err != nil {
+			t.Fatalf("registerAndSign with matching pin: %v", err)
+		}
+	})
+
+	t.Run("mismatched pin", func(t *testing.T) {
+		iss, _ := store.MintToken("c2")
+		cfg := agentConfig{
+			ServerURL:         srv.URL,
+			ClusterName:       "c2",
+			RegistrationToken: iss.Token,
+			ServerCAHash:      "sha256:" + strings.Repeat("0", 64),
+		}
+		if _, err := registerAndSign(context.Background(), cfg); err == nil {
+			t.Fatal("registerAndSign should have failed with wrong pin")
+		} else if !strings.Contains(err.Error(), "SPKI pin mismatch") {
+			t.Fatalf("err = %v, want SPKI pin mismatch", err)
+		}
+	})
+
+	t.Run("malformed pin", func(t *testing.T) {
+		iss, _ := store.MintToken("c3")
+		cfg := agentConfig{
+			ServerURL:         srv.URL,
+			ClusterName:       "c3",
+			RegistrationToken: iss.Token,
+			ServerCAHash:      "garbage",
+		}
+		if _, err := registerAndSign(context.Background(), cfg); err == nil {
+			t.Fatal("registerAndSign should have failed with malformed pin")
+		}
+	})
 }
