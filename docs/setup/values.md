@@ -302,6 +302,7 @@ topology decision matrix.
 | `agent.stateSecretName` | string | `periscope-agent-state` | Persisted mTLS cert + key + server CA. |
 | `agent.healthAddr` | string | `:8081` | Liveness / readiness probe port. |
 | `agent.logLevel` | enum | `""` (binary default = `info`) | `debug` \| `info` \| `warn` \| `error`. Set `debug` for per-request access logs. |
+| `agent.execIdleSeconds` | int | `600` | Per-connection idle timeout (seconds) for hijacked exec WS / SPDY streams. Mirrors the server's `PERISCOPE_EXEC_IDLE_SECONDS`; set the same value here so stuck streams get reaped on the agent side if the server crashes mid-session. Activity = any successful read; only idle streams are killed. `0` disables (relies entirely on server-side cascade close + OS TCP keepalive — not recommended). |
 
 ## deployment shape
 

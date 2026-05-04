@@ -13,6 +13,14 @@ tag.
 
 ## [Unreleased]
 
+### Added
+
+- Agent: per-connection idle timeout (`agent.execIdleSeconds`,
+  default `600`) for hijacked exec WS / SPDY streams. Defense-in-
+  depth so a stuck exec stream gets reaped on the agent side if
+  the server crashes / partitions mid-session, even if the
+  server-side cascade close doesn't fire.
+
 ### Documentation
 
 - Added [`docs/architecture/README.md`](docs/architecture/README.md) —
