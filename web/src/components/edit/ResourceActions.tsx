@@ -224,7 +224,7 @@ function BuiltinActions({
           disabled={!canEdit.allowed}
           aria-disabled={!canEdit.allowed}
           className={cn(
-            "rounded-sm border border-border-strong px-2.5 py-1 font-mono text-[12px] text-ink-muted transition-colors hover:bg-surface-2 hover:text-ink",
+            "whitespace-nowrap rounded-sm border border-border-strong px-2.5 py-1 font-mono text-[12px] text-ink-muted transition-colors hover:bg-surface-2 hover:text-ink",
             disabledCls,
           )}
         >
@@ -239,7 +239,7 @@ function BuiltinActions({
             disabled={scaleDisabled}
             aria-disabled={scaleDisabled}
             className={cn(
-              "rounded-sm border border-border-strong px-2.5 py-1 font-mono text-[12px] text-ink-muted transition-colors hover:bg-surface-2 hover:text-ink",
+              "whitespace-nowrap rounded-sm border border-border-strong px-2.5 py-1 font-mono text-[12px] text-ink-muted transition-colors hover:bg-surface-2 hover:text-ink",
               disabledCls,
             )}
           >
@@ -254,7 +254,7 @@ function BuiltinActions({
           disabled={!canDelete.allowed}
           aria-disabled={!canDelete.allowed}
           className={cn(
-            "rounded-sm border border-border-strong px-2.5 py-1 font-mono text-[12px] text-red transition-colors hover:bg-red-soft",
+            "whitespace-nowrap rounded-sm border border-border-strong px-2.5 py-1 font-mono text-[12px] text-red transition-colors hover:bg-red-soft",
             disabledCls,
           )}
         >
@@ -269,7 +269,7 @@ function BuiltinActions({
             disabled={!canEdit.allowed}
             aria-disabled={!canEdit.allowed}
             className={cn(
-              "rounded-sm border border-border-strong px-2.5 py-1 font-mono text-[12px] text-ink-muted transition-colors hover:bg-surface-2 hover:text-ink",
+              "whitespace-nowrap rounded-sm border border-border-strong px-2.5 py-1 font-mono text-[12px] text-ink-muted transition-colors hover:bg-surface-2 hover:text-ink",
               disabledCls,
             )}
           >
@@ -285,7 +285,7 @@ function BuiltinActions({
             disabled={!canEdit.allowed}
             aria-disabled={!canEdit.allowed}
             className={cn(
-              "rounded-sm border px-2.5 py-1 font-mono text-[12px] transition-colors",
+              "whitespace-nowrap rounded-sm border px-2.5 py-1 font-mono text-[12px] transition-colors",
               cachedCronJob.suspend
                 ? "border-yellow/40 bg-yellow/10 text-yellow hover:brightness-110"
                 : "border-border-strong text-ink-muted hover:bg-surface-2 hover:text-ink",
@@ -304,7 +304,7 @@ function BuiltinActions({
             disabled={!canCreateJobs.allowed}
             aria-disabled={!canCreateJobs.allowed}
             className={cn(
-              "rounded-sm border border-border-strong px-2.5 py-1 font-mono text-[12px] text-ink-muted transition-colors hover:bg-surface-2 hover:text-ink",
+              "whitespace-nowrap rounded-sm border border-border-strong px-2.5 py-1 font-mono text-[12px] text-ink-muted transition-colors hover:bg-surface-2 hover:text-ink",
               disabledCls,
             )}
           >
@@ -320,7 +320,7 @@ function BuiltinActions({
             disabled={!canEdit.allowed}
             aria-disabled={!canEdit.allowed}
             className={cn(
-              "rounded-sm border px-2.5 py-1 font-mono text-[12px] transition-colors",
+              "whitespace-nowrap rounded-sm border px-2.5 py-1 font-mono text-[12px] transition-colors",
               cachedNode.unschedulable
                 ? "border-yellow/40 bg-yellow/10 text-yellow hover:brightness-110"
                 : "border-border-strong text-ink-muted hover:bg-surface-2 hover:text-ink",
@@ -549,7 +549,7 @@ function CustomResourceActions({
           disabled={!canDelete.allowed}
           aria-disabled={!canDelete.allowed}
           className={cn(
-            "rounded-sm border border-border-strong px-2.5 py-1 font-mono text-[12px] text-red transition-colors hover:bg-red-soft",
+            "whitespace-nowrap rounded-sm border border-border-strong px-2.5 py-1 font-mono text-[12px] text-red transition-colors hover:bg-red-soft",
             disabledCls,
           )}
         >

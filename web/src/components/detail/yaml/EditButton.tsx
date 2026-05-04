@@ -35,7 +35,7 @@ export function EditButton({ disabled = false }: EditButtonProps) {
       onClick={handleClick}
       disabled={disabled}
       aria-disabled={disabled}
-      className="rounded-sm border border-border-strong px-2.5 py-1 font-mono text-[12px] text-ink-muted transition-colors hover:border-ink-muted hover:text-ink disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:border-border-strong disabled:hover:text-ink-muted"
+      className="whitespace-nowrap rounded-sm border border-border-strong px-2.5 py-1 font-mono text-[12px] text-ink-muted transition-colors hover:border-ink-muted hover:text-ink disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:border-border-strong disabled:hover:text-ink-muted"
     >
       edit yaml
     </button>
