@@ -4,6 +4,24 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#f4f1ea" />
+    <!-- Brand assets bundled into the SPA so a self-hosted Periscope
+         deployment makes ZERO outbound asset calls. The favicon is an
+         italic "p" from Instrument Serif (the site's display font),
+         adaptive via prefers-color-scheme: terracotta on light, amber
+         on dark. -->
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
+    <meta name="description" content="periscope · multi-cluster kubernetes console with keyless auth, oidc identity, and a tamper-evident audit trail." />
+    <!-- OpenGraph + Twitter for the rare case a Periscope URL gets
+         shared in Slack/Teams ("check this pod failing in prod"). -->
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="periscope" />
+    <meta property="og:description" content="multi-cluster kubernetes console · keyless · audit-trail clean" />
+    <meta property="og:image" content="/og-image.png" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="periscope" />
+    <meta name="twitter:description" content="multi-cluster kubernetes console · keyless · audit-trail clean" />
+    <meta name="twitter:image" content="/og-image.png" />
     <title>Periscope</title>
   </head>
   <body>
