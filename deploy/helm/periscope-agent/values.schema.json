@@ -98,6 +98,11 @@
             "error"
           ],
           "description": "Optional agent log level. Empty = use the binary default (info). Set debug to enable per-request access logs through the proxy."
+        },
+        "execIdleSeconds": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Per-connection idle timeout (seconds) for hijacked exec WS/SPDY streams. Mirrors the server's PERISCOPE_EXEC_IDLE_SECONDS (default 600). Set 0 to disable."
         }
       },
       "additionalProperties": false

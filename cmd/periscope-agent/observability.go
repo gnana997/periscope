@@ -96,6 +96,8 @@ func loggingMiddleware(next http.Handler) http.Handler {
 		// the optional interfaces httputil.ReverseProxy needs (Flusher
 		// for SSE, Hijacker for WebSocket upgrades on exec).
 		rec := newResponseRecorder(w)
+		rec.hijackIdleTimeout = execIdleTimeout()
+		rec.hijackLogCtx = r.Method + " " + r.URL.Path
 		next.ServeHTTP(rec, r)
 
 		latencyMs := time.Since(start).Milliseconds()
@@ -209,6 +211,13 @@ type responseRecorder struct {
 	status      int
 	bytes       int
 	wroteHeader bool
+
+	// hijackIdleTimeout is the idle timeout applied to the underlying
+	// net.Conn AFTER Hijack() succeeds. Zero = no wrapping. Set by
+	// loggingMiddleware from execIdleTimeout() (env-driven, see
+	// configureExecIdleTimeout).
+	hijackIdleTimeout time.Duration
+	hijackLogCtx      string
 }
 
 func newResponseRecorder(w http.ResponseWriter) *responseRecorder {
@@ -260,7 +269,16 @@ func (r *responseRecorder) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 	if !ok {
 		return nil, nil, fmt.Errorf("underlying ResponseWriter does not support http.Hijacker")
 	}
-	return hj.Hijack()
+	conn, brw, err := hj.Hijack()
+	if err != nil || r.hijackIdleTimeout <= 0 {
+		return conn, brw, err
+	}
+	// Install the per-conn idle-timeout for hijacked WS / SPDY
+	// streams. http.Server's own IdleTimeout doesn't apply once
+	// Hijack runs, so without this an exec stream that the server
+	// crashed mid-flight could hold this TCP open until the kernel
+	// keepalive eventually reaps it (minutes-to-hours).
+	return newIdleConn(conn, r.hijackIdleTimeout, r.hijackLogCtx), brw, nil
 }
 
 var (
@@ -271,3 +289,42 @@ var (
 // fmt is only used by string formatting in helper paths above —
 // keep the reference here so future edits don't accidentally drop it.
 var _ = fmt.Sprintf
+
+// ─── exec idle-timeout config ───────────────────────────────────────
+//
+// Mirrors the server's PERISCOPE_EXEC_IDLE_SECONDS (default 600s).
+// Operators set the same env var on the agent Deployment to keep the
+// two numbers aligned. The chart's agent values plumbing exposes
+// `agent.execIdleSeconds` for this.
+//
+// Used by the responseRecorder.Hijack wrapping to install a
+// per-connection idle deadline on hijacked WS / SPDY streams. See
+// idle_conn.go for the rationale.
+
+const defaultExecIdleSeconds = 600 // 10 min, matches server default
+
+// execIdleTimeout returns the configured idle timeout for hijacked
+// exec connections. Returns 0 when explicitly disabled via env
+// (PERISCOPE_EXEC_IDLE_SECONDS=0); the Hijack wrapper then no-ops.
+func execIdleTimeout() time.Duration {
+	raw := strings.TrimSpace(os.Getenv("PERISCOPE_EXEC_IDLE_SECONDS"))
+	if raw == "" {
+		return time.Duration(defaultExecIdleSeconds) * time.Second
+	}
+	// Strict positive integer; on parse failure fall back to default
+	// rather than 0 (which would silently disable).
+	var secs int
+	for _, c := range raw {
+		if c < '0' || c > '9' {
+			slog.Warn("agent.exec_idle_invalid",
+				"raw", raw, "fallback_seconds", defaultExecIdleSeconds)
+			return time.Duration(defaultExecIdleSeconds) * time.Second
+		}
+		secs = secs*10 + int(c-'0')
+	}
+	if secs == 0 {
+		// Operator-explicit disable.
+		return 0
+	}
+	return time.Duration(secs) * time.Second
+}
