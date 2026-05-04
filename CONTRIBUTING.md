@@ -10,6 +10,30 @@ Please **do not** file a public issue for security vulnerabilities. See [`SECURI
 
 ## Ways to contribute
 
+## Adding a new live-updating list page
+
+Periscope has a cleanly-factored primitive for adding new live-updating
+list pages — most of the work flows through a `kindReg` registry, so a
+new kind is small and repetitive.
+
+**Quick recipe (4 steps):**
+
+1. **Define the DTO** in `internal/k8s/<kind>.go` — list-view struct +
+   `<kind>Summary` function that maps the API type to the DTO.
+2. **Add `Watch<Kind>`** in `internal/k8s/watch.go` — thin wrapper using
+   `watchKind` with list/watch closures.
+3. **Register the kind** in the `kindReg` map so the router and SSE
+   stream handler pick it up.
+4. **Add the SPA route** in the frontend so the new list page renders.
+
+For the full walkthrough with code templates, see
+[docs/architecture/watch-streams.md](docs/architecture/watch-streams.md)
+(section "8. Adding a new kind").
+
+Worked example: `internal/k8s/pods.go` and `WatchPods` in
+`internal/k8s/watch.go`.
+
+
 - **File a bug.** Use [GitHub Issues](https://github.com/gnana997/periscope/issues). Include the cluster type (EKS / kind / minikube / …), the auth mode (OIDC provider, IRSA / Pod Identity / kubeconfig), and steps to reproduce.
 - **Propose a feature.** Open an issue describing the use case before writing the code, especially for anything that affects the backend API, auth model, or audit shape.
 - **Improve the docs.** Setup guides under [`docs/setup/`](docs/setup/), architecture notes under [`docs/architecture/`](docs/architecture/), RFCs under [`docs/rfcs/`](docs/rfcs/), and inline comments in code are all fair game. Doc changes auto-sync to [periscopehq.dev](https://periscopehq.dev) within an hour.
