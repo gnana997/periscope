@@ -25,8 +25,18 @@ func LoginHandler(client *OIDCClient, cfg Config) http.HandlerFunc {
 			http.Redirect(w, r, "/", http.StatusFound)
 			return
 		}
-		state := NewState()
-		verifier := NewPKCEVerifier()
+		state, err := NewState()
+		if err != nil {
+			slog.ErrorContext(r.Context(), "auth.login_failed", "reason", "rand_failed", "err", err)
+			http.Error(w, "couldn't start login", http.StatusInternalServerError)
+			return
+		}
+		verifier, err := NewPKCEVerifier()
+		if err != nil {
+			slog.ErrorContext(r.Context(), "auth.login_failed", "reason", "rand_failed", "err", err)
+			http.Error(w, "couldn't start login", http.StatusInternalServerError)
+			return
+		}
 
 		// Encode state + verifier into a single value so they
 		// share a cookie. State is short, verifier is the secret.
@@ -91,7 +101,12 @@ func CallbackHandler(client *OIDCClient, store SessionStore, cfg Config) http.Ha
 			return
 		}
 
-		sessID := NewSessionID()
+		sessID, err := NewSessionID()
+		if err != nil {
+			slog.ErrorContext(r.Context(), "auth.login_failed", "reason", "rand_failed", "err", err)
+			http.Error(w, "couldn't complete login", http.StatusInternalServerError)
+			return
+		}
 		s, err := client.Exchange(r.Context(), code, verifier, sessID, cfg.Session.AbsoluteTimeout)
 		if err != nil {
 			slog.ErrorContext(r.Context(), "auth.login_failed",
