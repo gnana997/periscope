@@ -81,25 +81,38 @@ export function DetailPane({
             )}
           </button>
         ))}
-        <div className="ml-auto flex items-center gap-2">
-          {actions}
-          <button
-            type="button"
-            onClick={onClose}
-            className="flex size-7 items-center justify-center rounded-md text-ink-muted transition-colors hover:bg-surface-2 hover:text-ink"
-            aria-label="Close detail"
-          >
-            <svg width="11" height="11" viewBox="0 0 11 11" aria-hidden>
-              <path
-                d="M2 2l7 7M9 2l-7 7"
-                stroke="currentColor"
-                strokeWidth="1.4"
-                strokeLinecap="round"
-              />
-            </svg>
-          </button>
-        </div>
+        {/* Close button — pinned right via ml-auto. Always visible
+            regardless of tab count or pane width. Actions, when
+            present, render below in row 2 (see below) so they can
+            never push close off-screen. */}
+        <button
+          type="button"
+          onClick={onClose}
+          className="ml-auto flex size-7 shrink-0 items-center justify-center rounded-md text-ink-muted transition-colors hover:bg-surface-2 hover:text-ink"
+          aria-label="Close detail"
+        >
+          <svg width="11" height="11" viewBox="0 0 11 11" aria-hidden>
+            <path
+              d="M2 2l7 7M9 2l-7 7"
+              stroke="currentColor"
+              strokeWidth="1.4"
+              strokeLinecap="round"
+            />
+          </svg>
+        </button>
       </div>
+
+      {/* Row 2: actions. Two-row header keeps close X always reachable
+          even on narrow panes (the cut-off bug from 2026-05-04 review).
+          overflow-x-auto means a long action set scrolls horizontally
+          inside this band rather than being clipped. The row only
+          renders when actions are present, so resources without an
+          action menu (rare) keep the original single-row chrome. */}
+      {actions && (
+        <div className="flex h-10 shrink-0 items-center gap-1.5 overflow-x-auto border-b border-border bg-surface px-3">
+          {actions}
+        </div>
+      )}
 
       {/* Title row */}
       {/*

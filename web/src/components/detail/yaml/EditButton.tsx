@@ -1,20 +1,26 @@
-// EditButton — the small `[edit yaml]` button rendered by
-// ResourceActions in the DetailPane tab strip. Click navigates the
+// EditButton — the small icon-only "edit YAML" button rendered by
+// ResourceActions in the DetailPane action row. Click navigates the
 // URL to the YAML tab in edit mode (?tab=yaml&edit=1); YamlView
 // dispatches to the inline editor when the kind is in the registry
 // and the user has patch permission.
 //
 // `disabled` greys out the button when the user lacks `patch` on the
-// resource. The wrapping <Tooltip> in ResourceActions supplies the
-// hover hint; this component just owns the visual.
+// resource. Tooltip + sizing comes from <IconAction>.
 
 import { useSearchParams } from "react-router-dom";
+import { Pencil } from "lucide-react";
+import { IconAction } from "../../IconAction";
 
 interface EditButtonProps {
   disabled?: boolean;
+  /** Tooltip body shown when disabled (RBAC reason). */
+  disabledTooltip?: string | null;
 }
 
-export function EditButton({ disabled = false }: EditButtonProps) {
+export function EditButton({
+  disabled = false,
+  disabledTooltip,
+}: EditButtonProps) {
   const [, setParams] = useSearchParams();
 
   const handleClick = () => {
@@ -30,14 +36,12 @@ export function EditButton({ disabled = false }: EditButtonProps) {
   };
 
   return (
-    <button
-      type="button"
+    <IconAction
+      label="Edit YAML"
+      icon={<Pencil size={14} />}
       onClick={handleClick}
       disabled={disabled}
-      aria-disabled={disabled}
-      className="whitespace-nowrap rounded-sm border border-border-strong px-2.5 py-1 font-mono text-[12px] text-ink-muted transition-colors hover:border-ink-muted hover:text-ink disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:border-border-strong disabled:hover:text-ink-muted"
-    >
-      edit yaml
-    </button>
+      disabledTooltip={disabledTooltip}
+    />
   );
 }

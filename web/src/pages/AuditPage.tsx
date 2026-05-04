@@ -4,6 +4,7 @@ import { useAuth } from "../auth/useAuth";
 import { useAudit } from "../hooks/useAudit";
 import { PageHeader } from "../components/page/PageHeader";
 import { AuditFilterStrip } from "../components/audit/AuditFilterStrip";
+import { TimeRangePicker } from "../components/audit/TimeRangePicker";
 import { AuditRow } from "../components/audit/AuditRow";
 import { AuditTimelineStrip } from "../components/audit/AuditTimelineStrip";
 import { ScopeBanner } from "../components/audit/ScopeBanner";
@@ -77,7 +78,7 @@ export function AuditPage() {
 
   if (!auditEnabled) {
     return (
-      <div className="flex flex-1 flex-col">
+      <div className="flex h-full min-h-0 flex-col">
         <PageHeader title="Audit" />
         <AuditNotEnabledState />
       </div>
@@ -86,7 +87,7 @@ export function AuditPage() {
 
   if (pagedQuery.isPending) {
     return (
-      <div className="flex flex-1 flex-col">
+      <div className="flex h-full min-h-0 flex-col">
         <PageHeader title="Audit" />
         <LoadingState resource="audit" />
       </div>
@@ -95,7 +96,7 @@ export function AuditPage() {
 
   if (pagedQuery.isError) {
     return (
-      <div className="flex flex-1 flex-col">
+      <div className="flex h-full min-h-0 flex-col">
         <PageHeader title="Audit" />
         <ErrorState
           title="couldn't load audit log"
@@ -152,15 +153,19 @@ export function AuditPage() {
     !filters.outcome && deniedCount > 0 && allInRange.length > 0;
 
   return (
-    <div className="flex flex-1 flex-col">
-      <PageHeader title="Audit" subtitle={subtitle} />
+    <div className="flex h-full min-h-0 flex-col">
+      <PageHeader
+        title="Audit"
+        subtitle={subtitle}
+        trailing={<TimeRangePicker filters={filters} onChange={handleFiltersChange} />}
+      />
       <AuditFilterStrip
         filters={filters}
         onChange={handleFiltersChange}
         showActorFilter={showActorFilter}
       />
 
-      <div className="flex flex-1 flex-col gap-4 px-6 py-5">
+      <div className="flex flex-1 flex-col gap-4 overflow-y-auto px-6 py-5 min-h-0">
         {user?.auditScope === "self" && <ScopeBanner />}
 
         {allInRange.length > 0 && (
