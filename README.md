@@ -127,6 +127,9 @@ Both signed (cosign keyless) and discoverable on [Artifact Hub](https://artifact
 **Architecture**
 - [Watch streams — push model, fallback, RBAC](docs/architecture/watch-streams.md)
 
+**Reference**
+- [HTTP API reference (stability tiers, auth, conventions)](docs/api.md)
+
 **RFCs**
 - [RFC 0001 — Pod exec support](docs/rfcs/0001-pod-exec.md)
 - [RFC 0002 — Authentication (OIDC + per-user K8s authz)](docs/rfcs/0002-auth.md)

@@ -20,6 +20,11 @@ tag.
   schema, retention algorithm, `/api/audit` read-side RBAC, semver
   coverage, and the v1.0 security model (operator-trust now;
   hash-chain signing in v2).
+- Added [`docs/api.md`](docs/api.md) — HTTP API reference with
+  three stability tiers (Tier 1 stable, Tier 2 SPA-coupled,
+  Tier 3 live channels), authentication / cookie / session
+  contract, error-code enum, and the `/api/v1/...` versioning
+  policy for v2 onward.
 
 ## [1.0.0]
 
