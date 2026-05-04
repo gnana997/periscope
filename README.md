@@ -115,6 +115,7 @@ Both signed (cosign keyless) and discoverable on [Artifact Hub](https://artifact
 
 **Setup**
 - [Configuration & deployment](docs/setup/deploy.md)
+- [Environment variables reference](docs/setup/environment-variables.md)
 - [OIDC setup — Auth0](docs/setup/auth0.md)
 - [OIDC setup — Okta](docs/setup/okta.md)
 - [In-cluster RBAC the backend needs](docs/setup/cluster-rbac.md)

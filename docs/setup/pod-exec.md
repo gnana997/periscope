@@ -70,7 +70,9 @@ exec:
 
 Each value renders to a `PERISCOPE_EXEC_*` environment variable on the
 Periscope pod (or `PERISCOPE_PROBE_CLUSTERS_ON_BOOT=1` for the boot
-probe). The mapping:
+probe). The mapping below covers exec specifically; the cross-cutting
+reference for every env var the binary reads is
+[`environment-variables.md`](environment-variables.md).
 
 | Helm value | Env var | Code default |
 |---|---|---|

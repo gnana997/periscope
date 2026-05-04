@@ -82,7 +82,10 @@ the pod. Useful when debugging what's actually applied:
 | Helm value | Env var | Notes |
 |---|---|---|
 | `watchStreams.kinds` | `PERISCOPE_WATCH_STREAMS` | Only rendered when non-empty (server default is "all on" when env is unset) |
-| `watchStreams.perUserLimit` | `PERISCOPE_WATCH_PER_USER_LIMIT` | Only rendered when non-zero |
+| `watchStreams.perUserLimit` | `PERISCOPE_WATCH_PER_USER_LIMIT` | Only rendered when non-zero (server default `60`) |
+
+The central reference for every Periscope env var is
+[`environment-variables.md`](environment-variables.md).
 
 ---
 

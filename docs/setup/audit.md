@@ -51,7 +51,9 @@ The default is `false` — opt-in. When off:
 ### Helm values ↔ env var mapping
 
 The chart templates each `audit.*` value to a `PERISCOPE_AUDIT_*`
-env var on the pod. Useful when debugging what's actually applied:
+env var on the pod. Useful when debugging what's actually applied;
+the central reference for every Periscope env var (with semver
+coverage) is [`environment-variables.md`](environment-variables.md).
 
 | Helm value | Env var | Required when `audit.enabled=true` |
 |---|---|---|

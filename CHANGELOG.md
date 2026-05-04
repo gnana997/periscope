@@ -25,6 +25,12 @@ tag.
   Tier 3 live channels), authentication / cookie / session
   contract, error-code enum, and the `/api/v1/...` versioning
   policy for v2 onward.
+- Added [`docs/setup/environment-variables.md`](docs/setup/environment-variables.md) —
+  centralized reference for every `PERISCOPE_*` env var (and
+  `PORT`) the binary reads, with defaults, Helm-value mapping,
+  and the semver coverage rules for the configuration surface.
+- Fixed stale `PERISCOPE_WATCH_PER_USER_LIMIT` default in
+  `docs/architecture/watch-streams.md` (was 30, code is 60).
 
 ## [1.0.0]
 
