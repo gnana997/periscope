@@ -6,8 +6,8 @@ description: |
   AWS credentials in the pod, no kubeconfigs with embedded creds on the
   laptop.
 type: application
-version: 0.1.0
-appVersion: "0.1.0"
+version: 1.0.0
+appVersion: "1.0.0"
 keywords:
   - kubernetes
   - eks
@@ -40,11 +40,13 @@ annotations:
   # release notes for Artifact Hub's "What changed" panel).
   artifacthub.io/changes: |
     - kind: added
+      description: initial v1.0 stable release
+    - kind: added
       description: real-time SSE updates for 21+ resource kinds
     - kind: added
-      description: searchable audit log with SQLite/Postgres backends
+      description: searchable SQLite-backed audit log
     - kind: added
-      description: Helm release browser
+      description: read-only Helm release browser with revision diff
   # Cosign signing — Artifact Hub will display a "Signed" badge when
   # the chart is verifiable via cosign. The signKey block teaches it
   # how to verify; for keyless (Sigstore) signatures the URL points

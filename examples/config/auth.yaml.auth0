@@ -46,7 +46,7 @@ session:
 authorization:
   # K8s authorization mode: shared (default) | tier | raw.
   # See docs/setup/cluster-rbac.md.
-  moe: shared
+  mode: shared
 
   # tier-mode only — map your existing Auth0 groups to one of
   # read / triage / write / maintain / admin. Leave empty in
