@@ -118,7 +118,7 @@ without configuration.
 Why a single CA over per-cluster CAs: makes validation a single
 trust anchor and keeps the key material surface tiny. We sacrifice
 the ability to revoke "all certs for cluster X" by burning the
-issuer (we'd burn every cluster's cert instead). For v1.x.0 this
+issuer (we'd burn every cluster's cert instead). For v1.0 this
 is the right tradeoff; per-cluster issuers can layer in additively
 when threat model demands.
 
@@ -138,7 +138,7 @@ Three cert kinds the CA mints:
 | **Agent client cert** | `clientAuth` | the registered cluster name | `periscope-agent-state` Secret on the managed cluster |
 
 Default validity: 90 days for client + server, 10 years for the CA.
-Auto-rotation is a v1.x.+ follow-up; for now operators re-register
+Auto-rotation is a post-1.0 follow-up; for now operators re-register
 agents whose certs expire (no client outage; the agent surfaces the
 expiry as a connect failure with a clear log line).
 
@@ -176,7 +176,7 @@ endpoints:
 with `{"cluster": "<name>"}`. The server mints a 32-byte random
 opaque token, base64url-encoded, with TTL 15 min and bound to the
 named cluster. Stored in a `tunnel.TokenStore` (in-memory single-
-writer for v1.x.0; Postgres-backed for HA in v1.x.+). Returns
+writer for v1.0; Postgres-backed for HA is a post-1.0 follow-up). Returns
 `{token, cluster, expiresAt}`.
 
 **Step 2.** The operator runs `helm install periscope-agent ...
@@ -412,7 +412,7 @@ human user (`actor.sub`), the verb, the outcome, and `cluster:
 same shape regardless of how `prod-eu` is reached.
 
 A future `clusterBackend: agent` field on audit rows is being
-considered for the v1.x.+ audit RFC update, so SIEM consumers can
+considered for a post-1.0 audit RFC update, so SIEM consumers can
 filter by transport type. Additive change to RFC 0003 6, no wire-
 breaking impact.
 
@@ -421,7 +421,7 @@ breaking impact.
 | What happens | What the user sees | Recovery |
 |---|---|---|
 | Agent disconnects mid-request (network blip) | The `tunnel.RoundTripper` returns an error wrapped with `ErrAgentDisconnected`; the handler surfaces it as the standard upstream error class. SPA shows "cluster transient error, retry." | remotedialer reconnects with jittered backoff (1s → 30s); next request goes through. |
-| Cert expires unattended | Agent's reconnect attempts fail with `bad certificate`. Cluster goes "unreachable" in fleet view. | Operator deletes the agent's state Secret, mints a fresh token, re-installs. (90d default lifetime; auto-rotation is a v1.x.+ follow-up.) |
+| Cert expires unattended | Agent's reconnect attempts fail with `bad certificate`. Cluster goes "unreachable" in fleet view. | Operator deletes the agent's state Secret, mints a fresh token, re-installs. (90d default lifetime; auto-rotation is a post-1.0 follow-up.) |
 | Server restart | All agent connections drop. Agents reconnect on jittered backoff; sessions re-register, fleet view re-populates within ~10s. | Automatic. |
 | WS idle through corp proxy | Connection closes silently, agent reconnect kicks in. | remotedialer's keepalive frame keeps idle proxies happy; default <30s ping. |
 | Wrong-cluster registration attempt | Token redemption returns `cluster mismatch`; token burns; HTTP returns uniform 401. Server log carries the real reason. | Operator mints fresh token with the correct cluster name. |
@@ -431,7 +431,7 @@ breaking impact.
 
 ## 11. What's intentionally not here
 
-- **HA peer routing.** v1.x.0 is single-replica; documented
+- **HA peer routing.** v1.0 is single-replica; documented
   ~100-cluster ceiling per server pod (Rancher's empirically
   defensible number). Multi-replica with peer routing
   (request lands on replica A, agent's session is on replica B,
@@ -441,12 +441,12 @@ breaking impact.
   modal mints a token but assumes the operator has already added
   `backend: agent` to `clusters[]` in YAML and `helm upgrade`d
   the central server. Dynamic registry overlay (Secret-backed,
-  merged with YAML) is a v1.x.1 follow-up; tracked in the same
-  v1.x.0 epic [#42](https://github.com/gnana997/periscope/issues/42)
+  merged with YAML) is a post-1.0 follow-up; tracked in the same
+  v1.0 epic [#42](https://github.com/gnana997/periscope/issues/42)
   as Phase 2.
 
 - **Cert auto-rotation.** Agent re-registration is operator-driven
-  in v1.x.0 (90-day cert, manual mint + re-install). Auto-rotate-
+  in v1.0 (90-day cert, manual mint + re-install). Auto-rotate-
   at-2/3-lifetime is a small follow-up — the agent already has the
   in-cluster RBAC to update its own state Secret.
 
@@ -458,9 +458,9 @@ breaking impact.
   for the central server's stdout audit stream.
 
 - **Per-tunnel rate limits.** A buggy or malicious agent could
-  open many concurrent dials through its tunnel. v1.x.0 relies on
+  open many concurrent dials through its tunnel. v1.0 relies on
   the apiserver's own rate limits. Per-tunnel watch / connection
-  caps are tracked for v1.x.+.
+  caps are tracked for post-1.0.
 
 - **Multi-tenant shared CA.** Every Periscope deployment has its
   own CA; agents from one deployment cannot register against
@@ -498,6 +498,6 @@ Background:
 - [Issue #41](https://github.com/gnana997/periscope/issues/41) —
   design discussion (agent-vs-central-IAM)
 - [Issue #42](https://github.com/gnana997/periscope/issues/42) —
-  v1.x.0 multi-cluster epic
+  v1.0 multi-cluster epic
 - [Issue #43](https://github.com/gnana997/periscope/issues/43) —
   exec POC + integration (closed in v1.0.0)

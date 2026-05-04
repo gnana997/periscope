@@ -408,16 +408,18 @@ Errors:
 - `403 Forbidden` — session present but not admin tier (`admin tier required`)
 
 The token is stored in process memory on the server. Single-replica
-deployments are supported in v1.x.0; multi-replica with shared
-persistence lands in v1.x.+.
+deployments are supported in v1.0; multi-replica with shared
+persistence is a post-1.0 follow-up.
 
 ### `POST /api/agents/register`
 
 Agent-side endpoint. Validates the bootstrap token, signs the
 agent's CSR, returns the cert + the server's CA bundle. **Not
 authenticated** — the bootstrap token IS the proof of authorization.
-Mounted unauthenticated specifically because the agent does not yet
-have a long-lived identity at this point in the flow.
+Mounted unauthenticated specifically because the agent has not yet
+obtained its long-lived mTLS identity at this point in the bootstrap
+flow — the redeemed token is the only proof of authorization it can
+present until the CSR is signed.
 
 ```json
 POST /api/agents/register
@@ -442,7 +444,7 @@ POST /api/agents/register
 | `csr` | Base64-encoded DER. The agent generates the keypair locally; only the public key + name claim cross the wire. The CN inside the CSR is informational — the server overwrites it with the cluster name from the token at signing time. |
 | `cert` | PEM-encoded signed client cert. CN = cluster name, EKU = clientAuth. Default validity 90 days. |
 | `caBundle` | PEM-encoded server CA cert. The agent uses this to validate the server's TLS cert on every reconnect to the tunnel listener. |
-| `expiresAt` | When the client cert expires. Operators currently re-register manually; auto-rotation is a v1.x.+ follow-up. |
+| `expiresAt` | When the client cert expires. Operators currently re-register manually; auto-rotation is a post-1.0 follow-up. |
 
 Errors are deliberately uniform:
 
@@ -609,7 +611,7 @@ without re-fetching the whole object.
 
 Helm write operations (rollback / upgrade / install / uninstall)
 are deliberately **not** in v1.0 — they need the compound SAR
-fan-out layer to land first. v1.x.
+fan-out layer to land first. Targeted for the v1.x train.
 
 ---
 

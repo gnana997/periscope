@@ -2,10 +2,10 @@
 
 | | |
 |---|---|
-| **Status** | Landed — Tiers 1+2 green; both production bugs fixed; closes #42 + #43 |
+| **Status** | Implemented in v1.0.0 — Tiers 1+2 green; both production bugs fixed; closed #42 + #43 |
 | **Owner** | @gnana997 |
 | **Started** | 2026-05-04 |
-| **Targets** | v1.x.0 (collapse #43 into #42 if the harness passes) |
+| **Shipped** | v1.0.0 (collapsed #43 into #42; no separate v1.x.1) |
 | **Related** | #42 (agent-backend epic), #43 (exec-on-agent POC), PR #46 (agent-backend implementation), RFC 0001 (Pod Exec Support), `docs/architecture/agent-tunnel.md` |
 
 ---

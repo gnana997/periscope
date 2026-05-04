@@ -224,7 +224,8 @@ See [`docs/architecture/watch-streams.md`](docs/architecture/watch-streams.md) f
 
 1. Read it via `os.Getenv` or a small `parseIntEnv` / `parseDurationEnv` helper in `main.go`. Document the default in a comment next to the parse call.
 2. Surface it in the Helm chart: add the value to [`deploy/helm/periscope/values.yaml`](deploy/helm/periscope/values.yaml) (with a comment block explaining what it does and when to override), the schema in [`deploy/helm/periscope/values.schema.json`](deploy/helm/periscope/values.schema.json), and the env-var injection in [`deploy/helm/periscope/templates/deployment.yaml`](deploy/helm/periscope/templates/deployment.yaml).
-3. Document it in the relevant `docs/setup/*.md` guide.
+3. Add a row to the flat reference at [`docs/setup/values.md`](docs/setup/values.md) (single grep-friendly page operators reach for during `helm upgrade` — keep it in lockstep with `values.yaml` or it rots).
+4. Document the operator-facing rationale in the relevant `docs/setup/*.md` guide.
 
 ## Pull request process
 

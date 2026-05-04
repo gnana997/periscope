@@ -1,0 +1,106 @@
+name: Bug report
+description: Something is broken or behaving unexpectedly.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for filing a bug. The more of the fields below you can fill in, the
+        faster we can reproduce. If a field genuinely doesn't apply, write "n/a".
+
+        For security vulnerabilities, please follow the process in
+        [SECURITY.md](../../SECURITY.md) instead of opening a public issue.
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: A clear description of the bug, plus what you expected to happen.
+      placeholder: |
+        I clicked "Open Shell" on a pod and got an instant disconnect.
+        I expected an interactive shell.
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: Numbered steps. Include the cluster name in the registry, namespace, and pod where relevant.
+      placeholder: |
+        1. Sign in via Auth0
+        2. Open `prod-eu` cluster, navigate to pods in `default`
+        3. Click "Open Shell" on `nginx-abc-xyz`
+        4. ...
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Periscope version
+      description: Output of the `/healthz` endpoint, the GitHub release tag, or the chart version.
+      placeholder: "v1.0.0"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: backend
+    attributes:
+      label: Cluster backend
+      description: How Periscope reaches the cluster where the bug appears.
+      options:
+        - eks (Pod Identity / IRSA)
+        - kubeconfig
+        - in-cluster
+        - agent
+        - n/a (not cluster-specific)
+    validations:
+      required: true
+
+  - type: dropdown
+    id: auth
+    attributes:
+      label: OIDC provider
+      options:
+        - Auth0
+        - Okta
+        - Other
+        - n/a (not auth-related)
+    validations:
+      required: true
+
+  - type: input
+    id: k8s-version
+    attributes:
+      label: Kubernetes version
+      description: `kubectl version --short` of the affected cluster.
+      placeholder: "v1.30.4"
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs
+      description: |
+        Pod logs from `kubectl -n periscope logs deploy/periscope` and (if applicable)
+        `deploy/periscope-agent`. Redact tokens, cookies, and SA secrets.
+      render: shell
+
+  - type: textarea
+    id: config
+    attributes:
+      label: Relevant config
+      description: |
+        Helm values, the `clusters[]` entry for the affected cluster, and any
+        `PERISCOPE_*` env overrides — minus secrets.
+      render: yaml
+
+  - type: checkboxes
+    id: confirmations
+    attributes:
+      label: Confirmations
+      options:
+        - label: I have searched [existing issues](https://github.com/gnana997/periscope/issues?q=is%3Aissue) and this is not a duplicate.
+          required: true
+        - label: I am not reporting a security vulnerability (those go through SECURITY.md).
+          required: true

@@ -27,7 +27,66 @@ cluster you want to lock down.
 | `eks` (Pod Identity / IRSA) | Yes | Direct apiserver dial; standard WS / SPDY upgrade |
 | `kubeconfig` | Yes | Same as eks |
 | `in-cluster` | Yes | Same |
-| `agent` | Yes (since v1.0.0) | Routes via the loopback CONNECT proxy through the agent tunnel; transparent to the operator. See [`docs/architecture/agent-tunnel.md`](../architecture/agent-tunnel.md) for the integration details and [RFC 0004](../rfcs/0004-exec-over-agent-tunnel-poc.md) for the validation harness. |
+| `agent` | Yes (since v1.0.0) | Routes via the loopback CONNECT proxy through the agent tunnel; transparent to the operator. See [Operator notes for agent-backed clusters](#operator-notes-for-agent-backed-clusters) below, [`docs/architecture/agent-tunnel.md`](../architecture/agent-tunnel.md) for the integration details, and [RFC 0004](../rfcs/0004-exec-over-agent-tunnel-poc.md) for the validation harness. |
+
+### Operator notes for agent-backed clusters
+
+Pod exec on `backend: agent` clusters works through the same Helm
+values, RBAC, audit, and SPA flow as any other backend — but the
+transport path is longer, so a few operator-facing implications are
+worth knowing.
+
+**The same toggles apply.** All settings under §2 and §3 — global
+defaults, per-cluster overrides, `exec.enabled: false`,
+`maxSessionsPerUser`, `serverIdleSeconds` — work identically on
+agent-backed clusters. There is no separate `agent.exec.*` block.
+
+**Transport path.** A pod-exec request on an agent-backed cluster
+flows: browser → server WS handler → `internal/k8s/exec.go` builds
+a `remotecommand.NewWebSocketExecutor` (or SPDY) → a loopback HTTP
+CONNECT proxy in `internal/k8s/agent_exec_proxy.go` translates the
+per-cluster CONNECT into a tunnel dial → `rancher/remotedialer`
+multiplexes it onto the agent's long-lived WebSocket → the agent's
+`httputil.ReverseProxy` (with a `Hijack()` shim for upgrade traffic)
+re-issues the request to the local apiserver with the agent SA
+bearer token. WS v5 vs SPDY transport selection (§4) and circuit-
+breaker behavior happen on the *server* end; the agent is unaware.
+
+**Why the loopback CONNECT proxy.** client-go's WS / SPDY exec
+executors bypass `rest.Config.Transport` entirely (they dial via
+DNS), so the same trick that makes list/watch/apply transparent
+to handlers — substituting `rest.Config.Transport` — does not
+work for exec. The CONNECT proxy is the additive seam that closes
+that gap. Operators don't configure it; the server registers a
+loopback listener at startup.
+
+**RBAC is unchanged.** `pods/exec` create permission still applies
+in the *target* cluster's namespace, evaluated under the human's
+impersonated identity. The agent's SA needs only its standard
+`impersonate` lever (see [`docs/setup/cluster-rbac.md`](./cluster-rbac.md)
+§ "Agent backend"). No additional RBAC for exec specifically.
+
+**Audit is unchanged.** `pod.exec.session_start` /
+`pod.exec.session_end` records emit on the central server, with
+the same fields described in §7. The `cluster:` field carries the
+agent-backed cluster's registry name.
+
+**Latency.** First-exec latency on an agent-backed cluster is
+typically ~100ms higher than a direct backend (the extra hop
+through the tunnel and the agent's reverse proxy). Steady-state
+keystroke latency is dominated by the agent → apiserver hop, which
+is in-cluster on the managed side, so it's usually negligible. If
+you regularly see >500ms keystroke latency, the bottleneck is
+between the central server and the agent — investigate the WS
+path through proxies / NLBs.
+
+**Disconnect behavior.** If the agent tunnel drops mid-session,
+the WebSocket exec stream dies with it; the SPA shows the standard
+"session ended" UI. Reconnect requires a fresh shell — the exec
+session is not resumable across tunnel reconnects (this is the
+same behavior as a direct-backend `kubectl exec` losing its TCP
+connection). The agent itself reconnects on jittered backoff
+within 1–30s; subsequent shell opens succeed normally.
 
 ### Per-cluster opt-out
 
@@ -270,6 +329,37 @@ The breaker self-heals after 30 min. To force-reset, restart the
 Periscope pod. There's no operator-facing knob for this — pinning
 that long means real WebSocket failure that needs investigation
 upstream of Periscope.
+
+### Exec fails immediately on an agent-backed cluster
+
+Direct backends (`eks` / `kubeconfig` / `in-cluster`) work but
+shells on `backend: agent` clusters fail to upgrade. Most likely
+causes, in order:
+
+1. **Agent tunnel is down.** Check the fleet view — if the cluster
+   card is "unreachable", the tunnel is the problem, not exec.
+   See [`docs/setup/agent-onboarding.md`](./agent-onboarding.md)
+   troubleshooting.
+2. **Agent is on a pre-1.0.0 image.** The `Hijack()` shim in
+   `cmd/periscope-agent/observability.go` shipped in v1.0.0; older
+   agents fail every WS / SPDY upgrade with `"can't switch
+   protocols using non-Hijacker ResponseWriter"` in the agent log.
+   Fix: `helm upgrade periscope-agent` to ≥ v1.0.0.
+3. **Agent SA lacks `pods/exec` create on the target namespace.**
+   Different from the *user's* RBAC: the agent's reverse proxy
+   re-issues the request as itself (with Impersonate-* preserved),
+   and the apiserver checks both the agent's RBAC and the
+   impersonated user's RBAC. Default agent ClusterRole grants
+   this; verify if you tightened it.
+4. **Tunnel WS path strips upgrade headers.** Same root cause as
+   the §8 "WebSocket upgrade fails" bullet, but on the central-
+   server-to-agent leg. Check `agent.tunnelSANs` and any
+   intermediate LB.
+
+Enable agent debug logging
+(`helm upgrade ... --set agent.logLevel=debug` on the managed
+cluster) and grep for `proxy.request_in` / `proxy.apiserver_error`
+lines around the failed upgrade.
 
 ---
 

@@ -420,7 +420,7 @@ from different accounts / clouds / regions in one fleet view.
 The Periscope SPA includes a **+ Onboard cluster** button on the
 fleet page that walks through the token mint + install command
 flow. Phase 2 (live polling, runtime registry mutations,
-re-mint/decommission) lands in v1.x.1.
+re-mint/decommission) is a post-1.0 follow-up on the v1.x train.
 
 ## See also
 
@@ -435,7 +435,7 @@ re-mint/decommission) lands in v1.x.1.
 - [Issue #41](https://github.com/gnana997/periscope/issues/41) —
   agent-vs-central-IAM design discussion
 - [Issue #42](https://github.com/gnana997/periscope/issues/42) —
-  v1.x.0 multi-cluster epic
+  v1.0 multi-cluster epic
 - [Issue #48](https://github.com/gnana997/periscope/issues/48) —
   the ALB+NLB bootstrap chicken-and-egg this guide's Topology B
   fixes
