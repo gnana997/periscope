@@ -1,13 +1,16 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, type MouseEvent } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useResource } from "../hooks/useResource";
 import type { ReplicaSet, ReplicaSetList } from "../lib/types";
 import { ageFrom, nameMatches } from "../lib/format";
 import { cn } from "../lib/cn";
+import { api } from "../lib/api";
 import { PageHeader } from "../components/page/PageHeader";
 import { SplitPane } from "../components/page/SplitPane";
 import { EmptyState, ErrorState, ForbiddenState, LoadingState } from "../components/table/states";
 import { isForbidden } from "../components/table/isForbidden";
+import { BulkActionsToolbar } from "../components/table/BulkActionsToolbar";
+import { useTableSelection } from "../hooks/useTableSelection";
 import { DetailPane } from "../components/detail/DetailPane";
 import { ReplicaSetDescribe } from "../components/detail/describe/ReplicaSetDescribe";
 import { YamlView } from "../components/detail/YamlView";
@@ -16,6 +19,8 @@ import { useConfirmDiscard } from "../hooks/useConfirmDiscard";
 import { ResourceActions } from "../components/edit/ResourceActions";
 import { EventsView } from "../components/detail/EventsView";
 import { NamespacePicker } from "../components/shell/NamespacePicker";
+
+const rsKey = (rs: ReplicaSet) => `${rs.namespace}/${rs.name}`;
 
 function isActiveRS(rs: ReplicaSet) {
   return rs.desired > 0;
@@ -129,6 +134,28 @@ export function ReplicaSetsPage({ cluster }: { cluster: string }) {
   const selectedKey = selectedNs && selectedName ? `${selectedNs}/${selectedName}` : null;
   const selectRS = (rs: ReplicaSet) => setMany({ sel: rs.name, selNs: rs.namespace, tab: "describe" });
 
+  // Bulk-download selection. Lives at page level so the toolbar above
+  // the grouped list shares state with checkboxes inside RSRows. The
+  // grouped layout means visibleIds isn't simply `filtered.map(rsKey)` —
+  // dormant revisions are only "visible" when their group is expanded
+  // (or the user is searching, which auto-expands every group).
+  const selection = useTableSelection({ kindLabel: "replicasets" });
+  const visibleIds = useMemo(() => {
+    const ids: string[] = [];
+    for (const g of groups) {
+      if (g.activeRS) ids.push(rsKey(g.activeRS));
+      if (expandedGroups.has(g.key) || !!search) {
+        for (const rs of g.dormantRS) ids.push(rsKey(rs));
+      }
+    }
+    for (const rs of standalone) ids.push(rsKey(rs));
+    return ids;
+  }, [groups, standalone, expandedGroups, search]);
+  const onRowCheckboxClick = (id: string, e: MouseEvent) => {
+    if (e.shiftKey) selection.toggleRange(id, visibleIds);
+    else selection.toggle(id);
+  };
+
   const editFlag = useEditorDirty(cluster, "replicasets", selectedNs ?? undefined, selectedName);
   const confirmDiscard = useConfirmDiscard(editFlag.dirty);
 
@@ -158,25 +185,43 @@ export function ReplicaSetsPage({ cluster }: { cluster: string }) {
     ) : null;
 
   const groupedList = (
-    <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
-      {groups.map((group) => (
-        <DeploymentGroup
-          key={group.key}
-          group={group}
-          isExpanded={expandedGroups.has(group.key) || !!search}
-          onToggle={() => toggleGroup(group.key)}
-          selectedKey={selectedKey}
-          onSelectRS={selectRS}
-          onNavigateToDeployment={() =>
-            navigate(
-              `/clusters/${cluster}/deployments?sel=${encodeURIComponent(group.deploymentName)}&selNs=${encodeURIComponent(group.namespace)}&tab=describe`,
-            )
-          }
-        />
-      ))}
-      {standalone.length > 0 && (
-        <StandaloneSection rsList={standalone} selectedKey={selectedKey} onSelectRS={selectRS} />
-      )}
+    <div className="flex min-h-0 flex-1 flex-col">
+      <BulkActionsToolbar
+        selection={selection}
+        rows={filtered}
+        rowKey={rsKey}
+        cluster={cluster}
+        kindLabel="replicasets"
+        fetchYaml={(rs, signal) => api.yaml(cluster, "replicasets", rs.namespace, rs.name, signal)}
+      />
+      <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
+        {groups.map((group) => (
+          <DeploymentGroup
+            key={group.key}
+            group={group}
+            isExpanded={expandedGroups.has(group.key) || !!search}
+            onToggle={() => toggleGroup(group.key)}
+            selectedKey={selectedKey}
+            onSelectRS={selectRS}
+            onNavigateToDeployment={() =>
+              navigate(
+                `/clusters/${cluster}/deployments?sel=${encodeURIComponent(group.deploymentName)}&selNs=${encodeURIComponent(group.namespace)}&tab=describe`,
+              )
+            }
+            isChecked={(rs) => selection.has(rsKey(rs))}
+            onCheckboxClick={onRowCheckboxClick}
+          />
+        ))}
+        {standalone.length > 0 && (
+          <StandaloneSection
+            rsList={standalone}
+            selectedKey={selectedKey}
+            onSelectRS={selectRS}
+            isChecked={(rs) => selection.has(rsKey(rs))}
+            onCheckboxClick={onRowCheckboxClick}
+          />
+        )}
+      </div>
     </div>
   );
 
@@ -245,6 +290,8 @@ function DeploymentGroup({
   selectedKey,
   onSelectRS,
   onNavigateToDeployment,
+  isChecked,
+  onCheckboxClick,
 }: {
   group: RSGroup;
   isExpanded: boolean;
@@ -252,6 +299,8 @@ function DeploymentGroup({
   selectedKey: string | null;
   onSelectRS: (rs: ReplicaSet) => void;
   onNavigateToDeployment: () => void;
+  isChecked: (rs: ReplicaSet) => boolean;
+  onCheckboxClick: (id: string, e: MouseEvent) => void;
 }) {
   const { deploymentName, namespace, activeRS, dormantRS } = group;
   const hasDormant = dormantRS.length > 0;
@@ -318,6 +367,8 @@ function DeploymentGroup({
           isActive
           isSelected={selectedKey === `${activeRS.namespace}/${activeRS.name}`}
           onClick={() => onSelectRS(activeRS)}
+          isChecked={isChecked(activeRS)}
+          onCheckboxClick={onCheckboxClick}
         />
       )}
 
@@ -333,6 +384,8 @@ function DeploymentGroup({
                 isActive={false}
                 isSelected={selectedKey === `${rs.namespace}/${rs.name}`}
                 onClick={() => onSelectRS(rs)}
+                isChecked={isChecked(rs)}
+                onCheckboxClick={onCheckboxClick}
               />
             ))
           ) : (
@@ -360,14 +413,19 @@ function RSRow({
   isActive,
   isSelected,
   onClick,
+  isChecked,
+  onCheckboxClick,
 }: {
   rs: ReplicaSet;
   ownerName: string;
   isActive: boolean;
   isSelected: boolean;
   onClick: () => void;
+  isChecked: boolean;
+  onCheckboxClick: (id: string, e: MouseEvent) => void;
 }) {
   const { base, hash } = splitRSName(rs.name, ownerName);
+  const id = rsKey(rs);
 
   return (
     <div
@@ -376,13 +434,31 @@ function RSRow({
       onClick={onClick}
       onKeyDown={(e) => e.key === "Enter" && onClick()}
       className={cn(
-        "flex cursor-pointer items-center gap-3 py-1.5 pl-10 pr-6 text-[12.5px] transition-colors",
+        "flex cursor-pointer items-center gap-2 py-1.5 pl-4 pr-6 text-[12.5px] transition-colors",
         isSelected
-          ? "bg-accent/8 border-l-2 border-l-accent pl-[38px]"
+          ? "bg-accent/8 border-l-2 border-l-accent pl-[14px]"
           : "hover:bg-surface-2/30",
         !isActive && "opacity-55",
       )}
     >
+      {/* Wrapper handles the click so we can read shiftKey and stop
+          propagation before the row-click navigation fires. */}
+      <span
+        className="flex size-4 shrink-0 items-center justify-center"
+        onClick={(e) => {
+          e.stopPropagation();
+          onCheckboxClick(id, e);
+        }}
+      >
+        <input
+          type="checkbox"
+          checked={isChecked}
+          onChange={() => {}}
+          aria-label={`select replicaset ${rs.name}`}
+          className="h-3.5 w-3.5 cursor-pointer accent-accent"
+        />
+      </span>
+
       {/* Status dot */}
       <div
         className={cn(
@@ -428,10 +504,14 @@ function StandaloneSection({
   rsList,
   selectedKey,
   onSelectRS,
+  isChecked,
+  onCheckboxClick,
 }: {
   rsList: ReplicaSet[];
   selectedKey: string | null;
   onSelectRS: (rs: ReplicaSet) => void;
+  isChecked: (rs: ReplicaSet) => boolean;
+  onCheckboxClick: (id: string, e: MouseEvent) => void;
 }) {
   return (
     <div className="border-b border-border/50">
@@ -449,6 +529,8 @@ function StandaloneSection({
           isActive={isActiveRS(rs)}
           isSelected={selectedKey === `${rs.namespace}/${rs.name}`}
           onClick={() => onSelectRS(rs)}
+          isChecked={isChecked(rs)}
+          onCheckboxClick={onCheckboxClick}
         />
       ))}
     </div>
