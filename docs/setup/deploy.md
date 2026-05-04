@@ -179,6 +179,35 @@ already runs.
 
 ---
 
+## 4.5. Single-cluster install (in-cluster backend)
+
+When Periscope is deployed into the same cluster it should manage — the most common single-cluster install (kind, minikube, single-cluster prod) — register that cluster with `backend: in-cluster`:
+
+```yaml
+# my-values.yaml
+clusters:
+  - name: in-cluster
+    backend: in-cluster
+```
+
+The chart auto-detects this and binds Periscope's ServiceAccount to the impersonator role on the cluster — no separate `kubectl apply` step. See [`cluster-rbac.md`](./cluster-rbac.md#mode-in-cluster-single-cluster-install) for the rendered RBAC details and how impersonation flows through.
+
+Skips the AWS / Pod Identity / IRSA path entirely (in-cluster auth uses the SA token mounted by the kubelet). Skip section 4 above when this is your only cluster.
+
+Combining `in-cluster` with managed `eks` clusters in the same registry works — each cluster is independent. Common pattern:
+
+```yaml
+clusters:
+  - name: periscope-host
+    backend: in-cluster
+  - name: prod-eu-west-1
+    backend: eks
+    region: eu-west-1
+    arn: arn:aws:eks:eu-west-1:111111111111:cluster/prod-eu-west-1
+```
+
+---
+
 ## 5. Secret modes
 
 Pick the row that matches how you already manage secrets in the cluster.

@@ -144,10 +144,31 @@ auth:
 #       enabled: false
 # -----------------------------------------------------------------------------
 clusters: []
+#
+# Three backends supported:
+#
+# 1. eks — managed EKS clusters reached via IRSA / Pod Identity. The
+#    "default" backend (omit `backend:` to get this).
 # - name: prod-eu-west-1
 #   backend: eks
 #   region: eu-west-1
 #   arn: arn:aws:eks:eu-west-1:222222222222:cluster/prod-eu-west-1
+#
+# 2. kubeconfig — non-EKS clusters reached via a kubeconfig file at a
+#    path on the pod's filesystem. Useful for static credentials or
+#    cross-provider clusters.
+# - name: gke-staging
+#   backend: kubeconfig
+#   kubeconfigPath: /etc/periscope/gke-kubeconfig.yaml
+#   kubeconfigContext: staging
+#
+# 3. in-cluster — the cluster periscope is itself running in. Uses the
+#    in-pod ServiceAccount token (rest.InClusterConfig). The chart's
+#    cluster-rbac.yaml automatically binds the periscope SA to the
+#    impersonator role when this backend is in the registry. The most
+#    common single-cluster install pattern.
+# - name: in-cluster
+#   backend: in-cluster
 
 # -----------------------------------------------------------------------------
 # Secrets — how the OIDC client secret reaches the pod.

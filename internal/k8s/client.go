@@ -60,6 +60,8 @@ func buildRestConfig(ctx context.Context, p credentials.Provider, c clusters.Clu
 	switch c.Backend {
 	case clusters.BackendKubeconfig:
 		return buildKubeconfigRestConfig(p, c)
+	case clusters.BackendInCluster:
+		return buildInClusterRestConfig(p, c)
 	case clusters.BackendEKS, "":
 		return buildEKSRestConfig(ctx, p, c)
 	default:
@@ -112,6 +114,25 @@ func buildKubeconfigRestConfig(p credentials.Provider, c clusters.Cluster) (*res
 	).ClientConfig()
 	if err != nil {
 		return nil, fmt.Errorf("load kubeconfig %q: %w", c.KubeconfigPath, err)
+	}
+	applyImpersonation(cfg, p)
+	return cfg, nil
+}
+
+// buildInClusterRestConfig produces a *rest.Config from the in-pod
+// ServiceAccount via rest.InClusterConfig. The CA cert and bearer token
+// are auto-loaded from /var/run/secrets/kubernetes.io/serviceaccount/.
+// Per-user impersonation is then layered on top so the apiserver sees
+// the user (alice@corp), not the SA.
+//
+// The SA itself only needs `impersonate` permission on users + groups;
+// the actual resource RBAC is evaluated against the impersonated user.
+// The Helm chart's cluster-rbac.yaml renders that ClusterRoleBinding
+// when an in-cluster cluster is in the registry.
+func buildInClusterRestConfig(p credentials.Provider, c clusters.Cluster) (*rest.Config, error) {
+	cfg, err := rest.InClusterConfig()
+	if err != nil {
+		return nil, fmt.Errorf("load in-cluster config for %q: %w", c.Name, err)
 	}
 	applyImpersonation(cfg, p)
 	return cfg, nil
