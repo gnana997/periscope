@@ -314,7 +314,7 @@ tests substitute their own. The default refuses with a clear
 `"SetAgentTunnelLookup not called"` error so a misconfigured
 build never silently accepts agent-backed entries.
 
-## 8. Identity propagation
+## 8. Identity propagation (post-#59)
 
 Every Periscope handler talks to apiserver as the human user via
 `Impersonate-User` / `Impersonate-Group` headers (see
@@ -329,7 +329,10 @@ periscope handler
    │ rest.Config.Impersonate.UserName = "alice@corp"
    ▼
 http.Client built from rest.Config
-   │ HTTP request includes Impersonate-User header
+   │ outgoing request:
+   │   Impersonate-User: alice@corp
+   │   Impersonate-Group: periscope-tier:admin
+   │   (no Authorization — added by agent)
    ▼
 tunnel.NewRoundTripper
    │ TCP frame (HTTP bytes) into WS multiplexer
@@ -337,24 +340,65 @@ tunnel.NewRoundTripper
 remotedialer Session
    │ WS frame (TCP bytes) over wss://
    ▼
-periscope-agent
-   │ TCP frame received, fed to local apiserver dialer
+periscope-agent's local HTTP reverse proxy (cmd/periscope-agent/proxy.go)
+   │ adds Authorization: Bearer <agent SA token>
+   │ preserves Impersonate-* headers
+   │ forwards as HTTPS with kubelet-mounted apiserver CA
    ▼
 apiserver in managed cluster
-   │ sees the Impersonate-User header, evaluates RBAC against alice
+   │ authenticates: agent's ServiceAccount
+   │ checks: SA has "impersonate" verb? ✓ (chart's ClusterRole)
+   │ re-evaluates as alice@corp + admin group
+   │ runs the verb under alice's RBAC
 ```
 
-The agent itself talks to apiserver as **its own SA**. The
-apiserver authenticates the agent via the SA token (kubelet-mounted)
-and authorises **the agent's RBAC** (read + impersonate by default).
-But for the actual K8s call, the apiserver evaluates the Impersonate
-headers — so the verb runs as `alice`, audit-logged with `alice`'s
-identity, denied if `alice` lacks the verb. The agent's RBAC is the
-ceiling for what's physically possible; per-call authorization is the
-human's RBAC.
+The agent talks to apiserver as **its own SA**. The apiserver
+authenticates the agent via the SA token (kubelet-mounted into the
+agent pod) and authorises **the agent's RBAC** (read + impersonate
+by default). But for the actual K8s call, the apiserver evaluates
+the Impersonate headers — so the verb runs as `alice`, audit-logged
+with `alice`'s identity, denied if `alice` lacks the verb. The
+agent's RBAC is the ceiling for what's physically possible; per-call
+authorization is the human's RBAC.
 
 This is the same impersonation model as the `eks` and `kubeconfig`
-backends, just with a different transport carrying the headers.
+backends, just with a different bridge identity:
+
+| Backend | Bridge identity | Auth credential | Origin |
+|---|---|---|---|
+| `eks` | EKS-mapped K8s user | EKS bearer token | minted per-request via `eks:GetToken` |
+| `in-cluster` | host pod's SA | kubelet-mounted SA token | host pod's `/var/run/secrets/...` |
+| `agent` | agent pod's SA | kubelet-mounted SA token | **agent** pod's `/var/run/secrets/...` |
+
+### Why the local HTTP proxy (architectural note)
+
+Pre-#59 the agent forwarded raw TCP bytes from the tunnel directly
+to the apiserver. The server's HTTP request (built with no
+Authorization header — only Impersonate-*) reached the apiserver
+unauthenticated, the apiserver rejected it with 401/403 before
+impersonation was even consulted, and every agent-backed cluster
+appeared `denied` in the fleet view.
+
+The fix: the agent runs a tiny `httputil.ReverseProxy` on
+`127.0.0.1:7443`. The tunnel's `localDial` routes there instead of
+to the apiserver. The proxy injects the agent's SA bearer token,
+preserves Impersonate-* headers, and re-issues each request to the
+apiserver over HTTPS using the kubelet-mounted CA bundle. TLS now
+terminates at the proxy (not end-to-end through the tunnel), so the
+server-side `rest.Config.Host` switched to `http://apiserver.<c>.tunnel`
+(plain HTTP between server and tunnel; the unencrypted hop is in-
+process bytes, never touching the network).
+
+The proxy:
+- Always overwrites the inbound `Authorization` header (defensive —
+  closes the "compromised central server tries to substitute its
+  own token" hole)
+- Strips `X-Forwarded-*` headers `httputil.ReverseProxy` adds by
+  default (apiserver doesn't need them; they leak tunnel internals
+  into the apiserver's audit log)
+- Sets `FlushInterval=-1` so SSE / watch / logs streaming flushes
+  immediately (otherwise responses buffer and the SPA's watch streams
+  stall)
 
 ## 9. Audit shape
 
