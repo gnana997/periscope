@@ -12,6 +12,11 @@ This page covers both halves of the feature:
 - **RBAC** — who can read the persisted history via `GET /api/audit`,
   and how to grant that access in each authz mode.
 
+For the formal contract — the closed verb taxonomy, the wire-stable
+event schema, the SQLite schema, retention semantics, semver coverage,
+and the security model around tamper resistance — see
+[RFC 0003](../rfcs/0003-audit-log.md).
+
 ## Quick decision tree
 
 ```

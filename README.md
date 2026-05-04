@@ -130,6 +130,7 @@ Both signed (cosign keyless) and discoverable on [Artifact Hub](https://artifact
 **RFCs**
 - [RFC 0001 — Pod exec support](docs/rfcs/0001-pod-exec.md)
 - [RFC 0002 — Authentication (OIDC + per-user K8s authz)](docs/rfcs/0002-auth.md)
+- [RFC 0003 — Audit log: schema and retention semantics](docs/rfcs/0003-audit-log.md)
 
 ## Configuration
 

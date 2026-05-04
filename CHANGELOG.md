@@ -13,6 +13,14 @@ tag.
 
 ## [Unreleased]
 
+### Documentation
+
+- Added [RFC 0003 — Audit log: schema and retention semantics](docs/rfcs/0003-audit-log.md),
+  formalizing the verb taxonomy, wire-stable event shape, SQLite
+  schema, retention algorithm, `/api/audit` read-side RBAC, semver
+  coverage, and the v1.0 security model (operator-trust now;
+  hash-chain signing in v2).
+
 ## [1.0.0]
 
 Initial stable release.
