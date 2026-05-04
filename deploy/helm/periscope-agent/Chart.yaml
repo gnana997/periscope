@@ -23,7 +23,6 @@ sources:
 maintainers:
   - name: gnana997
     url: https://github.com/gnana997
-icon: https://raw.githubusercontent.com/gnana997/periscope/main/web/public/icon.svg
 annotations:
   # Artifact Hub renders these on the chart's listing page. See
   # https://artifacthub.io/docs/topics/annotations/helm/ for the full

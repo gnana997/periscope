@@ -6,6 +6,7 @@
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![Latest Release](https://img.shields.io/github/v/release/gnana997/periscope?include_prereleases&sort=semver)](https://github.com/gnana997/periscope/releases/latest)
 [![Artifact Hub](https://img.shields.io/endpoint?url=https://artifacthub.io/badge/repository/periscope)](https://artifacthub.io/packages/search?repo=periscope)
+[![Artifact Hub agent](https://img.shields.io/endpoint?url=https://artifacthub.io/badge/repository/periscope-agent)](https://artifacthub.io/packages/search?repo=periscope-agent)
 [![Go](https://img.shields.io/badge/Go-1.26-00ADD8.svg)](https://go.dev/)
 [![Node](https://img.shields.io/badge/Node-22-339933.svg)](https://nodejs.org/)
 
