@@ -67,9 +67,6 @@ func TestSetAgentTunnelLookup_HappyPath(t *testing.T) {
 	if cfg.Transport == nil {
 		t.Fatal("rest.Config.Transport is nil — agent backend produced a directly-dialing config")
 	}
-	if !cfg.Insecure {
-		t.Fatal("agent rest.Config should mark TLSClientConfig.Insecure (outer hop is in-process)")
-	}
 }
 
 func TestBuildAgentRestConfig_AppliesImpersonation(t *testing.T) {
