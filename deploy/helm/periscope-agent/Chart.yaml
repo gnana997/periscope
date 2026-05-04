@@ -16,6 +16,7 @@ keywords:
   - multi-cluster
   - periscope
   - agent
+  - dashboard
 home: https://github.com/gnana997/periscope
 sources:
   - https://github.com/gnana997/periscope
@@ -24,8 +25,33 @@ maintainers:
     url: https://github.com/gnana997
 icon: https://raw.githubusercontent.com/gnana997/periscope/main/web/public/icon.svg
 annotations:
+  # Artifact Hub renders these on the chart's listing page. See
+  # https://artifacthub.io/docs/topics/annotations/helm/ for the full
+  # key list.
+  artifacthub.io/license: Apache-2.0
+  artifacthub.io/operator: "false"
   artifacthub.io/links: |
-    - name: source
+    - name: Onboarding guide
+      url: https://github.com/gnana997/periscope/blob/main/docs/setup/agent-onboarding.md
+    - name: Source code
       url: https://github.com/gnana997/periscope
-    - name: server-chart
+    - name: Central server chart
       url: https://artifacthub.io/packages/helm/periscope/periscope
+    - name: Examples
+      url: https://github.com/gnana997/periscope/tree/main/examples/agent
+  # Per-release "What changed" rendered by Artifact Hub. The release
+  # workflow can sync these from PR titles since the previous tag
+  # (matches the server chart's convention).
+  artifacthub.io/changes: |
+    - kind: added
+      description: initial agent backend release — per-cluster tunnel client
+    - kind: added
+      description: mTLS-pinned WebSocket dial-out to the central tunnel listener
+    - kind: added
+      description: persisted state Secret (cert + key + server CA) for stable identity across restarts
+  # Cosign keyless signing (Sigstore). Same signing identity as the
+  # server chart — the release workflow signs both in one run. Verify
+  # via: cosign verify-blob ... --certificate-oidc-issuer=https://token.actions.githubusercontent.com
+  artifacthub.io/signKey: |
+    fingerprint: keyless
+    url: https://token.actions.githubusercontent.com
