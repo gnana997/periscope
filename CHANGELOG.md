@@ -13,49 +13,7 @@ tag.
 
 ## [Unreleased]
 
-### Added
-
-- Agent: per-connection idle timeout (`agent.execIdleSeconds`,
-  default `600`) for hijacked exec WS / SPDY streams. Defense-in-
-  depth so a stuck exec stream gets reaped on the agent side if
-  the server crashes / partitions mid-session, even if the
-  server-side cascade close doesn't fire.
-
-### Documentation
-
-- Added [`docs/architecture/README.md`](docs/architecture/README.md) —
-  top-level architecture overview: component map, source-tree
-  guide, suggested reading order for new contributors, and
-  cross-cutting design choices (single binary + embedded SPA,
-  stateless w.r.t. credentials, impersonation everywhere,
-  pre-flight RBAC, audit-before-action).
-- Added [`docs/setup/values.md`](docs/setup/values.md) — flat
-  reference for every value in the periscope and periscope-agent
-  Helm charts, organised by section, with type / default / notes
-  per field. Single page operators can grep during a `helm upgrade`.
-- Extended [`docs/setup/pod-exec.md`](docs/setup/pod-exec.md) with a
-  dedicated "Operator notes for agent-backed clusters" section
-  (transport path, RBAC, audit, latency, disconnect behavior) and
-  an agent-specific troubleshooting bullet for the
-  `cmd/periscope-agent/observability.go` Hijack shim regression.
-- Stamped [RFC 0004](docs/rfcs/0004-exec-over-agent-tunnel-poc.md)
-  status as "Implemented in v1.0.0".
-- Normalized version nomenclature in operator-facing docs: `v1.x.0`
-  / `v1.x.+` / `v1.x.1` collapsed to `v1.0` / `post-1.0` / `v1.x`
-  per consistency.
-- Tightened the `POST /api/agents/register` description in
-  [`docs/api.md`](docs/api.md) to clarify "before registration"
-  rather than the ambiguous "does not yet."
-- README: explicit note that pod exec works on every backend
-  including `agent`; new top-level architecture-overview link.
-
-### Repository
-
-- Added GitHub issue templates (`bug_report.yml`,
-  `feature_request.yml`) and a pull-request template under
-  `.github/`. Bug reports require backend, OIDC provider, and
-  Periscope version up front; PR template prompts surfaces
-  touched and a tested-paths summary.
+_Nothing yet._
 
 ## [1.0.0]
 
@@ -96,13 +54,20 @@ Initial stable release.
     page mints a token and renders the helm install command with the
     token baked in, copy-paste ready.
   - **Pod exec on agent-managed clusters** (#43, collapses into
-    #42 per RFC 0004 10). client-go's WebSocket and SPDY exec
+    #42 per RFC 0004 §10). client-go's WebSocket and SPDY exec
     executors bypass `rest.Config.Transport`, so a loopback HTTP
     CONNECT proxy in `internal/k8s/agent_exec_proxy.go` translates
     per-cluster CONNECTs into tunnel dials. The agent's reverse
     proxy implements `http.Hijacker` so the WS / SPDY upgrade
     succeeds. Validation in `internal/k8s/exec_tunnel_test.go`
     (Tier 1 in-process) + `hack/poc-exec-tunnel/` (Tier 2 kind e2e).
+  - Agent-side per-connection idle timeout
+    (`agent.execIdleSeconds`, default `600`) for hijacked exec
+    WS / SPDY streams. Defense-in-depth so a stuck exec stream gets
+    reaped on the agent side if the server crashes / partitions
+    mid-session, even when the server-side cascade close doesn't
+    fire. Activity = any successful read; only idle streams are
+    killed. `0` disables.
 
 - **Browsing & inspection**
   - List, detail, describe, events, and YAML for the common
@@ -168,6 +133,8 @@ Initial stable release.
 - Auth: browser navigations to `/` (or any deep link) without a
   session now `302` to `/api/auth/login` instead of returning plain
   `401 unauthenticated` — XHR callers still get the 401 (#37).
+- Fixed stale `PERISCOPE_WATCH_PER_USER_LIMIT` default in
+  `docs/architecture/watch-streams.md` (was 30, code is 60).
 
 ### Security
 
@@ -179,21 +146,41 @@ Initial stable release.
 
 ### Documentation
 
+- Added [`docs/architecture/README.md`](docs/architecture/README.md) —
+  top-level architecture overview: component map, source-tree
+  guide, suggested reading order for new contributors, and
+  cross-cutting design choices (single binary + embedded SPA,
+  stateless w.r.t. credentials, impersonation everywhere,
+  pre-flight RBAC, audit-before-action).
 - Added [RFC 0003 — Audit log: schema and retention semantics](docs/rfcs/0003-audit-log.md),
   formalizing the verb taxonomy, wire-stable event shape, SQLite
   schema, retention algorithm, `/api/audit` read-side RBAC, semver
   coverage, and the v1.0 security model (operator-trust now;
   hash-chain signing in v2).
+- Added [RFC 0004 — Exec over the agent tunnel](docs/rfcs/0004-exec-over-agent-tunnel-poc.md) —
+  design + findings for the loopback CONNECT proxy and agent
+  Hijack shim. Status stamped as "Implemented in v1.0.0."
 - Added [`docs/api.md`](docs/api.md) — HTTP API reference with
   three stability tiers (Tier 1 stable, Tier 2 SPA-coupled,
   Tier 3 live channels), authentication / cookie / session
   contract, error-code enum, CSRF posture, and the
-  `/api/v2/...` versioning policy for future majors.
+  `/api/v2/...` versioning policy for future majors. Includes
+  the three agent-backend endpoints (`POST /api/agents/tokens`
+  admin-only, `POST /api/agents/register` unauth + token-gated,
+  `WS /api/agents/connect` mTLS-required), with the `/register`
+  description tightened to clarify "before the agent has obtained
+  its long-lived mTLS identity" rather than the ambiguous "does
+  not yet."
+- Added [`docs/setup/values.md`](docs/setup/values.md) — flat
+  reference for every value in the periscope and periscope-agent
+  Helm charts, organised by section, with type / default / notes
+  per field. Single page operators can grep during a `helm upgrade`.
 - Added [`docs/setup/environment-variables.md`](docs/setup/environment-variables.md) —
   centralized reference for every `PERISCOPE_*` env var (and
   `PORT`) the binary reads, with defaults, Helm-value mapping,
   and the semver coverage rules for the configuration surface.
-- Fixed stale `PERISCOPE_WATCH_PER_USER_LIMIT` default in
+  Covers the two server-side and six agent-side env vars
+  introduced by #42.
 - Added [`docs/architecture/agent-tunnel.md`](docs/architecture/agent-tunnel.md) —
   design walkthrough for the agent backend: topology, PKI lifecycle,
   registration handshake, mTLS session lifecycle, the
@@ -207,15 +194,24 @@ Initial stable release.
 - Added [`examples/agent/`](examples/agent/) — sample values files
   for both server + agent charts and a reference
   `register-and-install.sh` script.
-- Extended `docs/api.md` with the three new agent-backend endpoints
-  (`POST /api/agents/tokens` admin-only, `POST /api/agents/register`
-  unauth + token-gated, `WS /api/agents/connect` mTLS-required).
-- Extended `docs/setup/environment-variables.md` 11 covering the
-  two server-side and six agent-side env vars introduced by #42.
-- Extended `docs/setup/cluster-rbac.md` with the agent-backend
-  RBAC story (the agent SA's impersonation lever, default
-  ClusterRole shape, how to tighten).
-  `docs/architecture/watch-streams.md` (was 30, code is 60).
+- Extended [`docs/setup/pod-exec.md`](docs/setup/pod-exec.md) with a
+  dedicated "Operator notes for agent-backed clusters" section
+  (transport path, RBAC, audit, latency, disconnect behavior) and
+  an agent-specific troubleshooting bullet for the
+  `cmd/periscope-agent/observability.go` Hijack shim regression.
+- Extended [`docs/setup/cluster-rbac.md`](docs/setup/cluster-rbac.md)
+  with the agent-backend RBAC story (the agent SA's impersonation
+  lever, default ClusterRole shape, how to tighten).
+- Normalized version nomenclature in operator-facing docs: `v1.x.0`
+  / `v1.x.+` / `v1.x.1` collapsed to `v1.0` / `post-1.0` / `v1.x`
+  for consistency.
+- README: explicit note that pod exec works on every backend
+  including `agent`; new top-level architecture-overview link.
+- Added GitHub issue templates (`bug_report.yml`,
+  `feature_request.yml`) and a pull-request template under
+  `.github/`. Bug reports require backend, OIDC provider, and
+  Periscope version up front; PR template prompts surfaces
+  touched and a tested-paths summary.
 
 [Unreleased]: https://github.com/gnana997/periscope/compare/v1.0.0...HEAD
 [1.0.0]: https://github.com/gnana997/periscope/releases/tag/v1.0.0

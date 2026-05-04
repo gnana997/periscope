@@ -77,17 +77,24 @@ export function ScalePopover({
 
   return (
     <Popover.Root open={open} onOpenChange={setOpen}>
-      <Popover.Trigger asChild>
-        {/* IconAction's own click is a no-op; Popover.Trigger handles
-            opening via composed event handlers. The Tooltip inside
-            IconAction still works because Trigger.asChild composes
-            refs, not replaces them. */}
-        <IconAction
-          label="Scale"
-          icon={<MoveVertical size={14} />}
-          onClick={() => {}}
-        />
-      </Popover.Trigger>
+      {/* Use Popover.Anchor (not Trigger) with a span wrapper +
+          manual open toggle on IconAction's onClick. Popover.Trigger
+          asChild requires its child to forward refs to a DOM element;
+          IconAction is a function component that doesn't (and adding
+          forwardRef would clash with the inner Tooltip's own asChild
+          ref forwarding). The Anchor + span pattern sidesteps the
+          ref-forwarding chain entirely: span natively forwards refs
+          (it's a DOM element), so Radix has its positioning anchor.
+          Open state is fully controlled here via setOpen. */}
+      <Popover.Anchor asChild>
+        <span className="inline-flex">
+          <IconAction
+            label="Scale"
+            icon={<MoveVertical size={14} />}
+            onClick={() => setOpen((o) => !o)}
+          />
+        </span>
+      </Popover.Anchor>
       <Popover.Portal>
         <Popover.Content
           side="bottom"
