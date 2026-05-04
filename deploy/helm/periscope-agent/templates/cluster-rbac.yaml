@@ -1,0 +1,248 @@
+{{- if .Values.clusterRBAC.enabled -}}
+{{- /*
+  cluster-rbac.yaml — tier ClusterRoleBindings on the MANAGED
+  cluster. These are the bindings the central server's user
+  impersonation chain lands on:
+
+      periscope-tier:read   → view              (built-in)
+      periscope-tier:write  → edit              (built-in)
+      periscope-tier:admin  → cluster-admin     (built-in)
+      periscope-tier:triage → periscope-triage  (defined here)
+      periscope-tier:maintain → periscope-maintain (defined here)
+
+  Without these bindings the apiserver evaluates the impersonated
+  group against zero matching rules and returns 403 Forbidden —
+  documented as Issue 2.5 in deployment-journey.md (the manual
+  `kubectl create clusterrolebinding` workaround the operator had
+  to run on each managed cluster). This template makes the
+  workaround unnecessary by default; disable via
+  `clusterRBAC.enabled: false` to ship a tighter custom set instead.
+
+  Tier semantics MUST stay in sync with the server chart's
+  templates/cluster-rbac.yaml — same role names, same group names,
+  same permissions. If you change one, change both.
+*/}}
+---
+# 1. Built-in tiers — bind to K8s standard ClusterRoles.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: periscope-tier-read
+  labels:
+    {{- include "periscope-agent.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: view
+subjects:
+  - kind: Group
+    name: periscope-tier:read
+    apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: periscope-tier-write
+  labels:
+    {{- include "periscope-agent.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: edit
+subjects:
+  - kind: Group
+    name: periscope-tier:write
+    apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: periscope-tier-admin
+  labels:
+    {{- include "periscope-agent.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cluster-admin
+subjects:
+  - kind: Group
+    name: periscope-tier:admin
+    apiGroup: rbac.authorization.k8s.io
+
+---
+# 2a. Triage tier — view + debug verbs, no spec mutation.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: periscope-triage
+  labels:
+    {{- include "periscope-agent.labels" . | nindent 4 }}
+rules:
+  # Aggregate the built-in `view` rules so triage starts as a superset.
+  # We can't reference `view` directly here, so duplicate the read rules.
+  - apiGroups: [""]
+    resources:
+      - bindings
+      - configmaps
+      - endpoints
+      - events
+      - limitranges
+      - namespaces
+      - namespaces/status
+      - persistentvolumeclaims
+      - persistentvolumeclaims/status
+      - pods
+      - pods/log
+      - pods/status
+      - replicationcontrollers
+      - replicationcontrollers/scale
+      - replicationcontrollers/status
+      - resourcequotas
+      - resourcequotas/status
+      - serviceaccounts
+      - services
+      - services/status
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["apps"]
+    resources:
+      - controllerrevisions
+      - daemonsets
+      - daemonsets/status
+      - deployments
+      - deployments/scale
+      - deployments/status
+      - replicasets
+      - replicasets/scale
+      - replicasets/status
+      - statefulsets
+      - statefulsets/scale
+      - statefulsets/status
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["batch"]
+    resources: ["cronjobs", "cronjobs/status", "jobs", "jobs/status"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingresses", "ingresses/status", "networkpolicies"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["autoscaling"]
+    resources: ["horizontalpodautoscalers", "horizontalpodautoscalers/status"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["policy"]
+    resources: ["poddisruptionbudgets", "poddisruptionbudgets/status"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["discovery.k8s.io"]
+    resources: ["endpointslices"]
+    verbs: ["get", "list", "watch"]
+
+  # Triage-specific debug verbs.
+  - apiGroups: [""]
+    resources: ["pods/exec", "pods/portforward"]
+    verbs: ["create"]
+  - apiGroups: [""]
+    resources: ["pods/eviction"]
+    verbs: ["create"]
+  # Restart pods (delete → controller recreates).
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["delete"]
+  # Scale workloads.
+  - apiGroups: ["apps"]
+    resources: ["deployments/scale", "statefulsets/scale", "replicasets/scale"]
+    verbs: ["update", "patch"]
+  # Rollout restart (sets a metadata annotation).
+  - apiGroups: ["apps"]
+    resources: ["deployments", "statefulsets", "daemonsets"]
+    verbs: ["patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: periscope-tier-triage
+  labels:
+    {{- include "periscope-agent.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: periscope-triage
+subjects:
+  - kind: Group
+    name: periscope-tier:triage
+    apiGroup: rbac.authorization.k8s.io
+
+---
+# 2b. Maintain tier — namespaced admin + cluster-scoped reads, no
+#     cluster-level RBAC create.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: periscope-maintain
+  labels:
+    {{- include "periscope-agent.labels" . | nindent 4 }}
+rules:
+  # Inherits the namespace-scoped `admin` ClusterRole verbs by listing them
+  # explicitly. (We could use aggregation, but explicit is auditable.)
+  - apiGroups: ["*"]
+    resources: ["*"]
+    verbs: ["get", "list", "watch"]
+  # Cluster-scoped reads.
+  - apiGroups: [""]
+    resources: ["nodes", "nodes/status", "namespaces", "persistentvolumes"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["storage.k8s.io"]
+    resources: ["storageclasses", "csidrivers", "csinodes", "volumeattachments"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["scheduling.k8s.io"]
+    resources: ["priorityclasses"]
+    verbs: ["get", "list", "watch"]
+  # Namespaced mutate.
+  - apiGroups: [""]
+    resources:
+      - configmaps
+      - events
+      - persistentvolumeclaims
+      - pods
+      - pods/exec
+      - pods/log
+      - pods/portforward
+      - replicationcontrollers
+      - replicationcontrollers/scale
+      - secrets
+      - serviceaccounts
+      - services
+    verbs: ["*"]
+  - apiGroups: ["apps"]
+    resources: ["*"]
+    verbs: ["*"]
+  - apiGroups: ["batch"]
+    resources: ["*"]
+    verbs: ["*"]
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["*"]
+    verbs: ["*"]
+  - apiGroups: ["autoscaling"]
+    resources: ["*"]
+    verbs: ["*"]
+  - apiGroups: ["policy"]
+    resources: ["*"]
+    verbs: ["*"]
+  - apiGroups: ["rbac.authorization.k8s.io"]
+    resources: ["roles", "rolebindings"]
+    verbs: ["*"]
+  # NOTE: clusterroles + clusterrolebindings are intentionally NOT here.
+  # That's the line between maintain and admin.
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: periscope-tier-maintain
+  labels:
+    {{- include "periscope-agent.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: periscope-maintain
+subjects:
+  - kind: Group
+    name: periscope-tier:maintain
+    apiGroup: rbac.authorization.k8s.io
+{{- end }}

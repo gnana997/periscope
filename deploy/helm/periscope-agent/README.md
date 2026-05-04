@@ -51,6 +51,13 @@ view flips to **healthy**.
   server forwards `Impersonate-User` headers through the tunnel
   and the local apiserver evaluates RBAC against the human, not
   the agent SA)
+- **Tier ClusterRoleBindings** (gated by `clusterRBAC.enabled`,
+  default `true`) mapping `periscope-tier:read/write/admin/triage/maintain`
+  groups to K8s ClusterRoles (`view`, `edit`, `cluster-admin`, plus the
+  custom `periscope-triage` and `periscope-maintain`). Without these
+  bindings every impersonated request lands as 403 Forbidden — see
+  Issue 2.5 in `deployment-journey.md`. Set `clusterRBAC.enabled: false`
+  to ship a tighter custom set yourself.
 - **Bootstrap-token Secret** (one-shot — safely deleted after
   registration succeeds; the persisted mTLS cert lives in a
   separate `helm.sh/resource-policy: keep` Secret managed by the
@@ -60,7 +67,7 @@ view flips to **healthy**.
 
 | Value | Purpose |
 |---|---|
-| `agent.serverURL` | Central tunnel URL (`wss://...:8443`). |
+| `agent.serverURL` | Central tunnel URL — `wss://...:8443/api/agents/connect`. Path is required; the schema rejects URLs without it. |
 | `agent.clusterName` | Cluster name as registered with the central server. Must match a `clusters[].name` entry of `backend: agent`. |
 | `agent.registrationToken` | Bootstrap token from the central server's token endpoint. Single-use, 15-min TTL. |
 

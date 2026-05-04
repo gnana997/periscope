@@ -28,3 +28,29 @@ bootstrap token from the central server first:
     -d '{"cluster":"{{ .Values.agent.clusterName }}"}'
 
 Then `helm upgrade` this chart with --set agent.registrationToken=<new>.
+
+{{- if .Values.clusterRBAC.enabled }}
+
+Tier ClusterRoleBindings on this managed cluster (auto-installed):
+
+  periscope-tier:read    → view             (built-in)
+  periscope-tier:write   → edit             (built-in)
+  periscope-tier:admin   → cluster-admin    (built-in)
+  periscope-tier:triage  → periscope-triage (custom)
+  periscope-tier:maintain→ periscope-maintain (custom)
+
+These bindings let user impersonation reach apiserver successfully.
+Without them, every request from the central server would land as
+403 Forbidden. Set `clusterRBAC.enabled=false` to ship a tighter custom
+set instead — see deploy/helm/periscope-agent/templates/cluster-rbac.yaml
+for the rendered shape.
+{{- else }}
+
+⚠  clusterRBAC.enabled is FALSE. Apiserver requests forwarded by the
+   central server will hit 403 Forbidden until you create your own
+   ClusterRoleBindings for the periscope-tier:* groups on this
+   cluster. Minimal example:
+
+     kubectl create clusterrolebinding periscope-tier-admin \
+       --clusterrole=cluster-admin --group=periscope-tier:admin
+{{- end }}

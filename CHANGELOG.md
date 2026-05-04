@@ -158,7 +158,7 @@ Initial stable release.
 - Extended `docs/api.md` with the three new agent-backend endpoints
   (`POST /api/agents/tokens` admin-only, `POST /api/agents/register`
   unauth + token-gated, `WS /api/agents/connect` mTLS-required).
-- Extended `docs/setup/environment-variables.md` §11 covering the
+- Extended `docs/setup/environment-variables.md` 11 covering the
   two server-side and six agent-side env vars introduced by #42.
 - Extended `docs/setup/cluster-rbac.md` with the agent-backend
   RBAC story (the agent SA's impersonation lever, default

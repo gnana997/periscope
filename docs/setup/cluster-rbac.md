@@ -646,4 +646,4 @@ What the agent does **not** do:
 
 For the failure-mode catalogue (cert expired, agent disconnected,
 deregistered cluster, server CA rotated) see
-[`docs/architecture/agent-tunnel.md`](../architecture/agent-tunnel.md) §10.
+[`docs/architecture/agent-tunnel.md`](../architecture/agent-tunnel.md) 10.
