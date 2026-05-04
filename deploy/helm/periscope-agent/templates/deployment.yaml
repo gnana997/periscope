@@ -54,6 +54,14 @@ spec:
               value: {{ .Values.agent.stateSecretName | quote }}
             - name: PERISCOPE_AGENT_HEALTH_ADDR
               value: {{ .Values.agent.healthAddr | quote }}
+            {{- if .Values.agent.registrationURL }}
+            - name: PERISCOPE_REGISTRATION_URL
+              value: {{ .Values.agent.registrationURL | quote }}
+            {{- end }}
+            {{- if .Values.agent.serverCAHash }}
+            - name: PERISCOPE_SERVER_CA_HASH
+              value: {{ .Values.agent.serverCAHash | quote }}
+            {{- end }}
             {{- if .Values.agent.registrationToken }}
             # Bootstrap token — only needed on first boot. After
             # registration completes, the agent ignores this and

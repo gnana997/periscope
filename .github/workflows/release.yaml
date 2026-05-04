@@ -242,6 +242,38 @@ jobs:
           cosign sign --yes \
             "${{ env.REGISTRY }}/${{ env.CHART_REPO }}/periscope-agent:${VERSION}@${DIGEST}"
 
+      # ── Artifact Hub repository metadata ──────────────────────
+      #
+      # AH proves the repo is owned by us by matching the
+      # repositoryID in the metadata layer pushed to the chart's
+      # `:artifacthub.io` tag against the UUID AH assigned at
+      # registration. Re-pushing on every release keeps the claim
+      # current — if we forget once and the metadata file content
+      # drifts (e.g. owner email change), the next release re-asserts.
+      # Idempotent: pushing the same content under the same tag is
+      # a no-op at the registry level.
+      #
+      # Auth: oras reads ~/.docker/config.json which docker/login-
+      # action@v3 (server-image step above) already populated. No
+      # separate login needed.
+      - name: Set up oras
+        uses: oras-project/setup-oras@v1
+        with:
+          version: latest
+
+      - name: Push Artifact Hub metadata (server chart)
+        run: |
+          oras push ${{ env.REGISTRY }}/${{ env.CHART_REPO }}/periscope:artifacthub.io \
+            --config=/dev/null:application/vnd.cncf.artifacthub.config.v1+yaml \
+            deploy/helm/periscope/artifacthub-repo.yml:application/vnd.cncf.artifacthub.repository-metadata.layer.v1.yaml
+
+      - name: Push Artifact Hub metadata (agent chart)
+        run: |
+          oras push ${{ env.REGISTRY }}/${{ env.CHART_REPO }}/periscope-agent:artifacthub.io \
+            --config=/dev/null:application/vnd.cncf.artifacthub.config.v1+yaml \
+            deploy/helm/periscope-agent/artifacthub-repo.yml:application/vnd.cncf.artifacthub.repository-metadata.layer.v1.yaml
+
+
       # ── GitHub Release ─────────────────────────────────────────
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2

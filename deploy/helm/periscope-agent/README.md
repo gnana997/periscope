@@ -67,6 +67,27 @@ view flips to **healthy**.
 The `values.schema.json` enforces all three at install time so
 typos surface immediately, not at pod-start.
 
+## Optional values for split / self-signed setups (#48)
+
+| Value | Purpose |
+|---|---|
+| `agent.registrationURL` | URL for the unauth registration POST. Set when central server splits HTTP and mTLS onto different load balancers (ALB+NLB topology). Empty = derive from `serverURL` via wss/ws → https/http translation. |
+| `agent.serverCAHash` | SPKI hash for kubeadm-style pinning on the registration TLS dial. Format: `sha256:<64 hex chars>`. Bootstraps the agent against a self-signed central server endpoint without distributing the full CA bundle. |
+
+Three deployment topologies — pick the one matching your central
+server's LB shape:
+
+- **Single LB, public cert** — set `serverURL` only. Agent does
+  standard chain validation against system roots.
+- **Split LBs (ALB + NLB)** — set `serverURL` + `registrationURL`.
+  Agent registers via the public-cert ALB, tunnels via the NLB.
+- **Single LB, self-signed** — set `serverURL` + `serverCAHash`.
+  Agent SPKI-pins the registration dial, falls back to standard
+  chain validation for the tunnel after registration.
+
+Full walkthrough with worked examples for each topology:
+[`docs/setup/agent-onboarding.md`](https://github.com/gnana997/periscope/blob/main/docs/setup/agent-onboarding.md).
+
 ## Security model
 
 - The agent's mTLS cert (signed by the central server's per-deployment

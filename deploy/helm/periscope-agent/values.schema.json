@@ -43,6 +43,16 @@
           "type": "string",
           "description": "Bootstrap token from POST /api/agents/tokens. Required on first install only — leave empty on subsequent upgrades. Single-use, 15-min TTL."
         },
+        "registrationURL": {
+          "type": "string",
+          "pattern": "^($|https?://)",
+          "description": "Optional URL for the unauth registration POST. Set when central server splits HTTP and mTLS onto different LBs (#48). Empty = derive from serverURL via wss/ws→https/http translation."
+        },
+        "serverCAHash": {
+          "type": "string",
+          "pattern": "^($|sha256:[0-9a-fA-F]{64})$",
+          "description": "Optional SPKI hash for kubeadm-style pinning on the registration TLS dial. Format: sha256:<64 hex chars>. When set, the agent skips standard chain validation and pins on this hash instead — bootstraps against self-signed central servers without distributing the full CA."
+        },
         "stateSecretName": {
           "type": "string",
           "minLength": 1,
