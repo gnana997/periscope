@@ -127,7 +127,7 @@ jobs:
       - name: Set up Helm
         uses: azure/setup-helm@v4
         with:
-          version: 1.3.2
+          version: latest
 
       # The chart's version field must match the tag for clean
       # discovery. Sync Chart.yaml's version + appVersion to the
