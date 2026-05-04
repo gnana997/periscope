@@ -33,6 +33,7 @@ Thanks for the PR. A few notes before you submit:
 - [ ] Audit / RBAC
 - [ ] Agent backend / tunnel
 - [ ] SPA / frontend
+- [ ] Documentation
 - [ ] None of the above
 
 ## How was this tested?
