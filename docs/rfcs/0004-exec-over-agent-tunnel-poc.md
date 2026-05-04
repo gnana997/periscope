@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | Draft |
+| **Status** | Draft — Tier 1 landed; integration gap surfaced |
 | **Owner** | @gnana997 |
 | **Started** | 2026-05-04 |
 | **Targets** | v1.x.0 (collapse #43 into #42 if the harness passes) |
@@ -222,7 +222,44 @@ Manual SPA smoke (final confidence on a release candidate):
 
 ---
 
-## 9. Decision after POC
+## 9. Findings (Tier 1, 2026-05-04)
+
+Tier 1 has landed in `internal/k8s/exec_tunnel_test.go`. The harness pivoted scope mid-implementation when it surfaced a substantive issue with the existing wiring; what shipped answers the foundational `#43` question and clearly documents the gap that remains.
+
+### What the harness now proves
+
+Five committed test cases, all passing under `-race`, total runtime ≈ 11 s in CI:
+
+| Test | Claim |
+|---|---|
+| `TestTunnelCarriesWebSocketExec` | A `v5.channel.k8s.io` WebSocket session — stdin echo, error-channel `Status{Success}`, clean close — flows through a `rancher/remotedialer` tunnel byte-equivalent to a direct connection. |
+| `TestTunnelCarriesWebSocketExec_LargeStdout` | 1 MiB of binary stdout round-trips without truncation; gorilla/websocket buffer sizes and remotedialer flow control are not biting. |
+| `TestTunnelCarriesWebSocketExec_Resize` | A channel-4 `{Width,Height}` resize frame is observed verbatim on the apiserver side. |
+| `TestTunnelCarriesWebSocketExec_TunnelDropMidStream` | Killing the tunnel mid-session aborts in-flight stream reads promptly; no goroutine deadlocks. |
+| `TestTunnelCarriesSPDYExec` | An `HTTP/1.1 + Upgrade: SPDY/3.1 + X-Stream-Protocol-Version: v4.channel.k8s.io` upgrade handshake completes through the tunnel with the apiserver's canonical headers. SPDY framing on top is identical bytes regardless of carrier; if the handshake bytes flow, the framing bytes follow mechanically. |
+
+### What the harness does NOT prove (the gap)
+
+The original plan in §4.1 wanted to drive the real `internal/k8s/exec.ExecPod` through the tunnel via `SetAgentTunnelLookup` + a `backend: agent` cluster. Doing that surfaced this:
+
+> `client-go`'s `remotecommand.NewWebSocketExecutor` and `remotecommand.NewSPDYExecutor` build their own roundtrippers internally and do not honor `rest.Config.Transport`. Specifically:
+>
+> - WebSocket: `k8s.io/client-go/transport/websocket/roundtripper.go:113` constructs a `gorilla/websocket.Dialer` with no `NetDialContext` hook.
+> - SPDY: `k8s.io/streaming/pkg/httpstream/spdy/roundtripper.go:354` (`dialWithoutProxy`) uses `*net.Dialer` for TCP.
+>
+> Neither path is reachable from any field on `rest.Config` that the existing `buildAgentRestConfig` populates. So even though `rest.Config.Transport` carries plain HTTP traffic (Pod GET, list, watch, etc.) through the tunnel correctly, exec dials `apiserver.<cluster>.tunnel:80` via DNS and gets `no such host`.
+
+Concretely: as of PR #46, exec on `backend: agent` is a no-op even though the chart field, the SPA tooltip removal, and the `remotecommand` fallback dance are all in place.
+
+### Bail-out path (per §7) for the gap
+
+The cleanest fix is the local-CONNECT-proxy pattern: stand up a loopback `net.Listen("tcp", "127.0.0.1:0")` listener inside the server process, accept HTTP `CONNECT` from gorilla/spdystream's default dialer, and bidirectionally pipe each accepted connection through `tunnel.Server.DialerFor(name)`. Then `cfg.Proxy = func(req *http.Request) (*url.URL, error) { return loopbackProxyURL, nil }` makes both the WS and SPDY executors route through the tunnel. About 80–120 LoC, plus a test that drives the real `ExecPod` end-to-end (which Tier 1 was already structured to do once the wiring works).
+
+Tracked separately so this RFC can land its findings without bundling the production fix.
+
+---
+
+## 10. Decision after POC
 
 If Tier 1 + Tier 2 both pass, in the same PR series:
 

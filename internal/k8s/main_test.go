@@ -23,5 +23,16 @@ func TestMain(m *testing.M) {
 		// time. None of these are spawned by Periscope's code; ignoring
 		// them is safe.
 		goleak.IgnoreTopFunction("k8s.io/klog/v2.(*loggingT).flushDaemon"),
+
+		// rancher/remotedialer spawns a per-Write backpressure
+		// goroutine (connection.go:88-90) that does not always exit
+		// when the underlying WebSocket is force-closed mid-stream —
+		// e.g. the tunnel-drop chaos case in
+		// exec_tunnel_test.go::TestTunnelCarriesWebSocketExec_TunnelDropMidStream.
+		// The leak is bounded (one per dropped tunneled connection,
+		// at most a small constant per session), upstream-tracked, and
+		// not produced by Periscope's code; ignoring it lets us keep
+		// goleak hygiene on every other path.
+		goleak.IgnoreTopFunction("github.com/rancher/remotedialer.(*connection).Write.func1"),
 	)
 }
