@@ -189,7 +189,7 @@ CI: every push and PR runs `golangci-lint`, `go test`, `npm run lint`, `npm test
 
 ## Roadmap
 
-Planning is tracked in [GitHub Issues](https://github.com/gnana997/periscope/issues). Notable post-v1.0 items: HA-friendly audit backend (Postgres), expanded write paths in the Helm release browser (rollback / upgrade), and richer per-cluster RBAC introspection.
+Planning is tracked in [GitHub Issues](https://github.com/gnana997/periscope/issues). Notable post-v1.0 items: expanded write paths in the Helm release browser (rollback / upgrade) and richer per-cluster RBAC introspection.
 
 ## Community & support
 

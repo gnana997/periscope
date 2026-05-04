@@ -5,7 +5,7 @@
 | **Status** | Accepted (shipped in v1.0) |
 | **Owner** | @gnana997 |
 | **Started** | 2026-05-04 |
-| **Targets** | v1.0 (formalize what shipped), v1.x (Postgres backend), v2 (signing / external SIEM contract) |
+| **Targets** | v1.0 (formalize what shipped), v2 (signing / external SIEM contract) |
 | **Related** | RFC 0001 (pod exec — section 10 — audit-event shape), RFC 0002 (auth — actor identity) |
 
 ---
@@ -29,7 +29,7 @@ source of truth.
 The key claim is **schema stability** (the verb set and field names are
 covered by semver) paired with an **explicit non-claim around tamper
 resistance** (v1.0 is operator-trust, not cryptographic). v1.x narrows the
-non-claim by adding a Postgres backend; v2 narrows it again by signing.
+non-claim further; v2 introduces signing for the operator-tampering case.
 
 ---
 
@@ -53,7 +53,7 @@ human." Two forces flow from that:
   nothing is lost from the operator-visible log stream.
 
 The combination of "exact shape, recorded reliably" and "never blocks the
-request" is what RFC 0001 §10 implicitly relied on. RFC 0003 elevates
+request" is what RFC 0001 10 implicitly relied on. RFC 0003 elevates
 that contract to a first-class spec so v1.x and v2 evolutions are
 confined edits rather than rewrites.
 
@@ -83,8 +83,7 @@ confined edits rather than rewrites.
   ship `StdoutSink` JSON to an external SIEM and treat that as the
   system of record.
 - **HA (multi-replica) audit.** SQLite is single-writer. v1.0 deploys
-  Periscope as one replica when audit persistence is on. Postgres
-  (v1.x) lifts this constraint.
+  Periscope as one replica when audit persistence is on.
 - **Free-text or `LIKE` search.** All filters are exact-match or
   time-range on indexed columns; full-text search would degrade past
   the retention cap.
@@ -93,7 +92,7 @@ confined edits rather than rewrites.
 
 - Tracking every read. List/describe/log-view are not audited; only
   privileged or identity-sensitive actions are. (`log_open` is reserved
-  in the taxonomy but not yet wired — see §4.)
+  in the taxonomy but not yet wired — see 4.)
 - Storing apply payloads. Diffs of YAML being applied are not part of
   the audit record. The audit row tells you "alice@corp applied
   Deployment foo at T," not what changed in the manifest.
@@ -170,8 +169,8 @@ serialization differs (slog kv vs SQLite columns vs JSON).
     "email":  "alice@corp.example",                 // optional
     "groups": ["periscope-users", "Sec-Team"]       // optional, IdP claim
   },
-  "verb":        "apply",                           // closed set, see §4
-  "outcome":     "success",                         // closed set, see §5
+  "verb":        "apply",                           // closed set, see 4
+  "outcome":     "success",                         // closed set, see 5
   "cluster":     "prod-eu",                         // registry name, optional for some events
   "resource": {
     "group":     "apps",                            // omitted for core
@@ -181,7 +180,7 @@ serialization differs (slog kv vs SQLite columns vs JSON).
     "name":      "checkout"                         // empty for batch operations
   },
   "reason":      "deployments.apps \"checkout\" already exists", // err.Error() on failure/denied; close-reason on exec_close; empty on plain success
-  "extra": {                                        // verb-specific; see §4
+  "extra": {                                        // verb-specific; see 4
     "dryRun": false,
     "force":  true
   }
@@ -281,7 +280,7 @@ additive fields introduced by the refactor.
 
 ### `SQLiteSink`
 
-Persisted, queryable, retention-bounded. Fully specified in §9–§11.
+Persisted, queryable, retention-bounded. Fully specified in 9–11.
 
 ---
 
@@ -464,7 +463,7 @@ matching the literal value (i.e. zero rows).
 
 ```json
 {
-  "items":  [ /* Row, see §6 */ ],
+  "items":  [ /* Row, see 6 */ ],
   "total":  1247,
   "limit":  50,
   "offset": 0
@@ -542,7 +541,7 @@ and `auditScope`) to hide audit nav when the feature is off.
 ### Adding a verb (minor version)
 
 1. Add the constant in `internal/audit/event.go`.
-2. Update §4 of this RFC with the emission site, outcome classes, and
+2. Update 4 of this RFC with the emission site, outcome classes, and
    `extra` shape.
 3. Wire the emission at the handler. Reuse `actorFromContext` and
    `outcomeFor`.
@@ -552,7 +551,7 @@ and `auditScope`) to hide audit nav when the feature is off.
 
 1. Append a new migration to `migrations` in `sqlite_sink.go`.
 2. Add the column to the Go struct and the `Row` JSON tags.
-3. Update §6 (top-level shape) and §9 (schema) of this RFC.
+3. Update 6 (top-level shape) and 9 (schema) of this RFC.
 4. Old rows return NULL → empty in JSON, which existing clients
    already tolerate for the existing nullable columns.
 
@@ -599,7 +598,7 @@ adding `extra` keys for new verbs review them against this list:
 
 The exec stdin/stdout payload **never** appears in audit fields
 (`bytes_stdin` / `bytes_stdout` are byte counts, not contents). RFC
-0001 §17 acceptance criterion #7 enforces this with a test.
+0001 17 acceptance criterion #7 enforces this with a test.
 
 **RBAC bypass risk.** The `actor` filter override is **server-side**
 in `auditQueryHandler`. There is no client-supplied way to escape it
@@ -636,7 +635,7 @@ The audit pipeline is complete (v1.0) when:
    and ignores any client-supplied `actor=` parameter
    (`audit_handler_test.go` covers both directions).
 9. `limit > 500` is silently clamped to 500.
-10. RFC 0001 §17 #7 (no stdin payloads in any audit field) holds.
+10. RFC 0001 17 #7 (no stdin payloads in any audit field) holds.
 
 All ten are met as of v1.0.0.
 
@@ -644,10 +643,6 @@ All ten are met as of v1.0.0.
 
 ## 15. Future work
 
-- **v1.x — Postgres backend.** Same `Sink` and `Reader` interfaces,
-  same column set, different driver. Lifts the single-replica
-  constraint. The `Reader` interface in
-  `internal/audit/reader.go:10` was carved out for exactly this.
 - **v1.x — `log_open` emission.** Wire the reserved verb behind a
   rate-aware emitter so a tail-follow doesn't flood the table.
 - **v2 — hash-chain signing.** Append a `prev_hash` column and a
@@ -669,5 +664,5 @@ All ten are met as of v1.0.0.
 - [`cmd/periscope/audit_handler.go`](../../cmd/periscope/audit_handler.go) — `/api/audit` HTTP handler
 - [`cmd/periscope/errors.go`](../../cmd/periscope/errors.go) — `outcomeFor`, `actorFromContext`
 - [`docs/setup/audit.md`](../setup/audit.md) — operator-facing guide
-- RFC 0001 §10 — pre-existing exec audit-event shape, preserved by `StdoutSink`
-- RFC 0002 §3 — actor identity sources (OIDC subject, IdP groups)
+- RFC 0001 10 — pre-existing exec audit-event shape, preserved by `StdoutSink`
+- RFC 0002 3 — actor identity sources (OIDC subject, IdP groups)

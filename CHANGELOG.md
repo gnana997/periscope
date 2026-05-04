@@ -13,24 +13,7 @@ tag.
 
 ## [Unreleased]
 
-### Documentation
-
-- Added [RFC 0003 — Audit log: schema and retention semantics](docs/rfcs/0003-audit-log.md),
-  formalizing the verb taxonomy, wire-stable event shape, SQLite
-  schema, retention algorithm, `/api/audit` read-side RBAC, semver
-  coverage, and the v1.0 security model (operator-trust now;
-  hash-chain signing in v2).
-- Added [`docs/api.md`](docs/api.md) — HTTP API reference with
-  three stability tiers (Tier 1 stable, Tier 2 SPA-coupled,
-  Tier 3 live channels), authentication / cookie / session
-  contract, error-code enum, and the `/api/v1/...` versioning
-  policy for v2 onward.
-- Added [`docs/setup/environment-variables.md`](docs/setup/environment-variables.md) —
-  centralized reference for every `PERISCOPE_*` env var (and
-  `PORT`) the binary reads, with defaults, Helm-value mapping,
-  and the semver coverage rules for the configuration surface.
-- Fixed stale `PERISCOPE_WATCH_PER_USER_LIMIT` default in
-  `docs/architecture/watch-streams.md` (was 30, code is 60).
+_Nothing yet._
 
 ## [1.0.0]
 
@@ -56,6 +39,10 @@ Initial stable release.
   - Fleet view aggregator at `/` over every registered cluster.
   - Cluster rail (left bar) for context switching.
   - Per-cluster scoping for every resource view.
+  - In-cluster cluster backend for self-managed deployments — the
+    chart auto-binds the periscope ServiceAccount to the
+    impersonator role when a cluster is registered with
+    `backend: in-cluster`.
 
 - **Browsing & inspection**
   - List, detail, describe, events, and YAML for the common
@@ -110,6 +97,16 @@ Initial stable release.
     filesystem, all capabilities dropped, `RuntimeDefault`
     seccomp profile in the Helm chart.
 
+### Fixed
+
+- Auth: `periscope_session` cookie is now `SameSite=Lax` (was
+  `Strict`). Strict suppressed the cookie on the post-OIDC-callback
+  redirect to `/`, so first-time sign-in landed on the
+  unauthenticated page until the user manually refreshed (#37).
+- Auth: browser navigations to `/` (or any deep link) without a
+  session now `302` to `/api/auth/login` instead of returning plain
+  `401 unauthenticated` — XHR callers still get the 401 (#37).
+
 ### Security
 
 - OIDC session and PKCE/state generation now propagate `crypto/rand`
@@ -117,6 +114,25 @@ Initial stable release.
   callbacks return 500 on the (vanishingly rare) RNG failure path
   rather than crashing the process and dropping every active
   session on the same replica.
+
+### Documentation
+
+- Added [RFC 0003 — Audit log: schema and retention semantics](docs/rfcs/0003-audit-log.md),
+  formalizing the verb taxonomy, wire-stable event shape, SQLite
+  schema, retention algorithm, `/api/audit` read-side RBAC, semver
+  coverage, and the v1.0 security model (operator-trust now;
+  hash-chain signing in v2).
+- Added [`docs/api.md`](docs/api.md) — HTTP API reference with
+  three stability tiers (Tier 1 stable, Tier 2 SPA-coupled,
+  Tier 3 live channels), authentication / cookie / session
+  contract, error-code enum, CSRF posture, and the
+  `/api/v2/...` versioning policy for future majors.
+- Added [`docs/setup/environment-variables.md`](docs/setup/environment-variables.md) —
+  centralized reference for every `PERISCOPE_*` env var (and
+  `PORT`) the binary reads, with defaults, Helm-value mapping,
+  and the semver coverage rules for the configuration surface.
+- Fixed stale `PERISCOPE_WATCH_PER_USER_LIMIT` default in
+  `docs/architecture/watch-streams.md` (was 30, code is 60).
 
 [Unreleased]: https://github.com/gnana997/periscope/compare/v1.0.0...HEAD
 [1.0.0]: https://github.com/gnana997/periscope/releases/tag/v1.0.0

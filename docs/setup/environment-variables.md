@@ -30,7 +30,7 @@ shape itself), see [`docs/setup/deploy.md`](deploy.md).
 | `PERISCOPE_WATCH_STREAMS` | `all` | Which kinds get an SSE watch route | `watchStreams.kinds` |
 | `PERISCOPE_WATCH_PER_USER_LIMIT` | `60` | Concurrent watch streams per user | `watchStreams.perUserLimit` |
 | `PERISCOPE_PROBE_CLUSTERS_ON_BOOT` | _(unset)_ | `1` to seed exec circuit breakers at boot | `exec.probeClustersOnBoot` |
-| `PERISCOPE_DEV_ALLOW_ORIGINS` | _(unset)_ | Extra WebSocket origins (dev only) | _(no Helm value — see §6)_ |
+| `PERISCOPE_DEV_ALLOW_ORIGINS` | _(unset)_ | Extra WebSocket origins (dev only) | _(no Helm value — see 6)_ |
 
 Empty / unset values fall back to the documented default. Negative or
 non-numeric values where a positive integer is expected fall back to
@@ -143,7 +143,7 @@ How often the prune+VACUUM loop runs. Go duration syntax (`24h`,
 hammering disk.
 
 The retention and prune algorithms are specified in
-[RFC 0003 §10](../rfcs/0003-audit-log.md).
+[RFC 0003 10](../rfcs/0003-audit-log.md).
 
 ---
 
@@ -285,7 +285,7 @@ oidc:
   # or:
   clientSecret: file:///run/secrets/oidc  # file read
   # or:
-  clientSecret: aws-secrets-manager://...  # AWS Secrets Manager
+  clientSecret: aws-secretsmanager://...  # AWS Secrets Manager
   clientSecret: aws-ssm://...              # AWS SSM Parameter Store
 ```
 
@@ -323,7 +323,7 @@ exceptions worth knowing:
 
 ## 10. Compatibility and forward evolution
 
-Env var names that appear in §1–§6 are **part of the v1.0 public
+Env var names that appear in 1–6 are **part of the v1.0 public
 configuration surface**. They are covered by the same semver
 promise as the HTTP API:
 
@@ -337,7 +337,7 @@ promise as the HTTP API:
 - Tightening parsing (rejecting a previously-tolerated value) is
   breaking.
 
-Variables in §7 are explicitly **not covered** — they're for
+Variables in 7 are explicitly **not covered** — they're for
 development workflows and may change shape between releases.
 
 ---
@@ -346,9 +346,6 @@ development workflows and may change shape between releases.
 
 Likely additions in v1.x:
 
-- `PERISCOPE_AUDIT_BACKEND=postgres` plus `PERISCOPE_AUDIT_DSN=...`
-  when the Postgres audit backend lands (RFC 0003 §15). The
-  `_DB_PATH` knob will continue to exist for SQLite.
 - `PERISCOPE_SESSION_STORE=redis` plus `PERISCOPE_SESSION_DSN=...`
   when the multi-replica session store lands.
 - `PERISCOPE_LOG_LEVEL` for runtime log-level tuning. Today the

@@ -10,12 +10,12 @@ near-identical entries.
 If you're looking for:
 
 - **Operator basics** — verifying a deployment, writing health checks,
-  granting audit-read access — the Tier 1 reference (§3) and the
-  authentication section (§2) are what you want.
+  granting audit-read access — the Tier 1 reference (3) and the
+  authentication section (2) are what you want.
 - **CLI / MCP integrators** — RFC 0001 (pod exec) and RFC 0002 (auth)
   describe the long-term contract those tools land against. Use this
   page to understand which HTTP surface is locked vs free to evolve.
-- **SPA contributors** — the patterns in §4 are the contract; the
+- **SPA contributors** — the patterns in 4 are the contract; the
   generated TypeScript types in `web/src/api/` are the canonical
   field-by-field shape for SPA-internal endpoints.
 
@@ -30,7 +30,7 @@ guarantees:
 | Tier | Coverage | Examples |
 |---|---|---|
 | **1 — Stable** | Path, method, request shape, response field names, and documented error classes are all covered by semver. Breaking changes require a major bump (v2). | `/healthz`, `/api/auth/*`, `/api/whoami`, `/api/features`, `/api/clusters`, `/api/fleet`, `/api/audit`, `/api/clusters/{c}/can-i` |
-| **2 — SPA-coupled** | Path and method are stable. Response field **shapes can evolve in minor versions** (additive fields, new optional flags). The patterns in §4 are stable; specific field-level shapes track what the SPA needs. | The 130+ resource list / detail / yaml / events / logs / dashboard / search / CRD / customresources / helm / apply / delete / trigger / meta / secrets-data / openapi-proxy routes |
+| **2 — SPA-coupled** | Path and method are stable. Response field **shapes can evolve in minor versions** (additive fields, new optional flags). The patterns in 4 are stable; specific field-level shapes track what the SPA needs. | The 130+ resource list / detail / yaml / events / logs / dashboard / search / CRD / customresources / helm / apply / delete / trigger / meta / secrets-data / openapi-proxy routes |
 | **3 — Live channels** | Stream wire formats are stable (frozen and tested against the SPA). Path, transport (SSE / WebSocket), event names, and frame shape are all covered. Documented separately. | Watch streams (SSE), pod exec (WebSocket), pod and workload logs (SSE) |
 
 **What is _not_ covered by semver in any tier:**
@@ -109,7 +109,7 @@ Endpoints:
 | Name | Lifetime | Path | HttpOnly | Secure | SameSite | Purpose |
 |---|---|---|---|---|---|---|
 | `periscope_login` | 10 min | `/` | ✓ | (when HTTPS) | Lax | One-shot OIDC `state` + PKCE verifier. Cleared on callback. |
-| `periscope_session` | configured (default 12 h) | `/` | ✓ | (when HTTPS) | **Strict** | Session id; lookup key into the in-memory session store. |
+| `periscope_session` | configured (default 12 h) | `/` | ✓ | (when HTTPS) | Lax | Session id; lookup key into the in-memory session store. |
 
 `Secure` is set automatically when the request reached the backend
 over TLS, including via `X-Forwarded-Proto: https` from a trusted
@@ -126,8 +126,7 @@ v1.0 keeps the session record in process memory. Restarting the
 pod **invalidates all sessions** — operators see a brief flash of
 the login screen on first request after a deploy. This is also why
 v1.0 supports a single replica when audit persistence is on (see
-RFC 0003 §3): session state has no shared store. A future
-`SessionStore` backed by Redis / PostgreSQL is post-v1.
+RFC 0003 3): session state has no shared store.
 
 ### Authorization on every API call
 
@@ -143,7 +142,7 @@ The `Provider` carries the user's `Impersonate-User` and
 `Impersonate-Group` headers; the apiserver evaluates RBAC against
 the human, not the pod. This is what lets a Kubernetes denial show
 up as `outcome: denied` in the audit log with the user's real
-subject (RFC 0003 §5).
+subject (RFC 0003 5).
 
 ### Bearer tokens / API keys
 
@@ -203,7 +202,7 @@ tooltips.
 | `authzMode` | `shared`, `tier`, or `raw`. See `docs/setup/cluster-rbac.md`. |
 | `tier` | Resolved tier name (tier mode only); empty otherwise. |
 | `auditEnabled` | Whether `/api/audit` is registered. |
-| `auditScope` | `self` or `all`. See RFC 0003 §11. Only present when `auditEnabled`. |
+| `auditScope` | `self` or `all`. See RFC 0003 11. Only present when `auditEnabled`. |
 | `expiresAt` | Unix seconds (UTC) of the session's absolute expiry. |
 
 `401 unauthenticated` if no valid session. There is also a
@@ -324,14 +323,14 @@ unmapped groups). Otherwise per-cluster errors are surfaced inline:
 Status enum (stable, additions are additive):
 `healthy` · `degraded` · `unreachable` · `unknown` · `denied`.
 
-Per-cluster error codes — the same enum used elsewhere (§6).
+Per-cluster error codes — the same enum used elsewhere (6).
 
 ### `GET /api/audit`
 
 Persisted audit query. **Registered only when SQLite is enabled and
 opened successfully** (otherwise 404). Full contract — request shape,
 response shape, retention semantics, RBAC, semver coverage — lives
-in [RFC 0003 §11](rfcs/0003-audit-log.md). One-line summary here:
+in [RFC 0003 11](rfcs/0003-audit-log.md). One-line summary here:
 
 ```
 GET /api/audit?
@@ -342,7 +341,7 @@ GET /api/audit?
 ```
 
 Returns `{ items, total, limit, offset }` with a stable `Row` shape
-documented in RFC 0003 §6. `X-Audit-Scope: self` or `all` header
+documented in RFC 0003 6. `X-Audit-Scope: self` or `all` header
 indicates whether the server hard-overrode the actor filter to the
 caller's own subject.
 
@@ -449,7 +448,7 @@ GET /api/clusters/{cluster}/pods/{ns}/{name}/logs?container=&follow=true&tailLin
 GET /api/clusters/{cluster}/{workload}/{ns}/{name}/logs?...
 ```
 
-Server-Sent Events stream. See §5 for the live-channel contract.
+Server-Sent Events stream. See 5 for the live-channel contract.
 `workload` ∈ `deployments`, `statefulsets`, `daemonsets`, `jobs`.
 
 ### Pattern: apply (Server-Side Apply)
@@ -582,7 +581,7 @@ when the client closes the connection; respects context-cancel.
 Workload-level routes auto-fan-out across the workload's child pods
 and tag each line with the source pod.
 
-A future `log_open` audit verb (RFC 0003 §4) will be emitted here;
+A future `log_open` audit verb (RFC 0003 4) will be emitted here;
 not yet wired.
 
 ### Pod exec (WebSocket)
@@ -604,7 +603,7 @@ context:
 - Two audit emissions per session: `exec_open` immediately after
   the apiserver accepts, `exec_close` once the stream returns. The
   `Reason` field carries the close disposition (`completed` /
-  `idle_timeout` / `abort` / `server_error`). See RFC 0003 §4.
+  `idle_timeout` / `abort` / `server_error`). See RFC 0003 4.
 - Concurrent sessions per user are bounded; the cap message lists
   active sessions with disconnect controls.
 - Stdin payloads never appear in logs or audit fields — only the
@@ -691,16 +690,31 @@ versions; existing codes are stable.
 
 ### CSRF
 
-Periscope relies on cookie `SameSite=Strict` for the session cookie
-to prevent cross-site state-changing requests. There is no
-double-submit token in v1.0. If you front Periscope with a proxy
-that strips `SameSite` (rare), evaluate your CSRF posture
-separately.
+Periscope's CSRF posture rests on three layers, not on a synchronizer
+token (none is issued in v1.0):
 
-`PATCH` (apply), `DELETE`, and `POST /trigger` are state-changing.
-The exec WebSocket handshake is also implicitly state-changing;
-its origin check (`PERISCOPE_DEV_ALLOW_ORIGINS` in dev mode;
-same-origin in prod) is the equivalent guard.
+1. **`periscope_session` is `SameSite=Lax`.** Cross-site `POST`,
+   `PATCH`, `DELETE`, and the WebSocket upgrade do *not* receive the
+   cookie at all, so a malicious page cannot drive a state-changing
+   request as the user. Lax (rather than Strict) is required so the
+   cookie is sent on the post-OIDC-callback redirect to `/`; Strict
+   would silently break sign-in. The cookie is also `HttpOnly`, so
+   it is unreadable from page JS even on same-origin contexts.
+2. **State-changing endpoints accept JSON or YAML only.** `apply` is
+   `application/yaml`; `trigger` and other POSTs are `application/json`.
+   The two body types a `<form>` can submit cross-site without a
+   preflight (`application/x-www-form-urlencoded` and
+   `multipart/form-data`) are not parsed by any state-changing handler.
+   A cross-site attacker would need to issue a true XHR, which is
+   blocked by CORS — Periscope sets no permissive
+   `Access-Control-Allow-Origin` headers.
+3. **The exec WebSocket checks `Origin`.** Same-origin in production;
+   `PERISCOPE_DEV_ALLOW_ORIGINS` widens the allowlist for local dev
+   (Vite proxy on `:5173` → backend on `:8088`).
+
+If you front Periscope with a proxy that strips `SameSite` or rewrites
+request bodies into form encoding, evaluate your CSRF posture
+separately.
 
 ### Pagination
 
@@ -732,11 +746,10 @@ These exist but are **not part of the API contract**:
 | When | What |
 |---|---|
 | v1.x | Helm write paths (rollback / upgrade) once the compound SAR layer lands. Additive: new methods on existing helm paths. |
-| v1.x | `log_open` audit emission for the SSE log streams. Additive: new audit verb (RFC 0003 §4 reserves it). |
-| v1.x | Postgres-backed session store and audit reader. No HTTP API change — same `/api/audit` shape, same cookies. |
+| v1.x | `log_open` audit emission for the SSE log streams. Additive: new audit verb (RFC 0003 4 reserves it). |
 | v1.x | `periscope-rbac` CLI (RFC 0002). Will use the existing `/api/clusters/*` and `/api/auth/whoami` surfaces. |
-| v2 | Anything that breaks the contracts in §3 or §4 (path moves, removed fields, renamed enums). Expect `/api/v2/...` alongside `/api/...` through one major's deprecation window. |
-| v3 | RFC 0001 §3 — MCP tool exposure. Will reuse the per-cluster typed function layer; HTTP API stays as the human-facing surface. |
+| v2 | Anything that breaks the contracts in 3 or 4 (path moves, removed fields, renamed enums). Expect `/api/v2/...` alongside `/api/...` through one major's deprecation window. |
+| v3 | RFC 0001 3 — MCP tool exposure. Will reuse the per-cluster typed function layer; HTTP API stays as the human-facing surface. |
 
 ---
 
