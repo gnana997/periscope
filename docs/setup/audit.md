@@ -12,6 +12,11 @@ This page covers both halves of the feature:
 - **RBAC** — who can read the persisted history via `GET /api/audit`,
   and how to grant that access in each authz mode.
 
+For the formal contract — the closed verb taxonomy, the wire-stable
+event schema, the SQLite schema, retention semantics, semver coverage,
+and the security model around tamper resistance — see
+[RFC 0003](../rfcs/0003-audit-log.md).
+
 ## Quick decision tree
 
 ```
@@ -46,7 +51,9 @@ The default is `false` — opt-in. When off:
 ### Helm values ↔ env var mapping
 
 The chart templates each `audit.*` value to a `PERISCOPE_AUDIT_*`
-env var on the pod. Useful when debugging what's actually applied:
+env var on the pod. Useful when debugging what's actually applied;
+the central reference for every Periscope env var (with semver
+coverage) is [`environment-variables.md`](environment-variables.md).
 
 | Helm value | Env var | Required when `audit.enabled=true` |
 |---|---|---|

@@ -233,7 +233,7 @@ Examples:
 feat(watch-streams): add Tier-A workload-controller SSE feeds
 fix(k8s): handle compact-list YAML in stripForEdit
 refactor(web): unify YAML editor on EditorSource
-docs(setup): refresh deploy.md §10.5 for the expanded watch-streams kinds
+docs(setup): refresh deploy.md 10.5 for the expanded watch-streams kinds
 chore(helm): relax watchStreams.kinds schema regex
 ci: add helm-lint job
 ```

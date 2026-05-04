@@ -196,8 +196,11 @@ func LoggedOutHandler() http.HandlerFunc {
 	}
 }
 
-// WhoamiHandler returns {subject, email, groups, mode, expiresAt} for
-// the current session. Used by the SPA's <AuthProvider> on first load.
+// WhoamiHandler returns the full session introspection payload for the
+// current session: subject, email, groups, mode, authzMode, tier (when
+// the resolver is in tier mode), auditEnabled, auditScope (when audit
+// is on), and expiresAt. Used by the SPA's <AuthProvider> on first
+// load, by the user menu, and by audit-nav gating.
 func WhoamiHandler(store SessionStore, cfg Config, resolver *authz.Resolver, auditEnabled bool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		s, ok := SessionFromContext(r.Context())

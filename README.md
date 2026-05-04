@@ -9,7 +9,7 @@
 [![Go](https://img.shields.io/badge/Go-1.26-00ADD8.svg)](https://go.dev/)
 [![Node](https://img.shields.io/badge/Node-22-339933.svg)](https://nodejs.org/)
 
-> **Status — early development.** Core flows (multi-cluster auth, resource browsing, pod exec, logs, YAML editing, audit log, real-time watch streams) work, but APIs, configuration, and UI are still changing. Expect breaking changes until a tagged release.
+> **Status — v1.0 stable.** Public HTTP API, configuration shape, and Helm values are covered by semver: breaking changes will land in a future major (v2). Bugfixes and additive features land on minor / patch tags off `main`. See [`CHANGELOG.md`](CHANGELOG.md) for what shipped per release.
 
 ## What is Periscope
 
@@ -20,7 +20,7 @@ Periscope is a self-hosted, multi-cluster Kubernetes console focused on EKS envi
 - **No long-lived AWS keys.** Cluster access is obtained on demand via Pod Identity or IRSA. Nothing static lives on the console pod.
 - **Real human in every audit row.** Every K8s call carries the user's OIDC identity via impersonation, so the audit log shows `alice@corp` — never `periscope-bot`.
 - **OIDC-gated user identity.** Auth0 and Okta tested. Authorization by IdP group, with configurable tiers.
-- **Searchable audit log.** SQLite or Postgres. First-class in-app view, time-filterable, retention-bounded — compliance reviews stop being a log-grep exercise.
+- **Searchable audit log.** SQLite-backed, with a first-class in-app view, time-filterable and retention-bounded — compliance reviews stop being a log-grep exercise.
 - **Live, not polled.** 21+ resource list pages stream over SSE for real-time updates, with a tested polling fallback for restrictive proxies.
 - **Schema-aware YAML editor.** Built-in kinds and Custom Resources. Server-side apply, field-ownership glyphs, conflict resolution, live drift detection while editing.
 
@@ -105,7 +105,7 @@ Both signed (cosign keyless) and discoverable on [Artifact Hub](https://artifact
 
 **Audit & observability**
 - Every privileged action signed by the human user — apply, delete, exec, secret reveal, log open, cronjob trigger
-- Persistent audit log: SQLite (single-replica) or Postgres (HA), with retention and size caps
+- Persistent audit log: SQLite (single-replica), with retention and size caps
 - First-class in-app audit view with filters by actor, verb, outcome, time range, namespace, request id
 - Density timeline strip surfaces denials and failures at a glance
 - Tier-mode audit-admin groups can see every actor's rows; everyone else sees their own
@@ -115,6 +115,7 @@ Both signed (cosign keyless) and discoverable on [Artifact Hub](https://artifact
 
 **Setup**
 - [Configuration & deployment](docs/setup/deploy.md)
+- [Environment variables reference](docs/setup/environment-variables.md)
 - [OIDC setup — Auth0](docs/setup/auth0.md)
 - [OIDC setup — Okta](docs/setup/okta.md)
 - [In-cluster RBAC the backend needs](docs/setup/cluster-rbac.md)
@@ -127,9 +128,13 @@ Both signed (cosign keyless) and discoverable on [Artifact Hub](https://artifact
 **Architecture**
 - [Watch streams — push model, fallback, RBAC](docs/architecture/watch-streams.md)
 
+**Reference**
+- [HTTP API reference (stability tiers, auth, conventions)](docs/api.md)
+
 **RFCs**
 - [RFC 0001 — Pod exec support](docs/rfcs/0001-pod-exec.md)
 - [RFC 0002 — Authentication (OIDC + per-user K8s authz)](docs/rfcs/0002-auth.md)
+- [RFC 0003 — Audit log: schema and retention semantics](docs/rfcs/0003-audit-log.md)
 
 ## Configuration
 
@@ -184,7 +189,7 @@ CI: every push and PR runs `golangci-lint`, `go test`, `npm run lint`, `npm test
 
 ## Roadmap
 
-Until the project tags its first release, planning is informal — see [GitHub Issues](https://github.com/gnana997/periscope/issues) for what's open. A structured roadmap will be published alongside the v0.1 release.
+Planning is tracked in [GitHub Issues](https://github.com/gnana997/periscope/issues). Notable post-v1.0 items: expanded write paths in the Helm release browser (rollback / upgrade) and richer per-cluster RBAC introspection.
 
 ## Community & support
 

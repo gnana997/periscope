@@ -153,7 +153,7 @@ The handler takes care of:
 
 ## 6. Per-user concurrency cap
 
-`PERISCOPE_WATCH_PER_USER_LIMIT` (default 30) caps concurrent watch
+`PERISCOPE_WATCH_PER_USER_LIMIT` (default 60) caps concurrent watch
 streams per OIDC subject across all clusters and kinds. Exceeding it
 returns HTTP 429. The cap exists to stop a runaway SPA bug from
 opening hundreds of EventSources and exhausting apiserver watch
