@@ -2,6 +2,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import { useClusters } from "../../hooks/useClusters";
 import { cn } from "../../lib/cn";
 import { UserMenu } from "./UserMenu";
+import { RailLinks } from "./RailLinks";
 import type { Cluster } from "../../lib/types";
 
 // ClusterRail is the leftmost vertical bar — Slack/Discord style. Each
@@ -35,7 +36,8 @@ export function ClusterRail() {
               />
             ))}
       </div>
-      <div className="shrink-0 pt-2">
+      <div className="flex shrink-0 flex-col items-center gap-3 border-t border-border pt-3">
+        <RailLinks />
         <UserMenu />
       </div>
     </aside>
