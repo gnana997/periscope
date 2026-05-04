@@ -31,6 +31,19 @@ shape itself), see [`docs/setup/deploy.md`](deploy.md).
 | `PERISCOPE_WATCH_PER_USER_LIMIT` | `60` | Concurrent watch streams per user | `watchStreams.perUserLimit` |
 | `PERISCOPE_PROBE_CLUSTERS_ON_BOOT` | _(unset)_ | `1` to seed exec circuit breakers at boot | `exec.probeClustersOnBoot` |
 | `PERISCOPE_DEV_ALLOW_ORIGINS` | _(unset)_ | Extra WebSocket origins (dev only) | _(no Helm value — see 6)_ |
+| `PERISCOPE_AGENT_LISTEN_ADDR` | _(unset = agent off)_ | TLS bind addr for `/api/agents/connect` | `agent.listenAddr` |
+| `PERISCOPE_AGENT_TUNNEL_SANS` | `localhost` | SAN(s) on the tunnel server cert | `agent.tunnelSANs` |
+
+*Agent binary (separate `periscope-agent` chart):*
+
+| Variable | Default | Purpose | Helm value |
+|---|---|---|---|
+| `PERISCOPE_SERVER_URL` | _(required)_ | wss:// URL of the central tunnel listener | `agent.serverURL` |
+| `PERISCOPE_CLUSTER_NAME` | _(required)_ | Cluster name claimed at registration + every reconnect | `agent.clusterName` |
+| `PERISCOPE_REGISTRATION_TOKEN` | _(first-boot only)_ | Single-use bootstrap token | `agent.registrationToken` |
+| `PERISCOPE_AGENT_NAMESPACE` | _(in-pod namespace)_ | Where the agent persists state | `(derived)` |
+| `PERISCOPE_AGENT_SECRET_NAME` | `periscope-agent-state` | State Secret name (cert + key + server CA) | `agent.stateSecretName` |
+| `PERISCOPE_AGENT_HEALTH_ADDR` | `:8081` | Bind addr for /healthz | `agent.healthAddr` |
 
 Empty / unset values fall back to the documented default. Negative or
 non-numeric values where a positive integer is expected fall back to
@@ -342,7 +355,117 @@ development workflows and may change shape between releases.
 
 ---
 
-## 11. Forward roadmap
+## 11. Agent backend
+
+Two binaries here: the central periscope server gains a small set
+of vars when `agent.enabled: true` in the chart; the agent itself
+(`periscope-agent`, separate Helm chart, separate binary) reads its
+own set when running on a managed cluster.
+
+### Server side (`periscope`)
+
+These are read by the central server when the agent backend is
+activated. Activated when either env var is set OR when the cluster
+registry contains a `backend: agent` entry. See
+[`docs/architecture/agent-tunnel.md`](../architecture/agent-tunnel.md)
+for the runtime design and
+[`docs/setup/agent-onboarding.md`](agent-onboarding.md) for the
+operator how-to.
+
+#### `PERISCOPE_AGENT_LISTEN_ADDR`
+
+Bind addr for the dedicated TLS listener that hosts
+`/api/agents/connect` (the WebSocket tunnel endpoint). Format
+`":PORT"`. Default `:8443` when the chart sets `agent.enabled: true`;
+unset when agent backend is off.
+
+The listener is **separate** from the main HTTP listener (`:8080`)
+because `ClientAuth: RequireAndVerifyClientCert` requires the TLS
+handshake to terminate at the pod — operators cannot front this
+port with an HTTP-terminating load balancer (ALB strips client
+certs and breaks mTLS). Wire NLB / TCP LB / TLS-passthrough Ingress
+for production.
+
+#### `PERISCOPE_AGENT_TUNNEL_SANS`
+
+Comma-separated DNS names baked into the SAN of the server cert
+that the tunnel listener presents. Agents validate this cert
+against the per-deployment CA they received at registration; the
+SAN must match whatever hostname the agent dials. Example:
+`agents.periscope.example.com,localhost`.
+
+Helm rendering: `agent.tunnelSANs`. Default `"localhost"` (kind /
+dev only; production must set the real DNS).
+
+### Agent side (`periscope-agent`)
+
+These are read by the agent binary on the managed cluster. Set in
+the agent's Helm values (`deploy/helm/periscope-agent/values.yaml`)
+and rendered into the agent Deployment as env vars.
+
+#### `PERISCOPE_SERVER_URL` (required)
+
+WebSocket URL of the central tunnel listener. Both `wss://` and
+`ws://` accepted; production must use `wss://`. Example:
+`wss://agents.periscope.example.com:8443`.
+
+Helm rendering: `agent.serverURL`. The chart's
+`values.schema.json` rejects values that don't match
+`^(wss?|https?)://`.
+
+#### `PERISCOPE_CLUSTER_NAME` (required)
+
+The cluster name the agent claims at registration time + on every
+reconnect. Must match a `clusters[].name` entry of `backend: agent`
+in the central server's registry, otherwise the tunnel is rejected.
+Validated against the DNS-1123-ish shape (lowercase + digits +
+dashes; 1-63 chars; no leading/trailing/consecutive dashes).
+
+Helm rendering: `agent.clusterName`. Schema-enforced.
+
+#### `PERISCOPE_REGISTRATION_TOKEN`
+
+Bootstrap token from the central server's `POST /api/agents/tokens`
+endpoint. Required on first install only; the agent persists the
+returned mTLS cert into the state Secret and ignores this var on
+subsequent restarts.
+
+Helm rendering: `agent.registrationToken`. The chart wires it via
+a one-shot `bootstrapSecret` so the value doesn't appear directly
+on the Deployment manifest.
+
+Single-use, 15-minute TTL — leak window is bounded.
+
+#### `PERISCOPE_AGENT_NAMESPACE`
+
+K8s namespace the agent runs in (the namespace it manages its own
+state Secret in). Default: read from the kubelet-mounted
+`/var/run/secrets/kubernetes.io/serviceaccount/namespace` — only
+override for tests where you're running the binary outside a pod.
+
+#### `PERISCOPE_AGENT_SECRET_NAME`
+
+Name of the K8s Secret the agent persists its mTLS cert + key +
+server CA into. Default `periscope-agent-state`. The agent creates
+the Secret if it doesn't exist (using its `create` RBAC); on
+subsequent restarts it reads the existing Secret and never
+re-registers.
+
+Helm rendering: `agent.stateSecretName`. The chart's RBAC grants
+the agent's SA `get/update` (resource-name-restricted) so its
+permissions are scoped to this one named Secret.
+
+#### `PERISCOPE_AGENT_HEALTH_ADDR`
+
+Bind addr for the kubelet probe target (`/healthz`). Default
+`:8081`. Format `":PORT"`. Reports 200 once the agent is past
+bootstrap; the tunnel state itself is reflected in pod logs (see
+the `tunnel.client_connected` / `tunnel.client_disconnected`
+slog lines).
+
+---
+
+## 12. Forward roadmap
 
 Likely additions in v1.x:
 

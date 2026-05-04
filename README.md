@@ -1,6 +1,6 @@
 # Periscope
 
-> A multi-cluster Kubernetes console for EKS, built around Pod Identity and IRSA.
+> A multi-cluster Kubernetes console — keyless on EKS via Pod Identity / IRSA, anything-with-egress via the periscope-agent tunnel.
 
 [![CI](https://github.com/gnana997/periscope/actions/workflows/ci.yaml/badge.svg?branch=main)](https://github.com/gnana997/periscope/actions/workflows/ci.yaml)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
@@ -76,6 +76,7 @@ Both signed (cosign keyless) and discoverable on [Artifact Hub](https://artifact
 - Fleet view at `/` — every registered cluster as a status card with identity, hot signals, and one-click drill-in
 - Switch context from the cluster rail (Slack-style left bar)
 - Per-cluster scoping for every resource view
+- Add managed clusters via `backend: agent` (#42) — `kubectl apply` an agent on any K8s with outbound HTTPS, no IAM trust required. Works on EKS, GKE, AKS, on-prem k3s.
 
 **Browsing & inspection**
 - Common resources (pods, deployments, services, configmaps, secrets, jobs, ingresses, RBAC, …) plus full Custom Resource catalog
@@ -124,9 +125,11 @@ Both signed (cosign keyless) and discoverable on [Artifact Hub](https://artifact
 - [Helm release browser](docs/setup/helm-releases.md)
 - [Pod exec setup](docs/setup/pod-exec.md)
 - [NetworkPolicy](docs/setup/networkpolicy.md)
+- [Multi-cluster onboarding (agent)](docs/setup/agent-onboarding.md) — register a managed cluster via the periscope-agent tunnel
 
 **Architecture**
 - [Watch streams — push model, fallback, RBAC](docs/architecture/watch-streams.md)
+- [Agent tunnel — multi-cluster transport, PKI, registration](docs/architecture/agent-tunnel.md)
 
 **Reference**
 - [HTTP API reference (stability tiers, auth, conventions)](docs/api.md)

@@ -570,3 +570,80 @@ clusters:
 ```
 
 Each cluster is independent. The same OIDC user identity flows to all of them via impersonation; per-cluster RBAC determines what the user can actually do where.
+
+## Mode: `agent` (managed cluster via tunnel)
+
+Available since v1.0.0. Pre-existing eks / kubeconfig / in-cluster
+modes still work alongside; agent is just a fourth `backend:` value.
+
+The agent backend inverts the network direction: a tiny
+`periscope-agent` pod runs *on the managed cluster* and dials *out*
+to the central Periscope server. The agent's own ServiceAccount
+identity (not Pod Identity, not IRSA) is what the local apiserver
+sees; per-user RBAC enforcement still happens via the same
+`Impersonate-User` / `Impersonate-Group` headers, just forwarded
+through the tunnel.
+
+Operator-facing setup (token mint, helm install, troubleshooting)
+lives in [`docs/setup/agent-onboarding.md`](agent-onboarding.md);
+the design walkthrough is in
+[`docs/architecture/agent-tunnel.md`](../architecture/agent-tunnel.md).
+
+What the agent's RBAC looks like by default (rendered by the
+[`periscope-agent`](../../deploy/helm/periscope-agent/) chart's
+`clusterrole.yaml`):
+
+```yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: periscope-agent
+rules:
+  # Read everything — the bulk of dashboard traffic.
+  - apiGroups: ["*"]
+    resources: ["*"]
+    verbs: ["get", "list", "watch"]
+
+  # Impersonation — the load-bearing permission. Lets the central
+  # server's per-user authz model reach this cluster's apiserver.
+  - apiGroups: [""]
+    resources: ["users", "groups", "serviceaccounts"]
+    verbs: ["impersonate"]
+  - apiGroups: ["authentication.k8s.io"]
+    resources: ["userextras/scopes"]
+    verbs: ["impersonate"]
+```
+
+**Important: the agent's RBAC is the ceiling for what's physically
+possible on this cluster.** Impersonation does not bypass cluster
+RBAC — the apiserver still evaluates the impersonated user's
+permissions, but the *actual transport* (the agent) needs the
+underlying verbs allowed too. So if you want users to be able to
+`apply`, `delete`, or `exec` on this cluster, the agent's
+ClusterRole has to grant those verbs.
+
+The chart-shipped default is **read + impersonate only**. To enable
+write paths, set `clusterRole.enabled: false` and bind your own
+ClusterRole that includes `create`, `update`, `patch`, `delete`,
+`pods/exec` etc.
+
+Tier subjects (`periscope-bridge`, `periscope-tier-admin`, etc.)
+are not relevant on the agent's local cluster — those bindings live
+on the cluster Periscope is running in (the central one), where the
+server validates the human's tier before forwarding the
+impersonation header. The agent just relays bytes.
+
+What the agent does **not** do:
+
+- It doesn't connect to AWS, GCP, or any cloud control plane. No
+  IAM trust, no `eks:GetToken`, no Pod Identity association.
+- It doesn't see user passwords, OIDC tokens, or session cookies.
+  Those terminate at the central server.
+- It doesn't have permission to modify its own RBAC. The chart's
+  ServiceAccount is locked to `get/update` on a single named state
+  Secret in its own namespace.
+- It doesn't write to audit. All audit emission is server-side.
+
+For the failure-mode catalogue (cert expired, agent disconnected,
+deregistered cluster, server CA rotated) see
+[`docs/architecture/agent-tunnel.md`](../architecture/agent-tunnel.md) §10.

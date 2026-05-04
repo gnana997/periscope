@@ -43,6 +43,16 @@ Initial stable release.
     chart auto-binds the periscope ServiceAccount to the
     impersonator role when a cluster is registered with
     `backend: in-cluster`.
+  - Agent backend (#42) — per-cluster `periscope-agent` pod
+    dials out to the central server over a long-lived mTLS-pinned
+    WebSocket. Adds managed clusters via one `helm install` on the
+    target cluster; works on EKS / GKE / AKS / on-prem k3s / kind,
+    no IAM trust per cluster. PKI bootstrapped at server startup
+    (per-deployment ECDSA P-256 CA in a K8s Secret); 15-min single-
+    use bootstrap tokens; 90-day rotating client certs.
+  - SPA "+ onboard cluster" button (admin-tier only) on the fleet
+    page mints a token and renders the helm install command with the
+    token baked in, copy-paste ready.
 
 - **Browsing & inspection**
   - List, detail, describe, events, and YAML for the common
@@ -132,6 +142,27 @@ Initial stable release.
   `PORT`) the binary reads, with defaults, Helm-value mapping,
   and the semver coverage rules for the configuration surface.
 - Fixed stale `PERISCOPE_WATCH_PER_USER_LIMIT` default in
+- Added [`docs/architecture/agent-tunnel.md`](docs/architecture/agent-tunnel.md) —
+  design walkthrough for the agent backend: topology, PKI lifecycle,
+  registration handshake, mTLS session lifecycle, the
+  `rest.Config.Transport` substitution that keeps existing handlers
+  unchanged, identity propagation, audit shape, and failure modes.
+- Added [`docs/setup/agent-onboarding.md`](docs/setup/agent-onboarding.md) —
+  operator how-to for registering a managed cluster via the agent
+  backend: same-account flow with prereqs, the 5-step register-
+  install-verify sequence, troubleshooting (mTLS handshake, token
+  expiry, SAN mismatch), security notes, cross-account note.
+- Added [`examples/agent/`](examples/agent/) — sample values files
+  for both server + agent charts and a reference
+  `register-and-install.sh` script.
+- Extended `docs/api.md` with the three new agent-backend endpoints
+  (`POST /api/agents/tokens` admin-only, `POST /api/agents/register`
+  unauth + token-gated, `WS /api/agents/connect` mTLS-required).
+- Extended `docs/setup/environment-variables.md` §11 covering the
+  two server-side and six agent-side env vars introduced by #42.
+- Extended `docs/setup/cluster-rbac.md` with the agent-backend
+  RBAC story (the agent SA's impersonation lever, default
+  ClusterRole shape, how to tighten).
   `docs/architecture/watch-streams.md` (was 30, code is 60).
 
 [Unreleased]: https://github.com/gnana997/periscope/compare/v1.0.0...HEAD

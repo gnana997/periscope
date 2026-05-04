@@ -29,7 +29,7 @@ guarantees:
 
 | Tier | Coverage | Examples |
 |---|---|---|
-| **1 — Stable** | Path, method, request shape, response field names, and documented error classes are all covered by semver. Breaking changes require a major bump (v2). | `/healthz`, `/api/auth/*`, `/api/whoami`, `/api/features`, `/api/clusters`, `/api/fleet`, `/api/audit`, `/api/clusters/{c}/can-i` |
+| **1 — Stable** | Path, method, request shape, response field names, and documented error classes are all covered by semver. Breaking changes require a major bump (v2). | `/healthz`, `/api/auth/*`, `/api/whoami`, `/api/features`, `/api/clusters`, `/api/fleet`, `/api/audit`, `/api/clusters/{c}/can-i`, `/api/agents/*` |
 | **2 — SPA-coupled** | Path and method are stable. Response field **shapes can evolve in minor versions** (additive fields, new optional flags). The patterns in 4 are stable; specific field-level shapes track what the SPA needs. | The 130+ resource list / detail / yaml / events / logs / dashboard / search / CRD / customresources / helm / apply / delete / trigger / meta / secrets-data / openapi-proxy routes |
 | **3 — Live channels** | Stream wire formats are stable (frozen and tested against the SPA). Path, transport (SSE / WebSocket), event names, and frame shape are all covered. Documented separately. | Watch streams (SSE), pod exec (WebSocket), pod and workload logs (SSE) |
 
@@ -376,6 +376,103 @@ cache. Anonymous callers and apiserver errors fail closed
 (`allowed: false`).
 
 ---
+### `POST /api/agents/tokens`
+
+Mint a single-use bootstrap token for registering a `backend: agent`
+cluster. **Admin tier only** — non-admin sessions get `403`. Agent
+endpoints are documented in detail in
+[`docs/architecture/agent-tunnel.md`](architecture/agent-tunnel.md).
+
+```json
+POST /api/agents/tokens
+{ "cluster": "prod-eu" }
+
+→ 200 OK
+{
+  "token":     "abc123...",
+  "cluster":   "prod-eu",
+  "expiresAt": "2026-05-04T12:49:56.789Z"
+}
+```
+
+| Field | Notes |
+|---|---|
+| `cluster` | Cluster name. Must match the DNS-1123-ish shape: `^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`, 1-63 chars. The token is bound to this name; an agent claiming a different name on registration burns the token. |
+| `token` | 32 random bytes, base64url-encoded (URL-safe, no padding). Single-use. Show to the operator immediately; not retrievable later. |
+| `expiresAt` | RFC3339Nano UTC. Default TTL 15 minutes. After expiry, the token is reaped from the server-side store. |
+
+Errors:
+
+- `400 Bad Request` — invalid cluster name (fails the DNS-1123 regex)
+- `401 Unauthorized` — no session
+- `403 Forbidden` — session present but not admin tier (`admin tier required`)
+
+The token is stored in process memory on the server. Single-replica
+deployments are supported in v1.x.0; multi-replica with shared
+persistence lands in v1.x.+.
+
+### `POST /api/agents/register`
+
+Agent-side endpoint. Validates the bootstrap token, signs the
+agent's CSR, returns the cert + the server's CA bundle. **Not
+authenticated** — the bootstrap token IS the proof of authorization.
+Mounted unauthenticated specifically because the agent does not yet
+have a long-lived identity at this point in the flow.
+
+```json
+POST /api/agents/register
+{
+  "token":   "abc123...",
+  "cluster": "prod-eu",
+  "csr":     "<base64-encoded DER form>"
+}
+
+→ 200 OK
+{
+  "cert":      "-----BEGIN CERTIFICATE-----\n...",
+  "caBundle":  "-----BEGIN CERTIFICATE-----\n...",
+  "expiresAt": "2026-08-02T05:14:00Z"
+}
+```
+
+| Field | Notes |
+|---|---|
+| `token` | The opaque token from `POST /api/agents/tokens`. Atomic redeem — succeeds at most once. |
+| `cluster` | Must match the cluster name the token was minted for; mismatch **burns the token** and returns 401. |
+| `csr` | Base64-encoded DER. The agent generates the keypair locally; only the public key + name claim cross the wire. The CN inside the CSR is informational — the server overwrites it with the cluster name from the token at signing time. |
+| `cert` | PEM-encoded signed client cert. CN = cluster name, EKU = clientAuth. Default validity 90 days. |
+| `caBundle` | PEM-encoded server CA cert. The agent uses this to validate the server's TLS cert on every reconnect to the tunnel listener. |
+| `expiresAt` | When the client cert expires. Operators currently re-register manually; auto-rotation is a v1.x.+ follow-up. |
+
+Errors are deliberately uniform:
+
+- `400 Bad Request` — body parse failure, missing required field, malformed CSR
+- `401 Unauthorized` — token-related failure with body `"registration rejected"`. The four real failure modes (`unknown` / `expired` / `consumed` / `cluster mismatch`) all collapse to this one response so a probing attacker can't distinguish them. Server-side log carries the actual reason for forensics.
+- `500 Internal Server Error` — sign failure (CSR parses but signing errors)
+
+### `WS /api/agents/connect`
+
+WebSocket upgrade endpoint for the long-lived tunnel. **Hosted on a
+separate TLS listener** from the rest of the API (default `:8443`,
+configurable via `agent.listenAddr` Helm value) because the listener
+runs `ClientAuth: RequireAndVerifyClientCert` against the
+per-deployment CA — it must NOT be fronted by an HTTP-terminating
+load balancer (ALB strips client certs).
+
+The agent presents its mTLS client cert (obtained at
+`POST /api/agents/register`); the cert's CN is the cluster name and
+becomes the session key in the server's tunnel. Wire format is
+`rancher/remotedialer` (Apache-2.0; multiplexes arbitrary TCP over
+the WebSocket). Direct API consumers are not expected — this is the
+contract between server and `periscope-agent` only.
+
+`tunnel.MTLSAuthorizer` validates:
+1. The cert chain (handled by the TLS layer's `ClientAuth`).
+2. `ExtKeyUsageClientAuth` is present (defense in depth).
+3. `NameAllowed(name)` returns true — i.e. the cluster is in the
+   registry as `backend: agent`. Deregistered clusters get rejected
+   even with a still-valid cert.
+
 
 ## 4. Tier 2 — SPA-coupled patterns
 
