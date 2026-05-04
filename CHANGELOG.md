@@ -88,7 +88,7 @@ Initial stable release.
     page mints a token and renders the helm install command with the
     token baked in, copy-paste ready.
   - **Pod exec on agent-managed clusters** (#43, collapses into
-    #42 per RFC 0004 §10). client-go's WebSocket and SPDY exec
+    #42 per RFC 0004 10). client-go's WebSocket and SPDY exec
     executors bypass `rest.Config.Transport`, so a loopback HTTP
     CONNECT proxy in `internal/k8s/agent_exec_proxy.go` translates
     per-cluster CONNECTs into tunnel dials. The agent's reverse

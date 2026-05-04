@@ -89,6 +89,21 @@ agent:
   # end-to-end trace.
   logLevel: ""
 
+  # Per-connection idle timeout for hijacked exec WS / SPDY streams
+  # (in seconds). Mirrors the server's PERISCOPE_EXEC_IDLE_SECONDS.
+  # Set the same value here as the server uses (default 600 / 10
+  # minutes) so a stuck exec stream gets reaped on the agent side
+  # if the server crashes / partitions mid-session.
+  #
+  # Activity = any successful read on the connection (data frames,
+  # control frames, ping responses). The deadline resets on every
+  # successful read; only IDLE streams are killed.
+  #
+  # Set to 0 to disable (relies entirely on server-side cascade
+  # close + OS TCP keepalive). NOT recommended; defense-in-depth is
+  # cheap to keep on.
+  execIdleSeconds: 600
+
 # ─── deployment shape ───────────────────────────────────────────────
 replicaCount: 1   # tunnel sessions are 1:1 with agent pods; HA needs server-side peer routing (v1.5+)
 

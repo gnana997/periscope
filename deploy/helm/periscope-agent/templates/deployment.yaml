@@ -58,6 +58,14 @@ spec:
             - name: PERISCOPE_LOG_LEVEL
               value: {{ .Values.agent.logLevel | quote }}
             {{- end }}
+            # Per-conn idle timeout for hijacked exec WS / SPDY streams.
+            # The agent wraps each Hijacked conn with this deadline so a
+            # stuck stream gets reaped if the server crashes mid-session.
+            # Always emitted so explicit "0" (operator-disable) propagates
+            # to the agent — gating on `if` would silently fall back to
+            # the agent default. See cmd/periscope-agent/idle_conn.go.
+            - name: PERISCOPE_EXEC_IDLE_SECONDS
+              value: {{ .Values.agent.execIdleSeconds | quote }}
             {{- if .Values.agent.registrationURL }}
             - name: PERISCOPE_REGISTRATION_URL
               value: {{ .Values.agent.registrationURL | quote }}
