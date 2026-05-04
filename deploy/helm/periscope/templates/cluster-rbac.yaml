@@ -1,4 +1,16 @@
-{{- if .Values.clusterRBAC.enabled -}}
+{{- /*
+  Auto-detect in-cluster mode: if any registered cluster has
+  backend: in-cluster, the chart's own SA needs the impersonator
+  role on this cluster — render the same tier bindings too so the
+  impersonated users have RBAC to actually do anything.
+*/}}
+{{- $hasInCluster := false -}}
+{{- range .Values.clusters }}
+  {{- if eq .backend "in-cluster" }}
+    {{- $hasInCluster = true -}}
+  {{- end }}
+{{- end }}
+{{- if or .Values.clusterRBAC.enabled $hasInCluster -}}
 {{- /*
   cluster-rbac.yaml — per-cluster RBAC manifests for tier-mode
   impersonation (RFC 0002 7.6). When tier mode is active, apply this
@@ -52,6 +64,14 @@ subjects:
   - kind: Group
     name: {{ .Values.clusterRBAC.bridgeGroup | default "periscope-bridge" }}
     apiGroup: rbac.authorization.k8s.io
+  {{- if $hasInCluster }}
+  # In-cluster mode — the chart's own SA needs impersonate so it can
+  # pass the OIDC user identity to the apiserver. Auto-rendered when
+  # any clusters[].backend == "in-cluster".
+  - kind: ServiceAccount
+    name: {{ include "periscope.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
+  {{- end }}
 
 ---
 # 2. Built-in tiers — bind to K8s standard ClusterRoles.

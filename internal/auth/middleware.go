@@ -71,12 +71,12 @@ func Middleware(client *OIDCClient, store SessionStore, cfg Config) func(http.Ha
 			}
 			c, err := r.Cookie(cfg.Session.CookieName)
 			if err != nil || c.Value == "" {
-				unauthorized(w)
+				unauthorized(w, r)
 				return
 			}
 			s, ok := store.Get(c.Value)
 			if !ok {
-				unauthorized(w)
+				unauthorized(w, r)
 				return
 			}
 			now := time.Now()
@@ -84,14 +84,14 @@ func Middleware(client *OIDCClient, store SessionStore, cfg Config) func(http.Ha
 				_ = store.Delete(s.ID)
 				slog.InfoContext(r.Context(), "auth.session_expired",
 					"subject", s.Subject, "kind", "absolute")
-				unauthorized(w)
+				unauthorized(w, r)
 				return
 			}
 			if cfg.Session.IdleTimeout > 0 && now.Sub(s.LastActivity) > cfg.Session.IdleTimeout {
 				_ = store.Delete(s.ID)
 				slog.InfoContext(r.Context(), "auth.session_expired",
 					"subject", s.Subject, "kind", "idle")
-				unauthorized(w)
+				unauthorized(w, r)
 				return
 			}
 
@@ -104,7 +104,7 @@ func Middleware(client *OIDCClient, store SessionStore, cfg Config) func(http.Ha
 					_ = store.Delete(s.ID)
 					slog.WarnContext(r.Context(), "auth.session_expired",
 						"subject", s.Subject, "kind", "refresh_failed", "err", err)
-					unauthorized(w)
+					unauthorized(w, r)
 					return
 				}
 				s = refreshed
@@ -139,11 +139,39 @@ func DevMiddleware(cfg Config) func(http.Handler) http.Handler {
 	}
 }
 
-func unauthorized(w http.ResponseWriter) {
+// unauthorized writes the standard 401 for API/XHR clients but
+// redirects browser navigations to the login endpoint so users
+// get the OIDC flow instead of a plain-text dead-end. The SPA
+// fetches with `Accept: application/json`, so checking for
+// text/html in Accept reliably distinguishes the two.
+func unauthorized(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodGet && acceptsHTML(r) {
+		http.Redirect(w, r, "/api/auth/login", http.StatusFound)
+		return
+	}
 	w.Header().Set("WWW-Authenticate", `Cookie realm="periscope"`)
 	http.Error(w, "unauthenticated", http.StatusUnauthorized)
 }
 
+// acceptsHTML returns true when the client signaled a preference
+// for an HTML response — i.e. a browser top-level navigation.
+// Tolerant of the q-value form (e.g. `text/html;q=0.9`).
+func acceptsHTML(r *http.Request) bool {
+	accept := r.Header.Get("Accept")
+	if accept == "" {
+		return false
+	}
+	for _, part := range strings.Split(accept, ",") {
+		media := strings.TrimSpace(part)
+		if i := strings.Index(media, ";"); i >= 0 {
+			media = media[:i]
+		}
+		if strings.EqualFold(strings.TrimSpace(media), "text/html") {
+			return true
+		}
+	}
+	return false
+}
 // SessionValid reports whether the request's session cookie still
 // resolves to a non-expired, non-idle session. Side-effect-free: does
 // not update LastActivity, refresh tokens, or hit the OIDC provider.

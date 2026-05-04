@@ -191,7 +191,7 @@
         "type": "object",
         "properties": {
           "name":    { "type": "string", "minLength": 1 },
-          "backend": { "type": "string", "enum": ["eks", "kubeconfig"] },
+          "backend": { "type": "string", "enum": ["eks", "kubeconfig", "in-cluster"] },
           "exec": {
             "type": "object",
             "description": "Per-cluster pod-exec overrides. Partial overrides are fine — omitted fields fall back to the global .exec defaults.",

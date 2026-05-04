@@ -334,6 +334,8 @@ func k8sIdentityLabel(c clusters.Cluster) string {
 	switch c.Backend {
 	case clusters.BackendKubeconfig:
 		return "kubeconfig:" + c.Name
+	case clusters.BackendInCluster:
+		return "in-cluster:" + c.Name
 	default:
 		return "shared-irsa-v1"
 	}
