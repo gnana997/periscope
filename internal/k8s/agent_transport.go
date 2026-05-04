@@ -93,23 +93,23 @@ func buildAgentRestConfig(_ context.Context, p credentials.Provider, c clusters.
 
 	cfg := &rest.Config{
 		Host: agentHostSentinel(c.Name),
-		// Disable TLS verification on the *outer* hop because the
-		// outer hop never leaves this process — the tunnel
-		// transport hands the bytes straight to a tunneled net.Conn.
-		// The inner hop (agent → real apiserver) still uses the
-		// agent's in-cluster CA bundle, which is the actual TLS
-		// trust boundary.
-		TLSClientConfig: rest.TLSClientConfig{Insecure: true},
-		// rest.Config.Transport pre-empts every other dial setting,
-		// which is exactly what we want.
+		// rest.Config.Transport pre-empts every other dial/TLS setting,
+		// which is exactly what we want. Do NOT set TLSClientConfig here
+		// — client-go refuses to build a clientset when both Transport
+		// and TLSClientConfig are set ("using a custom transport with TLS
+		// certificate options or the insecure flag is not allowed").
+		//
+		// The tunnel RoundTripper handles TLS internally: the outer hop
+		// (this process → tunnel) skips TLS because the bytes never leave
+		// the process; the inner hop (agent → real apiserver) uses the
+		// agent's in-cluster CA bundle, which is the actual trust boundary.
 		Transport: tunnel.NewRoundTripper(
 			func(ctx context.Context, network, addr string) (net.Conn, error) {
 				return dial(ctx, network, addr)
 			},
 			tunnel.RoundTripperOptions{
-				// Skip TLS on the tunnel-side connection; see the
-				// rationale in TLSClientConfig above. The inner
-				// hop is what actually carries TLS.
+				// Skip TLS on the tunnel-side connection; the inner
+				// hop (agent → apiserver) carries the real TLS.
 				TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, //nolint:gosec
 			},
 		),
