@@ -10,11 +10,12 @@
 // counts as the rollout progresses; the existing list-poll picks up
 // the cascade pod churn within ~15s (issue #4).
 
-import { ApiError, api, type YamlKind } from "../../lib/api";
+import { ApiError, type YamlKind } from "../../lib/api";
 import { KIND_REGISTRY } from "../../lib/k8sKinds";
 import { queryKeys } from "../../lib/queryKeys";
 import { buildMinimalSSA, type Identity } from "../../lib/yamlPatch";
 import { useOptimisticMutation } from "./_useOptimistic";
+import { applyWithLenientConflict } from "./_applyWithLenientConflict";
 
 export type RestartableKind = "deployments" | "statefulsets" | "daemonsets";
 
@@ -90,18 +91,23 @@ export function useRolloutRestart(args: RestartArgs) {
         ],
         identity,
       );
-      return api.applyResource({
-        cluster: args.cluster,
-        group: meta.group,
-        version: meta.version,
-        resource: meta.resource,
-        namespace: args.namespace,
-        name: args.name,
-        yaml,
-        // Force on conflict — kubectl-rollout may currently own the
-        // annotation. Operator opted into this; take ownership.
-        force: true,
-      });
+      // Lenient SSA — kubectl-rollout (HUMAN) commonly owns this
+      // annotation; the wrapper auto-takes-over on the second attempt.
+      // GitOps-managed workloads now surface a classified error
+      // ("Flux will revert in <5 min") instead of writing the
+      // annotation only for it to be silently reverted on reconcile.
+      return applyWithLenientConflict(
+        {
+          cluster: args.cluster,
+          group: meta.group,
+          version: meta.version,
+          resource: meta.resource,
+          namespace: args.namespace,
+          name: args.name,
+          yaml,
+        },
+        "rollout restart",
+      );
     },
     successToast: () => `restarted ${args.kind.replace(/s$/, "")} ${args.name}`,
     errorToast: (err) =>

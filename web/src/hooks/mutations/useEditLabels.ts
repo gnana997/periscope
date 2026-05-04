@@ -6,11 +6,12 @@
 // patched (some pages derive filter chips from labels and rebuilding
 // those derivations correctly in the optimistic phase is fragile).
 
-import { ApiError, api, type YamlKind } from "../../lib/api";
+import { ApiError, type YamlKind } from "../../lib/api";
 import { KIND_REGISTRY } from "../../lib/k8sKinds";
 import { queryKeys } from "../../lib/queryKeys";
 import { buildMinimalSSA, type Identity } from "../../lib/yamlPatch";
 import { useOptimisticMutation } from "./_useOptimistic";
+import { applyWithLenientConflict } from "./_applyWithLenientConflict";
 
 interface EditLabelsArgs {
   cluster: string;
@@ -73,16 +74,18 @@ export function useEditLabels(args: EditLabelsArgs) {
         [{ op: "replace", path: ["metadata", "labels"], value: vars.labels }],
         identity,
       );
-      return api.applyResource({
-        cluster: args.cluster,
-        group: meta.group,
-        version: meta.version,
-        resource: meta.resource,
-        namespace: args.namespace || undefined,
-        name: args.name,
-        yaml,
-        force: false,
-      });
+      return applyWithLenientConflict(
+        {
+          cluster: args.cluster,
+          group: meta.group,
+          version: meta.version,
+          resource: meta.resource,
+          namespace: args.namespace || undefined,
+          name: args.name,
+          yaml,
+        },
+        "update labels",
+      );
     },
     successToast: () => `updated labels on ${args.name}`,
     errorToast: (err) =>

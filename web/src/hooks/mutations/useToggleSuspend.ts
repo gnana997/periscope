@@ -4,7 +4,7 @@
 // completes; both the detail cache and any loaded list caches are
 // updated.
 
-import { ApiError, api } from "../../lib/api";
+import { ApiError } from "../../lib/api";
 import { KIND_REGISTRY } from "../../lib/k8sKinds";
 import { queryKeys } from "../../lib/queryKeys";
 import { buildMinimalSSA, type Identity } from "../../lib/yamlPatch";
@@ -12,6 +12,7 @@ import { patchRowInList } from "../../lib/listShape";
 import type { ResourceListResponse } from "../../lib/types";
 import type { QueryKey } from "@tanstack/react-query";
 import { useOptimisticMutation } from "./_useOptimistic";
+import { applyWithLenientConflict } from "./_applyWithLenientConflict";
 
 interface ToggleSuspendArgs {
   cluster: string;
@@ -89,16 +90,18 @@ export function useToggleSuspend(args: ToggleSuspendArgs) {
         [{ op: "replace", path: ["spec", "suspend"], value: vars.suspend }],
         identity,
       );
-      return api.applyResource({
-        cluster: args.cluster,
-        group: meta.group,
-        version: meta.version,
-        resource: meta.resource,
-        namespace: args.namespace,
-        name: args.name,
-        yaml,
-        force: false,
-      });
+      return applyWithLenientConflict(
+        {
+          cluster: args.cluster,
+          group: meta.group,
+          version: meta.version,
+          resource: meta.resource,
+          namespace: args.namespace,
+          name: args.name,
+          yaml,
+        },
+        "suspend toggle",
+      );
     },
     successToast: (vars) =>
       `${vars.suspend ? "suspended" : "resumed"} cronjob ${args.name}`,

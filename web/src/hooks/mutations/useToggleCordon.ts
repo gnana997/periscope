@@ -7,7 +7,7 @@
 // Optimistic patching flips the `unschedulable` flag in both detail
 // and list caches so the cordon badge appears within one render.
 
-import { ApiError, api } from "../../lib/api";
+import { ApiError } from "../../lib/api";
 import { KIND_REGISTRY } from "../../lib/k8sKinds";
 import { queryKeys } from "../../lib/queryKeys";
 import { buildMinimalSSA, type Identity } from "../../lib/yamlPatch";
@@ -15,6 +15,7 @@ import { patchRowInList } from "../../lib/listShape";
 import type { ResourceListResponse } from "../../lib/types";
 import type { QueryKey } from "@tanstack/react-query";
 import { useOptimisticMutation } from "./_useOptimistic";
+import { applyWithLenientConflict } from "./_applyWithLenientConflict";
 
 interface ToggleCordonArgs {
   cluster: string;
@@ -98,15 +99,17 @@ export function useToggleCordon(args: ToggleCordonArgs) {
         ],
         identity,
       );
-      return api.applyResource({
-        cluster: args.cluster,
-        group: meta.group,
-        version: meta.version,
-        resource: meta.resource,
-        name: args.name,
-        yaml,
-        force: false,
-      });
+      return applyWithLenientConflict(
+        {
+          cluster: args.cluster,
+          group: meta.group,
+          version: meta.version,
+          resource: meta.resource,
+          name: args.name,
+          yaml,
+        },
+        "cordon toggle",
+      );
     },
     successToast: (vars) =>
       `${vars.unschedulable ? "cordoned" : "uncordoned"} node ${args.name}`,
