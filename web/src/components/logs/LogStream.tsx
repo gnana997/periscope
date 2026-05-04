@@ -84,9 +84,47 @@ export function LogStream(props: LogStreamProps) {
   const virtualizer = useVirtualizer({
     count: rows.length,
     getScrollElement: () => parentRef.current,
-    estimateSize: (i) => (rows[i]?.kind === "divider" ? 14 : 22),
+    // When wrap is enabled, estimate larger so the initial fixed-size
+    // pass is closer to the wrapped reality. This dramatically reduces
+    // the volume of measureElement→resizeItem corrections that flow
+    // through TanStack Virtual on first paint, which is one of the
+    // ingredients in the resize-loop described by issue #65.
+    estimateSize: (i) => {
+      if (rows[i]?.kind === "divider") return 14;
+      return wrap ? 66 : 22;
+    },
     overscan: 24,
   });
+
+  // Width oscillation guard. measureElement uses a ResizeObserver under
+  // the hood; with `wrap` on at narrow pane widths, the act of measuring
+  // can change container width (scrollbar appears), which feeds back as
+  // another resize, ad infinitum (React error #185). We watch the parent
+  // and freeze dynamic measurement during active resize, then trigger a
+  // single virtualizer.measure() once the container settles.
+  const [resizing, setResizing] = useState(false);
+  useEffect(() => {
+    const el = parentRef.current;
+    if (!el) return;
+    let timer: number | undefined;
+    let lastWidth = el.clientWidth;
+    const ro = new ResizeObserver((entries) => {
+      const w = entries[0]?.contentRect.width ?? lastWidth;
+      if (w === lastWidth) return;
+      lastWidth = w;
+      setResizing(true);
+      if (timer !== undefined) window.clearTimeout(timer);
+      timer = window.setTimeout(() => {
+        setResizing(false);
+        virtualizer.measure();
+      }, 150);
+    });
+    ro.observe(el);
+    return () => {
+      if (timer !== undefined) window.clearTimeout(timer);
+      ro.disconnect();
+    };
+  }, [virtualizer]);
 
   // Auto-stick to bottom while follow is on. wasAtBottomRef drives the
   // auto-scroll decision (avoids re-renders); isAtBottom mirrors it as
@@ -241,7 +279,7 @@ export function LogStream(props: LogStreamProps) {
     <div className="relative min-h-0 flex-1 bg-bg">
       <div
         ref={parentRef}
-        className="absolute inset-0 overflow-y-auto"
+        className="absolute inset-0 overflow-y-scroll"
       >
       <div
         style={{
@@ -256,7 +294,7 @@ export function LogStream(props: LogStreamProps) {
             <div
               key={vi.key}
               data-index={vi.index}
-              ref={virtualizer.measureElement}
+              ref={resizing ? undefined : virtualizer.measureElement}
               style={{
                 position: "absolute",
                 top: 0,

@@ -12,7 +12,9 @@ interface SplitPaneProps {
    *  look the same regardless of monitor size. */
   initial?: number;
   /** Minimum detail-pane width in pixels. Drag-resize honors this.
-   *  Default 480 — below this the chip grid collapses to one column. */
+   *  Default 520 — below this the chip grid collapses to one column,
+   *  and the Logs tab's wrap mode + dynamic row measurement starts
+   *  oscillating against scrollbar appearance (issue #65). */
   min?: number;
   /** Maximum detail-pane width in pixels. Default 1100 — wide enough
    *  for YAML and event tables while still leaving room for the table. */
@@ -49,7 +51,7 @@ export function SplitPane({
   right,
   storageKey,
   initial = 640,
-  min = 480,
+  min = 520,
   max = 1100,
   minLeft = 320,
 }: SplitPaneProps) {
