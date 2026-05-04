@@ -431,15 +431,6 @@ breaking impact.
 
 ## 11. What's intentionally not here
 
-- **Exec.** Pod exec is a SPDY/WebSocket bidirectional upgrade
-  from the apiserver. In principle remotedialer carries it
-  transparently — Rancher uses it for `kubectl exec` — but a
-  direct integration test on Periscope's exact exec plumbing
-  hasn't been done. v1.x.0 disables exec for agent-backed
-  clusters at the SPA layer (the cluster card greys out the
-  "Open Shell" button). v1.x.1 carries the focused POC + flip;
-  see [#43](https://github.com/gnana997/periscope/issues/43).
-
 - **HA peer routing.** v1.x.0 is single-replica; documented
   ~100-cluster ceiling per server pod (Rancher's empirically
   defensible number). Multi-replica with peer routing
@@ -509,4 +500,4 @@ Background:
 - [Issue #42](https://github.com/gnana997/periscope/issues/42) —
   v1.x.0 multi-cluster epic
 - [Issue #43](https://github.com/gnana997/periscope/issues/43) —
-  exec POC follow-up
+  exec POC + integration (closed in v1.0.0)

@@ -55,9 +55,11 @@ view flips to **healthy**.
   default `true`) mapping `periscope-tier:read/write/admin/triage/maintain`
   groups to K8s ClusterRoles (`view`, `edit`, `cluster-admin`, plus the
   custom `periscope-triage` and `periscope-maintain`). Without these
-  bindings every impersonated request lands as 403 Forbidden — see
-  Issue 2.5 in `deployment-journey.md`. Set `clusterRBAC.enabled: false`
-  to ship a tighter custom set yourself.
+  bindings every impersonated request lands as 403 Forbidden — the
+  apiserver evaluates RBAC against the impersonated group, not the
+  agent SA, so the bindings have to live on the managed cluster the
+  agent runs on. Set `clusterRBAC.enabled: false` to ship a tighter
+  custom set yourself.
 - **Bootstrap-token Secret** (one-shot — safely deleted after
   registration succeeds; the persisted mTLS cert lives in a
   separate `helm.sh/resource-policy: keep` Secret managed by the

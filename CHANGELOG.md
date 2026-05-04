@@ -13,34 +13,7 @@ tag.
 
 ## [Unreleased]
 
-### Added
-
-- **Exec on agent-managed clusters.** `kubectl exec` now works on
-  `backend: agent` clusters end-to-end. Closes #42 (agent multi-
-  cluster epic) and #43 (exec follow-up); the two collapse into one
-  v1.x.0 ship per RFC 0004 10. Two production bugs surfaced + fixed
-  during validation:
-  - Loopback CONNECT proxy (`internal/k8s/agent_exec_proxy.go`):
-    client-go's WebSocket and SPDY executors build their own dialers
-    internally and ignore `rest.Config.Transport`. Pre-fix, exec on
-    agent-backed clusters dialed apiserver via DNS and got "no such
-    host". The new loopback proxy honours `cfg.Proxy` (the only ext-
-    config knob the upgrade dialers consult) and translates per-
-    cluster CONNECT requests into tunnel dials. Plain HTTP traffic
-    (Pod GET / list / watch) keeps using `cfg.Transport` directly —
-    no perf cost on the hot path.
-  - Agent `responseRecorder` now implements `http.Hijacker`
-    (`cmd/periscope-agent/observability.go`). Pre-fix, the access-log
-    middleware's ResponseWriter wrapper failed every WS / SPDY
-    upgrade with "can't switch protocols using non-Hijacker
-    ResponseWriter". Now delegates Hijack to the underlying writer.
-- **RFC 0004 + validation harness** for exec-on-agent: in-tree at
-  `docs/rfcs/0004-exec-over-agent-tunnel-poc.md` (design + findings);
-  Tier 1 protocol coverage at `internal/k8s/exec_tunnel_test.go`
-  (race-clean against an in-process tunnel + fake apiserver); Tier 2
-  e2e harness at `hack/poc-exec-tunnel/` (kind-based, drives the real
-  `remotecommand.NewWebSocketExecutor` end-to-end through the agent
-  tunnel against a real busybox pod).
+_Nothing yet._
 
 ## [1.0.0]
 
@@ -80,6 +53,14 @@ Initial stable release.
   - SPA "+ onboard cluster" button (admin-tier only) on the fleet
     page mints a token and renders the helm install command with the
     token baked in, copy-paste ready.
+  - **Pod exec on agent-managed clusters** (#43, collapses into
+    #42 per RFC 0004 §10). client-go's WebSocket and SPDY exec
+    executors bypass `rest.Config.Transport`, so a loopback HTTP
+    CONNECT proxy in `internal/k8s/agent_exec_proxy.go` translates
+    per-cluster CONNECTs into tunnel dials. The agent's reverse
+    proxy implements `http.Hijacker` so the WS / SPDY upgrade
+    succeeds. Validation in `internal/k8s/exec_tunnel_test.go`
+    (Tier 1 in-process) + `hack/poc-exec-tunnel/` (Tier 2 kind e2e).
 
 - **Browsing & inspection**
   - List, detail, describe, events, and YAML for the common
@@ -136,6 +117,8 @@ Initial stable release.
 
 ### Fixed
 
+- LogStream component no longer hits an infinite render loop when
+  toggling wrap mode (#66).
 - Auth: `periscope_session` cookie is now `SameSite=Lax` (was
   `Strict`). Strict suppressed the cookie on the post-OIDC-callback
   redirect to `/`, so first-time sign-in landed on the

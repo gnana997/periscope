@@ -20,6 +20,15 @@ is the only kill switch. There is intentionally no global
 `exec.enabled` toggle — disabling means setting it false on each
 cluster you want to lock down.
 
+### Backend support matrix
+
+| Backend | Exec works? | Notes |
+|---|---|---|
+| `eks` (Pod Identity / IRSA) | Yes | Direct apiserver dial; standard WS / SPDY upgrade |
+| `kubeconfig` | Yes | Same as eks |
+| `in-cluster` | Yes | Same |
+| `agent` | Yes (since v1.0.0) | Routes via the loopback CONNECT proxy through the agent tunnel; transparent to the operator. See [`docs/architecture/agent-tunnel.md`](../architecture/agent-tunnel.md) for the integration details and [RFC 0004](../rfcs/0004-exec-over-agent-tunnel-poc.md) for the validation harness. |
+
 ### Per-cluster opt-out
 
 ```yaml

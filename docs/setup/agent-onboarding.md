@@ -20,6 +20,16 @@ to its fleet view.
 > [`docs/architecture/agent-tunnel.md`](../architecture/agent-tunnel.md)
 > for the runtime design.
 
+> **What works on agent-managed clusters?** Everything that works on
+> direct backends (eks / kubeconfig / in-cluster) works on
+> `backend: agent` too: list / detail / watch / YAML edit / apply /
+> delete / can-i / **pod exec** / log streaming / audit forwarding.
+> Exec was the last gap and shipped in v1.0.0
+> ([#42](https://github.com/gnana997/periscope/issues/42) +
+> [#43](https://github.com/gnana997/periscope/issues/43)). See
+> [RFC 0004](../rfcs/0004-exec-over-agent-tunnel-poc.md) for the
+> integration details.
+
 ## Prerequisites (apply to every topology)
 
 On the **central cluster** (where the periscope server runs):
