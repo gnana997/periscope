@@ -6,7 +6,9 @@ import { ageFrom, nameMatches } from "../lib/format";
 import { PageHeader } from "../components/page/PageHeader";
 import { FilterStrip } from "../components/page/FilterStrip";
 import { SplitPane } from "../components/page/SplitPane";
-import { DataTable, type Column } from "../components/table/DataTable";
+import { type Column } from "../components/table/DataTable";
+import { SelectableDataTable } from "../components/table/SelectableDataTable";
+import { api } from "../lib/api";
 import {
   EmptyState,
   ErrorState,
@@ -153,12 +155,17 @@ export function IngressesPage({ cluster }: { cluster: string }) {
           ) : filtered.length === 0 ? (
             <EmptyState resource="ingresses" namespace={namespace} />
           ) : (
-            <DataTable<Ingress>
+            <SelectableDataTable<Ingress>
               columns={columns}
               rows={filtered}
               rowKey={(i) => `${i.namespace}/${i.name}`}
               onRowClick={(i) => confirmDiscard(() => setMany({ sel: i.name, selNs: i.namespace, tab: "describe" }))}
               selectedKey={selectedKey}
+              bulk={{
+                cluster,
+                kindLabel: "ingresses",
+                fetchYaml: (i, signal) => api.yaml(cluster, "ingresses", i.namespace, i.name, signal),
+              }}
             />
           )
         }

@@ -6,7 +6,9 @@ import { ageFrom, nameMatches } from "../lib/format";
 import { PageHeader } from "../components/page/PageHeader";
 import { FilterStrip } from "../components/page/FilterStrip";
 import { SplitPane } from "../components/page/SplitPane";
-import { DataTable, type Column } from "../components/table/DataTable";
+import { type Column } from "../components/table/DataTable";
+import { SelectableDataTable } from "../components/table/SelectableDataTable";
+import { api } from "../lib/api";
 import { EmptyState, ErrorState, ForbiddenState, LoadingState } from "../components/table/states";
 import { isForbidden } from "../components/table/isForbidden";
 import { DetailPane } from "../components/detail/DetailPane";
@@ -98,12 +100,17 @@ export function ServiceAccountsPage({ cluster }: { cluster: string }) {
           query.isLoading ? <LoadingState resource="serviceaccounts" /> :
           query.isError ? isForbidden(query.error) ? <ForbiddenState resource="serviceaccounts" /> : isForbidden(query.error) ? <ForbiddenState resource="serviceaccounts" /> : <ErrorState title="couldn't reach the cluster" message={(query.error as Error).message} /> :
           filtered.length === 0 ? <EmptyState resource="serviceaccounts" namespace={namespace} /> :
-          <DataTable<ServiceAccount>
+          <SelectableDataTable<ServiceAccount>
             columns={columns}
             rows={filtered}
             rowKey={(sa) => `${sa.namespace}/${sa.name}`}
             onRowClick={(sa) => confirmDiscard(() => setMany({ sel: sa.name, selNs: sa.namespace, tab: "describe" }))}
             selectedKey={selectedKey}
+            bulk={{
+              cluster,
+              kindLabel: "serviceaccounts",
+              fetchYaml: (sa, signal) => api.yaml(cluster, "serviceaccounts", sa.namespace, sa.name, signal),
+            }}
           />
         }
         right={detail}

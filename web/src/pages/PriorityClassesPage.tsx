@@ -6,7 +6,9 @@ import { ageFrom, nameMatches } from "../lib/format";
 import { cn } from "../lib/cn";
 import { PageHeader } from "../components/page/PageHeader";
 import { SplitPane } from "../components/page/SplitPane";
-import { DataTable, type Column } from "../components/table/DataTable";
+import { type Column } from "../components/table/DataTable";
+import { SelectableDataTable } from "../components/table/SelectableDataTable";
+import { api } from "../lib/api";
 import { EmptyState, ErrorState, ForbiddenState, LoadingState } from "../components/table/states";
 import { isForbidden } from "../components/table/isForbidden";
 import { DetailPane } from "../components/detail/DetailPane";
@@ -118,12 +120,17 @@ export function PriorityClassesPage({ cluster }: { cluster: string }) {
           query.isLoading ? <LoadingState resource="priorityclasses" /> :
           query.isError ? isForbidden(query.error) ? <ForbiddenState resource="priorityclasses" /> : isForbidden(query.error) ? <ForbiddenState resource="priorityclasses" /> : <ErrorState title="couldn't reach the cluster" message={(query.error as Error).message} /> :
           filtered.length === 0 ? <EmptyState resource="priorityclasses" namespace={null} /> :
-          <DataTable<PriorityClass>
+          <SelectableDataTable<PriorityClass>
             columns={columns}
             rows={filtered}
             rowKey={(r) => r.name}
             onRowClick={(r) => confirmDiscard(() => setMany({ sel: r.name, tab: "describe" }))}
             selectedKey={selectedName}
+            bulk={{
+              cluster,
+              kindLabel: "priorityclasses",
+              fetchYaml: (r, signal) => api.clusterScopedYaml(cluster, "priorityclasses", r.name, signal),
+            }}
           />
         }
         right={detail}

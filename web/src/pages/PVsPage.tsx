@@ -6,7 +6,9 @@ import type { PV, PVList } from "../lib/types";
 import { PageHeader } from "../components/page/PageHeader";
 import { FilterStrip } from "../components/page/FilterStrip";
 import { SplitPane } from "../components/page/SplitPane";
-import { DataTable, type Column } from "../components/table/DataTable";
+import { type Column } from "../components/table/DataTable";
+import { SelectableDataTable } from "../components/table/SelectableDataTable";
+import { api } from "../lib/api";
 import { PhaseTag } from "../components/table/StatusDot";
 import { DetailPane } from "../components/detail/DetailPane";
 import { YamlView } from "../components/detail/YamlView";
@@ -129,13 +131,18 @@ export function PVsPage({ cluster }: { cluster: string }) {
           ) : filtered.length === 0 ? (
             <EmptyState resource="pvs" namespace={null} />
           ) : (
-            <DataTable<PV>
+            <SelectableDataTable<PV>
               columns={columns}
               rows={filtered}
               rowKey={(p) => p.name}
               rowTint={rowTint}
               onRowClick={(p) => confirmDiscard(() => setMany({ sel: p.name, tab: "describe" }))}
               selectedKey={selectedName}
+              bulk={{
+                cluster,
+                kindLabel: "pvs",
+                fetchYaml: (p, signal) => api.clusterScopedYaml(cluster, "pvs", p.name, signal),
+              }}
             />
           )
         }

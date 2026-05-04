@@ -7,7 +7,9 @@ import { PageHeader } from "../components/page/PageHeader";
 import { FilterStrip } from "../components/page/FilterStrip";
 import { NamespacePicker } from "../components/shell/NamespacePicker";
 import { SplitPane } from "../components/page/SplitPane";
-import { DataTable, type Column } from "../components/table/DataTable";
+import { type Column } from "../components/table/DataTable";
+import { SelectableDataTable } from "../components/table/SelectableDataTable";
+import { api } from "../lib/api";
 import { PhaseTag } from "../components/table/StatusDot";
 import { DetailPane } from "../components/detail/DetailPane";
 import { YamlView } from "../components/detail/YamlView";
@@ -136,13 +138,18 @@ export function PVCsPage({ cluster }: { cluster: string }) {
           ) : filtered.length === 0 ? (
             <EmptyState resource="pvcs" namespace={namespace} />
           ) : (
-            <DataTable<PVC>
+            <SelectableDataTable<PVC>
               columns={columns}
               rows={filtered}
               rowKey={(p) => `${p.namespace}/${p.name}`}
               rowTint={rowTint}
               onRowClick={(p) => confirmDiscard(() => setMany({ sel: p.name, selNs: p.namespace, tab: "describe" }))}
               selectedKey={selectedKey}
+              bulk={{
+                cluster,
+                kindLabel: "pvcs",
+                fetchYaml: (p, signal) => api.yaml(cluster, "pvcs", p.namespace, p.name, signal),
+              }}
             />
           )
         }

@@ -6,7 +6,9 @@ import { ageFrom, nameMatches } from "../lib/format";
 import { PageHeader } from "../components/page/PageHeader";
 import { FilterStrip } from "../components/page/FilterStrip";
 import { SplitPane } from "../components/page/SplitPane";
-import { DataTable, type Column } from "../components/table/DataTable";
+import { type Column } from "../components/table/DataTable";
+import { SelectableDataTable } from "../components/table/SelectableDataTable";
+import { api } from "../lib/api";
 import {
   EmptyState,
   ErrorState,
@@ -125,12 +127,17 @@ export function ConfigMapsPage({ cluster }: { cluster: string }) {
           ) : filtered.length === 0 ? (
             <EmptyState resource="configmaps" namespace={namespace} />
           ) : (
-            <DataTable<ConfigMap>
+            <SelectableDataTable<ConfigMap>
               columns={columns}
               rows={filtered}
               rowKey={(c) => `${c.namespace}/${c.name}`}
               onRowClick={(c) => confirmDiscard(() => setMany({ sel: c.name, selNs: c.namespace, tab: "describe" }))}
               selectedKey={selectedKey}
+              bulk={{
+                cluster,
+                kindLabel: "configmaps",
+                fetchYaml: (c, signal) => api.yaml(cluster, "configmaps", c.namespace, c.name, signal),
+              }}
             />
           )
         }

@@ -6,7 +6,9 @@ import { ageFrom, nameMatches } from "../lib/format";
 import { PageHeader } from "../components/page/PageHeader";
 import { FilterStrip } from "../components/page/FilterStrip";
 import { SplitPane } from "../components/page/SplitPane";
-import { DataTable, type Column } from "../components/table/DataTable";
+import { type Column } from "../components/table/DataTable";
+import { SelectableDataTable } from "../components/table/SelectableDataTable";
+import { api } from "../lib/api";
 import {
   EmptyState,
   ErrorState,
@@ -137,12 +139,18 @@ export function SecretsPage({ cluster }: { cluster: string }) {
           ) : filtered.length === 0 ? (
             <EmptyState resource="secrets" namespace={namespace} />
           ) : (
-            <DataTable<Secret>
+            <SelectableDataTable<Secret>
               columns={columns}
               rows={filtered}
               rowKey={(s) => `${s.namespace}/${s.name}`}
               onRowClick={(s) => confirmDiscard(() => setMany({ sel: s.name, selNs: s.namespace, tab: "describe" }))}
               selectedKey={selectedKey}
+              bulk={{
+                cluster,
+                kindLabel: "secrets",
+                fetchYaml: (s, signal) => api.yaml(cluster, "secrets", s.namespace, s.name, signal),
+                isSecret: () => true,
+              }}
             />
           )
         }

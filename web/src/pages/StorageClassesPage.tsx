@@ -6,7 +6,9 @@ import type { StorageClass, StorageClassList } from "../lib/types";
 import { PageHeader } from "../components/page/PageHeader";
 import { FilterStrip } from "../components/page/FilterStrip";
 import { SplitPane } from "../components/page/SplitPane";
-import { DataTable, type Column } from "../components/table/DataTable";
+import { type Column } from "../components/table/DataTable";
+import { SelectableDataTable } from "../components/table/SelectableDataTable";
+import { api } from "../lib/api";
 import { DetailPane } from "../components/detail/DetailPane";
 import { YamlView } from "../components/detail/YamlView";
 import { useEditorDirty } from "../hooks/useEditorDirty";
@@ -109,12 +111,17 @@ export function StorageClassesPage({ cluster }: { cluster: string }) {
           ) : filtered.length === 0 ? (
             <EmptyState resource="storageclasses" namespace={null} />
           ) : (
-            <DataTable<StorageClass>
+            <SelectableDataTable<StorageClass>
               columns={columns}
               rows={filtered}
               rowKey={(s) => s.name}
               onRowClick={(s) => confirmDiscard(() => setMany({ sel: s.name, tab: "describe" }))}
               selectedKey={selectedName}
+              bulk={{
+                cluster,
+                kindLabel: "storageclasses",
+                fetchYaml: (s, signal) => api.clusterScopedYaml(cluster, "storageclasses", s.name, signal),
+              }}
             />
           )
         }

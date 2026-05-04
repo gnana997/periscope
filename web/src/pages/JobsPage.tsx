@@ -7,10 +7,11 @@ import { PageHeader } from "../components/page/PageHeader";
 import { FilterStrip } from "../components/page/FilterStrip";
 import { SplitPane } from "../components/page/SplitPane";
 import {
-  DataTable,
   type Column,
   type RowTint,
 } from "../components/table/DataTable";
+import { SelectableDataTable } from "../components/table/SelectableDataTable";
+import { api } from "../lib/api";
 import {
   EmptyState,
   ErrorState,
@@ -213,13 +214,18 @@ export function JobsPage({ cluster }: { cluster: string }) {
           ) : filtered.length === 0 ? (
             <EmptyState resource="jobs" namespace={namespace} />
           ) : (
-            <DataTable<Job>
+            <SelectableDataTable<Job>
               columns={columns}
               rows={filtered}
               rowKey={(j) => `${j.namespace}/${j.name}`}
               rowTint={rowTint}
               onRowClick={(j) => confirmDiscard(() => setMany({ sel: j.name, selNs: j.namespace, tab: "describe" }))}
               selectedKey={selectedKey}
+              bulk={{
+                cluster,
+                kindLabel: "jobs",
+                fetchYaml: (j, signal) => api.yaml(cluster, "jobs", j.namespace, j.name, signal),
+              }}
             />
           )
         }
