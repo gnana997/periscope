@@ -167,6 +167,81 @@ jobs:
           cosign sign --yes \
             "${{ env.REGISTRY }}/${{ env.CHART_REPO }}/periscope:${VERSION}@${DIGEST}"
 
+      # ── Agent image (#42) ─────────────────────────────────────
+      #
+      # Separate Dockerfile.agent build so the agent image stays
+      # tiny (no SPA, no web build step) and gets its own cosign
+      # signature. Same multi-arch + cache-gha treatment as the
+      # server image above.
+      - name: Extract agent image metadata
+        id: meta_agent
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ github.repository }}-agent
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}},enable=${{ !contains(github.ref, '-') }}
+            type=semver,pattern={{major}},enable=${{ !contains(github.ref, '-') }}
+            type=raw,value=latest,enable=${{ !contains(github.ref, '-') }}
+            type=raw,value=${{ github.ref_name }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.description=Periscope agent — per-cluster tunnel client
+            org.opencontainers.image.licenses=Apache-2.0
+
+      - name: Build and push agent image
+        id: build_agent
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: Dockerfile.agent
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta_agent.outputs.tags }}
+          labels: ${{ steps.meta_agent.outputs.labels }}
+          build-args: |
+            VERSION=${{ github.ref_name }}
+            COMMIT=${{ github.sha }}
+          cache-from: type=gha,scope=agent
+          cache-to: type=gha,mode=max,scope=agent
+
+      - name: Sign agent image
+        env:
+          DIGEST: ${{ steps.build_agent.outputs.digest }}
+          TAGS: ${{ steps.meta_agent.outputs.tags }}
+        run: |
+          for tag in $TAGS; do
+            cosign sign --yes "${tag}@${DIGEST}"
+          done
+
+      # ── Agent Helm chart ──────────────────────────────────────
+      - name: Sync agent chart version to tag
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          sed -i "s/^version: .*/version: ${VERSION}/" deploy/helm/periscope-agent/Chart.yaml
+          sed -i "s/^appVersion: .*/appVersion: \"${VERSION}\"/" deploy/helm/periscope-agent/Chart.yaml
+
+      - name: Package agent chart
+        run: |
+          helm package deploy/helm/periscope-agent --destination dist/
+
+      - name: Push agent chart to OCI registry
+        id: helm_push_agent
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          OUT=$(helm push dist/periscope-agent-${VERSION}.tgz oci://${{ env.REGISTRY }}/${{ env.CHART_REPO }} 2>&1)
+          echo "$OUT"
+          DIGEST=$(echo "$OUT" | awk '/Digest:/{print $2}')
+          echo "digest=${DIGEST}" >> "$GITHUB_OUTPUT"
+
+      - name: Sign agent chart
+        env:
+          DIGEST: ${{ steps.helm_push_agent.outputs.digest }}
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          cosign sign --yes \
+            "${{ env.REGISTRY }}/${{ env.CHART_REPO }}/periscope-agent:${VERSION}@${DIGEST}"
+
       # ── GitHub Release ─────────────────────────────────────────
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2

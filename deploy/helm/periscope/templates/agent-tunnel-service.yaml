@@ -1,0 +1,27 @@
+{{- if and .Values.agent.enabled .Values.agent.tunnelService.enabled -}}
+# Optional second Service exposing only the tunnel port externally.
+# TLS terminates at the pod (mTLS — ALB strips client certs, so the
+# tunnel must NOT be fronted by an L7 load balancer). NLB / TCP LB
+# is the right shape; the operator's choice of Service type +
+# annotations drives the cloud provider's behavior.
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "periscope.fullname" . }}-tunnel
+  labels:
+    {{- include "periscope.labels" . | nindent 4 }}
+    app.kubernetes.io/component: agent-tunnel
+  {{- with .Values.agent.tunnelService.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: {{ .Values.agent.tunnelService.type }}
+  ports:
+    - name: tunnel
+      port: {{ .Values.agent.tunnelService.port }}
+      targetPort: tunnel
+      protocol: TCP
+  selector:
+    {{- include "periscope.selectorLabels" . | nindent 4 }}
+{{- end }}

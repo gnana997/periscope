@@ -1,0 +1,31 @@
+apiVersion: v2
+name: periscope-agent
+description: |
+  Periscope agent — runs on a managed K8s cluster, dials out to the
+  central Periscope server over a long-lived WebSocket. Lets the
+  server reach this cluster's apiserver without IAM, kubeconfig, or
+  EKS Access Entry — just outbound HTTPS.
+type: application
+# Both fields track the central server version. Server N is
+# compatible with agent N and N-1 (documented in the server's
+# CHANGELOG).
+version: 1.0.0
+appVersion: "1.0.0"
+keywords:
+  - kubernetes
+  - multi-cluster
+  - periscope
+  - agent
+home: https://github.com/gnana997/periscope
+sources:
+  - https://github.com/gnana997/periscope
+maintainers:
+  - name: gnana997
+    url: https://github.com/gnana997
+icon: https://raw.githubusercontent.com/gnana997/periscope/main/web/public/icon.svg
+annotations:
+  artifacthub.io/links: |
+    - name: source
+      url: https://github.com/gnana997/periscope
+    - name: server-chart
+      url: https://artifacthub.io/packages/helm/periscope/periscope

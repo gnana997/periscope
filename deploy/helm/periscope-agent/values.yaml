@@ -1,0 +1,95 @@
+# periscope-agent values
+# ----------------------
+# Each managed cluster runs ONE periscope-agent Deployment that dials
+# out to the central server. Most fields below are set per-install
+# (cluster identity + bootstrap token); the rest can stay at defaults.
+
+image:
+  repository: ghcr.io/gnana997/periscope-agent
+  tag: ""              # default = .Chart.AppVersion
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+
+# ─── identity ───────────────────────────────────────────────────────
+agent:
+  # Required: the WebSocket URL of the central Periscope tunnel
+  # listener. wss:// for production, ws:// only for kind / dev.
+  # Example:
+  #   wss://agents.periscope.example.com:8443
+  serverURL: ""
+
+  # Required: the cluster name as registered with the central server.
+  # Must match a `clusters[].name` entry of `backend: agent` in the
+  # server's values.yaml. The mTLS cert's CN is set to this name at
+  # signing time, so changing it after registration breaks the tunnel.
+  clusterName: ""
+
+  # Required on FIRST install only: the bootstrap token minted by
+  # the central server (POST /api/agents/tokens). Single-use, 15-min
+  # TTL. After registration the agent persists its mTLS cert into
+  # the state Secret and never needs the token again — leave empty
+  # on subsequent upgrades.
+  registrationToken: ""
+
+  # K8s Secret holding the persisted client cert + key + server CA.
+  # Created by the agent itself on first registration; survives pod
+  # restarts. `helm.sh/resource-policy: keep` is set so a `helm
+  # uninstall` doesn't wipe it (re-registration would burn the
+  # bootstrap token, which is single-use).
+  stateSecretName: "periscope-agent-state"
+
+  # Health probe port (kubelet liveness + readiness target).
+  healthAddr: ":8081"
+
+# ─── deployment shape ───────────────────────────────────────────────
+replicaCount: 1   # tunnel sessions are 1:1 with agent pods; HA needs server-side peer routing (v1.5+)
+
+# Ship the bootstrap token through a one-shot Secret rather than
+# putting it directly on the env. Set `agent.registrationToken` and
+# the chart wires the env var via secretKeyRef.
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+
+# RBAC: by default the agent only needs to manage its own state
+# Secret in this namespace. Cluster-wide read + impersonate is added
+# below via clusterRole.* so handlers on the central server can
+# operate as the human user via Impersonate-* headers.
+clusterRole:
+  # When true, the agent gets a ClusterRole binding granting:
+  #   - get/list/watch on every namespaced + cluster-scoped resource
+  #     (so list/detail/watch handlers work transparently)
+  #   - impersonate on users/groups/serviceaccounts (the lever that
+  #     lets the impersonation chain reach apiserver as the human)
+  # Set false if you want to ship a tighter custom ClusterRole and
+  # bind it yourself.
+  enabled: true
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    cpu: 500m
+    memory: 256Mi
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 65532
+  runAsGroup: 65532
+  seccompProfile:
+    type: RuntimeDefault
+
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: ["ALL"]
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+podAnnotations: {}
+env: []

@@ -165,6 +165,37 @@ func main() {
 	router.Use(httpx.AuditBegin)
 	router.Use(authMW)
 	auth.RegisterRoutes(router, authClient, sessionStore, authCfg, authzResolver, auditReader != nil)
+
+	// --- agent backend (#42) ---
+	//
+	// Optional. Activated when:
+	//   - PERISCOPE_AGENT_LISTEN_ADDR is set (operator opts in
+	//     explicitly via the chart; agents can register at runtime
+	//     even before any agent-backed cluster is in YAML), OR
+	//   - the registry already contains a backend: agent entry.
+	// When activated, this wires the per-deployment CA, mints a
+	// server cert for the tunnel TLS listener, mounts /api/agents/*,
+	// and installs the lookup hook so internal/k8s clients route
+	// agent-backed clusters through the live tunnel session.
+	agentListenAddr := os.Getenv("PERISCOPE_AGENT_LISTEN_ADDR")
+	agentTunnelEnabled := agentListenAddr != "" || registryHasAgentBackend(registry)
+	agentTunnelStop, err := registerAgentTunnel(context.Background(), router,
+		agentTunnelOptions{
+			Enabled:        agentTunnelEnabled,
+			ListenAddr:     agentListenAddr,
+			TunnelDNSNames: parseAgentTunnelSANs(os.Getenv("PERISCOPE_AGENT_TUNNEL_SANS")),
+		},
+		registry, authzResolver, sessionStore, authCfg)
+	if err != nil {
+		slog.Error("agent tunnel disabled", "err", err)
+	}
+	defer agentTunnelStop()
+	if agentTunnelEnabled {
+		slog.Info("agent backend enabled",
+			"listen_addr", agentListenAddr,
+			"agent_clusters_in_registry", len(agentBackedNames(registry)))
+	}
+
 	router.Get("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))

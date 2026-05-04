@@ -185,13 +185,35 @@
       },
       "additionalProperties": false
     },
+    "agent": {
+      "type": "object",
+      "description": "Optional agent backend wiring (#42). Default off; enable to host the per-deployment CA + tunnel TLS listener so periscope-agent pods on managed clusters can dial in.",
+      "properties": {
+        "enabled":      { "type": "boolean" },
+        "listenAddr":   { "type": "string", "pattern": "^:[0-9]+$", "description": "Bind addr for the dedicated TLS listener hosting /api/agents/connect. Format :PORT." },
+        "tunnelSANs":   { "type": "string", "description": "Comma-separated DNS names baked into the server cert presented on the tunnel. Must include whatever hostname agents dial." },
+        "caSecretName": { "type": "string", "minLength": 1, "maxLength": 253, "description": "K8s Secret holding the per-deployment CA. Pre-created empty by the chart; server fills on first boot." },
+        "tunnelService": {
+          "type": "object",
+          "description": "Optional second Service exposing the tunnel listener externally. Default disabled — operators wire NLB/TCP-LB themselves or port-forward for testing.",
+          "properties": {
+            "enabled":     { "type": "boolean" },
+            "type":        { "type": "string", "enum": ["ClusterIP", "NodePort", "LoadBalancer"] },
+            "port":        { "type": "integer", "minimum": 1, "maximum": 65535 },
+            "annotations": { "type": "object" }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
     "clusters": {
       "type": "array",
       "items": {
         "type": "object",
         "properties": {
           "name":    { "type": "string", "minLength": 1 },
-          "backend": { "type": "string", "enum": ["eks", "kubeconfig", "in-cluster"] },
+          "backend": { "type": "string", "enum": ["eks", "kubeconfig", "in-cluster", "agent"] },
           "exec": {
             "type": "object",
             "description": "Per-cluster pod-exec overrides. Partial overrides are fine — omitted fields fall back to the global .exec defaults.",

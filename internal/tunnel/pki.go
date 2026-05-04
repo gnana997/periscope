@@ -217,6 +217,50 @@ func (c *CA) SignClient(csrDER []byte, clusterName string, validity time.Duratio
 	return pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}), nil
 }
 
+// SignServer mints a server cert (ExtKeyUsageServerAuth) chained to
+// this CA. Used by the central server for the tunnel TLS listener so
+// agents can validate the server identity using the same CA bundle
+// they received at registration.
+//
+// dnsNames populates the cert SANs — agents connect by hostname so
+// the SANs must include whatever DNS name the operator points the
+// agent at (e.g. "periscope.example.com" for prod, "localhost" for
+// kind smoke tests).
+func (c *CA) SignServer(commonName string, dnsNames []string, validity time.Duration) ([]byte, []byte, error) {
+	if validity == 0 {
+		validity = CertValidity{}.withDefaults().Client
+	}
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		return nil, nil, fmt.Errorf("server keygen: %w", err)
+	}
+	serial, err := randomSerial()
+	if err != nil {
+		return nil, nil, fmt.Errorf("server serial: %w", err)
+	}
+	now := time.Now().UTC()
+	tmpl := &x509.Certificate{
+		SerialNumber: serial,
+		Subject:      pkix.Name{CommonName: commonName, Organization: []string{"periscope-server"}},
+		NotBefore:    now.Add(-1 * time.Minute),
+		NotAfter:     now.Add(validity),
+		KeyUsage:     x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,
+		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		DNSNames:     dnsNames,
+	}
+	der, err := x509.CreateCertificate(rand.Reader, tmpl, c.cert, &key.PublicKey, c.key)
+	if err != nil {
+		return nil, nil, fmt.Errorf("sign server cert: %w", err)
+	}
+	certPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})
+	keyDER, err := x509.MarshalECPrivateKey(key)
+	if err != nil {
+		return nil, nil, fmt.Errorf("marshal server key: %w", err)
+	}
+	keyPEM := pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER})
+	return certPEM, keyPEM, nil
+}
+
 // ClusterPool returns an x509.CertPool containing only this CA. Used
 // by the mTLS authorizer's TLS config so client certs are validated
 // against this trust anchor and only this one.

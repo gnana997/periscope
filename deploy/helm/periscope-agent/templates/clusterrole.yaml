@@ -1,0 +1,55 @@
+{{- if .Values.clusterRole.enabled -}}
+# Cluster-wide RBAC for the agent's apiserver-side identity. The
+# agent talks to the local apiserver as itself (its own SA token);
+# the central server's user-impersonation headers (Impersonate-User
+# / Impersonate-Group) are forwarded through the tunnel and the
+# apiserver evaluates RBAC against the impersonated human user.
+#
+# So this ClusterRole defines what the agent's bridge identity
+# CAN BE — anything beyond this is unreachable even with admin
+# tier. We default to:
+#   - read everything (so list/detail/watch handlers work)
+#   - impersonate users + groups + serviceaccounts (the lever that
+#     makes per-user RBAC enforcement possible)
+#   - escalate is NOT granted; agents cannot grant themselves
+#     anything beyond what's already in this ClusterRole.
+#
+# Operators who want the agent to support write actions (apply,
+# delete, exec) need to extend this list — currently those go via
+# the impersonated user's RBAC, so the agent's own RBAC must permit
+# the underlying verbs (impersonation doesn't bypass cluster RBAC,
+# it just makes apiserver evaluate against a different subject).
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "periscope-agent.fullname" . }}
+  labels:
+    {{- include "periscope-agent.labels" . | nindent 4 }}
+rules:
+  # Read everything (the bulk of dashboard traffic).
+  - apiGroups: ["*"]
+    resources: ["*"]
+    verbs: ["get", "list", "watch"]
+  # Impersonation — the load-bearing permission for per-user RBAC.
+  - apiGroups: [""]
+    resources: ["users", "groups", "serviceaccounts"]
+    verbs: ["impersonate"]
+  - apiGroups: ["authentication.k8s.io"]
+    resources: ["userextras/scopes"]
+    verbs: ["impersonate"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "periscope-agent.fullname" . }}
+  labels:
+    {{- include "periscope-agent.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "periscope-agent.fullname" . }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "periscope-agent.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
+{{- end }}
