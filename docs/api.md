@@ -571,6 +571,15 @@ conflict info — the SPA uses this for the conflict resolver.
 `group=core` is rewritten to the empty string server-side so
 core-API resources can use the same URL pattern.
 
+The pattern handles **create and update transparently**:
+Server-Side Apply against a name that does not yet exist
+creates the resource; against an existing name it updates per
+field-manager semantics. The SPA's "Apply YAML" flow reuses
+this endpoint for both cases — there is no separate `/create`
+route. `dryRun=true` still emits an audit row with
+`extra.dryRun=true` so the action is visible in the trail
+while remaining filterable from real applies.
+
 ### Pattern: delete
 
 ```

@@ -101,6 +101,22 @@ var disallowedMetadataPaths = []string{
 	"selfLink",
 }
 
+// newDynamicClientForApply is swapped out by tests for a fake dynamic
+// client. Production path: build a rest.Config via buildRestConfig
+// (shared with meta.go) and a dynamic.Interface. Mirrors
+// newDynamicClientForMeta so apply has the same testability shape.
+var newDynamicClientForApply = func(ctx context.Context, p credentials.Provider, c clusters.Cluster) (dynamic.Interface, error) {
+	cfg, err := buildRestConfig(ctx, p, c)
+	if err != nil {
+		return nil, err
+	}
+	dyn, err := dynamic.NewForConfig(cfg)
+	if err != nil {
+		return nil, fmt.Errorf("apply: build dynamic client: %w", err)
+	}
+	return dyn, nil
+}
+
 // ApplyResource performs the validation pipeline + dynamic-client SSA.
 // All errors are wrapped with a stable prefix the handler can use to
 // classify (apiserver errors flow through unwrapped so kerrors.IsXxx
@@ -128,13 +144,9 @@ func ApplyResource(ctx context.Context, p credentials.Provider, args ApplyResour
 	stripDisallowedMetadata(obj)
 
 	// --- build dynamic client ------------------------------------------
-	cfg, err := buildRestConfig(ctx, p, args.Cluster)
+	dyn, err := newDynamicClientForApply(ctx, p, args.Cluster)
 	if err != nil {
 		return ApplyResourceResult{}, err
-	}
-	dyn, err := dynamic.NewForConfig(cfg)
-	if err != nil {
-		return ApplyResourceResult{}, fmt.Errorf("apply: build dynamic client: %w", err)
 	}
 	gvr := schema.GroupVersionResource{
 		Group:    args.Group,
