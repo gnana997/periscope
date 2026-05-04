@@ -761,11 +761,12 @@ func main() {
 				return k8s.GetConfigMapYAML(ctx, p, k8s.GetConfigMapArgs{Cluster: c, Namespace: ns, Name: name})
 			})))
 
+	// secrets /yaml is special-cased: the manifest contains every
+	// base64-encoded data key, so each fetch is audited as
+	// `secret_reveal` (parallel to /data/{key}). All other kinds
+	// share the generic yamlHandler below.
 	router.Get("/api/clusters/{cluster}/secrets/{ns}/{name}/yaml", credentials.Wrap(factory,
-		yamlHandler(registry, "secret",
-			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, ns, name string) (string, error) {
-				return k8s.GetSecretYAML(ctx, p, k8s.GetSecretArgs{Cluster: c, Namespace: ns, Name: name})
-			})))
+		secretYamlHandler(registry, auditEmitter)))
 
 	router.Get("/api/clusters/{cluster}/jobs/{ns}/{name}/yaml", credentials.Wrap(factory,
 		yamlHandler(registry, "job",
@@ -1603,6 +1604,59 @@ func secretRevealHandler(reg *clusters.Registry, auditer *audit.Emitter) credent
 		w.Header().Set("Cache-Control", "no-store")
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write(value)
+	}
+}
+
+// secretYamlHandler serves the Secret manifest as YAML and audits
+// the read as a `secret_reveal` event. The /yaml payload contains
+// every base64-encoded data key, so a download is materially the
+// same exposure as N calls to /data/{key} — and the bulk YAML
+// download flow on the frontend now leans on this to surface "alice
+// revealed N secrets via bulk download" trails. We record the
+// (sorted) key list in `Extra.keys` so reviewers can see exactly
+// which keys were exposed, not just that "some secret was read".
+func secretYamlHandler(reg *clusters.Registry, auditer *audit.Emitter) credentials.Handler {
+	return func(w http.ResponseWriter, r *http.Request, p credentials.Provider) {
+		c, ok := reg.ByName(chi.URLParam(r, "cluster"))
+		if !ok {
+			http.Error(w, "cluster not found", http.StatusNotFound)
+			return
+		}
+		ns := chi.URLParam(r, "ns")
+		name := chi.URLParam(r, "name")
+		evt := audit.Event{
+			Actor:   actorFromContext(r.Context()),
+			Verb:    audit.VerbSecretReveal,
+			Cluster: c.Name,
+			Resource: audit.ResourceRef{
+				Group: "", Version: "v1", Resource: "secrets",
+				Namespace: ns, Name: name,
+			},
+			Extra: map[string]any{"via": "yaml"},
+		}
+		yaml, keys, err := k8s.GetSecretYAMLWithKeys(r.Context(), p, k8s.GetSecretArgs{
+			Cluster: c, Namespace: ns, Name: name,
+		})
+		if err != nil {
+			if errors.Is(err, context.Canceled) {
+				return
+			}
+			evt.Outcome = outcomeFor(err)
+			evt.Reason = err.Error()
+			auditer.Record(r.Context(), evt)
+			slog.ErrorContext(r.Context(), "secret yaml fetch failed",
+				"err", err, "cluster", c.Name, "ns", ns, "name", name, "actor", p.Actor())
+			http.Error(w, "operation failed", httpStatusFor(err))
+			return
+		}
+		evt.Outcome = audit.OutcomeSuccess
+		evt.Extra["keys"] = keys
+		evt.Extra["key_count"] = len(keys)
+		auditer.Record(r.Context(), evt)
+		w.Header().Set("Content-Type", "application/yaml; charset=utf-8")
+		w.Header().Set("Cache-Control", "no-store")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(yaml))
 	}
 }
 

@@ -67,18 +67,36 @@ func GetSecret(ctx context.Context, p credentials.Provider, args GetSecretArgs) 
 	}, nil
 }
 
-func GetSecretYAML(ctx context.Context, p credentials.Provider, args GetSecretArgs) (string, error) {
+// GetSecretYAMLWithKeys returns the Secret manifest as YAML plus the
+// sorted list of data keys present on the Secret. The handler layer
+// (cmd/periscope.secretYamlHandler) uses the key list to populate
+// the `secret_reveal` audit row so operators see *which* keys were
+// exposed by a YAML download, not just that "some secret" was read.
+func GetSecretYAMLWithKeys(
+	ctx context.Context,
+	p credentials.Provider,
+	args GetSecretArgs,
+) (string, []string, error) {
 	cs, err := newClientFn(ctx, p, args.Cluster)
 	if err != nil {
-		return "", fmt.Errorf("build clientset: %w", err)
+		return "", nil, fmt.Errorf("build clientset: %w", err)
 	}
 	raw, err := cs.CoreV1().Secrets(args.Namespace).Get(ctx, args.Name, metav1.GetOptions{})
 	if err != nil {
-		return "", fmt.Errorf("get secret %s/%s: %w", args.Namespace, args.Name, err)
+		return "", nil, fmt.Errorf("get secret %s/%s: %w", args.Namespace, args.Name, err)
 	}
+	keys := make([]string, 0, len(raw.Data))
+	for k := range raw.Data {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
 	raw.APIVersion = "v1"
 	raw.Kind = "Secret"
-	return formatYAML(raw)
+	yaml, err := formatYAML(raw)
+	if err != nil {
+		return "", nil, err
+	}
+	return yaml, keys, nil
 }
 
 // GetSecretValueArgs identifies a single key of a single secret to read.
