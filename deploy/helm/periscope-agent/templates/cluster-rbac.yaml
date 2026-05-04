@@ -179,9 +179,12 @@ metadata:
   labels:
     {{- include "periscope-agent.labels" . | nindent 4 }}
 rules:
+  # Inherits the namespace-scoped `admin` ClusterRole verbs by listing them
+  # explicitly. (We could use aggregation, but explicit is auditable.)
   - apiGroups: ["*"]
     resources: ["*"]
     verbs: ["get", "list", "watch"]
+  # Cluster-scoped reads.
   - apiGroups: [""]
     resources: ["nodes", "nodes/status", "namespaces", "persistentvolumes"]
     verbs: ["get", "list", "watch"]
@@ -191,6 +194,7 @@ rules:
   - apiGroups: ["scheduling.k8s.io"]
     resources: ["priorityclasses"]
     verbs: ["get", "list", "watch"]
+  # Namespaced mutate.
   - apiGroups: [""]
     resources:
       - configmaps
