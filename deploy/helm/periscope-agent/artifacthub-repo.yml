@@ -27,7 +27,7 @@
 #      re-push the metadata layer (same oras command above) so
 #      the ownership claim resolves.
 
-repositoryID: 00000000-0000-0000-0000-000000000000
+repositoryID: b6dc080a-36b3-4934-890e-b1544f742958
 # After registering the repo on Artifact Hub, replace the zeros above
 # with the UUID Artifact Hub assigns to the repository. Re-push the
 # metadata layer (same oras command above) to claim the OCI repo
