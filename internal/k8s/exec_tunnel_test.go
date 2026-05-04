@@ -23,7 +23,7 @@
 // Neither honors rest.Config.Transport. So even with the tunnel
 // correctly carrying bytes (proven below), ExecPod over backend: agent
 // dials the apiserver via DNS, not through the tunnel. Surfacing the
-// integration fix is tracked separately; see RFC 0004 §7 and the
+// integration fix is tracked separately; see RFC 0004 7 and the
 // follow-up issue linked from this branch's PR.
 //
 // Topology in one process:
@@ -92,11 +92,11 @@ const (
 // ─── Tier 1 cases ────────────────────────────────────────────────────────
 
 // TestTunnelCarriesWebSocketExec is the foundational case from RFC 0004
-// §4.1 (case 1): a v5.channel.k8s.io WebSocket session — including
+// 4.1 (case 1): a v5.channel.k8s.io WebSocket session — including
 // stdin echo and a clean error-channel Status close — flows through a
 // remotedialer tunnel without corruption, truncation, or deadlock.
 //
-// If this test ever fails, treat it per RFC 0004 §7: the failure tells
+// If this test ever fails, treat it per RFC 0004 7: the failure tells
 // you which layer is wrong. Most likely culprits are
 // gorilla/websocket buffer sizes, remotedialer flow-control, or our
 // tunnel server's session bookkeeping.
@@ -112,8 +112,8 @@ func TestTunnelCarriesWebSocketExec(t *testing.T) {
 	wsURL := "ws://apiserver." + stack.name + ".tunnel/api/v1/namespaces/default/pods/busybox/exec"
 
 	dialer := websocket.Dialer{
-		NetDialContext:  stack.netDialContext,
-		Subprotocols:    []string{wsSubprotoV5},
+		NetDialContext:   stack.netDialContext,
+		Subprotocols:     []string{wsSubprotoV5},
 		HandshakeTimeout: 5 * time.Second,
 	}
 	conn, resp, err := dialer.DialContext(context.Background(), wsURL, nil)
@@ -164,7 +164,7 @@ func TestTunnelCarriesWebSocketExec(t *testing.T) {
 // TestTunnelCarriesWebSocketExec_LargeStdout verifies that 1 MiB of
 // stdout echoes back through the tunnel without truncation. Probes
 // the gorilla/websocket buffer-size and remotedialer flow-control
-// concerns called out in RFC 0004 §7.
+// concerns called out in RFC 0004 7.
 func TestTunnelCarriesWebSocketExec_LargeStdout(t *testing.T) {
 	const size = 1 << 20 // 1 MiB
 	want := make([]byte, size)
@@ -739,10 +739,9 @@ func firstDiff(a, b []byte) int {
 	return -1
 }
 
-
 // ─── e2e: real client-go executor through the loopback proxy ──────────
 
-// TestExecPodE2EThroughTunnel is the load-bearing claim of RFC 0004 §9
+// TestExecPodE2EThroughTunnel is the load-bearing claim of RFC 0004 9
 // after the production fix: client-go's remotecommand WebSocket
 // executor — which builds its own dialer and ignores rest.Config.
 // Transport — successfully routes through the agent tunnel via the
@@ -768,9 +767,9 @@ func TestExecPodE2EThroughTunnel(t *testing.T) {
 		// agent disconnect, then tunnel session cleanup all
 		// running back-to-back. Production never tears down between
 		// exec calls, so the race is purely a test-time artifact.
-		// Tracked in RFC 0004 §9. The test runs without -race; the
+		// Tracked in RFC 0004 9. The test runs without -race; the
 		// no-race lane in CI is the regression guard.
-		t.Skip("upstream rancher/remotedialer race under -race teardown — see RFC 0004 §9")
+		t.Skip("upstream rancher/remotedialer race under -race teardown — see RFC 0004 9")
 	}
 	const cluster = "e2e-cluster"
 
@@ -849,4 +848,3 @@ func TestExecPodE2EThroughTunnel(t *testing.T) {
 	}
 
 }
-

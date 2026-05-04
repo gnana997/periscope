@@ -38,7 +38,7 @@ Gates for shipping exec on `backend: agent` in v1.x.0:
 
 - Performance benchmarks. We're proving correctness, not chasing throughput numbers.
 - Multi-replica / HA peer routing — out of scope per #42.
-- A new framing layer. Expected to be unnecessary; this RFC only describes how we'd detect being wrong (see §7, Bail-out criteria).
+- A new framing layer. Expected to be unnecessary; this RFC only describes how we'd detect being wrong (see 7, Bail-out criteria).
 
 ---
 
@@ -163,7 +163,7 @@ poc-exec-tunnel: ## #43 POC: end-to-end exec through agent tunnel on kind
 | `hack/poc-exec-tunnel/` | **New directory.** All Tier 2 artifacts. |
 | `.github/workflows/poc-exec-tunnel.yaml` | **New.** `workflow_dispatch` job that runs Tier 2. |
 
-Nothing in `internal/exec/`, `internal/k8s/exec.go`, or `internal/tunnel/` should change. If something *needs* to change there, it's a finding — see §7.
+Nothing in `internal/exec/`, `internal/k8s/exec.go`, or `internal/tunnel/` should change. If something *needs* to change there, it's a finding — see 7.
 
 ## 6. Existing functions / utilities the POC reuses
 
@@ -240,7 +240,7 @@ Five committed test cases, all passing under `-race`, total runtime ≈ 11 s in 
 
 ### What the harness does NOT prove (the gap)
 
-The original plan in §4.1 wanted to drive the real `internal/k8s/exec.ExecPod` through the tunnel via `SetAgentTunnelLookup` + a `backend: agent` cluster. Doing that surfaced this:
+The original plan in 4.1 wanted to drive the real `internal/k8s/exec.ExecPod` through the tunnel via `SetAgentTunnelLookup` + a `backend: agent` cluster. Doing that surfaced this:
 
 > `client-go`'s `remotecommand.NewWebSocketExecutor` and `remotecommand.NewSPDYExecutor` build their own roundtrippers internally and do not honor `rest.Config.Transport`. Specifically:
 >
@@ -251,7 +251,7 @@ The original plan in §4.1 wanted to drive the real `internal/k8s/exec.ExecPod` 
 
 Concretely: as of PR #46, exec on `backend: agent` is a no-op even though the chart field, the SPA tooltip removal, and the `remotecommand` fallback dance are all in place.
 
-### Bail-out path (per §7) for the gap
+### Bail-out path (per 7) for the gap
 
 The cleanest fix is the local-CONNECT-proxy pattern: stand up a loopback `net.Listen("tcp", "127.0.0.1:0")` listener inside the server process, accept HTTP `CONNECT` from gorilla/spdystream's default dialer, and bidirectionally pipe each accepted connection through `tunnel.Server.DialerFor(name)`. Then `cfg.Proxy = func(req *http.Request) (*url.URL, error) { return loopbackProxyURL, nil }` makes both the WS and SPDY executors route through the tunnel. About 80–120 LoC, plus a test that drives the real `ExecPod` end-to-end (which Tier 1 was already structured to do once the wiring works).
 
