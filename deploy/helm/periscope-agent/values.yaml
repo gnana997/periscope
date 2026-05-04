@@ -16,7 +16,7 @@ agent:
   # Required: the WebSocket URL of the central Periscope tunnel
   # listener. wss:// for production, ws:// only for kind / dev.
   # Example:
-  #   wss://agents.periscope.example.com:8443
+  #   wss://agents.periscope.example.com:8443/api/agents/connect
   serverURL: ""
 
   # Required: the cluster name as registered with the central server.
@@ -43,7 +43,7 @@ agent:
   # (wss/ws → https/http).
   #
   # Example:
-  #   serverURL:       wss://agents.periscope.example.com:8443
+  #   serverURL:       wss://agents.periscope.example.com:8443/api/agents/connect
   #   registrationURL: https://periscope.example.com
   registrationURL: ""
 
@@ -112,6 +112,29 @@ clusterRole:
   #     lets the impersonation chain reach apiserver as the human)
   # Set false if you want to ship a tighter custom ClusterRole and
   # bind it yourself.
+  enabled: true
+
+# Tier ClusterRoleBindings on the managed cluster. The central server
+# forwards user impersonation headers (Impersonate-User /
+# Impersonate-Group) through the tunnel — but those headers only
+# matter if the *managed* cluster has ClusterRoleBindings mapping
+# `periscope-tier:*` groups to actual K8s ClusterRoles. Without these
+# bindings every request lands as 403 Forbidden (deployment-journey.md
+# Issue 2.5).
+#
+# Default true so out-of-the-box installs work. Disable to ship a
+# tighter custom set yourself — see deploy/helm/periscope-agent/
+# templates/cluster-rbac.yaml for the rendered shape.
+#
+# When enabled, the chart installs:
+#   ClusterRoleBinding periscope-tier-read    → view
+#   ClusterRoleBinding periscope-tier-write   → edit
+#   ClusterRoleBinding periscope-tier-admin   → cluster-admin
+#   ClusterRoleBinding periscope-tier-triage  → periscope-triage (custom)
+#   ClusterRoleBinding periscope-tier-maintain→ periscope-maintain (custom)
+# plus the two custom ClusterRoles. Identical tier semantics to the
+# server chart's clusterRBAC.
+clusterRBAC:
   enabled: true
 
 resources:

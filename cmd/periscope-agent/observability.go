@@ -14,10 +14,10 @@
 package main
 
 import (
-	"encoding/base64"
-	"encoding/json"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -61,13 +61,13 @@ func parseLogLevel(raw string) slog.Level {
 // loggingMiddleware wraps the reverse proxy with per-request access
 // logs. Three log lines per request, level-gated:
 //
-//   DEBUG  proxy.request_in   - what the agent received from the tunnel
-//   DEBUG  proxy.request_out  - what the agent returned (status, latency, bytes)
-//   WARN   proxy.apiserver_error - fires when status >= 400 (always-on, even at INFO)
+//	DEBUG  proxy.request_in   - what the agent received from the tunnel
+//	DEBUG  proxy.request_out  - what the agent returned (status, latency, bytes)
+//	WARN   proxy.apiserver_error - fires when status >= 400 (always-on, even at INFO)
 //
 // All three carry `request_id` taken from the X-Request-Id header that
 // the central server's chi middleware sets on every API call. Same id
-// shows up on the server's audit row (RFC 0003 §6) so operators can
+// shows up on the server's audit row (RFC 0003 6) so operators can
 // grep one id across server audit DB + server stdout slog + agent
 // stdout slog for a single end-to-end trace.
 //
@@ -129,10 +129,10 @@ func loggingMiddleware(next http.Handler) http.Handler {
 // + parsed expiry. Called once after rest.InClusterConfig() succeeds.
 //
 // Lets operators confirm at a glance that:
-//   1. The agent loaded the CA bundle (ca_bundle_len > 0)
-//   2. The agent has an SA token (sa_token_present: true)
-//   3. The token has reasonable lifetime ahead (sa_token_expires_in_seconds)
-//   4. The apiserver URL is what they expect
+//  1. The agent loaded the CA bundle (ca_bundle_len > 0)
+//  2. The agent has an SA token (sa_token_present: true)
+//  3. The token has reasonable lifetime ahead (sa_token_expires_in_seconds)
+//  4. The apiserver URL is what they expect
 //
 // Critical for debugging "why did auth start failing 60 minutes after
 // install" — projected SA tokens default to 1-hour TTL with auto-

@@ -3,14 +3,28 @@
   "title": "periscope-agent Helm values",
   "description": "Values for the periscope-agent chart (#42). Validates required fields at install time so operators get a clear error instead of a template-side fail.",
   "type": "object",
-  "required": ["agent"],
+  "required": [
+    "agent"
+  ],
   "properties": {
     "image": {
       "type": "object",
       "properties": {
-        "repository": { "type": "string", "minLength": 1 },
-        "tag":        { "type": "string" },
-        "pullPolicy": { "type": "string", "enum": ["Always", "IfNotPresent", "Never"] }
+        "repository": {
+          "type": "string",
+          "minLength": 1
+        },
+        "tag": {
+          "type": "string"
+        },
+        "pullPolicy": {
+          "type": "string",
+          "enum": [
+            "Always",
+            "IfNotPresent",
+            "Never"
+          ]
+        }
       },
       "additionalProperties": false
     },
@@ -18,19 +32,29 @@
       "type": "array",
       "items": {
         "type": "object",
-        "required": ["name"],
-        "properties": { "name": { "type": "string", "minLength": 1 } },
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
         "additionalProperties": false
       }
     },
     "agent": {
       "type": "object",
-      "required": ["serverURL", "clusterName"],
+      "required": [
+        "serverURL",
+        "clusterName"
+      ],
       "properties": {
         "serverURL": {
           "type": "string",
-          "pattern": "^(wss?|https?)://",
-          "description": "Central Periscope tunnel URL. wss:// in production; ws:// only for kind/dev. Both http(s):// also accepted (the agent translates to ws:// for the WebSocket upgrade)."
+          "pattern": "^(wss?|https?)://[^/?#]+(:[0-9]+)?/api/agents/connect$",
+          "description": "Central Periscope tunnel URL — MUST include the path /api/agents/connect (Issue 2.2 from deployment-journey.md). wss:// in production; ws:// only for kind/dev. Both http(s):// also accepted (translated to ws:// for the WebSocket upgrade). Example: wss://agents.periscope.example.com:8443/api/agents/connect"
         },
         "clusterName": {
           "type": "string",
@@ -66,7 +90,13 @@
         },
         "logLevel": {
           "type": "string",
-          "enum": ["", "debug", "info", "warn", "error"],
+          "enum": [
+            "",
+            "debug",
+            "info",
+            "warn",
+            "error"
+          ],
           "description": "Optional agent log level. Empty = use the binary default (info). Set debug to enable per-request access logs through the proxy."
         }
       },
@@ -81,36 +111,74 @@
     "serviceAccount": {
       "type": "object",
       "properties": {
-        "create":      { "type": "boolean" },
-        "name":        { "type": "string" },
-        "annotations": { "type": "object" }
+        "create": {
+          "type": "boolean"
+        },
+        "name": {
+          "type": "string"
+        },
+        "annotations": {
+          "type": "object"
+        }
       },
       "additionalProperties": false
     },
     "clusterRole": {
       "type": "object",
       "properties": {
-        "enabled": { "type": "boolean", "description": "When true, the chart binds a ClusterRole granting the agent SA cluster-wide read + impersonate. Set false to ship a tighter custom ClusterRole and bind it yourself." }
+        "enabled": {
+          "type": "boolean",
+          "description": "When true, the chart binds a ClusterRole granting the agent SA cluster-wide read + impersonate. Set false to ship a tighter custom ClusterRole and bind it yourself."
+        }
       },
       "additionalProperties": false
     },
     "resources": {
       "type": "object",
       "properties": {
-        "requests": { "type": "object" },
-        "limits":   { "type": "object" }
+        "requests": {
+          "type": "object"
+        },
+        "limits": {
+          "type": "object"
+        }
       }
     },
-    "podSecurityContext":       { "type": "object" },
-    "containerSecurityContext": { "type": "object" },
-    "nodeSelector":             { "type": "object" },
-    "tolerations":              { "type": "array" },
-    "affinity":                 { "type": "object" },
-    "podAnnotations":           { "type": "object" },
+    "podSecurityContext": {
+      "type": "object"
+    },
+    "containerSecurityContext": {
+      "type": "object"
+    },
+    "nodeSelector": {
+      "type": "object"
+    },
+    "tolerations": {
+      "type": "array"
+    },
+    "affinity": {
+      "type": "object"
+    },
+    "podAnnotations": {
+      "type": "object"
+    },
     "env": {
       "type": "array",
       "description": "Extra env vars appended to the container's env list. Use for future PERISCOPE_* knobs that don't yet have a dedicated values field.",
-      "items": { "type": "object" }
+      "items": {
+        "type": "object"
+      }
+    },
+    "clusterRBAC": {
+      "type": "object",
+      "description": "Auto-create the ClusterRoleBindings that map periscope-tier:* groups to K8s built-in roles (read→view, write→edit, admin→cluster-admin) plus the custom triage + maintain ClusterRoles. Without these bindings, requests reaching this managed cluster get 403 Forbidden — see Issue 2.5 in deployment-journey.md. Default true so deployment-out-of-the-box works; disable if you want to ship a tighter custom set.",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "When true, the chart installs ClusterRoleBindings for all five tier groups + the triage/maintain custom ClusterRoles. Set false to manage tier bindings yourself."
+        }
+      },
+      "additionalProperties": false
     }
   },
   "additionalProperties": false

@@ -543,7 +543,7 @@ helm upgrade ... --set agent.logLevel=debug
 Bonus: every agent log line carries `request_id` taken from the
 `X-Request-Id` header that the central server's chi middleware sets
 on every API call. Same id appears on the server's audit row (RFC
-0003 §6 — `requestId`). One id grepped across server audit DB +
+0003 6 — `requestId`). One id grepped across server audit DB +
 server stdout slog + agent stdout slog gives a single end-to-end
 trace for any user click.
 
@@ -562,7 +562,7 @@ Likely additions in v1.x:
 - `PERISCOPE_SESSION_STORE=redis` plus `PERISCOPE_SESSION_DSN=...`
   when the multi-replica session store lands.
 - `PERISCOPE_LOG_LEVEL` parity for the central server. The agent
-  already supports it (see §11); extending to the server is a
+  already supports it (see 11); extending to the server is a
   ~10-LoC follow-up tracked alongside the next agent observability
   iteration.
 

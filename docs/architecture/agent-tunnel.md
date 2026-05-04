@@ -262,7 +262,7 @@ WS connection. The server side of the multiplexer exposes a
 `Dialer(clientKey)` that opens a new tunneled net.Conn to whatever
 address the server requests; the agent side fulfils that dial by
 calling its registered `LocalDialer` (which dials the local
-apiserver — see §7).
+apiserver — see 7).
 
 Session state on the server:
 
@@ -413,7 +413,7 @@ same shape regardless of how `prod-eu` is reached.
 
 A future `clusterBackend: agent` field on audit rows is being
 considered for the v1.x.+ audit RFC update, so SIEM consumers can
-filter by transport type. Additive change to RFC 0003 §6, no wire-
+filter by transport type. Additive change to RFC 0003 6, no wire-
 breaking impact.
 
 ## 10. Failure modes

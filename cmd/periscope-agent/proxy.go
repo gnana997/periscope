@@ -99,7 +99,7 @@ func startAPIProxy(inClusterCfg *rest.Config, listenAddr string) error {
 			pr.Out.Header.Del("X-Forwarded-Proto")
 
 			// Note: Impersonate-User / Impersonate-Group / Impersonate-Extra-*
-			// are NOT in the hop-by-hop header list (RFC 7230 §6.1)
+			// are NOT in the hop-by-hop header list (RFC 7230 6.1)
 			// so ReverseProxy passes them through unchanged. That's
 			// the load-bearing behaviour for #59 — the impersonation
 			// chain reaches the apiserver intact.
@@ -161,4 +161,3 @@ func apiserverTLSConfig(inClusterCfg *rest.Config) (*tls.Config, error) {
 // readFile is a thin indirection so tests can stub the CAFile load
 // without touching the filesystem. Production points at os.ReadFile.
 var readFile = os.ReadFile
-
