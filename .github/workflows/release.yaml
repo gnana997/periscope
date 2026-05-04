@@ -256,10 +256,12 @@ jobs:
       # Auth: oras reads ~/.docker/config.json which docker/login-
       # action@v3 (server-image step above) already populated. No
       # separate login needed.
-      - name: Set up oras
-        uses: oras-project/setup-oras@v1
-        with:
-          version: 1.3.2
+      - name: Install oras
+        run: |
+          ORAS_VERSION=1.3.2
+          curl -fsSL "https://github.com/oras-project/oras/releases/download/v${ORAS_VERSION}/oras_${ORAS_VERSION}_linux_amd64.tar.gz" \
+            | sudo tar -xzf - -C /usr/local/bin oras
+          oras version
 
       - name: Push Artifact Hub metadata (server chart)
         run: |
