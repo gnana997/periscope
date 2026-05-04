@@ -12,10 +12,9 @@ import { cn } from "../lib/cn";
 import { queryKeys } from "../lib/queryKeys";
 import { PageHeader } from "../components/page/PageHeader";
 import { SplitPane } from "../components/page/SplitPane";
-import {
-  DataTable,
-  type Column,
-} from "../components/table/DataTable";
+import { type Column } from "../components/table/DataTable";
+import { SelectableDataTable } from "../components/table/SelectableDataTable";
+import { api } from "../lib/api";
 import {
   EmptyState,
   ErrorState,
@@ -334,12 +333,26 @@ export function CustomResourcesPage({ cluster }: { cluster: string }) {
           ) : filtered.length === 0 ? (
             <EmptyState resource={crd?.kind?.toLowerCase() ?? "items"} namespace={namespace} />
           ) : (
-            <DataTable<CustomResource>
+            <SelectableDataTable<CustomResource>
               columns={columns}
               rows={filtered}
               rowKey={(r) => `${r.namespace ?? ""}/${r.name}`}
               onRowClick={onRowClick}
               selectedKey={selectedKey}
+              bulk={{
+                cluster,
+                kindLabel: crd?.plural ?? plural ?? "items",
+                fetchYaml: (r, signal) =>
+                  api.getCustomResourceYAML(
+                    cluster,
+                    group ?? "",
+                    version ?? "",
+                    plural ?? "",
+                    isClusterScoped ? null : r.namespace ?? null,
+                    r.name,
+                    signal,
+                  ),
+              }}
             />
           )
         }

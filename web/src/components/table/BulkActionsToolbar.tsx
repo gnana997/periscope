@@ -30,6 +30,16 @@ export interface BulkActionsToolbarProps<T> {
   rows: T[];
   /** Same row-key fn the DataTable uses; needed to resolve IDs → rows. */
   rowKey: (row: T) => string;
+
+  /**
+   * Optional explicit list of currently-rendered row IDs in
+   * render order. Defaults to `rows.map(rowKey)` — correct for
+   * flat tables. Grouped layouts (e.g. ReplicaSetsPage's
+   * deployment groupings) should pass this so the "(N hidden)"
+   * qualifier accounts for collapsed groups, not just filter
+   * chips.
+   */
+  visibleIds?: readonly string[];
   /** Cluster name — used in the filename. */
   cluster: string;
   /** Lowercase plural kind (e.g. "pods", "configmaps"). Used in the filename. */
@@ -37,11 +47,13 @@ export interface BulkActionsToolbarProps<T> {
   /** Per-row YAML fetcher. */
   fetchYaml: (row: T, signal: AbortSignal) => Promise<string>;
   /**
-   * Returns true if the row contains user secrets (i.e. downloading
-   * the YAML reveals base64 secret data). When any selected row is a
-   * Secret, we surface a confirm dialog before downloading.
+   * Returns true when downloading the row's YAML reveals sensitive data
+   * (base64 secret payloads, encrypted ciphertext, etc.). Any selected
+   * row matching `confirmReveal` triggers a confirm dialog before the
+   * download proceeds. Pass `() => true` for kinds where every row is
+   * sensitive (Secrets); use a per-row predicate for mixed kinds.
    */
-  isSecret?: (row: T) => boolean;
+  confirmReveal?: (row: T) => boolean;
 }
 
 export function BulkActionsToolbar<T>({
@@ -50,8 +62,9 @@ export function BulkActionsToolbar<T>({
   rowKey,
   cluster,
   kindLabel,
+  visibleIds,
   fetchYaml,
-  isSecret,
+  confirmReveal,
 }: BulkActionsToolbarProps<T>) {
   const [stripServerFields, setStripServerFields] = useState(true);
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
@@ -144,15 +157,15 @@ export function BulkActionsToolbar<T>({
         4500,
       );
     }
-    const secretCount = isSecret
-      ? selectedRows.filter(isSecret).length
+    const secretCount = confirmReveal
+      ? selectedRows.filter(confirmReveal).length
       : 0;
     if (secretCount > 0) {
       setConfirmSecrets({ selectedRows, secretCount });
       return;
     }
     void runDownload(selectedRows);
-  }, [resolveSelected, isSecret, runDownload]);
+  }, [resolveSelected, confirmReveal, runDownload]);
 
   const onConfirmSecrets = useCallback(() => {
     const pending = confirmSecrets;
@@ -167,7 +180,8 @@ export function BulkActionsToolbar<T>({
   if (selection.count === 0 && progress === null) return null;
 
   const downloading = progress !== null;
-  const visibleSelected = countVisible(selection, rows, rowKey);
+  const effectiveVisibleIds = visibleIds ?? rows.map(rowKey);
+  const visibleSelected = countVisible(selection, effectiveVisibleIds);
   const hidden = selection.count - visibleSelected;
 
   return (
@@ -247,13 +261,12 @@ export function BulkActionsToolbar<T>({
   );
 }
 
-function countVisible<T>(
+function countVisible(
   selection: TableSelection,
-  rows: T[],
-  rowKey: (row: T) => string,
+  visibleIds: readonly string[],
 ): number {
   let n = 0;
-  for (const row of rows) if (selection.has(rowKey(row))) n += 1;
+  for (const id of visibleIds) if (selection.has(id)) n += 1;
   return n;
 }
 
@@ -295,6 +308,7 @@ function SecretsRevealConfirm({
           <button
             type="button"
             onClick={onCancel}
+            autoFocus
             className="rounded border border-border-strong bg-surface px-3 py-1.5 text-[12px] text-ink hover:bg-surface-2"
           >
             Cancel
@@ -303,7 +317,6 @@ function SecretsRevealConfirm({
             type="button"
             onClick={onConfirm}
             className="rounded border border-red/60 bg-red px-3 py-1.5 text-[12px] font-medium text-bg hover:bg-red/90"
-            autoFocus
           >
             Reveal & download
           </button>

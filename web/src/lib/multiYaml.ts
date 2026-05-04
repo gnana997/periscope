@@ -140,9 +140,9 @@ export function buildFilename(
 ): string {
   const safeCluster = sanitize(cluster);
   const safeKind = sanitize(kindLabel);
-  const yyyy = date.getFullYear();
-  const mm = String(date.getMonth() + 1).padStart(2, "0");
-  const dd = String(date.getDate()).padStart(2, "0");
+  const yyyy = date.getUTCFullYear();
+  const mm = String(date.getUTCMonth() + 1).padStart(2, "0");
+  const dd = String(date.getUTCDate()).padStart(2, "0");
   return `${safeCluster}-${safeKind}-${yyyy}-${mm}-${dd}-${count}.yaml`;
 }
 
