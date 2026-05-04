@@ -116,7 +116,7 @@ func TestServer_Connect_RejectsNonWebSocket(t *testing.T) {
 	if err != nil {
 		t.Fatalf("plain GET: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode == 200 {
 		t.Fatalf("non-WS request got 200; expected an upgrade rejection")
 	}

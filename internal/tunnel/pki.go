@@ -1,6 +1,7 @@
 package tunnel
 
 import (
+	"bytes"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
@@ -281,9 +282,13 @@ func randomSerial() (*big.Int, error) {
 }
 
 func certKeyPair(cert *x509.Certificate, key *ecdsa.PrivateKey) bool {
-	pub, ok := cert.PublicKey.(*ecdsa.PublicKey)
-	if !ok {
+	certPubDER, err := x509.MarshalPKIXPublicKey(cert.PublicKey)
+	if err != nil {
 		return false
 	}
-	return pub.X.Cmp(key.X) == 0 && pub.Y.Cmp(key.Y) == 0
+	keyPubDER, err := x509.MarshalPKIXPublicKey(&key.PublicKey)
+	if err != nil {
+		return false
+	}
+	return bytes.Equal(certPubDER, keyPubDER)
 }
