@@ -14,12 +14,14 @@
 package main
 
 import (
+	"bufio"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"strings"
@@ -244,18 +246,27 @@ func (r *responseRecorder) Flush() {
 	}
 }
 
-// Note: we don't expose Hijack() directly on responseRecorder because
-// http.Hijacker requires the exact return tuple types
-// (net.Conn, *bufio.ReadWriter, error) and adding the imports for those
-// in this file isn't worth the build-graph cost. The reverse-proxy
-// flow we ship today doesn't trigger Hijack (exec is deferred to
-// v1.x.1 per #43). When exec lands, the ResponseRecorder will need
-// Hijack() implementing — tracked in #43.
+// Hijack forwards to the underlying writer's Hijack so
+// httputil.ReverseProxy can take over the TCP connection for WS / SPDY
+// upgrades. Required for exec on agent-managed clusters: the central
+// server's exec dial routes through the agent's reverse proxy, which
+// needs to switch protocols on the same connection.
 //
-// Compile-time safety: if a future code path tries to type-assert
-// the recorder to http.Hijacker, it'll get nil instead of a wrong
-// implementation, surfacing the gap loudly.
-var _ http.Flusher = (*responseRecorder)(nil)
+// If the underlying ResponseWriter does not support Hijack (rare in
+// practice — Go's default http.Server implements it), return a clear
+// error so the proxy logs a typed failure instead of a panic.
+func (r *responseRecorder) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	hj, ok := r.ResponseWriter.(http.Hijacker)
+	if !ok {
+		return nil, nil, fmt.Errorf("underlying ResponseWriter does not support http.Hijacker")
+	}
+	return hj.Hijack()
+}
+
+var (
+	_ http.Flusher  = (*responseRecorder)(nil)
+	_ http.Hijacker = (*responseRecorder)(nil)
+)
 
 // fmt is only used by string formatting in helper paths above —
 // keep the reference here so future edits don't accidentally drop it.

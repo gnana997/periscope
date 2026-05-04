@@ -174,6 +174,17 @@ func registerAgentTunnel(
 	// buildAgentRestConfig can resolve cluster name → DialFunc.
 	internalk8s.SetAgentTunnelLookup(tunnelSrv.DialerFor)
 
+	// Start the loopback CONNECT proxy that exec uses to reach
+	// agent-managed clusters. Required because client-go's WebSocket
+	// and SPDY executors bypass rest.Config.Transport but honour
+	// rest.Config.Proxy — the proxy translates per-cluster CONNECT
+	// requests into tunnel dials. See internal/k8s/agent_exec_proxy.go.
+	execProxyStop, perr := internalk8s.StartAgentExecProxy(ctx)
+	if perr != nil {
+		return nil, fmt.Errorf("agent exec proxy: %w", perr)
+	}
+
+
 	mountAgentRoutes(router, tokenStore, ca, resolver, sessionStore, authCfg)
 
 	// Mint the server cert + bind the TLS listener.
@@ -191,6 +202,10 @@ func registerAgentTunnel(
 
 	return func() {
 		close(tokenStopCh)
+		// Stop the exec proxy first so its in-flight CONNECT-tunneled
+		// connections finish their io.Copy before tunnel teardown — see
+		// internal/k8s/agent_exec_proxy.go.
+		execProxyStop()
 		tunnelStop()
 	}, nil
 }

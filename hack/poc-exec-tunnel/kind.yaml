@@ -1,0 +1,10 @@
+# Kind config for the RFC 0004 Tier 2 e2e harness.
+# Single-node — we don't need multi-node since the only thing we're
+# proving is that exec round-trips through the agent tunnel, and a
+# tunnel session is 1:1 with an agent pod. Multi-node would just slow
+# the cold-start.
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: periscope-poc
+nodes:
+  - role: control-plane
