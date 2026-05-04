@@ -144,7 +144,6 @@ func TestLoadFromFile_errors(t *testing.T) {
 		name string
 		body string
 	}{
-		{"empty cluster list", `clusters: []`},
 		{"missing name", "clusters:\n  - arn: arn:aws:eks:us-east-1:1:cluster/a\n    region: us-east-1\n"},
 		{"eks: missing arn", "clusters:\n  - name: a\n    region: us-east-1\n"},
 		{"eks: missing region", "clusters:\n  - name: a\n    arn: arn:aws:eks:us-east-1:1:cluster/a\n"},
@@ -245,5 +244,45 @@ clusters:
 	}
 	if dev.Tags != nil && len(dev.Tags) != 0 {
 		t.Errorf("dev.Tags = %v, want nil/empty", dev.Tags)
+	}
+}
+
+func TestLoadFromFile_inClusterBackend(t *testing.T) {
+	p := writeTempFile(t, `
+clusters:
+  - name: in-cluster
+    backend: in-cluster
+`)
+	r, err := LoadFromFile(p)
+	if err != nil {
+		t.Fatalf("LoadFromFile: %v", err)
+	}
+	c, ok := r.ByName("in-cluster")
+	if !ok {
+		t.Fatal("ByName(in-cluster) not found")
+	}
+	if c.Backend != BackendInCluster {
+		t.Errorf("Backend = %q, want %q", c.Backend, BackendInCluster)
+	}
+	// in-cluster needs no extra fields — kubeconfig path / ARN / region
+	// must all be empty.
+	if c.KubeconfigPath != "" || c.ARN != "" || c.Region != "" {
+		t.Errorf("unexpected non-empty fields on in-cluster: kubeconfigPath=%q arn=%q region=%q",
+			c.KubeconfigPath, c.ARN, c.Region)
+	}
+}
+
+func TestLoadFromFile_emptyRegistryReturnsEmpty(t *testing.T) {
+	// Regression: empty cluster lists used to be a fatal error
+	// (`registry contains no clusters`), which crashed the pod on
+	// first install before clusters were configured. Now it returns
+	// an empty registry and the SPA renders the no-clusters state.
+	p := writeTempFile(t, `clusters: []`)
+	r, err := LoadFromFile(p)
+	if err != nil {
+		t.Fatalf("LoadFromFile: empty list should NOT error: %v", err)
+	}
+	if got := len(r.List()); got != 0 {
+		t.Errorf("List() len = %d, want 0", got)
 	}
 }

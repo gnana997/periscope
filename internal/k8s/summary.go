@@ -592,6 +592,8 @@ func providerLabel(backend string) string {
 	switch strings.ToLower(backend) {
 	case clusters.BackendKubeconfig:
 		return "Kubeconfig"
+	case clusters.BackendInCluster:
+		return "In-cluster"
 	default:
 		return "EKS"
 	}

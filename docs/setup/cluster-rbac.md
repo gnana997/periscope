@@ -509,3 +509,64 @@ Drift between the shipped role (chart `appVersion`) and the cluster
 is the operator's responsibility. The chart's `NOTES.txt` prints the
 shipped-role version on each `helm install` / `helm upgrade` so you
 can pin and re-apply when the chart bumps a verb.
+
+---
+
+## Mode: `in-cluster` (single-cluster install)
+
+When Periscope is deployed into the same cluster it manages (the most common single-cluster install pattern — kind, minikube, single-cluster prod), register that cluster with `backend: in-cluster`:
+
+```yaml
+# my-values.yaml
+clusters:
+  - name: in-cluster
+    backend: in-cluster
+```
+
+The pod uses its own ServiceAccount token (mounted at `/var/run/secrets/kubernetes.io/serviceaccount/`) as the underlying credentials, then layers per-user impersonation on top via `Impersonate-User` / `Impersonate-Group` headers — same model as `eks` and `kubeconfig`, just with a different credential source.
+
+### Auto-rendered RBAC
+
+The chart's `cluster-rbac.yaml` auto-detects in-cluster mode and renders the impersonator binding with the chart's SA as a subject. No separate `kubectl apply` step needed — `helm install` does the whole thing.
+
+The rendered `ClusterRoleBinding` looks like:
+
+```yaml
+kind: ClusterRoleBinding
+metadata:
+  name: periscope-impersonator
+subjects:
+  - kind: Group                  # for tier-mode managed clusters (if enabled)
+    name: periscope-bridge
+  - kind: ServiceAccount         # auto-added when an in-cluster cluster is in the registry
+    name: <release-name>-periscope
+    namespace: <release-namespace>
+```
+
+### What the SA can and can't do
+
+The SA only ever holds the `impersonate` verb on `users` / `groups`. It cannot read or modify any resource directly. Every actual API call goes through impersonation, so the apiserver evaluates RBAC against the impersonated user (e.g. `alice@corp` in tier mode mapped to `periscope-tier:admin`).
+
+Net: the chart-rendered SA is a thin "proxy" with no standalone power. All real authorization is per-user, per the existing tier / shared / raw modes.
+
+### Combining with managed clusters
+
+In-cluster and the other backends compose. A common production setup:
+
+```yaml
+clusters:
+  # The cluster periscope itself runs in
+  - name: periscope-host
+    backend: in-cluster
+  # Managed EKS clusters reached via Pod Identity
+  - name: prod-eu-west-1
+    backend: eks
+    region: eu-west-1
+    arn: arn:aws:eks:eu-west-1:111111111111:cluster/prod-eu-west-1
+  - name: stg-us-east-1
+    backend: eks
+    region: us-east-1
+    arn: arn:aws:eks:us-east-1:111111111111:cluster/stg-us-east-1
+```
+
+Each cluster is independent. The same OIDC user identity flows to all of them via impersonation; per-cluster RBAC determines what the user can actually do where.

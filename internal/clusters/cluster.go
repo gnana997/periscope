@@ -7,17 +7,26 @@ package clusters
 
 import "strings"
 
-// Cluster backend identifiers. EKS clusters authenticate via the
-// dashboard's Provider (AWS IAM); kubeconfig clusters authenticate via
-// a kubeconfig file (useful for local dev — KIND, minikube — and for
-// non-AWS clusters).
+// Cluster backend identifiers.
 //
-// Note: kubeconfig-backed clusters do not participate in v2's per-user
-// identity pass-through. The kubeconfig is one identity, applied to all
-// users of the dashboard.
+// All three backends do per-user identity pass-through via K8s
+// impersonation: the underlying credentials (AWS IAM token / kubeconfig
+// user / in-cluster SA token) are one identity that asserts "do this
+// as alice" via the Impersonate-User / Impersonate-Group headers,
+// so the apiserver evaluates RBAC under the user, not the dashboard.
+//
+//   eks         AWS IAM token via the Provider; for EKS clusters managed
+//               from a periscope deployed elsewhere.
+//   kubeconfig  Identity loaded from a kubeconfig file at a path on the
+//               pod's filesystem; useful for local dev (kind, minikube)
+//               or non-AWS clusters reached via a static kubeconfig.
+//   in-cluster  In-pod ServiceAccount token (rest.InClusterConfig());
+//               used when periscope manages the cluster it's running
+//               in. The single-cluster install pattern.
 const (
 	BackendEKS        = "eks"
 	BackendKubeconfig = "kubeconfig"
+	BackendInCluster  = "in-cluster"
 )
 
 // Cluster identifies a Kubernetes cluster the dashboard can talk to.

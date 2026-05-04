@@ -1,7 +1,6 @@
 package clusters
 
 import (
-	"errors"
 	"fmt"
 	"os"
 
@@ -42,7 +41,10 @@ func LoadFromFile(path string) (*Registry, error) {
 	}
 
 	if len(f.Clusters) == 0 {
-		return nil, errors.New("registry contains no clusters")
+		// Empty registry is OK — the dashboard boots, the SPA renders
+		// a friendly "no clusters configured" state. Fatal-on-empty
+		// was the wrong default; it blocked first-install smoke tests.
+		return Empty(), nil
 	}
 
 	byName := make(map[string]Cluster, len(f.Clusters))
@@ -70,9 +72,13 @@ func LoadFromFile(path string) (*Registry, error) {
 			if c.KubeconfigPath == "" {
 				return nil, fmt.Errorf("cluster %q (kubeconfig): empty kubeconfigPath", c.Name)
 			}
+		case BackendInCluster:
+			// No required fields. The credential source is the pod's
+			// in-cluster ServiceAccount, mounted by the kubelet at
+			// /var/run/secrets/kubernetes.io/serviceaccount/.
 		default:
-			return nil, fmt.Errorf("cluster %q: unknown backend %q (must be %q or %q)",
-				c.Name, c.Backend, BackendEKS, BackendKubeconfig)
+			return nil, fmt.Errorf("cluster %q: unknown backend %q (must be %q, %q, or %q)",
+				c.Name, c.Backend, BackendEKS, BackendKubeconfig, BackendInCluster)
 		}
 
 		if _, dup := byName[c.Name]; dup {
