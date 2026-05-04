@@ -200,21 +200,21 @@ func pkceChallenge(verifier string) string {
 
 // NewPKCEVerifier returns a 64-char URL-safe-base64 random string,
 // suitable as a PKCE code_verifier.
-func NewPKCEVerifier() string {
+func NewPKCEVerifier() (string, error) {
 	b := make([]byte, 48)
 	if _, err := rand.Read(b); err != nil {
-		panic("auth: rand.Read failed: " + err.Error())
+		return "", fmt.Errorf("auth: rand.Read failed: %w", err)
 	}
-	return base64.RawURLEncoding.EncodeToString(b)
+	return base64.RawURLEncoding.EncodeToString(b), nil
 }
 
 // NewState returns a 128-bit random string for the state parameter.
-func NewState() string {
+func NewState() (string, error) {
 	b := make([]byte, 16)
 	if _, err := rand.Read(b); err != nil {
-		panic("auth: rand.Read failed: " + err.Error())
+		return "", fmt.Errorf("auth: rand.Read failed: %w", err)
 	}
-	return base64.RawURLEncoding.EncodeToString(b)
+	return base64.RawURLEncoding.EncodeToString(b), nil
 }
 
 // decodeJWTPayload splits the JWT and base64-decodes the middle

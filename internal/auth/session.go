@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/base64"
+	"fmt"
 	"sync"
 	"time"
 )
@@ -128,12 +129,10 @@ func (errNotFound) Error() string { return "session not found" }
 
 // NewSessionID returns a 256-bit random session identifier encoded as
 // URL-safe base64 (no padding).
-func NewSessionID() string {
+func NewSessionID() (string, error) {
 	b := make([]byte, 32)
 	if _, err := rand.Read(b); err != nil {
-		// crypto/rand should not fail in practice; if it does, the
-		// process is in no shape to issue sessions.
-		panic("auth: rand.Read failed: " + err.Error())
+		return "", fmt.Errorf("auth: rand.Read failed: %w", err)
 	}
-	return base64.RawURLEncoding.EncodeToString(b)
+	return base64.RawURLEncoding.EncodeToString(b), nil
 }
