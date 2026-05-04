@@ -1,7 +1,10 @@
 package main
 
 import (
+	"encoding/json"
 	"maps"
+	"net/http"
+	"net/http/httptest"
 	"sync"
 	"testing"
 	"time"
@@ -85,6 +88,64 @@ func TestParseWatchStreamsEnv(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestFeaturesHandler(t *testing.T) {
+	allWatchStreams := make([]string, 0, len(watchKinds))
+	for _, k := range watchKinds {
+		allWatchStreams = append(allWatchStreams, k.Name)
+	}
+
+	tests := []struct {
+		name string
+		cfg  watchStreamsConfig
+		want []string
+	}{
+		{name: "empty config", cfg: watchStreamsConfig{}, want: []string{}},
+		{name: "all registered kinds", cfg: allKindsOn(), want: allWatchStreams},
+		{
+			name: "partial subset follows registry order",
+			cfg:  watchStreamsConfig{"events": true, "pods": true},
+			want: []string{"pods", "events"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, "/api/features", nil)
+			rec := httptest.NewRecorder()
+
+			featuresHandler(tt.cfg).ServeHTTP(rec, req)
+
+			if rec.Code != http.StatusOK {
+				t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+			}
+			if got := rec.Header().Get("Content-Type"); got != "application/json" {
+				t.Fatalf("Content-Type = %q, want application/json", got)
+			}
+
+			var body struct {
+				WatchStreams []string `json:"watchStreams"`
+			}
+			if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
+				t.Fatalf("decode response: %v", err)
+			}
+			if !slicesEqual(body.WatchStreams, tt.want) {
+				t.Fatalf("watchStreams = %v, want %v", body.WatchStreams, tt.want)
+			}
+		})
+	}
+}
+
+func slicesEqual(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
 
 func TestStreamTracker_RegisterSnapshotDeregister(t *testing.T) {
