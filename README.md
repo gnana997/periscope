@@ -1,7 +1,7 @@
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://periscopehq.vercel.app/readme-banner-dark.png">
-    <img alt="periscope · one dashboard. every cluster." src="https://periscopehq.vercel.app/readme-banner-light.png" width="100%">
+    <source media="(prefers-color-scheme: dark)" srcset="https://periscopehq.dev/readme-banner-dark.png">
+    <img alt="periscope · one dashboard. every cluster." src="https://periscopehq.dev/readme-banner-light.png" width="100%">
   </picture>
 </p>
 
