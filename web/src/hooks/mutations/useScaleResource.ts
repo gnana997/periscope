@@ -11,7 +11,7 @@
 // currently rendered (all-namespaces view, specific-namespace view,
 // or both at once).
 
-import { ApiError, api, type YamlKind } from "../../lib/api";
+import { ApiError, type YamlKind } from "../../lib/api";
 import { KIND_REGISTRY } from "../../lib/k8sKinds";
 import { queryKeys } from "../../lib/queryKeys";
 import { buildMinimalSSA, type Identity } from "../../lib/yamlPatch";
@@ -19,6 +19,7 @@ import { patchRowInList } from "../../lib/listShape";
 import type { ResourceListResponse } from "../../lib/types";
 import type { QueryKey } from "@tanstack/react-query";
 import { useOptimisticMutation } from "./_useOptimistic";
+import { applyWithLenientConflict } from "./_applyWithLenientConflict";
 
 export type ScalableKind = "deployments" | "statefulsets" | "replicasets";
 
@@ -113,16 +114,22 @@ export function useScaleResource(args: ScaleArgs) {
         [{ op: "replace", path: ["spec", "replicas"], value: vars.replicas }],
         identity,
       );
-      return api.applyResource({
-        cluster: args.cluster,
-        group: meta.group,
-        version: meta.version,
-        resource: meta.resource,
-        namespace: args.namespace,
-        name: args.name,
-        yaml,
-        force: false,
-      });
+      // Lenient SSA: auto-takeover when the conflict is only with
+      // HUMAN/UNKNOWN managers (kubectl-* / Rancher / unclassified).
+      // GITOPS/HELM/CONTROLLER conflicts surface a classified error
+      // instead — see _applyWithLenientConflict.ts.
+      return applyWithLenientConflict(
+        {
+          cluster: args.cluster,
+          group: meta.group,
+          version: meta.version,
+          resource: meta.resource,
+          namespace: args.namespace,
+          name: args.name,
+          yaml,
+        },
+        "scale",
+      );
     },
     successToast: (vars) => `scaled ${args.name} to ${vars.replicas}`,
     errorToast: (err, vars) =>
