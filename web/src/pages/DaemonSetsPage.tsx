@@ -7,10 +7,11 @@ import { PageHeader } from "../components/page/PageHeader";
 import { FilterStrip } from "../components/page/FilterStrip";
 import { SplitPane } from "../components/page/SplitPane";
 import {
-  DataTable,
   type Column,
   type RowTint,
 } from "../components/table/DataTable";
+import { SelectableDataTable } from "../components/table/SelectableDataTable";
+import { api } from "../lib/api";
 import {
   EmptyState,
   ErrorState,
@@ -164,13 +165,18 @@ export function DaemonSetsPage({ cluster }: { cluster: string }) {
           ) : filtered.length === 0 ? (
             <EmptyState resource="daemonsets" namespace={namespace} />
           ) : (
-            <DataTable<DaemonSet>
+            <SelectableDataTable<DaemonSet>
               columns={columns}
               rows={filtered}
               rowKey={(d) => `${d.namespace}/${d.name}`}
               rowTint={rowTint}
               onRowClick={(d) => confirmDiscard(() => setMany({ sel: d.name, selNs: d.namespace, tab: "describe" }))}
               selectedKey={selectedKey}
+              bulk={{
+                cluster,
+                kindLabel: "daemonsets",
+                fetchYaml: (d, signal) => api.yaml(cluster, "daemonsets", d.namespace, d.name, signal),
+              }}
             />
           )
         }

@@ -6,7 +6,9 @@ import { ageFrom, nameMatches } from "../lib/format";
 import { PageHeader } from "../components/page/PageHeader";
 import { FilterStrip } from "../components/page/FilterStrip";
 import { SplitPane } from "../components/page/SplitPane";
-import { DataTable, type Column } from "../components/table/DataTable";
+import { type Column } from "../components/table/DataTable";
+import { SelectableDataTable } from "../components/table/SelectableDataTable";
+import { api } from "../lib/api";
 import { EmptyState, ErrorState, ForbiddenState, LoadingState } from "../components/table/states";
 import { isForbidden } from "../components/table/isForbidden";
 import { DetailPane } from "../components/detail/DetailPane";
@@ -100,12 +102,17 @@ export function ResourceQuotasPage({ cluster }: { cluster: string }) {
           query.isLoading ? <LoadingState resource="resourcequotas" /> :
           query.isError ? isForbidden(query.error) ? <ForbiddenState resource="resourcequotas" /> : isForbidden(query.error) ? <ForbiddenState resource="resourcequotas" /> : <ErrorState title="couldn't reach the cluster" message={(query.error as Error).message} /> :
           filtered.length === 0 ? <EmptyState resource="resourcequotas" namespace={namespace} /> :
-          <DataTable<ResourceQuota>
+          <SelectableDataTable<ResourceQuota>
             columns={columns}
             rows={filtered}
             rowKey={(r) => `${r.namespace}/${r.name}`}
             onRowClick={(r) => confirmDiscard(() => setMany({ sel: r.name, selNs: r.namespace, tab: "describe" }))}
             selectedKey={selectedKey}
+            bulk={{
+              cluster,
+              kindLabel: "resourcequotas",
+              fetchYaml: (r, signal) => api.yaml(cluster, "resourcequotas", r.namespace, r.name, signal),
+            }}
           />
         }
         right={detail}

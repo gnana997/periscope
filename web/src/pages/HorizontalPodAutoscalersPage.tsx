@@ -7,7 +7,9 @@ import { cn } from "../lib/cn";
 import { PageHeader } from "../components/page/PageHeader";
 import { FilterStrip } from "../components/page/FilterStrip";
 import { SplitPane } from "../components/page/SplitPane";
-import { DataTable, type Column } from "../components/table/DataTable";
+import { type Column } from "../components/table/DataTable";
+import { SelectableDataTable } from "../components/table/SelectableDataTable";
+import { api } from "../lib/api";
 import { EmptyState, ErrorState, ForbiddenState, LoadingState } from "../components/table/states";
 import { isForbidden } from "../components/table/isForbidden";
 import { DetailPane } from "../components/detail/DetailPane";
@@ -113,12 +115,17 @@ export function HorizontalPodAutoscalersPage({ cluster }: { cluster: string }) {
           query.isLoading ? <LoadingState resource="horizontalpodautoscalers" /> :
           query.isError ? isForbidden(query.error) ? <ForbiddenState resource="horizontalpodautoscalers" /> : isForbidden(query.error) ? <ForbiddenState resource="horizontalpodautoscalers" /> : <ErrorState title="couldn't reach the cluster" message={(query.error as Error).message} /> :
           filtered.length === 0 ? <EmptyState resource="horizontalpodautoscalers" namespace={namespace} /> :
-          <DataTable<HPA>
+          <SelectableDataTable<HPA>
             columns={columns}
             rows={filtered}
             rowKey={(r) => `${r.namespace}/${r.name}`}
             onRowClick={(r) => confirmDiscard(() => setMany({ sel: r.name, selNs: r.namespace, tab: "describe" }))}
             selectedKey={selectedKey}
+            bulk={{
+              cluster,
+              kindLabel: "horizontalpodautoscalers",
+              fetchYaml: (r, signal) => api.yaml(cluster, "horizontalpodautoscalers", r.namespace, r.name, signal),
+            }}
           />
         }
         right={detail}

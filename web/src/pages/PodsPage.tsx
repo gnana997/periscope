@@ -7,10 +7,11 @@ import { PageHeader } from "../components/page/PageHeader";
 import { FilterStrip } from "../components/page/FilterStrip";
 import { SplitPane } from "../components/page/SplitPane";
 import {
-  DataTable,
   type Column,
   type RowTint,
 } from "../components/table/DataTable";
+import { SelectableDataTable } from "../components/table/SelectableDataTable";
+import { api } from "../lib/api";
 import { PhaseTag } from "../components/table/StatusDot";
 import { phaseTone } from "../components/table/phaseTone";
 import {
@@ -228,13 +229,18 @@ export function PodsPage({ cluster }: { cluster: string }) {
           ) : filtered.length === 0 ? (
             <EmptyState resource="pods" namespace={namespace} />
           ) : (
-            <DataTable<Pod>
+            <SelectableDataTable<Pod>
               columns={columns}
               rows={filtered}
               rowKey={(p) => `${p.namespace}/${p.name}`}
               rowTint={rowTint}
               onRowClick={(p) => confirmDiscard(() => setMany({ sel: p.name, selNs: p.namespace, tab: "describe" }))}
               selectedKey={selectedKey}
+              bulk={{
+                cluster,
+                kindLabel: "pods",
+                fetchYaml: (p, signal) => api.yaml(cluster, "pods", p.namespace, p.name, signal),
+              }}
             />
           )
         }

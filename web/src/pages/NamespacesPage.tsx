@@ -6,10 +6,11 @@ import { ageFrom, nameMatches } from "../lib/format";
 import { PageHeader } from "../components/page/PageHeader";
 import { SplitPane } from "../components/page/SplitPane";
 import {
-  DataTable,
   type Column,
   type RowTint,
 } from "../components/table/DataTable";
+import { SelectableDataTable } from "../components/table/SelectableDataTable";
+import { api } from "../lib/api";
 import { PhaseTag } from "../components/table/StatusDot";
 import {
   EmptyState,
@@ -133,13 +134,18 @@ export function NamespacesPage({ cluster }: { cluster: string }) {
           ) : filtered.length === 0 ? (
             <EmptyState resource="namespaces" namespace={null} />
           ) : (
-            <DataTable<Namespace>
+            <SelectableDataTable<Namespace>
               columns={columns}
               rows={filtered}
               rowKey={(n) => n.name}
               rowTint={rowTint}
               onRowClick={(n) => confirmDiscard(() => setMany({ sel: n.name, tab: "describe" }))}
               selectedKey={selectedName}
+              bulk={{
+                cluster,
+                kindLabel: "namespaces",
+                fetchYaml: (n, signal) => api.namespaceYaml(cluster, n.name, signal),
+              }}
             />
           )
         }

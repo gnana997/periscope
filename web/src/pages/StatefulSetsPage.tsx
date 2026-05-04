@@ -7,10 +7,11 @@ import { PageHeader } from "../components/page/PageHeader";
 import { FilterStrip } from "../components/page/FilterStrip";
 import { SplitPane } from "../components/page/SplitPane";
 import {
-  DataTable,
   type Column,
   type RowTint,
 } from "../components/table/DataTable";
+import { SelectableDataTable } from "../components/table/SelectableDataTable";
+import { api } from "../lib/api";
 import {
   EmptyState,
   ErrorState,
@@ -151,13 +152,18 @@ export function StatefulSetsPage({ cluster }: { cluster: string }) {
           ) : filtered.length === 0 ? (
             <EmptyState resource="statefulsets" namespace={namespace} />
           ) : (
-            <DataTable<StatefulSet>
+            <SelectableDataTable<StatefulSet>
               columns={columns}
               rows={filtered}
               rowKey={(s) => `${s.namespace}/${s.name}`}
               rowTint={rowTint}
               onRowClick={(s) => confirmDiscard(() => setMany({ sel: s.name, selNs: s.namespace, tab: "describe" }))}
               selectedKey={selectedKey}
+              bulk={{
+                cluster,
+                kindLabel: "statefulsets",
+                fetchYaml: (s, signal) => api.yaml(cluster, "statefulsets", s.namespace, s.name, signal),
+              }}
             />
           )
         }

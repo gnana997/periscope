@@ -5,7 +5,9 @@ import type { ClusterRole, ClusterRoleList } from "../lib/types";
 import { ageFrom, nameMatches } from "../lib/format";
 import { PageHeader } from "../components/page/PageHeader";
 import { SplitPane } from "../components/page/SplitPane";
-import { DataTable, type Column } from "../components/table/DataTable";
+import { type Column } from "../components/table/DataTable";
+import { SelectableDataTable } from "../components/table/SelectableDataTable";
+import { api } from "../lib/api";
 import { EmptyState, ErrorState, ForbiddenState, LoadingState } from "../components/table/states";
 import { isForbidden } from "../components/table/isForbidden";
 import { DetailPane } from "../components/detail/DetailPane";
@@ -106,12 +108,17 @@ export function ClusterRolesPage({ cluster }: { cluster: string }) {
           query.isLoading ? <LoadingState resource="clusterroles" /> :
           query.isError ? isForbidden(query.error) ? <ForbiddenState resource="clusterroles" /> : isForbidden(query.error) ? <ForbiddenState resource="clusterroles" /> : <ErrorState title="couldn't reach the cluster" message={(query.error as Error).message} /> :
           filtered.length === 0 ? <EmptyState resource="clusterroles" namespace={null} /> :
-          <DataTable<ClusterRole>
+          <SelectableDataTable<ClusterRole>
             columns={columns}
             rows={filtered}
             rowKey={(r) => r.name}
             onRowClick={(r) => confirmDiscard(() => setMany({ sel: r.name, tab: "describe" }))}
             selectedKey={selectedName}
+            bulk={{
+              cluster,
+              kindLabel: "clusterroles",
+              fetchYaml: (r, signal) => api.clusterScopedYaml(cluster, "clusterroles", r.name, signal),
+            }}
           />
         }
         right={detail}

@@ -6,10 +6,11 @@ import { ageFrom, nameMatches } from "../lib/format";
 import { PageHeader } from "../components/page/PageHeader";
 import { SplitPane } from "../components/page/SplitPane";
 import {
-  DataTable,
   type Column,
   type RowTint,
 } from "../components/table/DataTable";
+import { SelectableDataTable } from "../components/table/SelectableDataTable";
+import { api } from "../lib/api";
 import { StatusDot } from "../components/table/StatusDot";
 import {
   EmptyState,
@@ -222,13 +223,18 @@ export function NodesPage({ cluster }: { cluster: string }) {
           ) : filtered.length === 0 ? (
             <EmptyState resource="nodes" namespace={null} />
           ) : (
-            <DataTable<Node>
+            <SelectableDataTable<Node>
               columns={columns}
               rows={filtered}
               rowKey={(n) => n.name}
               rowTint={rowTint}
               onRowClick={(n) => setMany({ sel: n.name })}
               selectedKey={selectedName}
+              bulk={{
+                cluster,
+                kindLabel: "nodes",
+                fetchYaml: (n, signal) => api.clusterScopedYaml(cluster, "nodes", n.name, signal),
+              }}
             />
           )
         }

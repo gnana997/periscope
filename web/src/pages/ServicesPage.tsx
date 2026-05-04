@@ -6,7 +6,9 @@ import { ageFrom, formatPorts, nameMatches } from "../lib/format";
 import { PageHeader } from "../components/page/PageHeader";
 import { FilterStrip } from "../components/page/FilterStrip";
 import { SplitPane } from "../components/page/SplitPane";
-import { DataTable, type Column } from "../components/table/DataTable";
+import { type Column } from "../components/table/DataTable";
+import { SelectableDataTable } from "../components/table/SelectableDataTable";
+import { api } from "../lib/api";
 import {
   EmptyState,
   ErrorState,
@@ -128,12 +130,17 @@ export function ServicesPage({ cluster }: { cluster: string }) {
           ) : filtered.length === 0 ? (
             <EmptyState resource="services" namespace={namespace} />
           ) : (
-            <DataTable<Service>
+            <SelectableDataTable<Service>
               columns={columns}
               rows={filtered}
               rowKey={(s) => `${s.namespace}/${s.name}`}
               onRowClick={(s) => confirmDiscard(() => setMany({ sel: s.name, selNs: s.namespace, tab: "describe" }))}
               selectedKey={selectedKey}
+              bulk={{
+                cluster,
+                kindLabel: "services",
+                fetchYaml: (s, signal) => api.yaml(cluster, "services", s.namespace, s.name, signal),
+              }}
             />
           )
         }

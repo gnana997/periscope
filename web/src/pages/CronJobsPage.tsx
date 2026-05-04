@@ -8,10 +8,11 @@ import { PageHeader } from "../components/page/PageHeader";
 import { FilterStrip } from "../components/page/FilterStrip";
 import { SplitPane } from "../components/page/SplitPane";
 import {
-  DataTable,
   type Column,
   type RowTint,
 } from "../components/table/DataTable";
+import { SelectableDataTable } from "../components/table/SelectableDataTable";
+import { api } from "../lib/api";
 import {
   EmptyState,
   ErrorState,
@@ -198,13 +199,18 @@ export function CronJobsPage({ cluster }: { cluster: string }) {
           ) : filtered.length === 0 ? (
             <EmptyState resource="cronjobs" namespace={namespace} />
           ) : (
-            <DataTable<CronJob>
+            <SelectableDataTable<CronJob>
               columns={columns}
               rows={filtered}
               rowKey={(c) => `${c.namespace}/${c.name}`}
               rowTint={rowTint}
               onRowClick={(c) => confirmDiscard(() => setMany({ sel: c.name, selNs: c.namespace, tab: "describe" }))}
               selectedKey={selectedKey}
+              bulk={{
+                cluster,
+                kindLabel: "cronjobs",
+                fetchYaml: (c, signal) => api.yaml(cluster, "cronjobs", c.namespace, c.name, signal),
+              }}
             />
           )
         }
