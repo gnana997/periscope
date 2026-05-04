@@ -252,6 +252,12 @@ func WhoamiHandler(store SessionStore, cfg Config, resolver *authz.Resolver, aud
 
 // --- cookie helpers ---
 
+// SameSite=Lax (not Strict) so the cookie is sent on the `/` request
+// that follows the Auth0 → /api/auth/callback → / redirect chain.
+// Strict suppresses the cookie on cross-site-initiated top-level
+// navigations, which the post-callback redirect counts as. The cookie
+// is HttpOnly and the API only mutates state via XHR, so Lax keeps the
+// CSRF posture intact.
 func setSessionCookie(w http.ResponseWriter, r *http.Request, cfg SessionConfig, value string, exp time.Time) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     cfg.CookieName,
@@ -260,7 +266,7 @@ func setSessionCookie(w http.ResponseWriter, r *http.Request, cfg SessionConfig,
 		Domain:   cfg.CookieDomain,
 		HttpOnly: true,
 		Secure:   isHTTPS(r),
-		SameSite: http.SameSiteStrictMode,
+		SameSite: http.SameSiteLaxMode,
 		Expires:  exp,
 	})
 }
@@ -273,7 +279,7 @@ func clearSessionCookie(w http.ResponseWriter, r *http.Request, cfg SessionConfi
 		Domain:   cfg.CookieDomain,
 		HttpOnly: true,
 		Secure:   isHTTPS(r),
-		SameSite: http.SameSiteStrictMode,
+		SameSite: http.SameSiteLaxMode,
 		Expires:  time.Unix(0, 0),
 		MaxAge:   -1,
 	})
