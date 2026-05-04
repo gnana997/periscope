@@ -1,0 +1,73 @@
+# periscope server values for the RFC 0004 Tier 2 e2e harness.
+#
+# Auth: dev mode (no OIDC). The chart enters dev mode when
+# auth.oidc.issuer is empty. Authorization mode + tier mapping go
+# UNDER auth.authorization (not at top level — the chart only reads
+# .Values.auth.authorization). The dev block's group "dev" is mapped
+# to the admin tier so /api/agents/tokens (admin-only) is reachable
+# via a periscope_session=dev cookie.
+
+image:
+  repository: periscope
+  tag: dev
+  pullPolicy: IfNotPresent
+
+podIdentity:
+  enabled: false
+
+auth:
+  dev:
+    subject: dev@local
+    email: dev@local
+    groups: [dev]
+  # Empty issuer → chart preserves dev block + skips OIDC secret resolution.
+  oidc:
+    issuer: ""
+    clientID: ""
+    clientSecret: ""
+    redirectURL: ""
+    postLogoutRedirect: ""
+  authorization:
+    # tier mode lets us map the dev session into admin and reach the
+    # admin-only /api/agents/tokens endpoint.
+    mode: tier
+    # groupTiers is a map: { groupName: tierName }. The dev session's
+    # group is "dev" (per the dev block above); map it to admin.
+    groupTiers:
+      dev: admin
+    defaultTier: ""
+    groupsClaim: groups
+    allowedGroups: []
+    auditAdminGroups: []
+
+# native = chart skips the OIDC client-secret env var entirely.
+secrets:
+  mode: native
+
+# Cluster registry — agent registers as kind-periscope-poc.
+clusters:
+  - name: kind-periscope-poc
+    backend: agent
+    environment: poc
+
+# Agent backend on. Tunnel Service exposed in-cluster only.
+agent:
+  enabled: true
+  listenAddr: ":8443"
+  tunnelSANs: "periscope-tunnel.periscope.svc.cluster.local,periscope-tunnel,localhost"
+  caSecretName: "periscope-agent-ca"
+  tunnelService:
+    enabled: true
+    type: ClusterIP
+
+audit:
+  enabled: true
+  retention: 24h
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 128Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi

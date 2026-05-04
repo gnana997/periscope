@@ -67,3 +67,15 @@ help:
 	@echo "Run 'make build' to produce the single embedded production binary."
 
 dev: help
+
+# ─── RFC 0004 Tier 2 e2e harness ──────────────────────────────────────
+# Bring up a kind cluster running both periscope server and periscope-
+# agent, run an exec probe through the agent tunnel, and assert the
+# round-trip succeeds. See hack/poc-exec-tunnel/README.md for details.
+.PHONY: poc-exec-tunnel poc-exec-tunnel-clean
+
+poc-exec-tunnel:
+	./hack/poc-exec-tunnel/run.sh
+
+poc-exec-tunnel-clean:
+	kind delete cluster --name periscope-poc 2>/dev/null || true

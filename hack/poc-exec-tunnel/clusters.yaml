@@ -1,0 +1,10 @@
+# Cluster registry for the periscope server in the kind POC. The lone
+# entry's backend: agent means the server reaches its OWN cluster's
+# apiserver via the agent tunnel — same code path that production uses
+# for managed clusters. Self-managed via agent is unusual in real
+# deployments (you'd use backend: in-cluster for the host cluster) but
+# proves the agent path end-to-end without needing a second kind.
+clusters:
+  - name: kind-periscope-poc
+    backend: agent
+    environment: poc

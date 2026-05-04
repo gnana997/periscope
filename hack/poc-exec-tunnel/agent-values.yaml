@@ -1,0 +1,41 @@
+# periscope-agent values for the RFC 0004 Tier 2 e2e harness.
+#
+# Topology: server + agent both run in the same kind cluster.
+#   - Server SPA + API on http://periscope.periscope.svc.cluster.local:8080
+#   - Server tunnel (mTLS) on wss://periscope-tunnel.periscope.svc.cluster.local:8443
+# The agent reaches each via in-cluster DNS — no Ingress / port-forwards
+# in the agent's network path.
+
+image:
+  repository: periscope-agent
+  tag: dev
+  pullPolicy: IfNotPresent
+
+agent:
+  # Long-lived mTLS tunnel — the cert + server CA are written into the
+  # agent's stateSecret on first registration; subsequent dials use them.
+  serverURL: "wss://periscope-tunnel.periscope.svc.cluster.local:8443/api/agents/connect"
+
+  # Bootstrap registration POST — set explicitly because the default
+  # derivation (wss → https) on serverURL would land on the tunnel
+  # port, but registration lives on the SPA Service's port 8080.
+  registrationURL: "http://periscope.periscope.svc.cluster.local:8080"
+
+  # Cluster name MUST match the registry entry in server-values.yaml.
+  clusterName: "kind-periscope-poc"
+
+  # Bootstrap token — set by run.sh from POST /api/agents/tokens.
+  registrationToken: "OVERRIDE_ME"
+
+  logLevel: "info"
+
+clusterRBAC:
+  enabled: true
+
+resources:
+  requests:
+    cpu: 25m
+    memory: 64Mi
+  limits:
+    cpu: 250m
+    memory: 256Mi
