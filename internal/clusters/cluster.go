@@ -27,6 +27,13 @@ const (
 	BackendEKS        = "eks"
 	BackendKubeconfig = "kubeconfig"
 	BackendInCluster  = "in-cluster"
+	// BackendAgent indicates the cluster is reached through a
+	// periscope-agent tunnel. The cluster registry entry only needs
+	// `name` + `backend: agent`; everything else (apiserver address,
+	// CA bundle, identity) is held by the connected agent and
+	// resolved at request time via internal/k8s/client.go's tunnel
+	// lookup hook. See issue #42 / docs/architecture/agent-tunnel.md.
+	BackendAgent      = "agent"
 )
 
 // Cluster identifies a Kubernetes cluster the dashboard can talk to.
