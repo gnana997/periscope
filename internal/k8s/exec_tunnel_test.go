@@ -536,18 +536,6 @@ func (s *tunneledStack) netDialContext(ctx context.Context, network, addr string
 	return dial(ctx, network, addr)
 }
 
-// httpClient returns an http.Client whose Transport routes every
-// connection through the tunnel.
-func (s *tunneledStack) httpClient(t *testing.T) *http.Client {
-	t.Helper()
-	dial, err := s.tunSrv.DialerFor(s.name)
-	if err != nil {
-		t.Fatalf("DialerFor: %v", err)
-	}
-	rt := tunnel.NewRoundTripper(dial, tunnel.RoundTripperOptions{})
-	return &http.Client{Transport: rt, Timeout: 10 * time.Second}
-}
-
 // ─── helpers: WebSocket fake apiserver ───────────────────────────────────
 
 type wsExecOpts struct {
@@ -675,14 +663,14 @@ func newSPDYExecHandler(t *testing.T) http.Handler {
 		// Match the apiserver's real shape: 101 + Connection/Upgrade +
 		// echoed X-Stream-Protocol-Version. client-go's SPDY
 		// roundtripper looks for exactly these headers.
-		_, _ = brw.Writer.WriteString("HTTP/1.1 101 Switching Protocols\r\n")
-		_, _ = brw.Writer.WriteString("Connection: Upgrade\r\n")
-		_, _ = brw.Writer.WriteString("Upgrade: SPDY/3.1\r\n")
+		_, _ = brw.WriteString("HTTP/1.1 101 Switching Protocols\r\n")
+		_, _ = brw.WriteString("Connection: Upgrade\r\n")
+		_, _ = brw.WriteString("Upgrade: SPDY/3.1\r\n")
 		if streamProto != "" {
-			_, _ = brw.Writer.WriteString("X-Stream-Protocol-Version: " + streamProto + "\r\n")
+			_, _ = brw.WriteString("X-Stream-Protocol-Version: " + streamProto + "\r\n")
 		}
-		_, _ = brw.Writer.WriteString("\r\n")
-		_ = brw.Writer.Flush()
+		_, _ = brw.WriteString("\r\n")
+		_ = brw.Flush()
 
 		// Idle until the peer closes — the test is done with us by then.
 		_, _ = io.Copy(io.Discard, conn)

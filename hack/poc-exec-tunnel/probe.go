@@ -77,7 +77,7 @@ func run(server, cluster, namespace, pod, cookie string, timeout time.Duration) 
 		}
 		return fmt.Errorf("ws dial: %w", err)
 	}
-	defer conn.CloseNow()
+	defer func() { _ = conn.CloseNow() }()
 
 	// Step 1: read the hello frame so we know the apiserver-side exec
 	// stream is up. session.go writes this BEFORE forwarding any user
