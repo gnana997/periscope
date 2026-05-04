@@ -149,7 +149,7 @@ export function SecretsPage({ cluster }: { cluster: string }) {
                 cluster,
                 kindLabel: "secrets",
                 fetchYaml: (s, signal) => api.yaml(cluster, "secrets", s.namespace, s.name, signal),
-                isSecret: () => true,
+                confirmReveal: () => true,
               }}
             />
           )

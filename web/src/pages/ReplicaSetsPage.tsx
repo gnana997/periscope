@@ -190,6 +190,7 @@ export function ReplicaSetsPage({ cluster }: { cluster: string }) {
         selection={selection}
         rows={filtered}
         rowKey={rsKey}
+        visibleIds={visibleIds}
         cluster={cluster}
         kindLabel="replicasets"
         fetchYaml={(rs, signal) => api.yaml(cluster, "replicasets", rs.namespace, rs.name, signal)}
@@ -455,6 +456,7 @@ function RSRow({
           checked={isChecked}
           onChange={() => {}}
           aria-label={`select replicaset ${rs.name}`}
+          tabIndex={-1}
           className="h-3.5 w-3.5 cursor-pointer accent-accent"
         />
       </span>
