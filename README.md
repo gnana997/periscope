@@ -17,6 +17,8 @@
 [![Go](https://img.shields.io/badge/Go-1.26-00ADD8.svg)](https://go.dev/)
 [![Node](https://img.shields.io/badge/Node-22-339933.svg)](https://nodejs.org/)
 
+**v1.0.0 launched.** Read the [launch announcement](https://github.com/gnana997/periscope/discussions/70) — origin story, what shipped, what's not in v1.0, and what's next.
+
 > **Status — v1.0 stable.** Public HTTP API, configuration shape, and Helm values are covered by semver: breaking changes will land in a future major (v2). Bugfixes and additive features land on minor / patch tags off `main`. See [`CHANGELOG.md`](CHANGELOG.md) for what shipped per release.
 
 ## What is Periscope
