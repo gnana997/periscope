@@ -193,3 +193,59 @@ func TestAcceptsHTML(t *testing.T) {
 		}
 	}
 }
+
+func TestIsPublic_AgentRegister(t *testing.T) {
+	// /api/agents/register is unauth-by-design (the bootstrap token in
+	// the request body IS the auth). If this regresses, agents fail
+	// first-boot registration with 401 from the auth middleware long
+	// before tunnel.RegisterHandler ever sees the request — see #48.
+	if !isPublic("/api/agents/register") {
+		t.Fatal("/api/agents/register should be in the isPublic allowlist")
+	}
+}
+
+func TestIsPublic_AgentTokensRequiresAuth(t *testing.T) {
+	// /api/agents/tokens is admin-tier-only — must NOT be in the
+	// isPublic allowlist. The session-cookie check runs first; the
+	// adminOnlyMiddleware in cmd/periscope enforces tier on top.
+	if isPublic("/api/agents/tokens") {
+		t.Fatal("/api/agents/tokens must NOT be public — it's admin-tier-only")
+	}
+}
+
+func TestIsPublic_KnownPathsCovered(t *testing.T) {
+	// Lock the full set so future additions to isPublic show up as a
+	// test diff, prompting a security review of the new entry.
+	wantPublic := []string{
+		"/healthz",
+		"/api/auth/config",
+		"/api/auth/login",
+		"/api/auth/callback",
+		"/api/auth/loggedout",
+		"/api/auth/logout",
+		"/api/auth/logout/everywhere",
+		"/api/agents/register",
+	}
+	for _, p := range wantPublic {
+		if !isPublic(p) {
+			t.Errorf("isPublic(%q) = false, want true", p)
+		}
+	}
+
+	// Negative: a sample of paths that MUST require auth.
+	wantPrivate := []string{
+		"/api/whoami",
+		"/api/clusters",
+		"/api/fleet",
+		"/api/audit",
+		"/api/agents/tokens",                 // admin-tier-only
+		"/api/clusters/prod-eu/pods",         // per-cluster handler
+		"/",                                  // SPA root — auth-gated for HTML
+		"/some/random/path",                  // unknown path — fail closed
+	}
+	for _, p := range wantPrivate {
+		if isPublic(p) {
+			t.Errorf("isPublic(%q) = true, want false (would bypass auth)", p)
+		}
+	}
+}

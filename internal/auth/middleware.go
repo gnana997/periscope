@@ -46,6 +46,15 @@ func isPublic(path string) bool {
 		"/api/auth/login",
 		"/api/auth/callback",
 		"/api/auth/loggedout",
+		// Agent registration: the bootstrap token IS the auth.
+		// Validated inside tunnel.RegisterHandler atomically with CSR
+		// signing — adding this to the public allowlist moves the auth
+		// gate from "session cookie" to "bootstrap token in body,"
+		// not removing it. /api/agents/tokens is NOT public (admin-only,
+		// session-gated by adminOnlyMiddleware in cmd/periscope), and
+		// /api/agents/connect runs on the separate tunnel TLS listener
+		// (mTLS-gated) so never hits this middleware. See #48.
+		"/api/agents/register",
 		"/api/auth/logout",
 		"/api/auth/logout/everywhere":
 		return true
