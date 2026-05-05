@@ -152,7 +152,13 @@ func LogoutHandler(store SessionStore, cfg Config) http.HandlerFunc {
 			}
 		}
 		clearSessionCookie(w, r, cfg.Session)
-		http.Redirect(w, r, "/", http.StatusFound)
+		// ?signedOut=1 tells the SPA's AuthProvider to NOT auto-trigger
+		// silent SSO on this load — without the flag, the SPA would
+		// kick off /api/auth/login on every unauthenticated mount, and
+		// Auth0's still-valid SSO session would re-issue a fresh
+		// Periscope session, undoing the logout. The SPA strips the
+		// query param after reading it.
+		http.Redirect(w, r, "/?signedOut=1", http.StatusFound)
 	}
 }
 
@@ -173,12 +179,12 @@ func LogoutEverywhereHandler(client *OIDCClient, store SessionStore, cfg Config)
 		clearSessionCookie(w, r, cfg.Session)
 
 		if client == nil {
-			http.Redirect(w, r, "/", http.StatusFound)
+			http.Redirect(w, r, "/?signedOut=1", http.StatusFound)
 			return
 		}
 		logoutURL := client.LogoutURL(url.QueryEscape(idTokenHint))
 		if logoutURL == "" {
-			http.Redirect(w, r, "/", http.StatusFound)
+			http.Redirect(w, r, "/?signedOut=1", http.StatusFound)
 			return
 		}
 		http.Redirect(w, r, logoutURL, http.StatusFound)

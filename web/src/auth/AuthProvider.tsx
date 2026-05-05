@@ -16,12 +16,33 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const refresh = useCallback(async () => {
     setIsLoading(true);
     setError(null);
+    // When true, we're navigating away (silent-SSO attempt). Skip the
+    // setIsLoading(false) at the bottom so the spinner stays up
+    // through the redirect instead of flashing <LoginScreen />.
+    let navigating = false;
     try {
       const res = await fetch("/api/auth/whoami", {
         headers: { Accept: "application/json" },
       });
       if (res.status === 401) {
         setUser(null);
+        // The backend's LogoutHandler redirects to /?signedOut=1 so
+        // the SPA can distinguish "user just signed out" from "no
+        // session, try silent SSO". Without this flag we'd kick off
+        // /api/auth/login on every unauthenticated mount and Auth0's
+        // still-valid SSO session would re-authenticate immediately,
+        // looping the logout. Strip the param after reading so a
+        // refresh doesn't keep blocking auto-SSO.
+        const params = new URLSearchParams(window.location.search);
+        if (params.has("signedOut")) {
+          params.delete("signedOut");
+          const qs = params.toString();
+          const next = window.location.pathname + (qs ? `?${qs}` : "") + window.location.hash;
+          window.history.replaceState(null, "", next);
+          return;
+        }
+        navigating = true;
+        window.location.replace("/api/auth/login");
         return;
       }
       if (!res.ok) {
@@ -33,7 +54,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setError((e as Error).message);
       setUser(null);
     } finally {
-      setIsLoading(false);
+      if (!navigating) setIsLoading(false);
     }
   }, []);
 
