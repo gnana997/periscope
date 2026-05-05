@@ -75,6 +75,8 @@ sanity check:
 | **Audit stdout shipping** | Whatever your log-aggregator agent (Fluent Bit, Vector, etc.) needs — that runs alongside Periscope, not inside it. |
 | **OIDC / IdP** | TCP/443 to the issuer host. Already in the minimum policy above. |
 | **AWS STS / EKS DescribeCluster** | TCP/443 to `sts.amazonaws.com` and the regional EKS endpoints. Already needed for cluster auth. |
+| **EKS Upgrade Insights** | TCP/443 to the regional EKS endpoint. Same target as `DescribeCluster` — no new rule. |
+| **Managed node groups + AMI drift** | TCP/443 to the regional EKS, SSM, and EC2 endpoints. SSM is the primary "latest AMI" lookup (`/aws/service/eks/optimized-ami/...` public parameters); EC2 `DescribeImages` is the fallback. The "all internet HTTPS but no in-cluster traffic" rule above already covers them. |
 
 In short: the only outbound traffic Periscope generates is to (a) the
 IdP, (b) AWS STS / EKS, and (c) each managed cluster's apiserver.
