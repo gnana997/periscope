@@ -74,7 +74,14 @@ export function parseMultiDocYaml(yamlText: string): ParsedDoc[] {
     }
 
     const obj = doc.toJS() as unknown;
-    if (obj == null || typeof obj !== "object") {
+    if (obj == null) {
+      // Empty doc (e.g. content between adjacent --- separators,
+      // or trailing --- with no body). Silently skip rather than
+      // emit a parseError — this is a YAML quirk, not user fault.
+      idx += 1;
+      continue;
+    }
+    if (typeof obj !== "object") {
       out.push({
         id,
         raw,
