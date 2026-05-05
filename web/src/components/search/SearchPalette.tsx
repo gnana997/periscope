@@ -7,6 +7,9 @@ import { queryKeys } from "../../lib/queryKeys";
 import { useCRDs } from "../../hooks/useResource";
 import { nameMatches } from "../../lib/format";
 import type { CRD, SearchKind, SearchResult } from "../../lib/types";
+import { useApplyDialog } from "../../contexts/applyDialog";
+import { useCanApply } from "../../hooks/useCanApply";
+import { Plus } from "lucide-react";
 
 const IS_MAC =
   typeof navigator !== "undefined" &&
@@ -67,6 +70,18 @@ export function SearchPalette({
   // <Routes>, not a descendant.
   const match = useMatch("/clusters/:cluster/*");
   const cluster = match?.params.cluster ?? "";
+
+  const dialog = useApplyDialog();
+
+  // When the operator picks the Apply YAML quick action: close the
+  // palette first (single Cmd+K invocation, single result), then open
+  // the shared dialog. The dialog lives at App level via
+  // ApplyDialogProvider, so palette unmount doesn't kill it.
+  const handleApplyAction = () => {
+    if (!cluster) return;
+    onClose();
+    dialog.open(cluster);
+  };
   const navigate = useNavigate();
 
   const [query, setQuery] = useState("");
@@ -264,7 +279,7 @@ export function SearchPalette({
           {!cluster ? (
             <Empty>open a cluster to search its resources</Empty>
           ) : !debounced ? (
-            <EmptyHint />
+            <EmptyHintWithActions cluster={cluster} onApplyClick={handleApplyAction} />
           ) : isFetching && results.length === 0 ? (
             <Empty>searching…</Empty>
           ) : isError ? (
@@ -536,13 +551,41 @@ function Empty({
   );
 }
 
-function EmptyHint() {
+function EmptyHintWithActions({
+  cluster,
+  onApplyClick,
+}: {
+  cluster: string;
+  onApplyClick: () => void;
+}) {
+  const canApply = useCanApply(cluster);
+  const showApply = canApply.allowed || canApply.loading;
   return (
-    <div className="px-4 py-8 text-center">
-      <p className="font-mono text-[12px] text-ink-muted">type to search</p>
-      <p className="mt-1.5 font-mono text-[10.5px] text-ink-faint">
-        across pods, deployments, services, configs and more
-      </p>
+    <div className="px-2 py-4">
+      {showApply && (
+        <div className="mb-2">
+          <div className="px-2 pb-1 font-mono text-[10px] uppercase tracking-[0.08em] text-ink-faint">
+            quick actions
+          </div>
+          <button
+            type="button"
+            onClick={onApplyClick}
+            className="group flex w-full items-center gap-2.5 rounded-sm px-2 py-1.5 text-left transition-colors hover:bg-surface-2"
+          >
+            <Plus aria-hidden className="size-4 text-ink-faint group-hover:text-accent" />
+            <span className="font-mono text-[12.5px] text-ink">Apply YAML</span>
+            <span className="ml-auto font-mono text-[10.5px] text-ink-faint">
+              paste / upload manifests
+            </span>
+          </button>
+        </div>
+      )}
+      <div className="px-2 py-2 text-center">
+        <p className="font-mono text-[12px] text-ink-muted">type to search</p>
+        <p className="mt-1.5 font-mono text-[10.5px] text-ink-faint">
+          across pods, deployments, services, configs and more
+        </p>
+      </div>
     </div>
   );
 }
