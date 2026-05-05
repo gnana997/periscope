@@ -17,10 +17,14 @@ on:
     tags:
       - "v*"
 
+# Top-level permissions are read-only by default. The release job
+# below grants the explicit write scopes it needs (contents to
+# create the GitHub Release, packages to push to ghcr.io,
+# id-token for cosign keyless signing + GH Attestations,
+# attestations to upload SLSA provenance via attest-build-provenance).
+# This shape passes OpenSSF Scorecard's Token-Permissions check.
 permissions:
-  contents: write       # create the GitHub Release
-  packages: write       # push to ghcr.io
-  id-token: write       # cosign keyless signing via GH OIDC
+  contents: read
 
 env:
   REGISTRY: ghcr.io
@@ -31,6 +35,11 @@ jobs:
   release:
     name: Build, sign, and publish
     runs-on: ubuntu-latest
+    permissions:
+      contents: write       # create the GitHub Release
+      packages: write       # push to ghcr.io
+      id-token: write       # cosign keyless signing + GH Attestations
+      attestations: write   # actions/attest-build-provenance
     steps:
       - uses: actions/checkout@v6
         with:
@@ -102,6 +111,20 @@ jobs:
             cosign sign --yes "${tag}@${DIGEST}"
           done
 
+      # SLSA build provenance attestation. The
+      # actions/attest-build-provenance action signs the predicate
+      # via Sigstore's public Fulcio CA (using the same OIDC
+      # identity as cosign), pushes the attestation as an OCI
+      # referrer next to the image, AND publishes it as a GitHub
+      # Attestation. OpenSSF Scorecard's Signed-Releases check
+      # picks up GitHub Attestations on recent versions.
+      - name: Attest server image provenance
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-name: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true
+
       # ── SBOM ───────────────────────────────────────────────────
       - name: Generate SBOM
         uses: anchore/sbom-action@v0
@@ -167,6 +190,13 @@ jobs:
           cosign sign --yes \
             "${{ env.REGISTRY }}/${{ env.CHART_REPO }}/periscope:${VERSION}@${DIGEST}"
 
+      - name: Attest server chart provenance
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-name: ${{ env.REGISTRY }}/${{ env.CHART_REPO }}/periscope
+          subject-digest: ${{ steps.helm_push.outputs.digest }}
+          push-to-registry: true
+
       # ── Agent image (#42) ─────────────────────────────────────
       #
       # Separate Dockerfile.agent build so the agent image stays
@@ -214,6 +244,13 @@ jobs:
             cosign sign --yes "${tag}@${DIGEST}"
           done
 
+      - name: Attest agent image provenance
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-name: ${{ env.REGISTRY }}/${{ github.repository }}-agent
+          subject-digest: ${{ steps.build_agent.outputs.digest }}
+          push-to-registry: true
+
       # ── Agent Helm chart ──────────────────────────────────────
       - name: Sync agent chart version to tag
         run: |
@@ -241,6 +278,13 @@ jobs:
           VERSION="${GITHUB_REF_NAME#v}"
           cosign sign --yes \
             "${{ env.REGISTRY }}/${{ env.CHART_REPO }}/periscope-agent:${VERSION}@${DIGEST}"
+
+      - name: Attest agent chart provenance
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-name: ${{ env.REGISTRY }}/${{ env.CHART_REPO }}/periscope-agent
+          subject-digest: ${{ steps.helm_push_agent.outputs.digest }}
+          push-to-registry: true
 
       # ── Artifact Hub repository metadata ──────────────────────
       #
