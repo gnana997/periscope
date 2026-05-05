@@ -37,6 +37,16 @@ jobs:
           cache: true
       - run: go test ./...
 
+      # govulncheck — Go vulnerability scanner. Only flags vulns
+      # actually present in the call graph (lower noise than
+      # generic dep scanners). Report-only: continue-on-error so
+      # findings show in the run UI but do not fail the build.
+      - name: Govulncheck
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          govulncheck ./...
+        continue-on-error: true
+
   web:
     name: Web (lint, test, build)
     runs-on: ubuntu-latest

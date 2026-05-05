@@ -1,0 +1,63 @@
+# Dependabot — auto-PRs for vulnerable / outdated dependencies across
+# the three ecosystems Periscope cares about. Weekly cadence keeps PR
+# noise low while still catching CVEs within a reasonable window.
+#
+# Grouping: minor + patch updates land in a single PR per ecosystem so
+# a typical week is one consolidated PR per ecosystem rather than a
+# fan-out of 30 single-package bumps. Major updates still fan out so
+# we can review breaking changes individually.
+
+version: 2
+
+updates:
+  # Go modules — the central server, agent, and shared internal packages.
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "08:00"
+      timezone: UTC
+    open-pull-requests-limit: 10
+    groups:
+      go-minor-and-patch:
+        update-types:
+          - minor
+          - patch
+
+  # npm — the SPA + tooling under web/.
+  - package-ecosystem: npm
+    directory: /web
+    schedule:
+      interval: weekly
+      day: monday
+      time: "08:00"
+      timezone: UTC
+    open-pull-requests-limit: 10
+    groups:
+      npm-minor-and-patch:
+        update-types:
+          - minor
+          - patch
+    # Some bundled dev-deps (vitest plugins, eslint configs) churn
+    # weekly with cosmetic-only releases. Ignore patch-only bumps for
+    # those to keep the dashboard tidy.
+    ignore:
+      - dependency-name: "*"
+        update-types:
+          - version-update:semver-patch
+
+  # GitHub Actions — pinned to major versions across our workflows.
+  # Dependabot bumps the major when a new one ships so we don't lag.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "08:00"
+      timezone: UTC
+    open-pull-requests-limit: 5
+    groups:
+      actions-all:
+        patterns:
+          - "*"

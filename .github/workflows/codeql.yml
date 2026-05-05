@@ -1,0 +1,66 @@
+# CodeQL — GitHub's static analysis for security bugs.
+# Runs on push to main + PRs + weekly cron. Findings land in the
+# repo's Security tab; this is intentionally report-only and does NOT
+# fail PRs. We can tighten later once we've watched the signal-to-noise
+# ratio on a few release cycles.
+#
+# Languages:
+#   - go        — backend (cmd/ + internal/)
+#   - javascript — picks up TypeScript via the JS extractor (web/)
+
+name: CodeQL
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: '0 7 * * 1'   # weekly, Mondays 07:00 UTC (an hour after Scorecard)
+
+permissions:
+  contents: read
+
+jobs:
+  analyze:
+    name: Analyze (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    permissions:
+      # Required to upload results to the Security tab.
+      security-events: write
+      # Required to fetch internal dependencies during build.
+      actions: read
+      contents: read
+
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [go, javascript]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Go
+        if: matrix.language == 'go'
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v4
+        with:
+          languages: ${{ matrix.language }}
+          # security-and-quality picks up more issues than the default
+          # security-extended; report-only mode means more signal isn't
+          # painful while we tune.
+          queries: security-and-quality
+
+      - name: Autobuild
+        uses: github/codeql-action/autobuild@v4
+
+      - name: Perform CodeQL analysis
+        uses: github/codeql-action/analyze@v4
+        with:
+          category: /language:${{ matrix.language }}
