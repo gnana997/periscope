@@ -12,6 +12,7 @@
 
 import { useId } from "react";
 import { Modal } from "../ui/Modal";
+import { ApplyYamlInput } from "./ApplyYamlInput";
 import { useApplyYamlState } from "../../hooks/useApplyYamlState";
 
 export interface ApplyYamlDialogProps {
@@ -53,14 +54,12 @@ export function ApplyYamlDialog({ open, onClose, cluster }: ApplyYamlDialogProps
 
         {/* ── Body ──────────────────────────────────────────────── */}
         <div className="flex-1 overflow-auto px-6 py-5">
-          <p className="text-sm text-ink-muted">
-            <em>YAML input + per-doc preview will land in subsequent
-            commits of this PR.</em>
-          </p>
-          {/* Placeholder so we can verify the modal renders + dismisses. */}
-          <div className="mt-4 rounded-sm border border-border bg-surface-2 px-3 py-2 font-mono text-[11px] text-ink-faint">
-            docs parsed: {state.docs.length} · busy: {state.busy}
-          </div>
+          <ApplyYamlInput value={state.yamlText} onChange={state.setYamlText} />
+          {state.docs.length > 0 && (
+            <p className="mt-3 font-mono text-[11px] text-ink-faint tabular">
+              {state.docs.length} document{state.docs.length === 1 ? "" : "s"} parsed
+            </p>
+          )}
         </div>
 
         {/* ── Footer ────────────────────────────────────────────── */}
