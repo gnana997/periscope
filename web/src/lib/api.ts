@@ -78,6 +78,9 @@ import type {
   HelmReleaseDetail,
   HelmHistoryResponse,
   HelmDiffResponse,
+  ChartFetchResult,
+  ChartVersionsResult,
+  ChartFetchRequest,
 } from "./types";
 
 class ApiError extends Error {
@@ -816,6 +819,44 @@ export const api = {
       `/api/clusters/${enc(cluster)}/helm/releases/${enc(namespace)}/${enc(name)}/diff?${params.toString()}`,
       signal,
     );
+  },
+
+  /**
+   * Helm chart fetch — version picker + values loader for the
+   * install dialog (#73). Two endpoints, two caches:
+   *   - chartVersions: GET, lightweight, called while typing
+   *   - chartValues:   POST, audited, called on Fetch click
+   *
+   * `nocache` bypasses the server-side cache and pulls fresh — wire
+   * this to a "refresh" button so operators who pushed a new chart
+   * version don't have to wait up to 5 min for the TTL.
+   */
+  chartVersions: (
+    cluster: string,
+    ref: string,
+    chartName: string,
+    opts?: { nocache?: boolean },
+    signal?: AbortSignal,
+  ) => {
+    const params = new URLSearchParams({ ref });
+    if (chartName) params.set("chart", chartName);
+    if (opts?.nocache) params.set("nocache", "true");
+    return getJSON<ChartVersionsResult>(
+      `/api/clusters/${enc(cluster)}/helm/chart/versions?${params.toString()}`,
+      signal,
+    );
+  },
+
+  chartValues: (
+    cluster: string,
+    body: ChartFetchRequest,
+    opts?: { nocache?: boolean },
+    signal?: AbortSignal,
+  ) => {
+    const url = `/api/clusters/${enc(cluster)}/helm/chart/values${
+      opts?.nocache ? "?nocache=true" : ""
+    }`;
+    return postJSON<ChartFetchResult>(url, body, signal);
   },
 };
 

@@ -43,6 +43,12 @@ const (
 	VerbExecClose    Verb = "exec_close"
 	VerbSecretReveal Verb = "secret_reveal"
 	VerbBulkDownload Verb = "bulk_download"
+	// VerbHelmChartFetch — operator pasted a chart ref (HTTP repo or
+	// OCI) and clicked Fetch to load values + schema for the install
+	// dialog (issue #73). User-initiated read, worth attributing —
+	// internal repo URLs end up in the audit trail too. NOT emitted
+	// for the version-list endpoint (called while typing).
+	VerbHelmChartFetch Verb = "helm_chart_fetch"
 	// VerbLogOpen is reserved for pod/workload log stream opens. No
 	// emission site exists yet; declared so the taxonomy is visible
 	// and a follow-up PR can wire it without revisiting this file.

@@ -13,7 +13,26 @@ tag.
 
 ## [Unreleased]
 
-_Nothing yet._
+### Added
+
+- Helm chart fetch backend (#73, sub-task of #72). Two new endpoints
+  `GET /api/clusters/{c}/helm/chart/versions` and
+  `POST /api/clusters/{c}/helm/chart/values` for the Helm install
+  dialog's version picker + values loader. Supports public HTTP chart
+  repos (decode `index.yaml` ourselves) and public OCI refs (via
+  `oras.land/oras-go/v2`). Both deps are kubectl-free, preserving the
+  v1.0 release-decoder philosophy of isolating Periscope from helm
+  SDK transitive churn. Rejects charts with sub-chart dependencies
+  with a structured `422 unsupported_dependencies` error. OCI tag
+  listing is pinned: media-type filter
+  (`application/vnd.cncf.helm.config.v1+json`), semver sort, 50-cap.
+  Two independent server-side caches with `?nocache=true` bypass.
+  Audit emits one `verb=helm_chart_fetch` row per `/values` call;
+  `/versions` is silent (called while typing). v1.1 ships
+  unauthenticated public refs only — private OCI auth (ECR via Pod
+  Identity / IRSA) is a follow-up sub-task. Frontend types + API
+  client + TanStack hooks ship alongside the backend; the install-
+  dialog UI lands in a sibling issue.
 
 ## [1.0.0]
 
