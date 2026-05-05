@@ -1364,6 +1364,7 @@ func applyResourceHandler(reg *clusters.Registry, auditer *audit.Emitter) creden
 				"force":  args.Force,
 			},
 		}
+
 		result, err := applyResourceFn(r.Context(), p, args)
 		if err != nil {
 			if errors.Is(err, context.Canceled) {
@@ -1413,6 +1414,8 @@ func triggerCronJobHandler(reg *clusters.Registry, auditer *audit.Emitter) crede
 				Group: "batch", Version: "v1", Resource: "cronjobs",
 				Namespace: args.Namespace, Name: args.Name,
 			},
+}
+}
 		}
 		result, err := k8s.TriggerCronJob(r.Context(), p, args)
 		if err != nil {
@@ -1462,6 +1465,7 @@ func deleteResourceHandler(reg *clusters.Registry, auditer *audit.Emitter) crede
 				Namespace: args.Namespace, Name: args.Name,
 			},
 		}
+
 		if err := k8s.DeleteResource(r.Context(), p, args); err != nil {
 			if errors.Is(err, context.Canceled) {
 				return
