@@ -164,7 +164,19 @@ func fetchHTTPIndex(ctx context.Context, repoURL string) (*indexFile, error) {
 }
 
 func httpGet(ctx context.Context, target string, maxBytes int) ([]byte, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
+	// Sanitize the URL upfront. Beyond what the dial-time SSRF guard
+	// catches at the network layer, this rejects malformed URLs and
+	// non-http(s) schemes before any I/O fires — and gives static
+	// analysis (CodeQL go/request-forgery) a clear sanitizer barrier
+	// between the operator-supplied ref string and net/http's request
+	// constructor. The reconstructed URL is functionally identical to
+	// `target` but flows from a typed *url.URL whose scheme has been
+	// explicitly validated against a finite set.
+	safeURL, err := sanitizeChartFetchURL(target)
+	if err != nil {
+		return nil, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, safeURL, nil)
 	if err != nil {
 		return nil, fmt.Errorf("%w: bad URL: %v", ErrChartUnsupportedRef, err)
 	}
@@ -207,4 +219,51 @@ func classifyHTTPErr(err error) error {
 	// SPA shows a single, clear message rather than an opaque
 	// dial:tcp:127.0.0.1:443: connection refused.
 	return fmt.Errorf("%w: %v", ErrChartUnreachable, err)
+}
+
+// sanitizeChartFetchURL parses target, validates the scheme and host,
+// and returns a reconstructed URL string built from the typed
+// *url.URL components. The reconstruction is the load-bearing piece
+// for CodeQL's go/request-forgery query: data flow from the
+// untrusted string to the request constructor passes through a
+// scheme allow-list (http / https only) and a *url.URL field
+// reassembly, which the query treats as a sanitizer.
+//
+// Functionally equivalent to using `target` directly when the input
+// is well-formed, but rejects upfront:
+//   - malformed URLs (url.Parse errors)
+//   - non-http(s) schemes (defends against file://, gopher://, etc.)
+//   - missing host (rejects relative URLs that would otherwise
+//     resolve against nothing)
+//
+// The dial-time SSRF guard (helm_chart_ssrf.go) is still the runtime
+// authority on which destinations are allowed; this function adds an
+// orthogonal static-analysis-friendly sanitizer.
+func sanitizeChartFetchURL(target string) (string, error) {
+	parsed, err := url.Parse(target)
+	if err != nil {
+		return "", fmt.Errorf("%w: bad URL: %v", ErrChartUnsupportedRef, err)
+	}
+	switch parsed.Scheme {
+	case "http", "https":
+		// allowed
+	default:
+		return "", fmt.Errorf("%w: scheme %q not allowed", ErrChartUnsupportedRef, parsed.Scheme)
+	}
+	if parsed.Host == "" {
+		return "", fmt.Errorf("%w: missing host", ErrChartUnsupportedRef)
+	}
+	// Reassemble from validated parts. Note: we don't preserve
+	// userinfo (parsed.User) — chart fetches in v1.1 are anonymous,
+	// and embedded credentials in URLs are an anti-pattern operators
+	// shouldn't be using. Stripping them defends against
+	// credentials-in-logs leaks if a malformed URL hits an error path
+	// that includes target in the message.
+	safe := &url.URL{
+		Scheme:   parsed.Scheme,
+		Host:     parsed.Host,
+		Path:     parsed.Path,
+		RawQuery: parsed.RawQuery,
+	}
+	return safe.String(), nil
 }

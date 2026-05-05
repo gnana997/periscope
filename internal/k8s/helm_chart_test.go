@@ -471,3 +471,43 @@ func writeTarFile(tw *tar.Writer, name, body string) {
 	_, _ = tw.Write([]byte(body))
 }
 
+
+func TestSanitizeChartFetchURL(t *testing.T) {
+	cases := []struct {
+		name      string
+		in        string
+		want      string
+		wantErr   bool
+		wantMatch string // substring of the returned safe URL
+	}{
+		{name: "https passthrough", in: "https://example.com/path", want: "https://example.com/path"},
+		{name: "http allowed", in: "http://example.com/", want: "http://example.com/"},
+		{name: "preserves query", in: "https://example.com/path?a=1&b=2", want: "https://example.com/path?a=1&b=2"},
+		{name: "strips userinfo", in: "https://alice:secret@example.com/path", wantMatch: "https://example.com/path"},
+		{name: "rejects ftp", in: "ftp://example.com", wantErr: true},
+		{name: "rejects file", in: "file:///etc/passwd", wantErr: true},
+		{name: "rejects gopher", in: "gopher://example.com", wantErr: true},
+		{name: "rejects relative", in: "/just/a/path", wantErr: true},
+		{name: "rejects empty", in: "", wantErr: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := sanitizeChartFetchURL(tc.in)
+			if tc.wantErr {
+				if err == nil {
+					t.Errorf("expected error, got %q", got)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if tc.want != "" && got != tc.want {
+				t.Errorf("got %q, want %q", got, tc.want)
+			}
+			if tc.wantMatch != "" && !strings.Contains(got, tc.wantMatch) {
+				t.Errorf("got %q, want substring %q", got, tc.wantMatch)
+			}
+		})
+	}
+}
