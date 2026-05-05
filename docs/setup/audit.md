@@ -1,6 +1,6 @@
 # Audit log
 
-Periscope records every privileged action — pod exec, secret reveal,
+Periscope records every privileged action — pod exec, secret reveal, bulk YAML download,
 resource apply / delete / scale / label edit, cronjob trigger — as a
 structured `audit.Event`. Events flow through an in-process Emitter to
 one or more sinks.

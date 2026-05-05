@@ -1011,6 +1011,17 @@ func main() {
 	router.Get("/api/clusters/{cluster}/secrets/{ns}/{name}/data/{key}",
 		credentials.Wrap(factory, secretRevealHandler(registry, auditEmitter)))
 
+	// --- Bulk download audit endpoint ---
+	//
+	// One row per bulk YAML download from the SPA. Records the
+	// operator's intent ("alice downloaded N {kind} from cluster X")
+	// so audit reviewers can answer that question without joining
+	// individual /yaml read events. Per-fetch RBAC is still
+	// enforced by the underlying yamlHandler routes; this endpoint
+	// only records the batch.
+	router.Post("/api/clusters/{cluster}/audit/bulk-download",
+		credentials.Wrap(factory, bulkDownloadAuditHandler(registry, auditEmitter)))
+
 	// --- Generic resource mutation endpoints (PR-D) ---
 	//
 	// One pair of routes covers every editable resource — Pod, Deployment,
@@ -1658,6 +1669,153 @@ func secretYamlHandler(reg *clusters.Registry, auditer *audit.Emitter) credentia
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(yaml))
 	}
+}
+
+// bulkDownloadCap mirrors the SPA's per-tab selection cap (see
+// useTableSelection.DEFAULT_CAP). Server enforces defensively so a
+// patched / forged client can't blow audit-row size out.
+const bulkDownloadCap = 100
+
+// bulkDownloadIDCap caps the slice of resource IDs that lands in
+// `Extra.ids`. The full count lives in `Extra.count` regardless; the
+// IDs are a forensic sample, not the source of truth.
+const bulkDownloadIDCap = 50
+
+// bulkDownloadAuditHandler records a single audit row per bulk YAML
+// download initiated from the SPA. The actual /yaml fetches go
+// through the existing per-kind handlers (each with its own RBAC and,
+// for secrets, its own audit row); this endpoint only records the
+// operator's batch intent so audit reviewers can answer "what did
+// alice bulk-download from prod last week?" with a single query.
+//
+// Outcome semantics:
+//   - "success" → at least one /yaml fetch succeeded (partials count as success;
+//     `Extra.failure_count` carries the partial-failure count)
+//   - "failure" → zero /yaml fetches succeeded (RBAC denies, network errors,
+//     etc.). The operator's intent is still audit-worthy.
+//
+// The endpoint is RBAC-open for any authenticated user — anyone who
+// can call /yaml can also call this. The audit gate doesn't need
+// extra authorization on top of the per-fetch RBAC.
+func bulkDownloadAuditHandler(reg *clusters.Registry, auditer *audit.Emitter) credentials.Handler {
+	type req struct {
+		Kind         string   `json:"kind"`
+		Count        int      `json:"count"`
+		IDs          []string `json:"ids"`
+		Outcome      string   `json:"outcome"` // "success" | "failure"
+		FailureCount int      `json:"failure_count"`
+	}
+	return func(w http.ResponseWriter, r *http.Request, p credentials.Provider) {
+		c, ok := reg.ByName(chi.URLParam(r, "cluster"))
+		if !ok {
+			http.Error(w, "cluster not found", http.StatusNotFound)
+			return
+		}
+		var body req
+		// 16 KiB is comfortably above the worst-case payload (50 IDs of
+		// reasonable length + a handful of small fields) and well under
+		// any sane request budget.
+		if err := json.NewDecoder(io.LimitReader(r.Body, 1<<14)).Decode(&body); err != nil {
+			http.Error(w, "malformed body", http.StatusBadRequest)
+			return
+		}
+		if !isKnownBulkDownloadKind(body.Kind) {
+			http.Error(w, "unknown kind", http.StatusBadRequest)
+			return
+		}
+		if body.Count <= 0 || body.Count > bulkDownloadCap {
+			http.Error(w, "count out of range", http.StatusBadRequest)
+			return
+		}
+		if len(body.IDs) > bulkDownloadIDCap {
+			// Server-side truncate — never reject. The operator already
+			// did the download; we'd rather record a slightly-truncated
+			// row than no row at all.
+			body.IDs = body.IDs[:bulkDownloadIDCap]
+		}
+		if body.FailureCount < 0 {
+			body.FailureCount = 0
+		}
+		outcome := audit.OutcomeFailure
+		if body.Outcome == "success" {
+			outcome = audit.OutcomeSuccess
+		}
+		auditer.Record(r.Context(), audit.Event{
+			Actor:   actorFromContext(r.Context()),
+			Verb:    audit.VerbBulkDownload,
+			Outcome: outcome,
+			Cluster: c.Name,
+			Resource: audit.ResourceRef{
+				Resource:  body.Kind,
+				Namespace: "*", // bulk selections may span namespaces
+			},
+			Extra: map[string]any{
+				"kind":          body.Kind,
+				"count":         body.Count,
+				"ids":           body.IDs,
+				"failure_count": body.FailureCount,
+			},
+		})
+		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
+// bulkDownloadableKinds enumerates the URL plurals the SPA may
+// pass as `kind` for a bulk YAML download. Equivalent to the set
+// of /api/clusters/{c}/{plural}/.../yaml routes registered in
+// main(). Custom resources use the `customresources/<plural>`
+// prefix since their plural varies per CRD.
+var bulkDownloadableKinds = map[string]struct{}{
+	// namespaced (have /{ns}/{name}/yaml)
+	"configmaps":              {},
+	"cronjobs":                {},
+	"daemonsets":              {},
+	"deployments":             {},
+	"endpointslices":          {},
+	"horizontalpodautoscalers": {},
+	"ingresses":               {},
+	"jobs":                    {},
+	"limitranges":             {},
+	"networkpolicies":         {},
+	"poddisruptionbudgets":    {},
+	"pods":                    {},
+	"pvcs":                    {},
+	"replicasets":             {},
+	"resourcequotas":          {},
+	"rolebindings":            {},
+	"roles":                   {},
+	"secrets":                 {},
+	"serviceaccounts":         {},
+	"services":                {},
+	"statefulsets":            {},
+	// cluster-scoped (have /{name}/yaml)
+	"clusterrolebindings":     {},
+	"clusterroles":            {},
+	"ingressclasses":          {},
+	"namespaces":              {},
+	"priorityclasses":         {},
+	"pvs":                     {},
+	"runtimeclasses":          {},
+	"storageclasses":          {},
+}
+
+// isKnownBulkDownloadKind validates the SPA-supplied kind label.
+// The set lives one place (above) — single source of truth shared
+// with the audit log, so a typo on the SPA side rejects fast.
+// Custom resources are accepted via the `customresources/<plural>`
+// prefix; the plural after the slash isn't validated server-side
+// since the CRD catalog is dynamic.
+func isKnownBulkDownloadKind(kind string) bool {
+	if kind == "" {
+		return false
+	}
+	if _, ok := bulkDownloadableKinds[kind]; ok {
+		return true
+	}
+	if strings.HasPrefix(kind, "customresources/") {
+		return len(kind) > len("customresources/")
+	}
+	return false
 }
 
 // podLogsHandler streams a single pod's logs as Server-Sent Events.

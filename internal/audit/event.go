@@ -42,6 +42,7 @@ const (
 	VerbExecOpen     Verb = "exec_open"
 	VerbExecClose    Verb = "exec_close"
 	VerbSecretReveal Verb = "secret_reveal"
+	VerbBulkDownload Verb = "bulk_download"
 	// VerbLogOpen is reserved for pod/workload log stream opens. No
 	// emission site exists yet; declared so the taxonomy is visible
 	// and a follow-up PR can wire it without revisiting this file.

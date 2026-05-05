@@ -22,6 +22,7 @@ import {
   buildFilename,
   triggerYamlDownload,
 } from "../../lib/multiYaml";
+import { recordBulkDownload } from "../../lib/api";
 import type { TableSelection } from "../../hooks/useTableSelection";
 
 export interface BulkActionsToolbarProps<T> {
@@ -111,6 +112,24 @@ export function BulkActionsToolbar<T>({
           showToast("download canceled", "info");
           return;
         }
+        // Emit one structured audit row per download — fire-and-forget
+        // so a failed audit POST never blocks the operator. Both the
+        // success and the all-failed paths emit; both are auditable
+        // operator intent. See RFC 0003 §4 (`bulk_download` verb).
+        const auditOutcome = result.successCount === 0 ? "failure" : "success";
+        void recordBulkDownload(cluster, {
+          kind: kindLabel,
+          count: selectedRows.length,
+          ids: selectedRows.slice(0, 50).map((row) => rowKey(row)),
+          outcome: auditOutcome,
+          failure_count: result.failures.length,
+        }).catch(() => {
+          // Audit POST failed — log nothing visible. The download
+          // already completed. The audit gap is acceptable: missing
+          // audit row beats blocking the user on a transient API
+          // failure of the audit endpoint itself.
+        });
+
         if (result.successCount === 0) {
           showToast(
             `download failed — 0 of ${selectedRows.length} fetched`,
