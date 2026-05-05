@@ -43,6 +43,14 @@ const (
 	VerbExecClose    Verb = "exec_close"
 	VerbSecretReveal Verb = "secret_reveal"
 	VerbBulkDownload Verb = "bulk_download"
+	// VerbRollbackIntent is emitted before the apiserver patch fires —
+	// captures the operator's intent (target revision, reason) even
+	// when the patch later fails or the request hangs. Pair with
+	// VerbRollback (post-outcome) for a complete forensics trace.
+	VerbRollbackIntent Verb = "rollback_intent"
+	// VerbRollback is the outcome row for a workload rollback (issue
+	// #71). Carries the new revision number on success in Extra.
+	VerbRollback Verb = "rollback"
 	// VerbLogOpen is reserved for pod/workload log stream opens. No
 	// emission site exists yet; declared so the taxonomy is visible
 	// and a follow-up PR can wire it without revisiting this file.

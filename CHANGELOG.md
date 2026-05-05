@@ -13,7 +13,24 @@ tag.
 
 ## [Unreleased]
 
-_Nothing yet._
+### Added
+
+- Workload rollback button for Deployment / StatefulSet / DaemonSet
+  (#71). Opens a revision picker with Monaco YAML diff preview of the
+  current pod template vs the target revision. Mirrors `kubectl
+  rollout undo` — strategic-merge-patches `spec.template` and writes
+  the `kubernetes.io/change-cause` annotation. Pre-flight warnings
+  cover the three production footguns: GitOps-managed workloads
+  (ArgoCD / Helm / Flux annotations or labels) get a yellow banner
+  warning that reconcile will revert the rollback; paused Deployments
+  get a "resume rollout" pane instead of the picker; HPA-targeted
+  workloads get an inline note. Optional reason field flows into both
+  the change-cause annotation and the structured audit row. New API
+  endpoints `GET /revisions` (history + pre-flight metadata) and
+  `POST /rollback` (the patch); two new audit verbs
+  `rollback_intent` (pre-patch) + `rollback` (post-outcome) so
+  incident review captures attempts that hang or fail mid-flight.
+  See [`docs/setup/workload-rollback.md`](docs/setup/workload-rollback.md).
 
 ## [1.0.0]
 

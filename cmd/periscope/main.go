@@ -582,6 +582,14 @@ func main() {
 
 	router.Post("/api/clusters/{cluster}/cronjobs/{ns}/{name}/trigger",
 		credentials.Wrap(factory, triggerCronJobHandler(registry, auditEmitter)))
+
+	// Workload rollback (#71). Rolls back Deployment / StatefulSet /
+	// DaemonSet to a chosen previous revision. {kind} is the apiserver
+	// resource plural; the handlers reject unsupported kinds with 400.
+	router.Get("/api/clusters/{cluster}/{kind}/{ns}/{name}/revisions",
+		credentials.Wrap(factory, listRevisionsHandler(registry)))
+	router.Post("/api/clusters/{cluster}/{kind}/{ns}/{name}/rollback",
+		credentials.Wrap(factory, rollbackHandler(registry, auditEmitter)))
 	router.Get("/api/clusters/{cluster}/pvcs/{ns}/{name}", credentials.Wrap(factory,
 		detailHandler(registry, "pvc",
 			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, ns, name string) (k8s.PVCDetail, error) {

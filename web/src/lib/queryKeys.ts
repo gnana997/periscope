@@ -76,6 +76,9 @@ export const queryKeys = {
       // single prefix invalidation sweeps it.
       yamlDrift: (ns: string, name: string) =>
         ["cluster", c, "kind", kind, "yaml-drift", ns, name] as const,
+      // Workload rollback (#71) — revision history + pre-flight.
+      revisions: (ns: string, name: string) =>
+        ["cluster", c, "kind", kind, "revisions", ns, name] as const,
     }),
 
     // Helm release browser. Cluster-scoped; the storage Secret/CM

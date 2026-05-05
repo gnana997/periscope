@@ -78,6 +78,9 @@ import type {
   HelmReleaseDetail,
   HelmHistoryResponse,
   HelmDiffResponse,
+  RevisionHistory,
+  RollbackRequest,
+  RollbackResponse,
 } from "./types";
 
 class ApiError extends Error {
@@ -817,7 +820,52 @@ export const api = {
       signal,
     );
   },
+
+  /**
+   * Workload rollback (#71). Two endpoints, called from the
+   * RollbackDialog: GET history (revision picker) and POST rollback
+   * (the patch). Both are kind-gated server-side — supplying an
+   * unsupported kind returns 400.
+   */
+  revisions: (
+    cluster: string,
+    kind: RollbackableKind,
+    namespace: string,
+    name: string,
+    signal?: AbortSignal,
+  ) =>
+    getJSON<RevisionHistory>(
+      `/api/clusters/${enc(cluster)}/${enc(kind)}/${enc(namespace)}/${enc(name)}/revisions`,
+      signal,
+    ),
+
+  rollback: (
+    cluster: string,
+    kind: RollbackableKind,
+    namespace: string,
+    name: string,
+    body: RollbackRequest,
+    signal?: AbortSignal,
+  ) =>
+    postJSON<RollbackResponse>(
+      `/api/clusters/${enc(cluster)}/${enc(kind)}/${enc(namespace)}/${enc(name)}/rollback`,
+      body,
+      signal,
+    ),
 };
+
+/** Workload kinds that have apiserver-native rollout history. */
+export type RollbackableKind = "deployments" | "statefulsets" | "daemonsets";
+
+export const ROLLBACKABLE_KINDS: RollbackableKind[] = [
+  "deployments",
+  "statefulsets",
+  "daemonsets",
+];
+
+export function isRollbackable(kind: string): kind is RollbackableKind {
+  return (ROLLBACKABLE_KINDS as string[]).includes(kind);
+}
 
 // --- write helpers (kept out of `api` block so the call sites stay readable) ---
 

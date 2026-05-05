@@ -1438,3 +1438,52 @@ export interface HelmDiffResponse {
   to: HelmDiffSide;
   changes: HelmDiffItem[];
 }
+
+// ─── Workload rollback (#71) ─────────────────────────────────────────
+
+/** One entry in the rollout history of a Deployment / StatefulSet /
+ *  DaemonSet. `podTemplate` is the full PodTemplateSpec serialized
+ *  as a generic record so the dialog can drive the diff viewer
+ *  without an extra round-trip per click. */
+export interface Revision {
+  revision: number;
+  isCurrent: boolean;
+  changeCause?: string;
+  createdAt: string;
+  podTemplateHash?: string;
+  images: string[];
+  podTemplate: Record<string, unknown>;
+}
+
+/** Detected upstream reconciler. The dialog renders a yellow banner
+ *  warning the operator that a rollback may be reverted on the next
+ *  reconcile cycle unless they also revert the source. */
+export interface ManagedBy {
+  controller: "argocd" | "helm" | "flux";
+  instance?: string;
+}
+
+export interface RevisionHistory {
+  currentRevision: number;
+  revisions: Revision[];
+  /** Deployment-only; null/undefined for STS / DS. When true, the
+   *  dialog refuses the rollback path and offers a Resume button. */
+  paused?: boolean;
+  managedBy?: ManagedBy;
+  /** Name of an HPA in the same namespace whose scaleTargetRef
+   *  points at this workload. Empty when none. */
+  hpaTarget?: string;
+}
+
+export interface RollbackRequest {
+  revision: number;
+  /** Optional human reason. Flows into the
+   *  `kubernetes.io/change-cause` annotation on the new revision and
+   *  the structured audit row. */
+  reason?: string;
+}
+
+export interface RollbackResponse {
+  newRevision: number;
+  patchedAt: string;
+}
