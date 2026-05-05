@@ -172,7 +172,7 @@ func TestRollback_Deployment_PatchShape(t *testing.T) {
 
 	// Capture the PATCH so we can assert on its body.
 	var capturedPatch []byte
-	cs.Fake.PrependReactor("patch", "deployments", func(action clientgotesting.Action) (bool, runtime.Object, error) {
+	cs.PrependReactor("patch", "deployments", func(action clientgotesting.Action) (bool, runtime.Object, error) {
 		patchAction, ok := action.(clientgotesting.PatchAction)
 		if !ok {
 			return false, nil, nil
