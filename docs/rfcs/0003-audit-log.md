@@ -111,9 +111,18 @@ are not allowed — every emission site uses a `audit.Verb*` constant.
 | `delete` | `deleteResourceHandler` | `success` / `failure` / `denied` | — |
 | `trigger` | `triggerCronJobHandler` | `success` / `failure` / `denied` | on success: `jobName: string` |
 | `secret_reveal` | `secretRevealHandler` | `success` / `failure` / `denied` | `key: string`; on success also `size: int` (bytes of the decoded value) |
+| `bulk_download` | `bulkDownloadAuditHandler` (POST `/api/clusters/{c}/audit/bulk-download`, called by the SPA after a bulk YAML download resolves) | `success` (≥1 fetch succeeded) / `failure` (zero fetches succeeded) | `kind: string`, `count: int`, `ids: []string` (server-truncated to 50), `failure_count: int` |
 | `exec_open` | `execHandler` immediately after session admit | `success` only | `session_id`, `container`, `tty`, `command`, `k8s_identity`, `started_at` |
 | `exec_close` | `execHandler` once `execsess.Run` returns | `success` / `failure` | all `exec_open` fields plus `transport`, `ended_at`, `duration_ms`, `exit_code`, `bytes_stdin`, `bytes_stdout`, `err`. `Reason` carries the close disposition: `completed` / `idle_timeout` / `abort` / `server_error` |
 | `log_open` | _reserved_ | _reserved_ | _reserved_ |
+
+`bulk_download` is **SPA-emitted**, not server-derived. The endpoint
+doesn't gate access — anyone who can call /yaml can also POST
+/audit/bulk-download — because the auditable event is the operator's
+batch *intent*, recorded once. The per-fetch RBAC is enforced by the
+underlying yamlHandler routes. A failed audit POST is fire-and-forget
+client-side: the download already happened, the audit row is the
+thing we're willing to lose, not the user's work.
 
 `apply` is intentionally a single verb covering both create and update.
 Periscope's mutation surface is `PATCH application/apply-patch+yaml`

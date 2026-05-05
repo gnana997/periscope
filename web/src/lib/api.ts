@@ -1002,4 +1002,52 @@ export async function mintAgentToken(cluster: string, signal?: AbortSignal): Pro
   return (await res.json()) as AgentTokenIssuance;
 }
 
+
+/**
+ * recordBulkDownload — emit one structured audit row for a bulk YAML
+ * download. The actual /yaml fetches are unchanged; this endpoint
+ * only records "alice bulk-downloaded N {kind} from cluster X" so
+ * audit reviewers can answer that question without joining
+ * individual /yaml read events. See RFC 0003 §4 (`bulk_download`
+ * verb) for the schema.
+ *
+ * Outcome semantics:
+ *   - "success" — at least one /yaml fetch succeeded (partials
+ *     count as success; pass `failure_count` for the partial count)
+ *   - "failure" — zero /yaml fetches succeeded. The operator's
+ *     intent is still audit-worthy.
+ *
+ * Caller should fire-and-forget — a failed audit POST must not
+ * block the user, the download has already been served.
+ */
+export interface BulkDownloadAuditBody {
+  kind: string;
+  count: number;
+  ids: string[];
+  outcome: "success" | "failure";
+  failure_count: number;
+}
+
+export async function recordBulkDownload(
+  cluster: string,
+  body: BulkDownloadAuditBody,
+): Promise<void> {
+  const res = await fetch(
+    `/api/clusters/${encodeURIComponent(cluster)}/audit/bulk-download`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    },
+  );
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new ApiError(
+      `${res.status} ${res.statusText} on /audit/bulk-download`,
+      res.status,
+      text,
+    );
+  }
+}
+
 export { ApiError };

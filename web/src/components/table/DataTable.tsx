@@ -323,6 +323,7 @@ function RowCheckbox({ checked, rowId }: { checked: boolean; rowId: string }) {
       // will warn about a controlled input without a handler.
       onChange={() => {}}
       aria-label={`select row ${rowId}`}
+      tabIndex={-1}
       className="h-3.5 w-3.5 cursor-pointer accent-accent"
     />
   );

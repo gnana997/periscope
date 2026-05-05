@@ -17,7 +17,10 @@ export interface BulkOptions<T> {
   kindLabel: string;
   fetchYaml: (row: T, signal: AbortSignal) => Promise<string>;
   /** Optional — used to gate the secret-reveal confirm dialog. */
-  isSecret?: (row: T) => boolean;
+  /** Mirrors `BulkActionsToolbar.confirmReveal`. Pass `() => true` for
+   *  kinds where every row is sensitive (Secrets); use a per-row
+   *  predicate for mixed kinds. */
+  confirmReveal?: (row: T) => boolean;
   /** Override the default 100-row cap. */
   cap?: number;
 }
@@ -52,7 +55,7 @@ export function SelectableDataTable<T>({
         cluster={bulk.cluster}
         kindLabel={bulk.kindLabel}
         fetchYaml={bulk.fetchYaml}
-        isSecret={bulk.isSecret}
+        confirmReveal={bulk.confirmReveal}
       />
       {tableNode}
     </div>

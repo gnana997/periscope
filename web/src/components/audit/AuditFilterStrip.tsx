@@ -17,6 +17,7 @@ const VERBS = [
   "exec_close",
   "secret_reveal",
   "log_open",
+  "bulk_download",
 ] as const;
 
 
