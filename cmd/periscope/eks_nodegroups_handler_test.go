@@ -65,9 +65,9 @@ func withFakeNodegroupsClient(t *testing.T, fake *fakeEKSNodegroupsClient) {
 // session. Reuses the recordingSink + fakeProvider from the package
 // scaffolding (audit_test_helpers_test.go / cani_handler_test.go).
 //
-// The amiCache is optional — pass nil to test the no-drift path
-// (PR-2 commit 2 behavior); pass a cache to exercise drift fold-in
-// (PR-3 commit 3 behavior).
+// `amiCache` is optional — nil exercises the no-drift path (the PR-2
+// shape, where DriftComputed stays false on every row); a non-nil
+// cache exercises the drift fold-in path that production runs.
 func invokeNodegroups(t *testing.T, reg *clusters.Registry, cache *eksNodegroupsCache, sink *recordingSink, url string, params map[string]string, isDetail bool) *httptest.ResponseRecorder {
 	return invokeNodegroupsWithDrift(t, reg, cache, nil, sink, url, params, isDetail)
 }
@@ -77,9 +77,9 @@ func invokeNodegroupsWithDrift(t *testing.T, reg *clusters.Registry, cache *eksN
 	emitter := audit.New(sink)
 	var h credentials.Handler
 	if isDetail {
-		h = eksNodegroupsGetHandlerWithDrift(reg, cache, amiCache, emitter)
+		h = eksNodegroupsGetHandler(reg, cache, amiCache, emitter)
 	} else {
-		h = eksNodegroupsListHandlerWithDrift(reg, cache, amiCache, emitter)
+		h = eksNodegroupsListHandler(reg, cache, amiCache, emitter)
 	}
 	req := httptest.NewRequest(http.MethodGet, url, http.NoBody)
 	rctx := chi.NewRouteContext()

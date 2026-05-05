@@ -288,9 +288,9 @@ func main() {
 	amiCatalogCacheTTL := 30 * time.Minute
 	amiCatalogC := newAMICatalogCache(amiCatalogCacheTTL)
 	router.Get("/api/clusters/{cluster}/eks/nodegroups", credentials.Wrap(factory,
-		eksNodegroupsListHandlerWithDrift(registry, eksNodegroupsC, amiCatalogC, auditEmitter)))
+		eksNodegroupsListHandler(registry, eksNodegroupsC, amiCatalogC, auditEmitter)))
 	router.Get("/api/clusters/{cluster}/eks/nodegroups/{name}", credentials.Wrap(factory,
-		eksNodegroupsGetHandlerWithDrift(registry, eksNodegroupsC, amiCatalogC, auditEmitter)))
+		eksNodegroupsGetHandler(registry, eksNodegroupsC, amiCatalogC, auditEmitter)))
 
 	// --- Overview / dashboard ---
 

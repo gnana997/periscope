@@ -164,16 +164,13 @@ type NodegroupDetail struct {
 
 // ── Handlers ─────────────────────────────────────────────────────────
 
-func eksNodegroupsListHandler(reg *clusters.Registry, cache *eksNodegroupsCache, emitter *audit.Emitter) func(http.ResponseWriter, *http.Request, credentials.Provider) {
-	return eksNodegroupsListHandlerWithDrift(reg, cache, nil, emitter)
-}
-
-// eksNodegroupsListHandlerWithDrift is the drift-aware handler.
-// `amiCache` may be nil in tests; in that case drift fields stay
-// zero (DriftComputed=false on every row). main.go always passes a
-// non-nil cache so production responses populate drift for
-// AWS-managed (non-CUSTOM) nodegroups.
-func eksNodegroupsListHandlerWithDrift(reg *clusters.Registry, cache *eksNodegroupsCache, amiCache *amiCatalogCache, emitter *audit.Emitter) func(http.ResponseWriter, *http.Request, credentials.Provider) {
+// eksNodegroupsListHandler returns the cluster's managed node group
+// list with drift fields folded onto each row. `amiCache` may be
+// nil in tests; in that case drift stays uncomputed
+// (DriftComputed=false on every row) and the SPA renders "—" in the
+// drift column. main.go always passes a non-nil cache so production
+// responses populate drift for AWS-managed (non-CUSTOM) nodegroups.
+func eksNodegroupsListHandler(reg *clusters.Registry, cache *eksNodegroupsCache, amiCache *amiCatalogCache, emitter *audit.Emitter) func(http.ResponseWriter, *http.Request, credentials.Provider) {
 	return func(w http.ResponseWriter, r *http.Request, p credentials.Provider) {
 		c, ok := reg.ByName(chi.URLParam(r, "cluster"))
 		if !ok {
@@ -269,11 +266,9 @@ func eksNodegroupsListHandlerWithDrift(reg *clusters.Registry, cache *eksNodegro
 	}
 }
 
-func eksNodegroupsGetHandler(reg *clusters.Registry, cache *eksNodegroupsCache, emitter *audit.Emitter) func(http.ResponseWriter, *http.Request, credentials.Provider) {
-	return eksNodegroupsGetHandlerWithDrift(reg, cache, nil, emitter)
-}
-
-func eksNodegroupsGetHandlerWithDrift(reg *clusters.Registry, cache *eksNodegroupsCache, amiCache *amiCatalogCache, emitter *audit.Emitter) func(http.ResponseWriter, *http.Request, credentials.Provider) {
+// eksNodegroupsGetHandler is the per-nodegroup detail handler.
+// Same amiCache nil-handling contract as the list handler.
+func eksNodegroupsGetHandler(reg *clusters.Registry, cache *eksNodegroupsCache, amiCache *amiCatalogCache, emitter *audit.Emitter) func(http.ResponseWriter, *http.Request, credentials.Provider) {
 	return func(w http.ResponseWriter, r *http.Request, p credentials.Provider) {
 		c, ok := reg.ByName(chi.URLParam(r, "cluster"))
 		if !ok {
