@@ -2,6 +2,7 @@ package auth
 
 import (
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 	"net/url"
@@ -109,6 +110,12 @@ func CallbackHandler(client *OIDCClient, store SessionStore, cfg Config) http.Ha
 		}
 		s, err := client.Exchange(r.Context(), code, verifier, sessID, cfg.Session.AbsoluteTimeout)
 		if err != nil {
+			if errors.Is(err, ErrGroupsClaimMissing) {
+				slog.ErrorContext(r.Context(), "auth.login_failed",
+					"reason", "groups_claim_missing", "err", err)
+				http.Error(w, "your IdP did not return a groups claim — contact your admin (groupsClaim configured in periscope auth.yaml is absent from the OIDC tokens).", http.StatusBadGateway)
+				return
+			}
 			slog.ErrorContext(r.Context(), "auth.login_failed",
 				"reason", "code_exchange_failed", "err", err)
 			http.Error(w, "couldn't complete login", http.StatusBadGateway)
@@ -233,6 +240,15 @@ func WhoamiHandler(store SessionStore, cfg Config, resolver *authz.Resolver, aud
 				auditScope = "all"
 			}
 		}
+		// Always emit groups as a JSON array (never null). Go marshals a
+		// nil []string as null, which the SPA's UserMenu treats as a
+		// programming error and crashes on. A user with zero groups is
+		// a legitimate state (defaultTier in tier mode covers it), so
+		// the wire shape must be a stable [].
+		groups := s.Groups
+		if groups == nil {
+			groups = []string{}
+		}
 		body := struct {
 			Subject    string   `json:"subject"`
 			Email      string   `json:"email"`
@@ -246,7 +262,7 @@ func WhoamiHandler(store SessionStore, cfg Config, resolver *authz.Resolver, aud
 		}{
 			Subject:    s.Subject,
 			Email:      s.Email,
-			Groups:     s.Groups,
+			Groups:     groups,
 			Mode:       string(cfg.Mode),
 			AuthzMode:  authzMode,
 			Tier:       tier,

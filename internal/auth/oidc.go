@@ -166,14 +166,31 @@ func (c *OIDCClient) LogoutURL(idTokenHint string) string {
 	return u
 }
 
+// ErrGroupsClaimMissing means the configured groupsClaim was absent
+// from BOTH the ID token and the access token. This is distinct from
+// "claim present but empty" — an absent claim almost always indicates
+// an IdP misconfiguration (Action not attached, claim name typo,
+// connection not enriching the token). Treating it as "user has no
+// groups" silently funnels users to defaultTier, masking the real
+// problem; treating it as a hard failure surfaces it.
+var ErrGroupsClaimMissing = errors.New("groups claim missing from id_token and access_token")
+
 // extractGroups reads the configured groups claim from the access
 // token first (OIDC best practice for backend authorization), falling
 // back to the ID token, then to /userinfo as a last resort.
 func (c *OIDCClient) extractGroups(tok *oauth2.Token, idTok *oidc.IDToken) ([]string, error) {
-	// Try ID token first — simpler and synchronous.
+	// If no claim is configured, group-based authorization is disabled
+	// — return empty without complaint.
+	if c.groupsClaim == "" {
+		return []string{}, nil
+	}
+
+	// Try ID token first — simpler and synchronous. Note: present-
+	// but-empty is a real signal (user has zero roles) and must not
+	// fall through to the access-token branch.
 	var idClaims map[string]any
 	_ = idTok.Claims(&idClaims)
-	if g, ok := stringSliceClaim(idClaims, c.groupsClaim); ok {
+	if g, present := stringSliceClaim(idClaims, c.groupsClaim); present {
 		return g, nil
 	}
 
@@ -181,15 +198,15 @@ func (c *OIDCClient) extractGroups(tok *oauth2.Token, idTok *oidc.IDToken) ([]st
 	// signature here (it's OIDC's, not ours) — we just decode it.
 	if tok.AccessToken != "" {
 		if claims, ok := decodeJWTPayload(tok.AccessToken); ok {
-			if g, ok := stringSliceClaim(claims, c.groupsClaim); ok {
+			if g, present := stringSliceClaim(claims, c.groupsClaim); present {
 				return g, nil
 			}
 		}
 	}
 
-	// Fall through: no groups in either token. Authorization will
-	// reject if the deployment requires groups.
-	return nil, nil
+	// Claim absent from both tokens. Refuse the login — see
+	// ErrGroupsClaimMissing for rationale.
+	return nil, ErrGroupsClaimMissing
 }
 
 // pkceChallenge computes the S256 PKCE challenge for a verifier.
