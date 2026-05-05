@@ -142,3 +142,58 @@ function stableHash(s: string): string {
   }
   return (h >>> 0).toString(16).padStart(8, "0");
 }
+
+import { KIND_REGISTRY } from "./k8sKinds";
+
+export interface GVR {
+  group: string;
+  version: string;
+  resource: string;
+}
+
+/**
+ * gvrFromApiVersionAndKind splits a Kubernetes apiVersion + kind into
+ * the (group, version, resource) tuple Periscope's apply endpoint
+ * expects.
+ *
+ * For known built-in kinds (Pod / Deployment / ConfigMap / …), the
+ * resource plural comes from KIND_REGISTRY. For unknown kinds — most
+ * commonly Custom Resource Definitions whose plural varies —
+ * fall back to the naive "lowercase + 's'" pluralization. The
+ * apiserver will return a clear 404 on the apply call if the plural
+ * is wrong, which surfaces in the per-doc result panel.
+ *
+ * apiVersion conventions:
+ *   - "v1"          → group="" (core), version="v1"
+ *   - "apps/v1"     → group="apps", version="v1"
+ *   - "rbac.authorization.k8s.io/v1" → group="rbac.…", version="v1"
+ *
+ * Periscope's URL convention rewrites empty group to "core" — that
+ * substitution happens server-side in cmd/periscope/main.go, so we
+ * pass "" through and the existing api.applyResource handles it.
+ */
+export function gvrFromApiVersionAndKind(
+  apiVersion: string,
+  kind: string,
+): GVR {
+  const slash = apiVersion.indexOf("/");
+  const group = slash === -1 ? "" : apiVersion.slice(0, slash);
+  const version = slash === -1 ? apiVersion : apiVersion.slice(slash + 1);
+
+  // Reverse lookup: kind ("Pod") → KindMeta entry. KIND_REGISTRY is
+  // indexed by YamlKind (the URL-segment plural).
+  for (const meta of Object.values(KIND_REGISTRY)) {
+    if (meta.kind === kind) {
+      return { group: meta.group, version: meta.version, resource: meta.resource };
+    }
+  }
+
+  // Fallback: naive pluralization. Works for ~80% of CRD names that
+  // follow the noun + 's' convention. For irregulars (NetworkPolicy →
+  // networkpolicies, Endpoints → endpoints), the server will 404.
+  return {
+    group,
+    version,
+    resource: kind.toLowerCase() + (kind.endsWith("s") ? "" : "s"),
+  };
+}

@@ -27,6 +27,9 @@ export function ApplyYamlDialog({ open, onClose, cluster }: ApplyYamlDialogProps
   const titleId = useId();
   const state = useApplyYamlState();
 
+  const validCount = state.docs.filter((d) => d.valid).length;
+  const invalidCount = state.docs.length - validCount;
+
   // The dialog itself controls the close path — child components emit
   // events (clear, cancel, apply-success) that route here so reset
   // happens in one place.
@@ -60,28 +63,51 @@ export function ApplyYamlDialog({ open, onClose, cluster }: ApplyYamlDialogProps
         </div>
 
         {/* ── Footer ────────────────────────────────────────────── */}
-        <footer className="flex items-center justify-end gap-2 border-t border-border px-6 py-4">
-          <button
-            type="button"
-            onClick={handleClose}
-            className="rounded-sm border border-border-strong px-4 py-1.5 font-mono text-sm lowercase text-ink transition-colors hover:bg-surface-2"
-          >
-            cancel
-          </button>
-          <button
-            type="button"
-            disabled
-            className="rounded-sm border border-border-strong px-4 py-1.5 font-mono text-sm lowercase text-ink-faint disabled:cursor-not-allowed"
-          >
-            dry-run
-          </button>
-          <button
-            type="button"
-            disabled
-            className="rounded-sm border border-accent bg-accent px-4 py-1.5 font-mono text-sm lowercase text-accent-ink disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            apply
-          </button>
+        <footer className="flex items-center justify-between gap-2 border-t border-border px-6 py-4">
+          <p className="font-mono text-[11px] text-ink-muted">
+            {state.busy === "dry-run" && "running dry-run…"}
+            {state.busy === "apply" && "applying…"}
+            {state.busy === "idle" && validCount > 0 && (
+              <>{validCount} valid {validCount === 1 ? "doc" : "docs"} ready{invalidCount > 0 && `, ${invalidCount} skipped`}</>
+            )}
+          </p>
+          <div className="flex items-center gap-2">
+            {state.busy !== "idle" ? (
+              <button
+                type="button"
+                onClick={state.cancel}
+                className="rounded-sm border border-border-strong px-4 py-1.5 font-mono text-sm lowercase text-ink transition-colors hover:bg-surface-2"
+              >
+                cancel run
+              </button>
+            ) : (
+              <>
+                <button
+                  type="button"
+                  onClick={handleClose}
+                  className="rounded-sm border border-border-strong px-4 py-1.5 font-mono text-sm lowercase text-ink transition-colors hover:bg-surface-2"
+                >
+                  cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { void state.runDryRun(cluster); }}
+                  disabled={validCount === 0}
+                  className="rounded-sm border border-border-strong px-4 py-1.5 font-mono text-sm lowercase text-ink transition-colors hover:bg-surface-2 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  dry-run
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { void state.runApply(cluster); }}
+                  disabled={validCount === 0}
+                  className="rounded-sm border border-accent bg-accent px-4 py-1.5 font-mono text-sm lowercase text-accent-ink transition-[filter] hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  apply {validCount > 0 ? validCount : ""}
+                </button>
+              </>
+            )}
+          </div>
         </footer>
       </div>
     </Modal>
