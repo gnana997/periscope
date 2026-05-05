@@ -1305,6 +1305,11 @@ func eventsHandler(reg *clusters.Registry, kind string) credentials.Handler {
 	}
 }
 
+// applyResourceFn is the indirection the handler dispatches through so
+// tests can stub the apply path without spinning up a fake dynamic
+// client. Mirrors caniCheckSARFn / caniListSSRRFn in cani_handler.go.
+var applyResourceFn = k8s.ApplyResource
+
 // applyResourceHandler is the HTTP front-end of k8s.ApplyResource. It
 // reads the YAML body, dispatches to the dynamic client under the
 // caller's impersonated identity, and returns the post-apply state as
@@ -1359,7 +1364,7 @@ func applyResourceHandler(reg *clusters.Registry, auditer *audit.Emitter) creden
 				"force":  args.Force,
 			},
 		}
-		result, err := k8s.ApplyResource(r.Context(), p, args)
+		result, err := applyResourceFn(r.Context(), p, args)
 		if err != nil {
 			if errors.Is(err, context.Canceled) {
 				return

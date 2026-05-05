@@ -9,7 +9,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 	"testing"
 
 	"github.com/go-chi/chi/v5"
@@ -26,25 +25,6 @@ import (
 //
 // fakeProvider is shared with cani_handler_test.go (same package).
 
-// recordSink captures audit events for assertion.
-type recordSink struct {
-	mu     sync.Mutex
-	events []audit.Event
-}
-
-func (r *recordSink) Record(_ context.Context, evt audit.Event) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.events = append(r.events, evt)
-}
-
-func (r *recordSink) snapshot() []audit.Event {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	cp := make([]audit.Event, len(r.events))
-	copy(cp, r.events)
-	return cp
-}
 
 // bulkDownloadRegistry writes a one-cluster YAML to a temp dir and
 // loads it. Mirrors how production boots; saves us from exposing a
@@ -68,7 +48,7 @@ func bulkDownloadRegistry(t *testing.T, clusterName string) *clusters.Registry {
 
 // invokeBulkDownload posts the body to the handler with a planted
 // session in the context and the {cluster} chi URL param wired in.
-func invokeBulkDownload(t *testing.T, reg *clusters.Registry, sink *recordSink, cluster string, body []byte) *httptest.ResponseRecorder {
+func invokeBulkDownload(t *testing.T, reg *clusters.Registry, sink *recordingSink, cluster string, body []byte) *httptest.ResponseRecorder {
 	t.Helper()
 	emitter := audit.New(sink)
 	h := bulkDownloadAuditHandler(reg, emitter)
@@ -90,7 +70,7 @@ func invokeBulkDownload(t *testing.T, reg *clusters.Registry, sink *recordSink, 
 
 func TestBulkDownloadAudit_Success(t *testing.T) {
 	reg := bulkDownloadRegistry(t, "prod-eu")
-	sink := &recordSink{}
+	sink := &recordingSink{}
 
 	body := mustJSONBulk(t, map[string]any{
 		"kind":          "configmaps",
@@ -137,7 +117,7 @@ func TestBulkDownloadAudit_Success(t *testing.T) {
 
 func TestBulkDownloadAudit_PartialIsSuccess(t *testing.T) {
 	reg := bulkDownloadRegistry(t, "c1")
-	sink := &recordSink{}
+	sink := &recordingSink{}
 	body := mustJSONBulk(t, map[string]any{
 		"kind": "pods", "count": 10,
 		"ids":     []string{"ns/p1"},
@@ -157,7 +137,7 @@ func TestBulkDownloadAudit_PartialIsSuccess(t *testing.T) {
 
 func TestBulkDownloadAudit_Failure(t *testing.T) {
 	reg := bulkDownloadRegistry(t, "c1")
-	sink := &recordSink{}
+	sink := &recordingSink{}
 	body := mustJSONBulk(t, map[string]any{
 		"kind": "pods", "count": 5, "outcome": "failure", "failure_count": 5,
 	})
@@ -172,7 +152,7 @@ func TestBulkDownloadAudit_Failure(t *testing.T) {
 
 func TestBulkDownloadAudit_ClusterNotFound(t *testing.T) {
 	reg := bulkDownloadRegistry(t, "c1")
-	sink := &recordSink{}
+	sink := &recordingSink{}
 	body := mustJSONBulk(t, map[string]any{"kind": "pods", "count": 1, "outcome": "success"})
 	rec := invokeBulkDownload(t, reg, sink, "nope", body)
 	if rec.Code != http.StatusNotFound {
@@ -185,7 +165,7 @@ func TestBulkDownloadAudit_ClusterNotFound(t *testing.T) {
 
 func TestBulkDownloadAudit_MalformedBody(t *testing.T) {
 	reg := bulkDownloadRegistry(t, "c1")
-	sink := &recordSink{}
+	sink := &recordingSink{}
 	rec := invokeBulkDownload(t, reg, sink, "c1", []byte("not json"))
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400", rec.Code)
@@ -197,7 +177,7 @@ func TestBulkDownloadAudit_MalformedBody(t *testing.T) {
 
 func TestBulkDownloadAudit_UnknownKind(t *testing.T) {
 	reg := bulkDownloadRegistry(t, "c1")
-	sink := &recordSink{}
+	sink := &recordingSink{}
 	body := mustJSONBulk(t, map[string]any{"kind": "bogusresource", "count": 1, "outcome": "success"})
 	rec := invokeBulkDownload(t, reg, sink, "c1", body)
 	if rec.Code != http.StatusBadRequest {
@@ -212,7 +192,7 @@ func TestBulkDownloadAudit_KnownKinds(t *testing.T) {
 	reg := bulkDownloadRegistry(t, "c1")
 	for _, kind := range []string{"pods", "configmaps", "secrets", "customresources/certificates"} {
 		t.Run(kind, func(t *testing.T) {
-			sink := &recordSink{}
+			sink := &recordingSink{}
 			body := mustJSONBulk(t, map[string]any{
 				"kind": kind, "count": 1, "outcome": "success",
 			})
@@ -226,7 +206,7 @@ func TestBulkDownloadAudit_KnownKinds(t *testing.T) {
 
 func TestBulkDownloadAudit_CountOverCap(t *testing.T) {
 	reg := bulkDownloadRegistry(t, "c1")
-	sink := &recordSink{}
+	sink := &recordingSink{}
 	body := mustJSONBulk(t, map[string]any{
 		"kind": "pods", "count": bulkDownloadCap + 1, "outcome": "success",
 	})
@@ -238,7 +218,7 @@ func TestBulkDownloadAudit_CountOverCap(t *testing.T) {
 
 func TestBulkDownloadAudit_CountZero(t *testing.T) {
 	reg := bulkDownloadRegistry(t, "c1")
-	sink := &recordSink{}
+	sink := &recordingSink{}
 	body := mustJSONBulk(t, map[string]any{"kind": "pods", "count": 0, "outcome": "success"})
 	rec := invokeBulkDownload(t, reg, sink, "c1", body)
 	if rec.Code != http.StatusBadRequest {
@@ -248,7 +228,7 @@ func TestBulkDownloadAudit_CountZero(t *testing.T) {
 
 func TestBulkDownloadAudit_IDsTruncatedServerSide(t *testing.T) {
 	reg := bulkDownloadRegistry(t, "c1")
-	sink := &recordSink{}
+	sink := &recordingSink{}
 	ids := make([]string, bulkDownloadIDCap+10)
 	for i := range ids {
 		ids[i] = "ns/r-" + strings.Repeat("x", 3)
