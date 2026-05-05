@@ -404,3 +404,111 @@ func TestApplyHandler_ClusterNotFound_404(t *testing.T) {
 		t.Errorf("audit events=%d, want 0 (no action against real cluster)", got)
 	}
 }
+
+// TestApplyHandler_MultiDoc_EmitsOneRowPerCall verifies the audit
+// emission story for the SPA's multi-doc Apply YAML flow (#53). The
+// SPA fans out N PATCH calls (one per parsed doc) — the handler must
+// emit N distinct audit rows, each with the correct kind / namespace /
+// name, so a multi-doc apply is reconstructible from the audit log
+// without joining co-temporal events by request_id alone.
+//
+// Documents the parse-fail-no-row gap from #55: docs that fail to
+// parse on the SPA side never reach this handler, so they leave no
+// audit row. The dialog surfaces them in its preview list with
+// "bad input"; auditors needing to know "how many docs were SUBMITTED
+// vs accepted" must reconstruct from the SPA-side telemetry, not
+// the apply-handler audit log alone.
+func TestApplyHandler_MultiDoc_EmitsOneRowPerCall(t *testing.T) {
+	reg := testRegistry(t)
+	stubApplyFn(t, makeApplyResult("placeholder", "default", false), nil)
+
+	// Three sequential invocations, one per "doc" the SPA fans out.
+	// We share the audit emitter across all three to mirror the
+	// real-world setup where one Periscope instance serves the
+	// whole burst.
+	invocations := []struct {
+		group, ns, name string
+	}{
+		{"apps", "prod", "deploy-a"},
+		{"", "prod", "configmap-a"}, // core/v1 (group="" rewrites to "core" in URL)
+		{"apps", "staging", "deploy-b"},
+	}
+
+	allEvents := []audit.Event{}
+	for _, in := range invocations {
+		_, sink := invokeApply(
+			t, reg, "",
+			in.group, in.ns, in.name,
+			minimalDeploymentYAML(in.name, in.ns),
+		)
+		events := sink.snapshot()
+		if len(events) != 1 {
+			t.Fatalf("invocation %s/%s emitted %d events, want 1",
+				in.ns, in.name, len(events))
+		}
+		allEvents = append(allEvents, events...)
+	}
+
+	if len(allEvents) != 3 {
+		t.Fatalf("aggregate events = %d, want 3", len(allEvents))
+	}
+
+	// Each row carries its own kind/ns/name — no cross-talk.
+	for i, e := range allEvents {
+		want := invocations[i]
+		if e.Verb != audit.VerbApply {
+			t.Errorf("event %d verb = %q, want apply", i, e.Verb)
+		}
+		if e.Resource.Namespace != want.ns {
+			t.Errorf("event %d namespace = %q, want %q",
+				i, e.Resource.Namespace, want.ns)
+		}
+		if e.Resource.Name != want.name {
+			t.Errorf("event %d name = %q, want %q",
+				i, e.Resource.Name, want.name)
+		}
+	}
+}
+
+// TestApplyHandler_MultiDoc_MixedOutcomes ensures audit rows record
+// each individual doc's actual outcome — not all success or all
+// failure. SPA's per-doc result panel reads from the apply call's
+// HTTP response, but the audit log is the durable record; this test
+// pins down that the durable record correctly differentiates per-doc
+// outcomes.
+func TestApplyHandler_MultiDoc_MixedOutcomes(t *testing.T) {
+	reg := testRegistry(t)
+
+	// First call succeeds, second hits a 403 (RBAC race — operator's
+	// can-i pre-flight passed, but apiserver-side denied at apply),
+	// third succeeds.
+	type plan struct {
+		ns, name string
+		err      error
+		want     audit.Outcome
+	}
+	plans := []plan{
+		{ns: "default", name: "ok-1", err: nil, want: audit.OutcomeSuccess},
+		{ns: "locked", name: "denied", err: kerrors.NewForbidden(
+			schema.GroupResource{Group: "apps", Resource: "deployments"},
+			"denied", errors.New("RBAC: forbidden"),
+		), want: audit.OutcomeDenied},
+		{ns: "default", name: "ok-2", err: nil, want: audit.OutcomeSuccess},
+	}
+
+	for _, p := range plans {
+		stubApplyFn(t, makeApplyResult(p.name, p.ns, false), p.err)
+		_, sink := invokeApply(
+			t, reg, "", "apps", p.ns, p.name,
+			minimalDeploymentYAML(p.name, p.ns),
+		)
+		events := sink.snapshot()
+		if len(events) != 1 {
+			t.Fatalf("%s/%s: events=%d, want 1", p.ns, p.name, len(events))
+		}
+		if events[0].Outcome != p.want {
+			t.Errorf("%s/%s: outcome=%q, want %q",
+				p.ns, p.name, events[0].Outcome, p.want)
+		}
+	}
+}
