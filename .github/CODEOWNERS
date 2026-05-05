@@ -10,17 +10,45 @@
 # Default: the project maintainer owns everything.
 *                                       @gnana997
 
-# Security / auth / audit surfaces — listed explicitly so future
-# co-maintainers can be added with a one-line edit per surface,
-# without changing the catch-all above.
+# ── Security / auth / audit surfaces ──────────────────────────────
+# Listed explicitly so future co-maintainers can be added with a
+# one-line edit per surface, without changing the catch-all above.
+
 /internal/auth/                         @gnana997
 /internal/authz/                        @gnana997
 /internal/credentials/                  @gnana997
 /internal/audit/                        @gnana997
+/internal/secrets/                      @gnana997
+/internal/tunnel/                       @gnana997
+
+# Specific security-sensitive Go files — pod exec, secret reveal,
+# agent-tunnel exec proxy. Each has a separate audit verb attached
+# and gets the explicit ownership the directory catch-all already
+# implies.
 /internal/k8s/exec.go                   @gnana997
+/internal/k8s/secrets.go                @gnana997
+/internal/k8s/agent_exec_proxy.go       @gnana997
+
+# cmd/periscope handlers — split out so reviewers can see at a
+# glance which HTTP surfaces touch sensitive paths.
 /cmd/periscope/exec_handler.go          @gnana997
 /cmd/periscope/audit_handler.go         @gnana997
+/cmd/periscope/cani_handler.go          @gnana997
+/cmd/periscope/agent_handler.go         @gnana997
 
-# Helm chart + CI surfaces — operator-facing, deserve the same gate.
+# ── Documentation with security / compliance implications ─────────
+
+/SECURITY.md                            @gnana997
+/docs/rfcs/                             @gnana997
+/docs/security/                         @gnana997
+/docs/setup/cluster-rbac.md             @gnana997
+/docs/setup/audit.md                    @gnana997
+/docs/setup/auth0.md                    @gnana997
+/docs/setup/okta.md                     @gnana997
+/docs/setup/agent-onboarding.md         @gnana997
+/docs/setup/pod-exec.md                 @gnana997
+
+# ── Operator-facing surfaces (Helm charts, CI workflows) ──────────
+
 /deploy/                                @gnana997
 /.github/                               @gnana997
