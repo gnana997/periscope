@@ -16,6 +16,8 @@
 [![Artifact Hub agent](https://img.shields.io/endpoint?url=https://artifacthub.io/badge/repository/periscope-agent)](https://artifacthub.io/packages/search?repo=periscope-agent)
 [![Go](https://img.shields.io/badge/Go-1.26-00ADD8.svg)](https://go.dev/)
 [![Node](https://img.shields.io/badge/Node-22-339933.svg)](https://nodejs.org/)
+[![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/gnana997/periscope/badge)](https://scorecard.dev/viewer/?uri=github.com/gnana997/periscope)
+[![CodeQL](https://github.com/gnana997/periscope/actions/workflows/codeql.yml/badge.svg?branch=main)](https://github.com/gnana997/periscope/actions/workflows/codeql.yml)
 
 **v1.0.0 launched.** Read the [launch announcement](https://github.com/gnana997/periscope/discussions/70) — origin story, what shipped, what's not in v1.0, and what's next.
 
