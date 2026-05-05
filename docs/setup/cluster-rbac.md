@@ -12,6 +12,12 @@ RBAC, and you're done.
 
 This guide walks each mode end-to-end.
 
+> **Reviewing Periscope for adoption?** For the security-team
+> view — every ClusterRole and ClusterRoleBinding the default
+> install creates, the CIS / AWS Guardrails findings each will
+> trigger, and how to opt out — see
+> [`docs/security/rbac-posture.md`](../security/rbac-posture.md).
+
 ---
 
 ## Background: how impersonation works
