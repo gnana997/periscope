@@ -7,10 +7,13 @@
 # to track posture over time and to surface a public badge enterprise
 # evaluators recognise.
 #
-# Pinning: matches the rest of the repo's workflows — major-version
-# pinning. Scorecard itself dings us on this (Pinned-Dependencies
-# check); we accept the lower score in exchange for not having to
-# manually rotate SHAs across every workflow. Easy to upgrade later.
+# Pinning: most actions in this repo use major-version pins
+# (@v3, @v6, etc.). ossf/scorecard-action does NOT publish a
+# rolling major tag — only point releases — so this workflow
+# pins to the latest point version. Bump on each scorecard-action
+# release. Scorecard itself dings us on Pinned-Dependencies for
+# the rest of the repo's actions; accepting that lower score
+# in exchange for not rotating SHAs across every workflow.
 
 name: OpenSSF Scorecard
 
@@ -44,7 +47,7 @@ jobs:
           persist-credentials: false
 
       - name: Run analysis
-        uses: ossf/scorecard-action@v2
+        uses: ossf/scorecard-action@v2.4.3
         with:
           results_file: results.sarif
           results_format: sarif
