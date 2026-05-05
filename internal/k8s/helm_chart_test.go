@@ -489,6 +489,10 @@ func TestSanitizeChartFetchURL(t *testing.T) {
 		{name: "rejects gopher", in: "gopher://example.com", wantErr: true},
 		{name: "rejects relative", in: "/just/a/path", wantErr: true},
 		{name: "rejects empty", in: "", wantErr: true},
+		{name: "ipv4 with port", in: "http://127.0.0.1:8080/x", want: "http://127.0.0.1:8080/x"},
+		{name: "ipv6 with port", in: "http://[::1]:8080/x", want: "http://[::1]:8080/x"},
+		{name: "rejects host with control char", in: "http://exa\nmple.com/", wantErr: true},
+		{name: "rejects host with space", in: "http://exa mple.com/", wantErr: true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

@@ -8,10 +8,26 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
 	"time"
 
 	"sigs.k8s.io/yaml"
+)
+
+// chartFetchHostRe gates the Host field of a parsed chart-fetch URL.
+// Matches RFC-1123 DNS names, IPv4 dotted literals, and bracketed
+// IPv6, each with an optional :port. Rejecting on no-match gives
+// CodeQL go/request-forgery a recognizable regex barrier guard
+// between the operator-supplied ref and net/http's request
+// constructor — the dial-time SSRF guard remains the runtime
+// authority on which destinations actually connect.
+var chartFetchHostRe = regexp.MustCompile(
+	`^(` +
+		`([a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)(\.([a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?))*` +
+		`|([0-9]{1,3}(\.[0-9]{1,3}){3})` +
+		`|(\[[0-9a-fA-F:.]+\])` +
+		`)(:[0-9]{1,5})?$`,
 )
 
 // HTTP chart-repo client. A chart repo is "any HTTP server that
@@ -223,11 +239,11 @@ func classifyHTTPErr(err error) error {
 
 // sanitizeChartFetchURL parses target, validates the scheme and host,
 // and returns a reconstructed URL string built from the typed
-// *url.URL components. The reconstruction is the load-bearing piece
-// for CodeQL's go/request-forgery query: data flow from the
-// untrusted string to the request constructor passes through a
-// scheme allow-list (http / https only) and a *url.URL field
-// reassembly, which the query treats as a sanitizer.
+// *url.URL components. Two checks compose to give CodeQL's
+// go/request-forgery query a sanitizer it recognizes: a scheme
+// allow-list (http / https only) and a regex match on the parsed
+// Host. The reconstructed URL is then assembled from those validated
+// parts.
 //
 // Functionally equivalent to using `target` directly when the input
 // is well-formed, but rejects upfront:
@@ -235,6 +251,8 @@ func classifyHTTPErr(err error) error {
 //   - non-http(s) schemes (defends against file://, gopher://, etc.)
 //   - missing host (rejects relative URLs that would otherwise
 //     resolve against nothing)
+//   - hosts that don't look like a DNS name / IPv4 / bracketed IPv6
+//     with optional port
 //
 // The dial-time SSRF guard (helm_chart_ssrf.go) is still the runtime
 // authority on which destinations are allowed; this function adds an
@@ -252,6 +270,16 @@ func sanitizeChartFetchURL(target string) (string, error) {
 	}
 	if parsed.Host == "" {
 		return "", fmt.Errorf("%w: missing host", ErrChartUnsupportedRef)
+	}
+	// Regex-check the host shape. This is the load-bearing barrier for
+	// CodeQL go/request-forgery: branching on a regex match of the
+	// untrusted Host gives the query a recognizable guard before the
+	// reassembled URL flows into http.NewRequestWithContext. Functionally
+	// this rejects malformed hosts (embedded paths, control chars, IDN
+	// surrogates) that url.Parse would otherwise accept; the dial-time
+	// SSRF guard still owns the IP-range policy.
+	if !chartFetchHostRe.MatchString(parsed.Host) {
+		return "", fmt.Errorf("%w: invalid host %q", ErrChartUnsupportedRef, parsed.Host)
 	}
 	// Reassemble from validated parts. Note: we don't preserve
 	// userinfo (parsed.User) — chart fetches in v1.1 are anonymous,
