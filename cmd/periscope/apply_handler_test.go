@@ -21,30 +21,6 @@ import (
 	"github.com/gnana997/periscope/internal/k8s"
 )
 
-// recordingSink is the test-side implementation of audit.Sink — it
-// captures every Event the handler emits so tests can assert on
-// verb / outcome / resource shape without parsing slog output. Mirrors
-// the same name in internal/audit/emitter_test.go but kept private to
-// the handler tests since exporting it would couple two packages.
-type recordingSink struct {
-	mu     sync.Mutex
-	events []audit.Event
-}
-
-func (r *recordingSink) Record(_ context.Context, evt audit.Event) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.events = append(r.events, evt)
-}
-
-func (r *recordingSink) snapshot() []audit.Event {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	out := make([]audit.Event, len(r.events))
-	copy(out, r.events)
-	return out
-}
-
 // applyHandlerCall is a captured invocation of applyResourceFn — kept
 // so tests can assert the handler propagated dryRun/force/group/name
 // correctly to the apply layer.
@@ -70,36 +46,30 @@ func stubApplyFn(t *testing.T, result k8s.ApplyResourceResult, err error) *[]app
 	return &calls
 }
 
-// invokeApply drives the handler against a fully-formed PATCH request
-// for a Deployment in `default` namespace. Centralising the chi route
-// param injection + session attachment keeps each test focused on its
-// assertion. `query` is the raw query-string ("" for none).
-func invokeApply(t *testing.T, h func(http.ResponseWriter, *http.Request, credentials.Provider), reg *clusters.Registry, query, group, ns, name, body string) (*httptest.ResponseRecorder, *recordingSink) {
+// invokeApply drives applyResourceHandler against a fully-formed
+// PATCH request for a Deployment. Thin wrapper around the shared
+// invokeAuthenticated helper that just supplies the apply-specific
+// URL pattern + chi route params. `query` is the raw query-string
+// ("" for none).
+func invokeApply(t *testing.T, reg *clusters.Registry, query, group, ns, name, body string) (*httptest.ResponseRecorder, *recordingSink) {
 	t.Helper()
 	url := "/api/clusters/test/resources/" + group + "/v1/deployments/" + ns + "/" + name
 	if query != "" {
 		url += "?" + query
 	}
-	req := httptest.NewRequest(http.MethodPatch, url, bytes.NewBufferString(body))
-	req.Header.Set("Content-Type", "application/yaml")
-
-	rctx := chi.NewRouteContext()
-	rctx.URLParams.Add("cluster", "test")
-	rctx.URLParams.Add("group", group)
-	rctx.URLParams.Add("version", "v1")
-	rctx.URLParams.Add("resource", "deployments")
-	rctx.URLParams.Add("ns", ns)
-	rctx.URLParams.Add("name", name)
-	ctx := context.WithValue(req.Context(), chi.RouteCtxKey, rctx)
-	ctx = credentials.WithSession(ctx, credentials.Session{Subject: "alice@example.com", Email: "alice@example.com"})
-	req = req.WithContext(ctx)
-
-	rec := httptest.NewRecorder()
-	sink := &recordingSink{}
-	emitter := audit.New(sink)
-	hh := applyResourceHandler(reg, emitter)
-	hh(rec, req, fakeProvider{actor: "alice"})
-	return rec, sink
+	return invokeAuthenticated(t,
+		func(e *audit.Emitter) credentials.Handler { return applyResourceHandler(reg, e) },
+		http.MethodPatch, url,
+		map[string]string{
+			"cluster":  "test",
+			"group":    group,
+			"version":  "v1",
+			"resource": "deployments",
+			"ns":       ns,
+			"name":     name,
+		},
+		[]byte(body),
+	)
 }
 
 // makeApplyResult constructs an ApplyResourceResult that matches the
@@ -137,7 +107,7 @@ func TestApplyHandler_Create_AuditSuccess(t *testing.T) {
 	reg := testRegistry(t)
 	calls := stubApplyFn(t, makeApplyResult("new-app", "default", false), nil)
 
-	rec, sink := invokeApply(t, nil, reg, "", "apps", "default", "new-app", minimalDeploymentYAML("new-app", "default"))
+	rec, sink := invokeApply(t, reg, "", "apps", "default", "new-app", minimalDeploymentYAML("new-app", "default"))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
 	}
@@ -188,7 +158,7 @@ func TestApplyHandler_Update_AuditSuccess(t *testing.T) {
 	reg := testRegistry(t)
 	stubApplyFn(t, makeApplyResult("existing", "prod", false), nil)
 
-	rec, sink := invokeApply(t, nil, reg, "", "apps", "prod", "existing", minimalDeploymentYAML("existing", "prod"))
+	rec, sink := invokeApply(t, reg, "", "apps", "prod", "existing", minimalDeploymentYAML("existing", "prod"))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
 	}
@@ -220,7 +190,7 @@ func TestApplyHandler_NamespaceNotFound_AuditFailure(t *testing.T) {
 	)
 	stubApplyFn(t, k8s.ApplyResourceResult{}, apiErr)
 
-	rec, sink := invokeApply(t, nil, reg, "", "apps", "ghost", "orphan", minimalDeploymentYAML("orphan", "ghost"))
+	rec, sink := invokeApply(t, reg, "", "apps", "ghost", "orphan", minimalDeploymentYAML("orphan", "ghost"))
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("status=%d body=%s, want 404", rec.Code, rec.Body.String())
 	}
@@ -253,7 +223,7 @@ func TestApplyHandler_Forbidden_AuditDenied(t *testing.T) {
 	)
 	stubApplyFn(t, k8s.ApplyResourceResult{}, apiErr)
 
-	rec, sink := invokeApply(t, nil, reg, "", "apps", "default", "locked", minimalDeploymentYAML("locked", "default"))
+	rec, sink := invokeApply(t, reg, "", "apps", "default", "locked", minimalDeploymentYAML("locked", "default"))
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("status=%d, want 403", rec.Code)
 	}
@@ -271,7 +241,7 @@ func TestApplyHandler_DryRun_AuditWithFlag(t *testing.T) {
 	reg := testRegistry(t)
 	calls := stubApplyFn(t, makeApplyResult("preview", "staging", true), nil)
 
-	rec, sink := invokeApply(t, nil, reg, "dryRun=true", "apps", "staging", "preview", minimalDeploymentYAML("preview", "staging"))
+	rec, sink := invokeApply(t, reg, "dryRun=true", "apps", "staging", "preview", minimalDeploymentYAML("preview", "staging"))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
 	}
@@ -306,7 +276,7 @@ func TestApplyHandler_Force_PassedThrough(t *testing.T) {
 	reg := testRegistry(t)
 	calls := stubApplyFn(t, makeApplyResult("retry", "prod", false), nil)
 
-	rec, sink := invokeApply(t, nil, reg, "force=true", "apps", "prod", "retry", minimalDeploymentYAML("retry", "prod"))
+	rec, sink := invokeApply(t, reg, "force=true", "apps", "prod", "retry", minimalDeploymentYAML("retry", "prod"))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status=%d", rec.Code)
 	}
@@ -331,7 +301,7 @@ func TestApplyHandler_GroupCoreNormalized(t *testing.T) {
 		},
 	}, nil)
 
-	rec, sink := invokeApply(t, nil, reg, "", "core", "default", "cm", "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: cm\n  namespace: default\n")
+	rec, sink := invokeApply(t, reg, "", "core", "default", "cm", "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: cm\n  namespace: default\n")
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
 	}
@@ -351,7 +321,7 @@ func TestApplyHandler_BadYAML_400(t *testing.T) {
 	reg := testRegistry(t)
 	stubApplyFn(t, k8s.ApplyResourceResult{}, errors.New("apply: parse yaml: line 3: bad indent"))
 
-	rec, sink := invokeApply(t, nil, reg, "", "apps", "default", "x", "::not yaml::")
+	rec, sink := invokeApply(t, reg, "", "apps", "default", "x", "::not yaml::")
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status=%d body=%s, want 400", rec.Code, rec.Body.String())
 	}
@@ -374,7 +344,7 @@ func TestApplyHandler_Conflict_409(t *testing.T) {
 	)
 	stubApplyFn(t, k8s.ApplyResourceResult{}, conflictErr)
 
-	rec, sink := invokeApply(t, nil, reg, "", "apps", "default", "contended", minimalDeploymentYAML("contended", "default"))
+	rec, sink := invokeApply(t, reg, "", "apps", "default", "contended", minimalDeploymentYAML("contended", "default"))
 	if rec.Code != http.StatusConflict {
 		t.Fatalf("status=%d, want 409", rec.Code)
 	}
