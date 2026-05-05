@@ -15,6 +15,7 @@ import { Modal } from "../ui/Modal";
 import { ApplyYamlInput } from "./ApplyYamlInput";
 import { DocPreviewList } from "./DocPreviewList";
 import { useApplyYamlState } from "../../hooks/useApplyYamlState";
+import { useApplyPreFlight } from "../../hooks/useApplyPreFlight";
 
 export interface ApplyYamlDialogProps {
   open: boolean;
@@ -26,6 +27,7 @@ export interface ApplyYamlDialogProps {
 export function ApplyYamlDialog({ open, onClose, cluster }: ApplyYamlDialogProps) {
   const titleId = useId();
   const state = useApplyYamlState();
+  const preFlight = useApplyPreFlight(cluster, state.docs);
 
   const validCount = state.docs.filter((d) => d.valid).length;
   const invalidCount = state.docs.length - validCount;
@@ -62,6 +64,7 @@ export function ApplyYamlDialog({ open, onClose, cluster }: ApplyYamlDialogProps
           <DocPreviewList
             docs={state.docs}
             results={state.results}
+            preFlight={preFlight.decisions}
             onForce={(doc) => { void state.forceApplyOne(doc, cluster); }}
             forceDisabled={state.busy !== "idle"}
           />
@@ -73,7 +76,7 @@ export function ApplyYamlDialog({ open, onClose, cluster }: ApplyYamlDialogProps
             {state.busy === "dry-run" && "running dry-run…"}
             {state.busy === "apply" && "applying…"}
             {state.busy === "idle" && validCount > 0 && (
-              <>{validCount} valid {validCount === 1 ? "doc" : "docs"} ready{invalidCount > 0 && `, ${invalidCount} skipped`}</>
+              <>{validCount} valid {validCount === 1 ? "doc" : "docs"} ready{invalidCount > 0 && `, ${invalidCount} skipped`}{preFlight.deniedCount > 0 && `, ${preFlight.deniedCount} denied`}</>
             )}
           </p>
           <div className="flex items-center gap-2">
@@ -105,7 +108,7 @@ export function ApplyYamlDialog({ open, onClose, cluster }: ApplyYamlDialogProps
                 <button
                   type="button"
                   onClick={() => { void state.runApply(cluster); }}
-                  disabled={validCount === 0}
+                  disabled={validCount === 0 || preFlight.deniedCount > 0}
                   className="rounded-sm border border-accent bg-accent px-4 py-1.5 font-mono text-sm lowercase text-accent-ink transition-[filter] hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   apply {validCount > 0 ? validCount : ""}
