@@ -13,6 +13,7 @@
 import { useId } from "react";
 import { Modal } from "../ui/Modal";
 import { ApplyYamlInput } from "./ApplyYamlInput";
+import { DocPreviewList } from "./DocPreviewList";
 import { useApplyYamlState } from "../../hooks/useApplyYamlState";
 
 export interface ApplyYamlDialogProps {
@@ -55,11 +56,7 @@ export function ApplyYamlDialog({ open, onClose, cluster }: ApplyYamlDialogProps
         {/* ── Body ──────────────────────────────────────────────── */}
         <div className="flex-1 overflow-auto px-6 py-5">
           <ApplyYamlInput value={state.yamlText} onChange={state.setYamlText} />
-          {state.docs.length > 0 && (
-            <p className="mt-3 font-mono text-[11px] text-ink-faint tabular">
-              {state.docs.length} document{state.docs.length === 1 ? "" : "s"} parsed
-            </p>
-          )}
+          <DocPreviewList docs={state.docs} results={state.results} />
         </div>
 
         {/* ── Footer ────────────────────────────────────────────── */}
