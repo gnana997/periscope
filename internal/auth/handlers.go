@@ -111,9 +111,15 @@ func CallbackHandler(client *OIDCClient, store SessionStore, cfg Config) http.Ha
 		s, err := client.Exchange(r.Context(), code, verifier, sessID, cfg.Session.AbsoluteTimeout)
 		if err != nil {
 			if errors.Is(err, ErrGroupsClaimMissing) {
+				// 401 (not 502): the upstream OIDC dance succeeded —
+				// tokens minted, signature verified — but the
+				// configured groupsClaim is absent. That's an
+				// auth-policy refusal on our end, not an upstream
+				// failure. 502 would mislead operators reading logs
+				// into hunting an IdP outage that doesn't exist.
 				slog.ErrorContext(r.Context(), "auth.login_failed",
 					"reason", "groups_claim_missing", "err", err)
-				http.Error(w, "your IdP did not return a groups claim — contact your admin (groupsClaim configured in periscope auth.yaml is absent from the OIDC tokens).", http.StatusBadGateway)
+				http.Error(w, "your IdP did not return a groups claim — contact your admin (groupsClaim configured in periscope auth.yaml is absent from the OIDC tokens).", http.StatusUnauthorized)
 				return
 			}
 			slog.ErrorContext(r.Context(), "auth.login_failed",
