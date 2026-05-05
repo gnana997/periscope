@@ -80,6 +80,8 @@ import type {
   HelmDiffResponse,
   UpgradeInsightsListResponse,
   UpgradeInsightDetail,
+  NodegroupsListResponse,
+  NodegroupDetail,
 } from "./types";
 
 class ApiError extends Error {
@@ -836,6 +838,23 @@ export const api = {
   upgradeInsight: (cluster: string, insightId: string, signal?: AbortSignal) =>
     getJSON<UpgradeInsightDetail>(
       `/api/clusters/${enc(cluster)}/eks/upgrade-insights/${enc(insightId)}`,
+      signal,
+    ),
+
+  // --- EKS managed node groups (read-only, issue #103) ------------
+  //
+  // Same E_BACKEND_NOT_EKS contract as upgrade insights — callers
+  // branch on isBackendNotEKS for the empty state.
+
+  nodegroups: (cluster: string, signal?: AbortSignal) =>
+    getJSON<NodegroupsListResponse>(
+      `/api/clusters/${enc(cluster)}/eks/nodegroups`,
+      signal,
+    ),
+
+  nodegroup: (cluster: string, name: string, signal?: AbortSignal) =>
+    getJSON<NodegroupDetail>(
+      `/api/clusters/${enc(cluster)}/eks/nodegroups/${enc(name)}`,
       signal,
     ),
 };

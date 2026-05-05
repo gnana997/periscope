@@ -4,6 +4,7 @@ import { CircularGauge } from "../components/ui/CircularGauge";
 import { ThemeToggle } from "../components/shell/ThemeToggle";
 import { ApplyYamlEntry } from "../components/apply/ApplyYamlEntry";
 import { UpgradeReadinessCard } from "../components/eks/UpgradeReadinessCard";
+import { NodeGroupsCard } from "../components/eks/NodeGroupsCard";
 import { ageFrom } from "../lib/format";
 import { cn } from "../lib/cn";
 import type {
@@ -70,11 +71,13 @@ export function OverviewPage({ cluster }: { cluster: string }) {
       <ClusterIdentityBanner cluster={cluster} data={data} />
 
       <div className="space-y-6 px-6 py-5">
-        {/* EKS Upgrade readiness card (issue #103). The component
-            renders nothing for non-EKS clusters, so the row simply
-            collapses for kubeconfig / agent / in-cluster backends. */}
-        <section>
+        {/* EKS Upgrade readiness + Node groups cards (issue #103).
+            Both components render nothing for non-EKS clusters, so
+            the section simply collapses for kubeconfig / agent /
+            in-cluster backends. */}
+        <section className="grid grid-cols-1 gap-4 lg:grid-cols-2">
           <UpgradeReadinessCard cluster={cluster} />
+          <NodeGroupsCard cluster={cluster} />
         </section>
 
         {/* Capacity row: CPU gauge / Memory gauge / Pod phase chart -- */}

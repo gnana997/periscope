@@ -275,6 +275,20 @@ func main() {
 	router.Get("/api/clusters/{cluster}/eks/upgrade-insights/{insightId}", credentials.Wrap(factory,
 		eksInsightsGetHandler(registry, eksInsightsC, auditEmitter)))
 
+	// --- EKS managed node groups (read-only, issue #103) ---
+	//
+	// List + per-nodegroup detail. Surfaces the current EKS-optimized
+	// AMI release version, custom-AMI flag, scaling config, and
+	// health issues. Drift computation (latest AMI lookup +
+	// daysBehind) is layered onto the response by a separate code
+	// path; PR-2 lands the SDK plumbing only.
+	eksNodegroupsCacheTTL := 5 * time.Minute
+	eksNodegroupsC := newEKSNodegroupsCache(eksNodegroupsCacheTTL)
+	router.Get("/api/clusters/{cluster}/eks/nodegroups", credentials.Wrap(factory,
+		eksNodegroupsListHandler(registry, eksNodegroupsC, auditEmitter)))
+	router.Get("/api/clusters/{cluster}/eks/nodegroups/{name}", credentials.Wrap(factory,
+		eksNodegroupsGetHandler(registry, eksNodegroupsC, auditEmitter)))
+
 	// --- Overview / dashboard ---
 
 	router.Get("/api/clusters/{cluster}/dashboard", credentials.Wrap(factory,

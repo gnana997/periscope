@@ -1516,3 +1516,75 @@ export interface UpgradeInsightDetail extends UpgradeInsightSummary {
   resources: UpgradeInsightResource[];
   deprecationDetails?: DeprecationDetail[];
 }
+
+// --- EKS managed node groups (issue #103) ------------------------------
+//
+// Mirrors cmd/periscope/eks_nodegroups_handler.go.
+//
+// PR-2: drift fields are present in the type but always come back
+// false / empty until PR-3 wires the SSM-based latest-AMI lookup.
+// The SPA renders drift badges only when `driftComputed` is true.
+//
+// Custom AMIs (`customAmi: true`, AmiType="CUSTOM") never get drift
+// computed by design — when an operator ships a custom image, AWS
+// can't tell us what "latest" means.
+
+export interface NodegroupSummary {
+  name: string;
+  status: string;
+  amiType: string;
+  capacityType?: string;
+  kubernetesVersion?: string;
+  releaseVersion?: string;
+  customAmi: boolean;
+  instanceTypesPreview?: string;
+  desiredSize: number;
+  minSize: number;
+  maxSize: number;
+  healthIssueCount: number;
+  createdAt?: string;
+
+  // Drift fields — populated only when driftComputed is true.
+  driftComputed: boolean;
+  latestReleaseVersion?: string;
+  daysBehind?: number;
+  isBehind?: boolean;
+}
+
+export interface NodegroupsCounts {
+  total: number;
+  behind: number;
+  custom: number;
+  healthy: number;
+}
+
+export interface NodegroupsListResponse {
+  nodegroups: NodegroupSummary[];
+  counts: NodegroupsCounts;
+}
+
+export interface NodegroupHealthIssue {
+  code?: string;
+  message?: string;
+  resourceIds?: string[];
+}
+
+export interface LaunchTemplateRef {
+  id?: string;
+  name?: string;
+  version?: string;
+}
+
+export interface NodegroupDetail extends NodegroupSummary {
+  arn?: string;
+  nodeRole?: string;
+  instanceTypes?: string[];
+  subnets?: string[];
+  diskSize?: number;
+  labels?: Record<string, string>;
+  tags?: Record<string, string>;
+  healthIssues?: NodegroupHealthIssue[];
+  launchTemplate?: LaunchTemplateRef;
+  modifiedAt?: string;
+  autoScalingGroups?: string[];
+}
