@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -31,16 +32,32 @@ const chartFetchTimeout = 10 * time.Second
 // chartFetchClient is shared across calls; the underlying transport
 // pools connections so back-to-back fetches reuse TCP. Timeout caps
 // the entire round-trip including TLS handshake + body read.
+//
+// SSRF defense: the dialer's Control callback runs after DNS
+// resolution and before connect, so dialControlSSRFGuard can refuse
+// connections to private / link-local / IMDS addresses. Operators
+// can opt-in to private IPs via the env flag; see helm_chart_ssrf.go.
 var chartFetchClient = &http.Client{
-	Timeout: chartFetchTimeout,
-	Transport: &http.Transport{
-		// Connect timeout via DialContext keeps a slow registry
-		// from eating the full chartFetchTimeout on dial alone.
+	Timeout:   chartFetchTimeout,
+	Transport: newChartFetchTransport(),
+}
+
+// newChartFetchTransport builds the SSRF-guarded transport used by
+// both the HTTP repo path and the OCI client. Extracted so both can
+// share the same connection pool sizing + safety properties.
+func newChartFetchTransport() *http.Transport {
+	dialer := &net.Dialer{
+		Timeout:   5 * time.Second,
+		KeepAlive: 30 * time.Second,
+		Control:   dialControlSSRFGuard,
+	}
+	return &http.Transport{
+		DialContext:           dialer.DialContext,
 		ResponseHeaderTimeout: 5 * time.Second,
 		IdleConnTimeout:       30 * time.Second,
 		MaxIdleConns:          10,
 		MaxIdleConnsPerHost:   2,
-	},
+	}
 }
 
 // indexFile is our minimal projection of helm's repo IndexFile. We
@@ -157,13 +174,13 @@ func httpGet(ctx context.Context, target string, maxBytes int) ([]byte, error) {
 	if err != nil {
 		return nil, classifyHTTPErr(err)
 	}
-	defer resp.Body.Close()
-	switch {
-	case resp.StatusCode == http.StatusOK:
+	defer func() { _ = resp.Body.Close() }()
+	switch resp.StatusCode {
+	case http.StatusOK:
 		// fall through
-	case resp.StatusCode == http.StatusNotFound:
+	case http.StatusNotFound:
 		return nil, fmt.Errorf("%w: %s", ErrChartNotFound, target)
-	case resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden:
+	case http.StatusUnauthorized, http.StatusForbidden:
 		return nil, ErrChartUnauthorized
 	default:
 		return nil, fmt.Errorf("%w: %s returned %d", ErrChartUnreachable, target, resp.StatusCode)

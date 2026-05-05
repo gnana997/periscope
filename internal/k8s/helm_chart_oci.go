@@ -6,12 +6,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"strings"
 
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 	"oras.land/oras-go/v2/registry/remote"
 	"oras.land/oras-go/v2/registry/remote/auth"
-	"oras.land/oras-go/v2/registry/remote/retry"
 )
 
 func jsonUnmarshalManifest(body []byte, m *ocispec.Manifest) error {
@@ -134,7 +134,7 @@ func fetchOCIChartTarball(ctx context.Context, ref, version string) ([]byte, err
 		if err != nil {
 			return nil, classifyOCIErr(err)
 		}
-		defer rc.Close()
+		defer func() { _ = rc.Close() }()
 		return readCapped(rc, MaxChartBytes)
 	}
 	return nil, fmt.Errorf("%w: no helm-chart layer in manifest", ErrChartNotAChart)
@@ -145,6 +145,10 @@ func fetchOCIChartTarball(ctx context.Context, ref, version string) ([]byte, err
 // is unauthenticated only — the auth.Client uses zero-value creds,
 // which sends no Authorization header. Public OCI repos respond
 // directly; private ones return 401 and we surface ErrChartUnauthorized.
+//
+// SSRF: the underlying http.Client uses the same SSRF-guarded
+// transport as the HTTP-repo path, so an oci://169.254.169.254/...
+// ref aborts at dial time before any handshake.
 func newOCIRepo(ref string) (*remote.Repository, error) {
 	if !strings.HasPrefix(ref, "oci://") {
 		return nil, ErrChartUnsupportedRef
@@ -154,8 +158,14 @@ func newOCIRepo(ref string) (*remote.Repository, error) {
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrChartUnsupportedRef, err)
 	}
+	// Build a guarded http.Client mirroring oras-go's retry.DefaultClient
+	// shape but with our SSRF-blocking transport in place.
+	guardedHTTP := &http.Client{
+		Transport: newChartFetchTransport(),
+		Timeout:   chartFetchTimeout,
+	}
 	repo.Client = &auth.Client{
-		Client: retry.DefaultClient,
+		Client: guardedHTTP,
 		Header: map[string][]string{
 			"User-Agent": {"periscope-chart-fetcher"},
 		},
@@ -185,7 +195,7 @@ func fetchOCIManifest(ctx context.Context, repo *remote.Repository, desc ocispec
 	if err != nil {
 		return nil, classifyOCIErr(err)
 	}
-	defer rc.Close()
+	defer func() { _ = rc.Close() }()
 	body, err := readCapped(rc, 1*1024*1024) // manifests are small
 	if err != nil {
 		return nil, fmt.Errorf("%w: read manifest: %v", ErrChartUnreachable, err)

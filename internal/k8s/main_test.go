@@ -17,6 +17,12 @@ import (
 // "everything cleaned up after the suite" property, which is the
 // invariant we actually care about.
 func TestMain(m *testing.M) {
+	// helm_chart httptest fixtures bind to 127.0.0.1; the production
+	// SSRF guard blocks loopback. Flip the test bypass so the
+	// fixtures can dial through. Real production paths never set
+	// this — see helm_chart_ssrf.go.
+	chartFetchAllowLoopbackForTest.Store(true)
+
 	goleak.VerifyTestMain(m,
 		// k8s.io/client-go's leader election + log flusher start
 		// background goroutines on init that don't exit by VerifyTestMain

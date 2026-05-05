@@ -41,7 +41,7 @@ func unpackChart(tarball []byte) (ChartFetchResult, error) {
 	if err != nil {
 		return ChartFetchResult{}, fmt.Errorf("%w: gzip: %v", ErrChartInvalid, err)
 	}
-	defer gz.Close()
+	defer func() { _ = gz.Close() }()
 
 	var (
 		chartYAML  []byte

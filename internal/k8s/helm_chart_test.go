@@ -109,8 +109,8 @@ func TestUnpackChart_MissingChartYAML(t *testing.T) {
 	gz := gzip.NewWriter(&buf)
 	tw := tar.NewWriter(gz)
 	writeTarFile(tw, "alone/values.yaml", "key: value")
-	tw.Close()
-	gz.Close()
+	_ = tw.Close()
+	_ = gz.Close()
 	_, err := unpackChart(buf.Bytes())
 	if !errors.Is(err, ErrChartInvalid) {
 		t.Errorf("err = %v, want ErrChartInvalid", err)
@@ -122,8 +122,8 @@ func TestUnpackChart_RejectsTarPathTraversal(t *testing.T) {
 	gz := gzip.NewWriter(&buf)
 	tw := tar.NewWriter(gz)
 	writeTarFile(tw, "../../etc/passwd", "evil")
-	tw.Close()
-	gz.Close()
+	_ = tw.Close()
+	_ = gz.Close()
 	_, err := unpackChart(buf.Bytes())
 	if !errors.Is(err, ErrChartInvalid) {
 		t.Errorf("err = %v, want ErrChartInvalid", err)
@@ -215,7 +215,7 @@ func TestFetchHTTPVersions_Success(t *testing.T) {
 			http.NotFound(w, r)
 			return
 		}
-		fmt.Fprint(w, `apiVersion: v1
+		_, _ = fmt.Fprint(w, `apiVersion: v1
 entries:
   nginx:
     - name: nginx
@@ -252,7 +252,7 @@ entries:
 
 func TestFetchHTTPVersions_ChartNotInIndex(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprint(w, `apiVersion: v1
+		_, _ = fmt.Fprint(w, `apiVersion: v1
 entries:
   nginx:
     - name: nginx
@@ -309,7 +309,7 @@ func TestFetchHTTPChartTarball_Success(t *testing.T) {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/index.yaml", func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprint(w, `apiVersion: v1
+		_, _ = fmt.Fprint(w, `apiVersion: v1
 entries:
   nginx:
     - name: nginx
@@ -319,7 +319,7 @@ entries:
 	})
 	mux.HandleFunc("/nginx-1.0.0.tgz", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/octet-stream")
-		w.Write(tarballBytes)
+		_, _ = w.Write(tarballBytes)
 	})
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
@@ -335,7 +335,7 @@ entries:
 
 func TestFetchHTTPChartTarball_VersionNotFound(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprint(w, `apiVersion: v1
+		_, _ = fmt.Fprint(w, `apiVersion: v1
 entries:
   nginx:
     - name: nginx
@@ -364,14 +364,14 @@ description: web server
 	})
 	mux := http.NewServeMux()
 	mux.HandleFunc("/index.yaml", func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprint(w, `apiVersion: v1
+		_, _ = fmt.Fprint(w, `apiVersion: v1
 entries:
   nginx:
     - {name: nginx, version: 1.0.0, urls: ["nginx-1.0.0.tgz"]}
 `)
 	})
 	mux.HandleFunc("/nginx-1.0.0.tgz", func(w http.ResponseWriter, r *http.Request) {
-		w.Write(tarballBytes)
+		_, _ = w.Write(tarballBytes)
 	})
 	srv := httptest.NewServer(mux)
 	defer srv.Close()

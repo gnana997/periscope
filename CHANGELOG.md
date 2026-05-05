@@ -34,6 +34,21 @@ tag.
   client + TanStack hooks ship alongside the backend; the install-
   dialog UI lands in a sibling issue.
 
+### Security
+
+- Helm chart fetch endpoints reject SSRF attempts at dial time
+  (#73). The HTTP / OCI clients now run a `net.Dialer.Control`
+  callback that validates the resolved IP against blocklists:
+  - **Always blocked:** AWS IMDS (`169.254.169.254`), all
+    link-local (covers IPv6 IMDS + `fe80::/10`).
+  - **Blocked by default, env-var opt-in:** RFC1918 + IPv6 ULA
+    via `PERISCOPE_HELM_FETCH_ALLOW_PRIVATE=true` for operators
+    running internal chart repos.
+  - **Loopback** stays blocked even with the opt-in flag (no
+    legitimate chart-repo reason for chart-fetch from a Periscope
+    pod to reach localhost).
+  Caught by CodeQL on PR #106 before merge.
+
 ## [1.0.0]
 
 Initial stable release.

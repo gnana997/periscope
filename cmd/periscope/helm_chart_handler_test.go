@@ -25,7 +25,7 @@ func chartFixtureRegistry(t *testing.T) string {
 	tarball := buildHelmChartTarball(t)
 	mux := http.NewServeMux()
 	mux.HandleFunc("/index.yaml", func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprint(w, `apiVersion: v1
+		_, _ = fmt.Fprint(w, `apiVersion: v1
 entries:
   nginx:
     - name: nginx
@@ -37,7 +37,7 @@ entries:
 `)
 	})
 	mux.HandleFunc("/nginx-1.0.0.tgz", func(w http.ResponseWriter, r *http.Request) {
-		w.Write(tarball)
+		_, _ = w.Write(tarball)
 	})
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
@@ -55,11 +55,11 @@ func buildHelmChartTarball(t *testing.T) []byte {
 		{"nginx/Chart.yaml", "apiVersion: v2\nname: nginx\nversion: 1.0.0\ndescription: web\n"},
 		{"nginx/values.yaml", "replicaCount: 2\n"},
 	} {
-		tw.WriteHeader(&tar.Header{Name: f.name, Mode: 0o644, Size: int64(len(f.body))})
-		tw.Write([]byte(f.body))
+		_ = tw.WriteHeader(&tar.Header{Name: f.name, Mode: 0o644, Size: int64(len(f.body))})
+		_, _ = tw.Write([]byte(f.body))
 	}
-	tw.Close()
-	gz.Close()
+	_ = tw.Close()
+	_ = gz.Close()
 	return buf.Bytes()
 }
 
@@ -135,7 +135,7 @@ func TestChartVersionsHandler_CacheHit_DoesNotRefetch(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/index.yaml", func(w http.ResponseWriter, r *http.Request) {
 		hits++
-		fmt.Fprint(w, `apiVersion: v1
+		_, _ = fmt.Fprint(w, `apiVersion: v1
 entries:
   x:
     - {name: x, version: 1.0.0, urls: ["x-1.0.0.tgz"]}
@@ -166,7 +166,7 @@ func TestChartVersionsHandler_NoCache_BypassesCache(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/index.yaml", func(w http.ResponseWriter, r *http.Request) {
 		hits++
-		fmt.Fprint(w, `apiVersion: v1
+		_, _ = fmt.Fprint(w, `apiVersion: v1
 entries:
   x:
     - {name: x, version: 1.0.0, urls: ["x-1.0.0.tgz"]}
@@ -281,14 +281,14 @@ func TestChartValuesHandler_UnsupportedDeps_EmitsFailureRow(t *testing.T) {
 	tarball := buildDepsChartTarball(t)
 	mux := http.NewServeMux()
 	mux.HandleFunc("/index.yaml", func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprint(w, `apiVersion: v1
+		_, _ = fmt.Fprint(w, `apiVersion: v1
 entries:
   wp:
     - {name: wp, version: 1.0.0, urls: ["wp-1.0.0.tgz"]}
 `)
 	})
 	mux.HandleFunc("/wp-1.0.0.tgz", func(w http.ResponseWriter, r *http.Request) {
-		w.Write(tarball)
+		_, _ = w.Write(tarball)
 	})
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
@@ -334,12 +334,12 @@ dependencies:
   - name: mariadb
     version: 11.0.0
 `
-	tw.WriteHeader(&tar.Header{Name: "wp/Chart.yaml", Mode: 0o644, Size: int64(len(body))})
-	tw.Write([]byte(body))
+	_ = tw.WriteHeader(&tar.Header{Name: "wp/Chart.yaml", Mode: 0o644, Size: int64(len(body))})
+	_, _ = tw.Write([]byte(body))
 	values := "k: v\n"
-	tw.WriteHeader(&tar.Header{Name: "wp/values.yaml", Mode: 0o644, Size: int64(len(values))})
-	tw.Write([]byte(values))
-	tw.Close()
-	gz.Close()
+	_ = tw.WriteHeader(&tar.Header{Name: "wp/values.yaml", Mode: 0o644, Size: int64(len(values))})
+	_, _ = tw.Write([]byte(values))
+	_ = tw.Close()
+	_ = gz.Close()
 	return buf.Bytes()
 }
