@@ -1438,3 +1438,81 @@ export interface HelmDiffResponse {
   to: HelmDiffSide;
   changes: HelmDiffItem[];
 }
+
+// --- EKS Upgrade Insights (issue #103) ---------------------------------
+//
+// Mirrors cmd/periscope/eks_insights_handler.go. Three observations
+// for the SPA developer:
+//
+//   1. `status` is one of PASSING / WARNING / ERROR / UNKNOWN — the
+//      same string AWS returns. Render with the existing traffic-
+//      light glyphs.
+//   2. `editorPath` on a UpgradeInsightResource is empty when the
+//      backend couldn't parse the kubernetesResourceUri. The SPA
+//      should render the raw URI as monospace text in that case
+//      rather than a broken link.
+//   3. The 422 error envelope has `code: "E_BACKEND_NOT_EKS"` for
+//      non-EKS clusters; branch on that to render the empty state.
+
+export interface UpgradeInsightCounts {
+  passing: number;
+  warning: number;
+  error: number;
+  unknown: number;
+}
+
+export type UpgradeInsightStatus = "PASSING" | "WARNING" | "ERROR" | "UNKNOWN";
+
+export interface UpgradeInsightSummary {
+  id: string;
+  name: string;
+  category: string;
+  kubernetesVersion?: string;
+  status: UpgradeInsightStatus;
+  statusReason?: string;
+  lastRefreshTime?: string;
+  lastTransitionTime?: string;
+  description?: string;
+}
+
+export interface UpgradeInsightsListResponse {
+  insights: UpgradeInsightSummary[];
+  counts: UpgradeInsightCounts;
+  targetKubernetesVersion?: string;
+}
+
+export interface UpgradeInsightResource {
+  kubernetesResourceUri: string;
+  arn?: string;
+  group?: string;
+  version?: string;
+  resource?: string;
+  namespace?: string;
+  name?: string;
+  /** Cluster-rooted SPA path that opens the resource's YAML editor.
+   *  Empty when the backend couldn't map the URI to a known route. */
+  editorPath?: string;
+  status?: UpgradeInsightStatus;
+  statusReason?: string;
+}
+
+export interface DeprecationClientStat {
+  userAgent?: string;
+  numberOfRequestsLast30Days?: number;
+  lastRequestTime?: string;
+}
+
+export interface DeprecationDetail {
+  usage?: string;
+  replacedWith?: string;
+  stopServingVersion?: string;
+  startServingReplacementVersion?: string;
+  clientStats?: DeprecationClientStat[];
+}
+
+export interface UpgradeInsightDetail extends UpgradeInsightSummary {
+  recommendation?: string;
+  additionalInfo?: Record<string, string>;
+  resources: UpgradeInsightResource[];
+  deprecationDetails?: DeprecationDetail[];
+}

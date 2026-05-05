@@ -177,6 +177,34 @@ The role's trust policy uses the cluster's OIDC provider:
 Periscope code is identical for both. Pick whichever your platform team
 already runs.
 
+### 4.1. AWS API permissions on the role
+
+The trust policy above only says *who* can assume the role. The *permissions* policy attached to the role is what determines which AWS APIs Periscope can call. Required for every EKS-backed cluster:
+
+| Action | Used by |
+|---|---|
+| `eks:DescribeCluster` | Resolves the apiserver endpoint and CA on every K8s call (auth path). |
+| `eks:ListInsights`, `eks:DescribeInsight` | Upgrade Insights surface (`/api/clusters/{c}/eks/upgrade-insights*`). EKS-only by design; non-EKS clusters return 422. Cached server-side for 1 hour since AWS itself only refreshes daily. |
+
+Minimum permissions policy:
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [{
+    "Effect": "Allow",
+    "Action": [
+      "eks:DescribeCluster",
+      "eks:ListInsights",
+      "eks:DescribeInsight"
+    ],
+    "Resource": "arn:aws:eks:*:111111111111:cluster/*"
+  }]
+}
+```
+
+Tighten the resource ARN to specific cluster ARNs once you've decided which clusters Periscope manages. The Insights actions are read-only and produce no mutation surface, so they are safe to grant cluster-wide if your registry is small.
+
 ---
 
 ## 4.5. Single-cluster install (in-cluster backend)

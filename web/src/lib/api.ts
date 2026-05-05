@@ -78,6 +78,8 @@ import type {
   HelmReleaseDetail,
   HelmHistoryResponse,
   HelmDiffResponse,
+  UpgradeInsightsListResponse,
+  UpgradeInsightDetail,
 } from "./types";
 
 class ApiError extends Error {
@@ -817,7 +819,35 @@ export const api = {
       signal,
     );
   },
+
+  // --- EKS Upgrade Insights (read-only, issue #103) ---------------
+  //
+  // Both endpoints 422 with `E_BACKEND_NOT_EKS` for non-EKS clusters.
+  // Callers should branch on ApiError.status === 422 + bodyText that
+  // contains the code (or use isBackendNotEKS) and render the empty
+  // state instead of an error banner.
+
+  upgradeInsights: (cluster: string, signal?: AbortSignal) =>
+    getJSON<UpgradeInsightsListResponse>(
+      `/api/clusters/${enc(cluster)}/eks/upgrade-insights`,
+      signal,
+    ),
+
+  upgradeInsight: (cluster: string, insightId: string, signal?: AbortSignal) =>
+    getJSON<UpgradeInsightDetail>(
+      `/api/clusters/${enc(cluster)}/eks/upgrade-insights/${enc(insightId)}`,
+      signal,
+    ),
 };
+
+/** True when an ApiError is the structured 422/E_BACKEND_NOT_EKS
+ *  response from one of the EKS-only surfaces. Lets callers render
+ *  a clear empty state rather than a generic error. */
+export function isBackendNotEKS(err: unknown): boolean {
+  if (!(err instanceof ApiError)) return false;
+  if (err.status !== 422) return false;
+  return (err.bodyText ?? "").includes("E_BACKEND_NOT_EKS");
+}
 
 // --- write helpers (kept out of `api` block so the call sites stay readable) ---
 

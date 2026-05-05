@@ -259,6 +259,22 @@ func main() {
 	router.Get("/api/clusters/{cluster}/helm/releases/{ns}/{name}/diff", credentials.Wrap(factory,
 		helmDiffHandler(registry)))
 
+	// --- EKS Upgrade Insights (read-only) ---
+	//
+	// EKS scans every cluster's audit log daily and produces a list
+	// of UPGRADE_READINESS insights. We wrap ListInsights /
+	// DescribeInsight, layer a 1h cluster-keyed cache (AWS only
+	// refreshes daily), and decorate each affected resource with a
+	// deep link into the SPA's editor. EKS-only by design: non-EKS
+	// clusters get a 422 with a stable error code. See
+	// eks_insights_handler.go for the audit and 422 contract.
+	eksInsightsCacheTTL := 1 * time.Hour
+	eksInsightsC := newEKSInsightsCache(eksInsightsCacheTTL)
+	router.Get("/api/clusters/{cluster}/eks/upgrade-insights", credentials.Wrap(factory,
+		eksInsightsListHandler(registry, eksInsightsC, auditEmitter)))
+	router.Get("/api/clusters/{cluster}/eks/upgrade-insights/{insightId}", credentials.Wrap(factory,
+		eksInsightsGetHandler(registry, eksInsightsC, auditEmitter)))
+
 	// --- Overview / dashboard ---
 
 	router.Get("/api/clusters/{cluster}/dashboard", credentials.Wrap(factory,

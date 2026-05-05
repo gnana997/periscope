@@ -72,6 +72,7 @@ const ExecPage = lazyNamed(() => import("./pages/ExecPage"), "ExecPage");
 const HelmReleasesPage = lazyNamed(() => import("./pages/HelmReleasesPage"), "HelmReleasesPage");
 const HelmReleasePage = lazyNamed(() => import("./pages/HelmReleasePage"), "HelmReleasePage");
 const HelmDiffPage = lazyNamed(() => import("./pages/HelmDiffPage"), "HelmDiffPage");
+const UpgradeReadinessPage = lazyNamed(() => import("./pages/UpgradeReadinessPage"), "UpgradeReadinessPage");
 
 export const router = createBrowserRouter(
   createRoutesFromElements(
@@ -124,6 +125,7 @@ export const router = createBrowserRouter(
         <Route path="helm" element={<WithCluster Page={HelmReleasesPage} />} />
         <Route path="helm/:namespace/:name" element={<HelmReleasePage />} />
         <Route path="helm/:namespace/:name/diff" element={<HelmDiffPage />} />
+        <Route path="upgrade-readiness" element={<WithCluster Page={UpgradeReadinessPage} />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Route>,
