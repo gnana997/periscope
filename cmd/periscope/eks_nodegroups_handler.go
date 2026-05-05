@@ -51,6 +51,11 @@ import (
 // make the cache TTL story confusing).
 const eksNodegroupsListMaxResults = 100
 
+// driftLookupTimeout caps a single SSM/EC2 call. A misbehaving SSM
+// in one region must not stall the whole list response — we'd
+// rather skip drift on that nodegroup than block the page.
+const driftLookupTimeout = 4 * time.Second
+
 // eksNodegroupsAPI is the SDK seam for testability. The real client
 // returned by eks.NewFromConfig satisfies this implicitly.
 type eksNodegroupsAPI interface {
@@ -160,6 +165,15 @@ type NodegroupDetail struct {
 // ── Handlers ─────────────────────────────────────────────────────────
 
 func eksNodegroupsListHandler(reg *clusters.Registry, cache *eksNodegroupsCache, emitter *audit.Emitter) func(http.ResponseWriter, *http.Request, credentials.Provider) {
+	return eksNodegroupsListHandlerWithDrift(reg, cache, nil, emitter)
+}
+
+// eksNodegroupsListHandlerWithDrift is the drift-aware handler.
+// `amiCache` may be nil in tests; in that case drift fields stay
+// zero (DriftComputed=false on every row). main.go always passes a
+// non-nil cache so production responses populate drift for
+// AWS-managed (non-CUSTOM) nodegroups.
+func eksNodegroupsListHandlerWithDrift(reg *clusters.Registry, cache *eksNodegroupsCache, amiCache *amiCatalogCache, emitter *audit.Emitter) func(http.ResponseWriter, *http.Request, credentials.Provider) {
 	return func(w http.ResponseWriter, r *http.Request, p credentials.Provider) {
 		c, ok := reg.ByName(chi.URLParam(r, "cluster"))
 		if !ok {
@@ -234,6 +248,17 @@ func eksNodegroupsListHandler(reg *clusters.Registry, cache *eksNodegroupsCache,
 			return summaries[i].Name < summaries[j].Name
 		})
 
+		// Drift fold-in. AmiCache being non-nil is the gate; CUSTOM
+		// rows are skipped inside applyDrift. The catalog client is
+		// built once per request and reused across rows so the
+		// 30min cache amortizes calls within the same fleet view.
+		if amiCache != nil {
+			catalogClient := newAMICatalogClient(p, c)
+			for i := range summaries {
+				applyDrift(r.Context(), &summaries[i], catalogClient, amiCache)
+			}
+		}
+
 		resp := NodegroupsListResponse{
 			Nodegroups: summaries,
 			Counts:     buildNodegroupsCounts(summaries),
@@ -245,6 +270,10 @@ func eksNodegroupsListHandler(reg *clusters.Registry, cache *eksNodegroupsCache,
 }
 
 func eksNodegroupsGetHandler(reg *clusters.Registry, cache *eksNodegroupsCache, emitter *audit.Emitter) func(http.ResponseWriter, *http.Request, credentials.Provider) {
+	return eksNodegroupsGetHandlerWithDrift(reg, cache, nil, emitter)
+}
+
+func eksNodegroupsGetHandlerWithDrift(reg *clusters.Registry, cache *eksNodegroupsCache, amiCache *amiCatalogCache, emitter *audit.Emitter) func(http.ResponseWriter, *http.Request, credentials.Provider) {
 	return func(w http.ResponseWriter, r *http.Request, p credentials.Provider) {
 		c, ok := reg.ByName(chi.URLParam(r, "cluster"))
 		if !ok {
@@ -294,10 +323,49 @@ func eksNodegroupsGetHandler(reg *clusters.Registry, cache *eksNodegroupsCache, 
 		}
 
 		detail := buildNodegroupDetail(out.Nodegroup)
+		if amiCache != nil {
+			catalogClient := newAMICatalogClient(p, c)
+			applyDrift(r.Context(), &detail.NodegroupSummary, catalogClient, amiCache)
+		}
 		cache.PutDetail(c.Name, name, detail)
 		writeJSON(w, http.StatusOK, detail)
 		emitNodegroupsRead(r.Context(), emitter, c, audit.OutcomeSuccess, "detail", "")
 	}
+}
+
+// applyDrift folds the catalog lookup onto a nodegroup summary in
+// place. CUSTOM AMIs are skipped — the SPA renders "drift not
+// tracked" for them based on CustomAMI=true. Errors are logged and
+// leave DriftComputed=false; the nodegroup row simply shows "—" in
+// the drift column. The per-row cap on AWS calls bounds the
+// fleet-view fan-out.
+func applyDrift(parent context.Context, ng *NodegroupSummary, client amiCatalogAPI, cache *amiCatalogCache) {
+	if ng.CustomAMI {
+		return
+	}
+	amiType := ekstypes.AMITypes(ng.AmiType)
+	k8s := ng.KubernetesVersion
+	if k8s == "" {
+		return
+	}
+
+	cached, cachedErr, hit := cache.Get(amiType, k8s)
+	if !hit {
+		ctx, cancel := context.WithTimeout(parent, driftLookupTimeout)
+		defer cancel()
+		latest, err := latestForNodegroup(ctx, client, amiType, k8s)
+		cache.Put(amiType, k8s, latest, err)
+		cached, cachedErr = latest, err
+	}
+	if cachedErr != nil || cached == nil {
+		return
+	}
+
+	d := computeDrift(ng.ReleaseVersion, cached)
+	ng.DriftComputed = true
+	ng.LatestReleaseVersion = d.LatestReleaseVersion
+	ng.IsBehind = d.IsBehind
+	ng.DaysBehind = d.DaysBehind
 }
 
 // ── SDK → wire mapping ───────────────────────────────────────────────

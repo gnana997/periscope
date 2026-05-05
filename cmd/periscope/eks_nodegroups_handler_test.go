@@ -10,8 +10,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/aws/aws-sdk-go-v2/service/ec2"
 	"github.com/aws/aws-sdk-go-v2/service/eks"
 	ekstypes "github.com/aws/aws-sdk-go-v2/service/eks/types"
+	"github.com/aws/aws-sdk-go-v2/service/ssm"
+	ssmtypes "github.com/aws/aws-sdk-go-v2/service/ssm/types"
 	"github.com/go-chi/chi/v5"
 
 	"github.com/gnana997/periscope/internal/audit"
@@ -61,14 +64,22 @@ func withFakeNodegroupsClient(t *testing.T, fake *fakeEKSNodegroupsClient) {
 // invokeNodegroups drives the list or detail handler with a planted
 // session. Reuses the recordingSink + fakeProvider from the package
 // scaffolding (audit_test_helpers_test.go / cani_handler_test.go).
+//
+// The amiCache is optional — pass nil to test the no-drift path
+// (PR-2 commit 2 behavior); pass a cache to exercise drift fold-in
+// (PR-3 commit 3 behavior).
 func invokeNodegroups(t *testing.T, reg *clusters.Registry, cache *eksNodegroupsCache, sink *recordingSink, url string, params map[string]string, isDetail bool) *httptest.ResponseRecorder {
+	return invokeNodegroupsWithDrift(t, reg, cache, nil, sink, url, params, isDetail)
+}
+
+func invokeNodegroupsWithDrift(t *testing.T, reg *clusters.Registry, cache *eksNodegroupsCache, amiCache *amiCatalogCache, sink *recordingSink, url string, params map[string]string, isDetail bool) *httptest.ResponseRecorder {
 	t.Helper()
 	emitter := audit.New(sink)
 	var h credentials.Handler
 	if isDetail {
-		h = eksNodegroupsGetHandler(reg, cache, emitter)
+		h = eksNodegroupsGetHandlerWithDrift(reg, cache, amiCache, emitter)
 	} else {
-		h = eksNodegroupsListHandler(reg, cache, emitter)
+		h = eksNodegroupsListHandlerWithDrift(reg, cache, amiCache, emitter)
 	}
 	req := httptest.NewRequest(http.MethodGet, url, http.NoBody)
 	rctx := chi.NewRouteContext()
@@ -382,6 +393,188 @@ func TestEKSNodegroupsGet_MissingName(t *testing.T) {
 		map[string]string{"cluster": "prod-eu-west-1"}, true)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400", rec.Code)
+	}
+}
+
+// withFakeAMICatalog swaps the catalog client constructor for the
+// duration of the test. Mirrors the eks-insights/eks-nodegroups
+// pattern so each handler-integration test can supply its own
+// fake without globals.
+func withFakeAMICatalog(t *testing.T, fake amiCatalogAPI) {
+	t.Helper()
+	orig := newAMICatalogClient
+	newAMICatalogClient = func(_ credentials.Provider, _ clusters.Cluster) amiCatalogAPI {
+		return fake
+	}
+	t.Cleanup(func() { newAMICatalogClient = orig })
+}
+
+// Drift fold-in on the list response: SSM returns a newer release
+// than the nodegroup is on, IsBehind=true and DaysBehind > 0.
+func TestEKSNodegroupsList_DriftFoldedIntoSummary(t *testing.T) {
+	reg := eksRegistry(t, "prod-eu-west-1", clusters.BackendEKS)
+	now := time.Now().UTC()
+
+	nodegroupsFake := &fakeEKSNodegroupsClient{
+		listFn: func(_ context.Context, _ *eks.ListNodegroupsInput) (*eks.ListNodegroupsOutput, error) {
+			return &eks.ListNodegroupsOutput{Nodegroups: []string{"ng-1"}}, nil
+		},
+		descFn: func(_ context.Context, in *eks.DescribeNodegroupInput) (*eks.DescribeNodegroupOutput, error) {
+			ng := mkNodegroup(*in.NodegroupName, ekstypes.NodegroupStatusActive, &now)
+			oldRelease := "1.30.0-20240819"
+			ng.ReleaseVersion = &oldRelease
+			return &eks.DescribeNodegroupOutput{Nodegroup: ng}, nil
+		},
+	}
+	withFakeNodegroupsClient(t, nodegroupsFake)
+
+	latestImage := "ami-latest"
+	latestVersion := "1.30.0-20240901"
+	catalogFake := &fakeAMICatalogClient{
+		ssmFn: func(_ context.Context, in *ssm.GetParameterInput) (*ssm.GetParameterOutput, error) {
+			val := latestImage
+			if in.Name != nil && lastTokenIs(*in.Name, "release_version") {
+				val = latestVersion
+			}
+			return &ssm.GetParameterOutput{Parameter: &ssmtypes.Parameter{Value: &val}}, nil
+		},
+	}
+	withFakeAMICatalog(t, catalogFake)
+
+	sink := &recordingSink{}
+	cache := newEKSNodegroupsCache(time.Hour)
+	amiCache := newAMICatalogCache(time.Hour)
+
+	rec := invokeNodegroupsWithDrift(t, reg, cache, amiCache, sink,
+		"/api/clusters/prod-eu-west-1/eks/nodegroups",
+		map[string]string{"cluster": "prod-eu-west-1"}, false)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d; body = %s", rec.Code, rec.Body.String())
+	}
+	var got NodegroupsListResponse
+	if err := json.NewDecoder(rec.Body).Decode(&got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(got.Nodegroups) != 1 {
+		t.Fatalf("Nodegroups = %d", len(got.Nodegroups))
+	}
+	row := got.Nodegroups[0]
+	if !row.DriftComputed {
+		t.Errorf("DriftComputed = false, want true")
+	}
+	if !row.IsBehind {
+		t.Errorf("IsBehind = false, want true")
+	}
+	if row.LatestReleaseVersion != latestVersion {
+		t.Errorf("LatestReleaseVersion = %q", row.LatestReleaseVersion)
+	}
+	// 2024-09-01 minus 2024-08-19 = 13 days.
+	if row.DaysBehind != 13 {
+		t.Errorf("DaysBehind = %d, want 13", row.DaysBehind)
+	}
+	if got.Counts.Behind != 1 {
+		t.Errorf("Counts.Behind = %d, want 1", got.Counts.Behind)
+	}
+}
+
+// Custom AMI rows must NEVER have drift folded onto them, even when
+// the catalog is wired and would otherwise return a "latest".
+func TestEKSNodegroupsList_CustomAMISkipsDrift(t *testing.T) {
+	reg := eksRegistry(t, "prod-eu-west-1", clusters.BackendEKS)
+	now := time.Now().UTC()
+
+	nodegroupsFake := &fakeEKSNodegroupsClient{
+		listFn: func(_ context.Context, _ *eks.ListNodegroupsInput) (*eks.ListNodegroupsOutput, error) {
+			return &eks.ListNodegroupsOutput{Nodegroups: []string{"ng-custom"}}, nil
+		},
+		descFn: func(_ context.Context, in *eks.DescribeNodegroupInput) (*eks.DescribeNodegroupOutput, error) {
+			return &eks.DescribeNodegroupOutput{
+				Nodegroup: mkNodegroup(*in.NodegroupName, ekstypes.NodegroupStatusActive, &now),
+			}, nil
+		},
+	}
+	withFakeNodegroupsClient(t, nodegroupsFake)
+
+	// Catalog SSM/EC2 must never be called for CUSTOM rows. If
+	// either is invoked, the test fails the assertion.
+	catalogCalled := false
+	catalogFake := &fakeAMICatalogClient{
+		ssmFn: func(_ context.Context, _ *ssm.GetParameterInput) (*ssm.GetParameterOutput, error) {
+			catalogCalled = true
+			return nil, errors.New("should not be called for CUSTOM AMI")
+		},
+		ec2Fn: func(_ context.Context, _ *ec2.DescribeImagesInput) (*ec2.DescribeImagesOutput, error) {
+			catalogCalled = true
+			return nil, errors.New("should not be called for CUSTOM AMI")
+		},
+	}
+	withFakeAMICatalog(t, catalogFake)
+
+	sink := &recordingSink{}
+	cache := newEKSNodegroupsCache(time.Hour)
+	amiCache := newAMICatalogCache(time.Hour)
+
+	rec := invokeNodegroupsWithDrift(t, reg, cache, amiCache, sink,
+		"/api/clusters/prod-eu-west-1/eks/nodegroups",
+		map[string]string{"cluster": "prod-eu-west-1"}, false)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d", rec.Code)
+	}
+	if catalogCalled {
+		t.Errorf("catalog was invoked for CUSTOM AMI nodegroup")
+	}
+	var got NodegroupsListResponse
+	_ = json.NewDecoder(rec.Body).Decode(&got)
+	if len(got.Nodegroups) != 1 || got.Nodegroups[0].DriftComputed {
+		t.Errorf("CUSTOM row should leave DriftComputed=false; got = %+v", got.Nodegroups)
+	}
+}
+
+// Catalog failure should NOT fail the whole list — the drift fields
+// stay zero (DriftComputed=false) and the row still renders with
+// the rest of the nodegroup metadata.
+func TestEKSNodegroupsList_CatalogFailureDoesNotBlockList(t *testing.T) {
+	reg := eksRegistry(t, "prod-eu-west-1", clusters.BackendEKS)
+	now := time.Now().UTC()
+
+	nodegroupsFake := &fakeEKSNodegroupsClient{
+		listFn: func(_ context.Context, _ *eks.ListNodegroupsInput) (*eks.ListNodegroupsOutput, error) {
+			return &eks.ListNodegroupsOutput{Nodegroups: []string{"ng-1"}}, nil
+		},
+		descFn: func(_ context.Context, in *eks.DescribeNodegroupInput) (*eks.DescribeNodegroupOutput, error) {
+			return &eks.DescribeNodegroupOutput{
+				Nodegroup: mkNodegroup(*in.NodegroupName, ekstypes.NodegroupStatusActive, &now),
+			}, nil
+		},
+	}
+	withFakeNodegroupsClient(t, nodegroupsFake)
+
+	catalogFake := &fakeAMICatalogClient{
+		ssmFn: func(_ context.Context, _ *ssm.GetParameterInput) (*ssm.GetParameterOutput, error) {
+			return nil, errors.New("AccessDenied: GetParameter")
+		},
+		ec2Fn: func(_ context.Context, _ *ec2.DescribeImagesInput) (*ec2.DescribeImagesOutput, error) {
+			return nil, errors.New("AccessDenied: DescribeImages")
+		},
+	}
+	withFakeAMICatalog(t, catalogFake)
+
+	sink := &recordingSink{}
+	cache := newEKSNodegroupsCache(time.Hour)
+	amiCache := newAMICatalogCache(time.Hour)
+	rec := invokeNodegroupsWithDrift(t, reg, cache, amiCache, sink,
+		"/api/clusters/prod-eu-west-1/eks/nodegroups",
+		map[string]string{"cluster": "prod-eu-west-1"}, false)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d", rec.Code)
+	}
+	var got NodegroupsListResponse
+	_ = json.NewDecoder(rec.Body).Decode(&got)
+	if len(got.Nodegroups) != 1 || got.Nodegroups[0].DriftComputed {
+		t.Errorf("expected drift not computed on catalog failure; got %+v", got.Nodegroups)
 	}
 }
 
