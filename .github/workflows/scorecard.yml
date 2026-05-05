@@ -18,6 +18,7 @@
 name: OpenSSF Scorecard
 
 on:
+  workflow_dispatch:        # manual trigger for debugging / on-demand re-evaluation
   branch_protection_rule:
   schedule:
     - cron: '0 6 * * 1'   # weekly, Mondays 06:00 UTC
