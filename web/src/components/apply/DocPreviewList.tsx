@@ -9,15 +9,22 @@
 // force=true (takeover semantics). Successful dry-runs expose an
 // expandable diff so the operator can verify what would change before
 // committing.
+//
+// RBAC pre-flight (sub-task #55): when preFlight is supplied, denied
+// docs render an explicit "denied" chip with a tooltip. The dialog
+// uses preFlight.deniedCount > 0 to disable the Apply button.
 
 import { useState } from "react";
 import type { ParsedDoc } from "../../lib/applyYamlParser";
 import type { DocResult } from "../../hooks/useApplyYamlState";
+import type { DocPreFlight } from "../../hooks/useApplyPreFlight";
 import { cn } from "../../lib/cn";
 
 interface DocPreviewListProps {
   docs: ParsedDoc[];
   results: ReadonlyMap<string, DocResult>;
+  /** Per-doc RBAC pre-flight decisions; absent = no pre-flight available. */
+  preFlight?: ReadonlyMap<string, DocPreFlight>;
   /**
    * Called when the operator clicks the per-row "Force" button on a
    * conflict result. The dialog wires this to forceApplyOne(doc, cluster).
@@ -46,6 +53,7 @@ const STATE_COLOR: Record<DocResult["state"], string> = {
 export function DocPreviewList({
   docs,
   results,
+  preFlight,
   onForce,
   forceDisabled,
 }: DocPreviewListProps) {
@@ -58,6 +66,7 @@ export function DocPreviewList({
           key={doc.id}
           doc={doc}
           result={results.get(doc.id)}
+          preFlight={preFlight?.get(doc.id)}
           onForce={onForce}
           forceDisabled={forceDisabled}
         />
@@ -69,20 +78,29 @@ export function DocPreviewList({
 interface DocPreviewRowProps {
   doc: ParsedDoc;
   result: DocResult | undefined;
+  preFlight: DocPreFlight | undefined;
   onForce?: (doc: ParsedDoc) => void;
   forceDisabled?: boolean;
 }
 
-function DocPreviewRow({ doc, result, onForce, forceDisabled }: DocPreviewRowProps) {
+function DocPreviewRow({
+  doc,
+  result,
+  preFlight,
+  onForce,
+  forceDisabled,
+}: DocPreviewRowProps) {
   const [diffOpen, setDiffOpen] = useState(false);
   const state: DocResult["state"] = result?.state ?? "idle";
   const hasDiff = state === "success" && Boolean(result?.diff);
+  const denied = preFlight && !preFlight.loading && !preFlight.allowed;
 
   return (
     <li
       className={cn(
         "flex flex-col py-2",
         !doc.valid && "bg-red-soft/30",
+        denied && "bg-red-soft/20",
       )}
     >
       <div className="flex items-baseline gap-3">
@@ -121,6 +139,14 @@ function DocPreviewRow({ doc, result, onForce, forceDisabled }: DocPreviewRowPro
         )}
 
         <div className="ml-auto flex shrink-0 items-baseline gap-2">
+          {denied && (
+            <span
+              className="rounded-sm border border-red/50 bg-red-soft px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-[0.08em] text-red"
+              title={preFlight?.reason || "Operator does not have create or update permission for this resource"}
+            >
+              denied
+            </span>
+          )}
           {result?.errorMessage && (
             <span
               className={cn(
