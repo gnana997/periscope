@@ -59,7 +59,12 @@ export function ApplyYamlDialog({ open, onClose, cluster }: ApplyYamlDialogProps
         {/* ── Body ──────────────────────────────────────────────── */}
         <div className="flex-1 overflow-auto px-6 py-5">
           <ApplyYamlInput value={state.yamlText} onChange={state.setYamlText} />
-          <DocPreviewList docs={state.docs} results={state.results} />
+          <DocPreviewList
+            docs={state.docs}
+            results={state.results}
+            onForce={(doc) => { void state.forceApplyOne(doc, cluster); }}
+            forceDisabled={state.busy !== "idle"}
+          />
         </div>
 
         {/* ── Footer ────────────────────────────────────────────── */}

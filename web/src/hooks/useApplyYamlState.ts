@@ -55,6 +55,8 @@ export interface UseApplyYamlState {
   runDryRun: (cluster: string) => Promise<void>;
   /** Run real apply for every valid doc. Skips docs with parse errors. */
   runApply: (cluster: string) => Promise<void>;
+  /** Retry a single conflicted doc with force=true. */
+  forceApplyOne: (doc: ParsedDoc, cluster: string) => Promise<void>;
 }
 
 export function useApplyYamlState(): UseApplyYamlState {
@@ -133,6 +135,47 @@ export function useApplyYamlState(): UseApplyYamlState {
     [updateResult],
   );
 
+  /**
+   * forceApplyOne — retry a single doc with force=true. Used when
+   * runApply() leaves a doc in `conflict` state and the operator
+   * confirms takeover via the per-row Force button. Independent of
+   * the batch worker pool — runs immediately, ignores the busy
+   * state machine, and updates only this doc's result entry.
+   */
+  const forceApplyOne = useCallback(
+    async (doc: ParsedDoc, cluster: string): Promise<void> => {
+      if (!doc.valid || !doc.apiVersion || !doc.kind || !doc.name) return;
+      const gvr = gvrFromApiVersionAndKind(doc.apiVersion, doc.kind);
+      const ctrl = new AbortController();
+      updateResult(doc.id, { state: "pending" });
+      try {
+        await api.applyResource(
+          {
+            cluster,
+            group: gvr.group,
+            version: gvr.version,
+            resource: gvr.resource,
+            namespace: doc.namespace,
+            name: doc.name,
+            yaml: doc.raw,
+            force: true,
+          },
+          ctrl.signal,
+        );
+        updateResult(doc.id, { state: "success" });
+      } catch (err) {
+        const apiErr = err instanceof ApiError ? err : null;
+        updateResult(doc.id, {
+          state: "failure",
+          errorMessage: errorMessage(err),
+          error: apiErr ?? undefined,
+        });
+      }
+    },
+    [updateResult],
+  );
+
+
   const runBatch = useCallback(
     async (cluster: string, dryRun: boolean): Promise<void> => {
       if (busy !== "idle") return;
@@ -186,6 +229,7 @@ export function useApplyYamlState(): UseApplyYamlState {
     reset,
     runDryRun,
     runApply,
+    forceApplyOne,
   };
 }
 
