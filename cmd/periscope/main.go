@@ -284,6 +284,19 @@ func main() {
 		credentials.Wrap(factory, helmInstallPreviewHandler(registry, auditEmitter)))
 	router.Post("/api/clusters/{cluster}/helm/releases/{ns}/{name}/upgrade-preview",
 		credentials.Wrap(factory, helmUpgradePreviewHandler(registry, auditEmitter)))
+
+	// Helm install + upgrade actions (#76). Sync — handler blocks
+	// until the helm SDK call returns. Atomic=true by default so
+	// failed installs auto-rollback. Pre-flight SARs run before the
+	// SDK call; pre-flight denial returns 403 with the denied list
+	// inline. Audit emits an intent + outcome pair (4 verbs) so
+	// hung / partitioned operations still leave a forensic trail.
+	router.Post("/api/clusters/{cluster}/helm/install",
+		credentials.Wrap(factory, helmInstallHandler(registry, auditEmitter)))
+	router.Post("/api/clusters/{cluster}/helm/releases/{ns}/{name}/upgrade",
+		credentials.Wrap(factory, helmUpgradeHandler(registry, auditEmitter)))
+	router.Delete("/api/clusters/{cluster}/helm/releases/{ns}/{name}",
+		credentials.Wrap(factory, helmUninstallHandler(registry, auditEmitter)))
 	// --- EKS Upgrade Insights (read-only) ---
 	//
 	// EKS scans every cluster's audit log daily and produces a list

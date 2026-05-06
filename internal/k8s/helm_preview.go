@@ -1,8 +1,16 @@
 // helm_preview.go — dry-run preview for helm install / upgrade.
 //
-// Wraps helm's pkg/action.NewInstall(...).Run(DryRun=true, ClientOnly=true)
-// for install mode and pkg/action.NewUpgrade(...).Run(DryRun=true) for
-// upgrade mode. The output is:
+// Wraps helm's pkg/action.NewInstall(...).Run(DryRun=true) for install
+// mode and pkg/action.NewUpgrade(...).Run(DryRun=true) for upgrade
+// mode. We do NOT set ClientOnly=true — that would make helm skip
+// cluster discovery and fall back to chartutil.DefaultCapabilities
+// (KubeVersion 1.20), which incorrectly rejects any chart requiring
+// k8s ≥ 1.21 even on newer clusters. With ClientOnly unset, helm
+// queries the real apiserver for /version + APIResources, and the
+// chart's kubeVersion / apiVersion constraints are checked against
+// the actual cluster. The cost is one extra apiserver round-trip
+// per preview (~50-100ms), which is well within the operator's
+// perceived budget for a Preview button click. Output:
 //
 //   - The list of K8s manifests helm would apply (parsed via the
 //     existing parseManifestObjects helper from helm.go).
@@ -119,7 +127,11 @@ func defaultPreviewRender(ctx context.Context, p credentials.Provider, c cluster
 	case modeInstall:
 		inst := action.NewInstall(cfg)
 		inst.DryRun = true
-		inst.ClientOnly = true // skip apiserver capability resolution; chart's kubeVersion check still runs locally
+		// ClientOnly intentionally left unset — see file preamble.
+		// Setting it to true would make the kubeVersion check use
+		// helm's hardcoded default of 1.20, rejecting modern charts
+		// on modern clusters. The extra apiserver round-trip is
+		// worth correctness here.
 		inst.ReleaseName = args.ReleaseName
 		inst.Namespace = args.Namespace
 		inst.IncludeCRDs = true

@@ -1402,6 +1402,15 @@ export interface HelmReleaseDetail {
   valuesYaml: string;
   manifestYaml: string;
   resources: HelmManifestObject[];
+  /** Install ref (oci|http|https://...) the operator used to install
+   *  or last-upgrade this release via Periscope. Pre-fills the upgrade
+   *  dialog. Empty for releases installed via the helm CLI or any
+   *  non-Periscope tooling — Periscope only writes this annotation
+   *  on its own install/upgrade actions. */
+  installRef?: string;
+  /** Chart-name component for HTTP repos. Empty for OCI refs (the
+   *  chart name is implicit in the ref's last segment). */
+  installChartName?: string;
 }
 
 export interface HelmHistoryEntry {
@@ -1497,6 +1506,99 @@ export interface ChartFetchRequest {
    *  OCI refs (chart name is implicit in the ref's last segment). */
   chart?: string;
   version: string;
+}
+
+// ─── Helm preview + install + upgrade (#75 / #76) ─────────────────────
+
+/** Pre-flight RBAC denial entry on a PreviewResponse. The SPA renders
+ *  these inline as a "the apiserver would reject these" list. */
+export interface PreviewDenial {
+  group?: string;
+  resource: string;
+  namespace?: string;
+  name?: string;
+  verb: "create" | "patch" | "update";
+  reason: string;
+}
+
+/** Preview response shape (#75). Diff is null for install mode (no
+ *  current state to compare against); populated for upgrade. Denied
+ *  is null when every kind passes the SAR pre-flight. */
+export interface PreviewResponse {
+  manifests: HelmManifestObject[];
+  diff: HelmDiffResponse | null;
+  denied: PreviewDenial[] | null;
+}
+
+/** Install preview request body. */
+export interface HelmInstallPreviewRequest {
+  ref: string;
+  chartName?: string;
+  version: string;
+  namespace: string;
+  releaseName: string;
+  values: string;
+}
+
+/** Upgrade preview request body — ns + releaseName are URL path. */
+export interface HelmUpgradePreviewRequest {
+  ref: string;
+  chartName?: string;
+  version: string;
+  values: string;
+}
+
+/** Install action request body (#76). All knobs optional — handler
+ *  defaults Atomic=true / Wait=true / IncludeCRDs=true. */
+export interface HelmInstallRequest {
+  ref: string;
+  chartName?: string;
+  version: string;
+  namespace: string;
+  releaseName: string;
+  values: string;
+  atomic?: boolean;
+  wait?: boolean;
+  waitForJobs?: boolean;
+  includeCRDs?: boolean;
+  timeoutSeconds?: number;
+}
+
+/** Upgrade action request body (#76). */
+export interface HelmUpgradeRequest {
+  ref: string;
+  chartName?: string;
+  version: string;
+  values: string;
+  atomic?: boolean;
+  wait?: boolean;
+  waitForJobs?: boolean;
+  timeoutSeconds?: number;
+  cleanupOnFail?: boolean;
+  maxHistory?: number;
+}
+
+/** Result shape returned by both install + upgrade actions. */
+/** Uninstall response shape (#123). RevisionsRemoved is the count of
+ *  revisions helm pruned from storage — useful for the SPA's success
+ *  toast and forensic audit. */
+export interface HelmUninstallResult {
+  release: HelmActionResult["release"];
+  revisionsRemoved: number;
+}
+
+export interface HelmActionResult {
+  release: {
+    name: string;
+    namespace: string;
+    revision: number;
+    status: string;
+    chart: { name: string; version: string };
+    deployedAt: string;
+    notes?: string;
+  };
+  rolledBack?: boolean;
+  rollbackError?: string;
 }
 
 // ─── Workload rollback (#71) ─────────────────────────────────────────

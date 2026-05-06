@@ -135,6 +135,13 @@ func buildHelmActionConfig(ctx context.Context, p credentials.Provider, c cluste
 	return actionCfg, nil
 }
 
+// buildHelmActionConfigFn is the test seam for action.Configuration
+// construction. Production wires defaultBuildHelmActionConfig (the
+// real impl below); tests substitute a fake that returns a stub
+// *action.Configuration without touching newClientFn or the
+// apiserver discovery probe.
+var buildHelmActionConfigFn = buildHelmActionConfig
+
 // helmDebugSilent is the no-op variant of helm's DebugLog. We don't
 // pipe helm's internal verbose logs into the server's slog because
 // every operation Periscope kicks off via the helm SDK is already
