@@ -138,6 +138,19 @@ type HelmReleaseDetail struct {
 	// write ops will reuse the same list to compute compound
 	// permission checks.
 	Resources []HelmManifestObject `json:"resources"`
+	// InstallRef is the (oci|http|https)://… ref the operator used
+	// to install or last-upgraded this release via Periscope. Read
+	// from a periscope.io/install-ref annotation on the helm release
+	// storage Secret/ConfigMap. Empty for releases installed via the
+	// helm CLI directly or via any other tooling — Periscope only
+	// writes this annotation on its own install/upgrade actions.
+	// The SPA pre-fills the upgrade dialog from this when present.
+	InstallRef string `json:"installRef,omitempty"`
+	// InstallChartName is the chart-name component for HTTP repos
+	// (where the ref points at an index.yaml and the operator picks
+	// a chart by name from the index). Empty for OCI refs (the chart
+	// name is implicit in the ref's last segment).
+	InstallChartName string `json:"installChartName,omitempty"`
 }
 
 // HelmHistoryEntry is one row of the history table. Metadata-only —
@@ -510,6 +523,24 @@ func GetHelmRelease(ctx context.Context, p credentials.Provider, c clusters.Clus
 			return nil, fmt.Errorf("helm release %s/%s revision %d: rendered detail %d bytes exceeds %d-byte limit", namespace, name, detail.Revision, size, detailMaxBytes)
 		}
 	}
+
+	// Best-effort: read Periscope install metadata annotations from
+	// the storage object (written by InstallHelmRelease /
+	// UpgradeHelmRelease post-success). When present, the SPA's
+	// upgrade dialog pre-fills chart ref + chart name. Absent for
+	// releases installed via the helm CLI directly or by any other
+	// tooling — silently leaves the fields empty. Never fails the
+	// detail call: a metadata-read error is non-essential and
+	// shouldn't block the operator from seeing the rest of the
+	// release info.
+	if installRef, installChartName, mErr := ReadPeriscopeInstallMetadata(ctx, p, c, namespace, name, detail.Revision); mErr == nil {
+		detail.InstallRef = installRef
+		detail.InstallChartName = installChartName
+	} else {
+		slog.WarnContext(ctx, "helm release detail: metadata read failed (non-fatal, upgrade dialog won't pre-fill)",
+			"cluster", c.Name, "namespace", namespace, "name", name, "revision", detail.Revision, "err", mErr)
+	}
+
 	return detail, nil
 }
 

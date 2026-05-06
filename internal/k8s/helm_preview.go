@@ -1,8 +1,16 @@
 // helm_preview.go — dry-run preview for helm install / upgrade.
 //
-// Wraps helm's pkg/action.NewInstall(...).Run(DryRun=true, ClientOnly=true)
-// for install mode and pkg/action.NewUpgrade(...).Run(DryRun=true) for
-// upgrade mode. The output is:
+// Wraps helm's pkg/action.NewInstall(...).Run(DryRun=true) for install
+// mode and pkg/action.NewUpgrade(...).Run(DryRun=true) for upgrade
+// mode. We do NOT set ClientOnly=true — that would make helm skip
+// cluster discovery and fall back to chartutil.DefaultCapabilities
+// (KubeVersion 1.20), which incorrectly rejects any chart requiring
+// k8s ≥ 1.21 even on newer clusters. With ClientOnly unset, helm
+// queries the real apiserver for /version + APIResources, and the
+// chart's kubeVersion / apiVersion constraints are checked against
+// the actual cluster. The cost is one extra apiserver round-trip
+// per preview (~50-100ms), which is well within the operator's
+// perceived budget for a Preview button click. Output:
 //
 //   - The list of K8s manifests helm would apply (parsed via the
 //     existing parseManifestObjects helper from helm.go).
@@ -57,10 +65,19 @@ type PreviewArgs struct {
 // Diff is nil for install mode (nothing to compare against). Denied
 // is nil when every manifest passed the SAR pre-flight; non-nil
 // when one or more kinds would be rejected by the apiserver.
+//
+// ManifestYAML is the full rendered multi-doc YAML helm would apply
+// — same source as Diff.To.YAML in upgrade mode, surfaced separately
+// so install mode also has the rendered output to display. The SPA
+// renders this in a Monaco viewer so operators can read what's
+// actually going to be created before committing to install. Empty
+// only when the chart genuinely produced no manifests (vanishingly
+// rare; a chart with only NOTES.txt and no templates).
 type PreviewResult struct {
-	Manifests []HelmManifestObject `json:"manifests"`
-	Diff      *HelmDiff            `json:"diff,omitempty"`
-	Denied    []PreviewDenial      `json:"denied,omitempty"`
+	Manifests    []HelmManifestObject `json:"manifests"`
+	ManifestYAML string               `json:"manifestYaml"`
+	Diff         *HelmDiff            `json:"diff,omitempty"`
+	Denied       []PreviewDenial      `json:"denied,omitempty"`
 }
 
 // PreviewDenial is one entry in PreviewResult.Denied. Fields mirror
@@ -119,7 +136,11 @@ func defaultPreviewRender(ctx context.Context, p credentials.Provider, c cluster
 	case modeInstall:
 		inst := action.NewInstall(cfg)
 		inst.DryRun = true
-		inst.ClientOnly = true // skip apiserver capability resolution; chart's kubeVersion check still runs locally
+		// ClientOnly intentionally left unset — see file preamble.
+		// Setting it to true would make the kubeVersion check use
+		// helm's hardcoded default of 1.20, rejecting modern charts
+		// on modern clusters. The extra apiserver round-trip is
+		// worth correctness here.
 		inst.ReleaseName = args.ReleaseName
 		inst.Namespace = args.Namespace
 		inst.IncludeCRDs = true
@@ -179,7 +200,11 @@ func PreviewHelmInstall(ctx context.Context, p credentials.Provider, c clusters.
 	if err != nil {
 		return nil, fmt.Errorf("preflight: %w", err)
 	}
-	return &PreviewResult{Manifests: manifests, Denied: denied}, nil
+	return &PreviewResult{
+		Manifests:    manifests,
+		ManifestYAML: manifestYAML,
+		Denied:       denied,
+	}, nil
 }
 
 // PreviewHelmUpgrade renders the manifests helm would apply for an
@@ -217,7 +242,12 @@ func PreviewHelmUpgrade(ctx context.Context, p credentials.Provider, c clusters.
 	if err != nil {
 		return nil, fmt.Errorf("preflight: %w", err)
 	}
-	return &PreviewResult{Manifests: manifests, Diff: diff, Denied: denied}, nil
+	return &PreviewResult{
+		Manifests:    manifests,
+		ManifestYAML: manifestYAML,
+		Diff:         diff,
+		Denied:       denied,
+	}, nil
 }
 
 // fetchAndLoadChart pulls the tarball from OCI/HTTP, hands it to

@@ -81,6 +81,13 @@ import type {
   ChartFetchResult,
   ChartVersionsResult,
   ChartFetchRequest,
+  PreviewResponse,
+  HelmInstallPreviewRequest,
+  HelmUpgradePreviewRequest,
+  HelmInstallRequest,
+  HelmUpgradeRequest,
+  HelmActionResult,
+  HelmUninstallResult,
   RevisionHistory,
   RollbackRequest,
   RollbackResponse,
@@ -131,6 +138,23 @@ async function postJSON<T>(
       ...(body !== undefined ? { "Content-Type": "application/json" } : {}),
     },
     body: body !== undefined ? JSON.stringify(body) : undefined,
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new ApiError(
+      `${res.status} ${res.statusText} on ${path}`,
+      res.status,
+      text,
+    );
+  }
+  return (await res.json()) as T;
+}
+
+async function deleteJSON<T>(path: string, signal?: AbortSignal): Promise<T> {
+  const res = await fetch(path, {
+    method: "DELETE",
+    signal,
+    headers: { Accept: "application/json" },
   });
   if (!res.ok) {
     const text = await res.text().catch(() => "");
@@ -868,6 +892,97 @@ export const api = {
       opts?.nocache ? "?nocache=true" : ""
     }`;
     return postJSON<ChartFetchResult>(url, body, signal);
+  },
+
+  /**
+   * Helm dry-run preview (#75) — install mode. Returns rendered
+   * manifests + null diff + pre-flight RBAC denied list.
+   */
+  helmInstallPreview: (
+    cluster: string,
+    body: HelmInstallPreviewRequest,
+    signal?: AbortSignal,
+  ) =>
+    postJSON<PreviewResponse>(
+      `/api/clusters/${enc(cluster)}/helm/install-preview`,
+      body,
+      signal,
+    ),
+
+  /**
+   * Helm dry-run preview — upgrade mode. Returns manifests +
+   * diff vs current cluster state + denied list.
+   */
+  helmUpgradePreview: (
+    cluster: string,
+    namespace: string,
+    name: string,
+    body: HelmUpgradePreviewRequest,
+    signal?: AbortSignal,
+  ) =>
+    postJSON<PreviewResponse>(
+      `/api/clusters/${enc(cluster)}/helm/releases/${enc(namespace)}/${enc(name)}/upgrade-preview`,
+      body,
+      signal,
+    ),
+
+  /**
+   * Helm install action (#76). Sync — blocks until helm SDK call
+   * returns (~10-60s typical, 5min default, 10min cap). Audit pair:
+   * helm_install_intent + helm_install. Pre-flight SAR denials
+   * return 403 with E_HELM_PREFLIGHT_DENIED + denied list inline.
+   */
+  helmInstall: (
+    cluster: string,
+    body: HelmInstallRequest,
+    signal?: AbortSignal,
+  ) =>
+    postJSON<HelmActionResult>(
+      `/api/clusters/${enc(cluster)}/helm/install`,
+      body,
+      signal,
+    ),
+
+  /**
+   * Helm upgrade action (#76). Same sync + audit-pair semantics.
+   * RolledBack flag on the response means Atomic=true caught a
+   * partial failure and helm rolled the release back to its
+   * previous revision.
+   */
+  helmUpgrade: (
+    cluster: string,
+    namespace: string,
+    name: string,
+    body: HelmUpgradeRequest,
+    signal?: AbortSignal,
+  ) =>
+    postJSON<HelmActionResult>(
+      `/api/clusters/${enc(cluster)}/helm/releases/${enc(namespace)}/${enc(name)}/upgrade`,
+      body,
+      signal,
+    ),
+
+  /**
+   * Helm uninstall action (#123). DELETE /helm/releases/{ns}/{name}.
+   * Sync — blocks until helm SDK call returns. Audit pair fires
+   * regardless of outcome. Pre-flight SAR (verb=delete) denials
+   * return 403 with E_HELM_PREFLIGHT_DENIED.
+   */
+  helmUninstall: (
+    cluster: string,
+    namespace: string,
+    name: string,
+    opts?: { keepHistory?: boolean; disableHooks?: boolean },
+    signal?: AbortSignal,
+  ) => {
+    const params = new URLSearchParams();
+    if (opts?.keepHistory) params.set("keepHistory", "true");
+    if (opts?.disableHooks) params.set("disableHooks", "true");
+    const qs = params.toString();
+    return deleteJSON<HelmUninstallResult>(
+      `/api/clusters/${enc(cluster)}/helm/releases/${enc(namespace)}/${enc(name)}${qs ? `?${qs}` : ""}`,
+      signal,
+    );
   },
 
   /**

@@ -15,6 +15,61 @@ tag.
 
 ### Added
 
+- Helm install-ref pre-fill on the upgrade dialog (#76 follow-up). On
+  successful install / upgrade actions, Periscope patches the helm
+  release storage Secret/ConfigMap with two annotations —
+  `periscope.io/install-ref` and `periscope.io/install-chart-name` —
+  capturing the chart ref + chart name the operator originally used.
+  The release detail endpoint reads them back and exposes
+  `installRef` / `installChartName` on `HelmReleaseDetail`. The
+  upgrade dialog uses these to pre-fill, closing the "why doesn't
+  this remember anything" UX gap (helm itself doesn't persist the
+  install ref). Best-effort writes on the action path —
+  annotation-write failure does not fail the install/upgrade. Read
+  failures fall back to empty fields. **Limitation**: only releases
+  installed or upgraded via Periscope carry the annotations —
+  releases installed via the helm CLI directly still require
+  pasting the ref on first Periscope upgrade; subsequent upgrades
+  pre-fill once the annotation is on the new revision.
+
+- Helm release uninstall, end-to-end (#123, sub-task of #72). New
+  `DELETE /api/clusters/{c}/helm/releases/{ns}/{name}` endpoint with
+  `?keepHistory=true|false` and `?disableHooks=true|false` query
+  flags (both default false). Sync, with the same pre-flight SAR
+  pattern from #76 — verb=`delete` against each kind in the
+  current release's manifest list, denials short-circuit with
+  403 + inline list. Audit emits a `helm_uninstall_intent` +
+  `helm_uninstall` pre/post pair; outcome row carries the
+  `revisionsRemoved` count. SPA gains a red `[uninstall]` button
+  next to `[upgrade]` on the release detail page header, opening
+  a type-the-name confirmation modal (mirrors `DeleteResourceModal`'s
+  destructive-action friction pattern) with checkboxes for the two
+  flags. On success the SPA toasts the revision count and
+  navigates back to the release list.
+
+- Helm install + upgrade actions, end-to-end (#76, sub-task of #72). Two
+  new endpoints — `POST /api/clusters/{c}/helm/install` and
+  `POST /api/clusters/{c}/helm/releases/{ns}/{name}/upgrade` — and the
+  full SPA UI to drive them. Both are sync (handler blocks until the
+  helm SDK call returns; default 5min timeout, capped at 10min server-
+  side) with `Atomic=true` by default — failed installs / upgrades
+  auto-rollback so no half-deployed state lingers. Pre-flight SAR runs
+  before the SDK call; pre-flight denial returns 403 with the denied
+  list inline (`E_HELM_PREFLIGHT_DENIED`). Audit emits an intent +
+  outcome pair per call (`helm_install_intent` + `helm_install`,
+  `helm_upgrade_intent` + `helm_upgrade`) so hung / partitioned
+  operations still leave a forensic trail. Outcome rows carry the new
+  revision number and the `rolledBack` flag when Atomic caught a
+  partial failure. The SPA wires both flows into a unified
+  `ChartActionDialog` with a `mode` prop (replaces the earlier
+  install-only `HelmInstallDialog` from #74) — install via the
+  releases-list page, upgrade via a new `[Upgrade]` button on the
+  release detail page header. The dialog gains a collapsible Preview
+  pane that calls the #75 preview endpoints and surfaces the rendered
+  manifests + RBAC denial list + (upgrade) diff inline before commit.
+  Release detail pages gain a `notes` tab alongside values / manifest /
+  history that renders the chart's NOTES.txt.
+
 - Helm dry-run + diff preview backend (#75, sub-task of #72). Two new
   endpoints — `POST /api/clusters/{c}/helm/install-preview` and
   `POST /api/clusters/{c}/helm/releases/{ns}/{name}/upgrade-preview` —
