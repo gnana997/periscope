@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -197,6 +198,61 @@ func TestEKSNodegroupsList_AWSListErrorEmitsFailureAudit(t *testing.T) {
 	events := sink.snapshot()
 	if len(events) != 1 || events[0].Outcome != audit.OutcomeFailure {
 		t.Errorf("expected one failure event")
+	}
+}
+
+// TestEKSNodegroupsList_ClassifiesAWSErrors mirrors the insights test:
+// each smithy-typed exception flips the response to a structured
+// status + code so the SPA renders the right diagnostic.
+func TestEKSNodegroupsList_ClassifiesAWSErrors(t *testing.T) {
+	cases := []struct {
+		name       string
+		err        error
+		wantStatus int
+		wantCode   string
+	}{
+		{
+			name:       "AccessDenied → 403/E_AWS_FORBIDDEN",
+			err:        &ekstypes.AccessDeniedException{Message: strPtr("denied")},
+			wantStatus: http.StatusForbidden,
+			wantCode:   "E_AWS_FORBIDDEN",
+		},
+		{
+			name:       "ResourceNotFound → 404/E_AWS_NOT_FOUND",
+			err:        &ekstypes.ResourceNotFoundException{Message: strPtr("missing")},
+			wantStatus: http.StatusNotFound,
+			wantCode:   "E_AWS_NOT_FOUND",
+		},
+		{
+			name:       "Throttling → 429/E_AWS_THROTTLED",
+			err:        &ekstypes.ThrottlingException{Message: strPtr("slow down")},
+			wantStatus: http.StatusTooManyRequests,
+			wantCode:   "E_AWS_THROTTLED",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			reg := eksRegistry(t, "prod-eu-west-1", clusters.BackendEKS)
+			fake := &fakeEKSNodegroupsClient{
+				listFn: func(_ context.Context, _ *eks.ListNodegroupsInput) (*eks.ListNodegroupsOutput, error) {
+					return nil, tc.err
+				},
+			}
+			withFakeNodegroupsClient(t, fake)
+
+			rec := invokeNodegroups(t, reg, newEKSNodegroupsCache(time.Hour),
+				&recordingSink{},
+				"/api/clusters/prod-eu-west-1/eks/nodegroups",
+				map[string]string{"cluster": "prod-eu-west-1"}, false)
+
+			if rec.Code != tc.wantStatus {
+				t.Fatalf("status = %d, want %d; body = %s",
+					rec.Code, tc.wantStatus, rec.Body.String())
+			}
+			if !strings.Contains(rec.Body.String(), tc.wantCode) {
+				t.Errorf("body missing %q: %s", tc.wantCode, rec.Body.String())
+			}
+		})
 	}
 }
 

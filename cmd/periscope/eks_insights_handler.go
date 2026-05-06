@@ -209,7 +209,7 @@ func eksInsightsListHandler(reg *clusters.Registry, cache *eksInsightsCache, emi
 
 		if cached, ok := cache.GetList(c.Name); ok {
 			writeJSON(w, http.StatusOK, *cached)
-			emitInsightsRead(r.Context(), emitter, p, c, audit.OutcomeSuccess, "cache_hit", "")
+			emitInsightsRead(r.Context(), emitter, c, audit.OutcomeSuccess, "cache_hit", "")
 			return
 		}
 
@@ -227,8 +227,9 @@ func eksInsightsListHandler(reg *clusters.Registry, cache *eksInsightsCache, emi
 				return
 			}
 			slog.Warn("eks insights list failed", "cluster", c.Name, "err", err)
-			emitInsightsRead(r.Context(), emitter, p, c, audit.OutcomeFailure, "list", err.Error())
-			writeAPIErrorJSON(w, http.StatusBadGateway, "E_AWS_API",
+			emitInsightsRead(r.Context(), emitter, c, audit.OutcomeFailure, "list", err.Error())
+			status, code := awsErrorToStatus(err)
+			writeAPIErrorJSON(w, status, code,
 				"failed to list upgrade insights: "+err.Error())
 			return
 		}
@@ -243,7 +244,7 @@ func eksInsightsListHandler(reg *clusters.Registry, cache *eksInsightsCache, emi
 		resp := buildListResponse(out.Insights)
 		cache.PutList(c.Name, resp)
 		writeJSON(w, http.StatusOK, resp)
-		emitInsightsRead(r.Context(), emitter, p, c, audit.OutcomeSuccess, "list", "")
+		emitInsightsRead(r.Context(), emitter, c, audit.OutcomeSuccess, "list", "")
 	}
 }
 
@@ -271,7 +272,7 @@ func eksInsightsGetHandler(reg *clusters.Registry, cache *eksInsightsCache, emit
 
 		if cached, ok := cache.GetDetail(c.Name, insightID); ok {
 			writeJSON(w, http.StatusOK, *cached)
-			emitInsightsRead(r.Context(), emitter, p, c, audit.OutcomeSuccess, "detail:cache_hit", "")
+			emitInsightsRead(r.Context(), emitter, c, audit.OutcomeSuccess, "detail:cache_hit", "")
 			return
 		}
 
@@ -287,13 +288,14 @@ func eksInsightsGetHandler(reg *clusters.Registry, cache *eksInsightsCache, emit
 			}
 			slog.Warn("eks insights describe failed",
 				"cluster", c.Name, "insight_id", insightID, "err", err)
-			emitInsightsRead(r.Context(), emitter, p, c, audit.OutcomeFailure, "detail", err.Error())
-			writeAPIErrorJSON(w, http.StatusBadGateway, "E_AWS_API",
+			emitInsightsRead(r.Context(), emitter, c, audit.OutcomeFailure, "detail", err.Error())
+			status, code := awsErrorToStatus(err)
+			writeAPIErrorJSON(w, status, code,
 				"failed to describe insight: "+err.Error())
 			return
 		}
 		if out.Insight == nil {
-			emitInsightsRead(r.Context(), emitter, p, c, audit.OutcomeFailure, "detail", "empty response")
+			emitInsightsRead(r.Context(), emitter, c, audit.OutcomeFailure, "detail", "empty response")
 			writeAPIErrorJSON(w, http.StatusBadGateway, "E_AWS_API",
 				"DescribeInsight returned empty response")
 			return
@@ -302,7 +304,7 @@ func eksInsightsGetHandler(reg *clusters.Registry, cache *eksInsightsCache, emit
 		detail := buildDetailResponse(c.Name, out.Insight)
 		cache.PutDetail(c.Name, insightID, detail)
 		writeJSON(w, http.StatusOK, detail)
-		emitInsightsRead(r.Context(), emitter, p, c, audit.OutcomeSuccess, "detail", "")
+		emitInsightsRead(r.Context(), emitter, c, audit.OutcomeSuccess, "detail", "")
 	}
 }
 
@@ -353,37 +355,43 @@ func buildDetailResponse(cluster string, in *ekstypes.Insight) UpgradeInsightDet
 	return out
 }
 
-// mapInsightSummary maps the SDK InsightSummary (used by the list
-// endpoint) to the wire summary. mapInsightSummaryFull does the
-// equivalent for the detail-shaped Insight; we share field
-// extraction via a small helper rather than reflecting because the
-// two SDK structs are not interface-compatible.
-func mapInsightSummary(in *ekstypes.InsightSummary) UpgradeInsightSummary {
+// summaryFromInsightFields builds the wire summary from already-
+// dereffed scalars. Shared between the list ([]InsightSummary) and
+// detail (Insight) SDK shapes — neither has a usable interface
+// surface, so we pass the fields explicitly instead of reflecting.
+// One source of truth for the wire shape; if a field is added to
+// UpgradeInsightSummary, only this body needs to change.
+func summaryFromInsightFields(
+	id, name, k8sVer, description string,
+	category ekstypes.Category,
+	status *ekstypes.InsightStatus,
+	refresh, transition *time.Time,
+) UpgradeInsightSummary {
 	return UpgradeInsightSummary{
-		ID:                 deref(in.Id),
-		Name:               deref(in.Name),
-		Category:           string(in.Category),
-		KubernetesVersion:  deref(in.KubernetesVersion),
-		Status:             insightStatus(in.InsightStatus),
-		StatusReason:       insightStatusReason(in.InsightStatus),
-		LastRefreshTime:    in.LastRefreshTime,
-		LastTransitionTime: in.LastTransitionTime,
-		Description:        deref(in.Description),
+		ID:                 id,
+		Name:               name,
+		Category:           string(category),
+		KubernetesVersion:  k8sVer,
+		Status:             insightStatus(status),
+		StatusReason:       insightStatusReason(status),
+		LastRefreshTime:    refresh,
+		LastTransitionTime: transition,
+		Description:        description,
 	}
 }
 
+func mapInsightSummary(in *ekstypes.InsightSummary) UpgradeInsightSummary {
+	return summaryFromInsightFields(
+		deref(in.Id), deref(in.Name), deref(in.KubernetesVersion), deref(in.Description),
+		in.Category, in.InsightStatus, in.LastRefreshTime, in.LastTransitionTime,
+	)
+}
+
 func mapInsightSummaryFull(in *ekstypes.Insight) UpgradeInsightSummary {
-	return UpgradeInsightSummary{
-		ID:                 deref(in.Id),
-		Name:               deref(in.Name),
-		Category:           string(in.Category),
-		KubernetesVersion:  deref(in.KubernetesVersion),
-		Status:             insightStatus(in.InsightStatus),
-		StatusReason:       insightStatusReason(in.InsightStatus),
-		LastRefreshTime:    in.LastRefreshTime,
-		LastTransitionTime: in.LastTransitionTime,
-		Description:        deref(in.Description),
-	}
+	return summaryFromInsightFields(
+		deref(in.Id), deref(in.Name), deref(in.KubernetesVersion), deref(in.Description),
+		in.Category, in.InsightStatus, in.LastRefreshTime, in.LastTransitionTime,
+	)
 }
 
 func mapResource(cluster string, in *ekstypes.InsightResourceDetail) UpgradeInsightResourceRef {
@@ -455,8 +463,10 @@ func deref(s *string) string {
 func int32Ptr(v int32) *int32 { return &v }
 
 // pickModalVersion returns the version with the highest count.
-// Ties broken by lexicographic order of the version string, which
-// for "1.30" / "1.31" / "1.32" coincides with semantic order. Empty
+// Ties broken by lexicographic order of the version string. EKS
+// minor versions are 1.27+ in 2026 and AWS does not roll back minors,
+// so lex order matches numeric order in practice — this would NOT
+// be safe for "1.9" vs "1.10" if EKS ever regressed there. Empty
 // when the input is empty.
 func pickModalVersion(votes map[string]int) string {
 	var best string
@@ -473,13 +483,14 @@ func pickModalVersion(votes map[string]int) string {
 // emitInsightsRead is the single audit-emission helper this handler
 // uses. Centralizing the call shape means a future change to the
 // row's Extra payload (request_id is already auto-snapped by the
-// emitter) lands in one place.
-func emitInsightsRead(ctx context.Context, emitter *audit.Emitter, p credentials.Provider, c clusters.Cluster, outcome audit.Outcome, op, reason string) {
+// emitter) lands in one place. Mirrors emitNodegroupsRead — both
+// pull the actor from the request context via actorFromContext.
+func emitInsightsRead(ctx context.Context, emitter *audit.Emitter, c clusters.Cluster, outcome audit.Outcome, op, reason string) {
 	if emitter == nil {
 		return
 	}
 	emitter.Record(ctx, audit.Event{
-		Actor:   actorFromProvider(ctx, p),
+		Actor:   actorFromContext(ctx),
 		Verb:    audit.VerbEKSInsightsRead,
 		Outcome: outcome,
 		Cluster: c.Name,
@@ -488,11 +499,4 @@ func emitInsightsRead(ctx context.Context, emitter *audit.Emitter, p credentials
 			"op": op,
 		},
 	})
-}
-
-// actorFromProvider snapshots the actor from the request context's
-// session. Mirrors the existing actorFromContext helper but is named
-// here to make the dependency on ctx explicit at the callsite.
-func actorFromProvider(ctx context.Context, _ credentials.Provider) audit.Actor {
-	return actorFromContext(ctx)
 }

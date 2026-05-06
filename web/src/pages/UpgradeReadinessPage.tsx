@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { useUpgradeInsight, useUpgradeInsights } from "../hooks/useUpgradeInsights";
-import { isBackendNotEKS } from "../lib/api";
+import { isAWSForbidden, isAWSThrottled, isBackendNotEKS } from "../lib/api";
 import { cn } from "../lib/cn";
 import type {
   UpgradeInsightStatus,
@@ -42,6 +42,36 @@ export function UpgradeReadinessPage({ cluster }: { cluster: string }) {
         <p className="text-[13px] text-ink-faint">
           Upgrade insights are an EKS feature; this cluster is not
           backed by EKS, so no upgrade-readiness data is available.
+        </p>
+      </div>
+    );
+  }
+
+  if (isError && isAWSForbidden(error)) {
+    return (
+      <div className="px-6 py-8">
+        <h1 className="mb-2 text-[16px] font-medium">Upgrade readiness</h1>
+        <p className="text-[13px] text-ink-faint">
+          Periscope's AWS role does not have permission to read upgrade
+          insights for this cluster. Required IAM actions:{" "}
+          <code className="font-mono text-[12px]">eks:ListInsights</code>{" "}
+          and{" "}
+          <code className="font-mono text-[12px]">eks:DescribeInsight</code>.
+          See{" "}
+          <code className="font-mono text-[12px]">docs/setup/deploy.md</code>{" "}
+          for the full permission matrix.
+        </p>
+      </div>
+    );
+  }
+
+  if (isError && isAWSThrottled(error)) {
+    return (
+      <div className="px-6 py-8">
+        <h1 className="mb-2 text-[16px] font-medium">Upgrade readiness</h1>
+        <p className="text-[13px] text-ink-faint">
+          AWS rate-limited this request. Refresh the page in a moment;
+          the cache will absorb subsequent calls.
         </p>
       </div>
     );

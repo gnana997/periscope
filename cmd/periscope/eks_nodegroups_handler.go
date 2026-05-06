@@ -31,6 +31,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -204,7 +205,8 @@ func eksNodegroupsListHandler(reg *clusters.Registry, cache *eksNodegroupsCache,
 			}
 			slog.Warn("eks nodegroups list failed", "cluster", c.Name, "err", err)
 			emitNodegroupsRead(r.Context(), emitter, c, audit.OutcomeFailure, "list", err.Error())
-			writeAPIErrorJSON(w, http.StatusBadGateway, "E_AWS_API",
+			status, code := awsErrorToStatus(err)
+			writeAPIErrorJSON(w, status, code,
 				"failed to list node groups: "+err.Error())
 			return
 		}
@@ -249,11 +251,25 @@ func eksNodegroupsListHandler(reg *clusters.Registry, cache *eksNodegroupsCache,
 		// rows are skipped inside applyDrift. The catalog client is
 		// built once per request and reused across rows so the
 		// 30min cache amortizes calls within the same fleet view.
+		//
+		// Fan-out is parallel: each applyDrift carries its own
+		// driftLookupTimeout (4s), the cache is sync-safe via its
+		// own mutex, and iterations write to disjoint &summaries[i]
+		// slots — no race window. Worst-case wall-clock collapses
+		// from N×SSM-latency to one SSM-latency on a cold cache.
+		// Mirrors fleet_handler.go's WaitGroup pattern; no errgroup
+		// dependency.
 		if amiCache != nil {
 			catalogClient := newAMICatalogClient(p, c)
+			var wg sync.WaitGroup
 			for i := range summaries {
-				applyDrift(r.Context(), &summaries[i], catalogClient, amiCache)
+				wg.Add(1)
+				go func(i int) {
+					defer wg.Done()
+					applyDrift(r.Context(), &summaries[i], catalogClient, amiCache)
+				}(i)
 			}
+			wg.Wait()
 		}
 
 		resp := NodegroupsListResponse{
@@ -306,7 +322,8 @@ func eksNodegroupsGetHandler(reg *clusters.Registry, cache *eksNodegroupsCache, 
 			slog.Warn("eks nodegroup describe failed",
 				"cluster", c.Name, "nodegroup", name, "err", err)
 			emitNodegroupsRead(r.Context(), emitter, c, audit.OutcomeFailure, "detail", err.Error())
-			writeAPIErrorJSON(w, http.StatusBadGateway, "E_AWS_API",
+			status, code := awsErrorToStatus(err)
+			writeAPIErrorJSON(w, status, code,
 				"failed to describe node group: "+err.Error())
 			return
 		}

@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -275,6 +276,70 @@ func TestEKSInsightsList_AWSErrorEmitsFailureAudit(t *testing.T) {
 		t.Errorf("expected non-empty Reason")
 	}
 }
+
+// TestEKSInsightsList_ClassifiesAWSErrors covers the awsErrorToStatus
+// fold-in: each smithy-typed exception lands on the right HTTP status
+// + stable error code so the SPA can branch on them. A non-smithy
+// error keeps the legacy 502/E_AWS_API behavior.
+func TestEKSInsightsList_ClassifiesAWSErrors(t *testing.T) {
+	cases := []struct {
+		name       string
+		err        error
+		wantStatus int
+		wantCode   string
+	}{
+		{
+			name:       "AccessDenied → 403/E_AWS_FORBIDDEN",
+			err:        &ekstypes.AccessDeniedException{Message: strPtr("denied")},
+			wantStatus: http.StatusForbidden,
+			wantCode:   "E_AWS_FORBIDDEN",
+		},
+		{
+			name:       "ResourceNotFound → 404/E_AWS_NOT_FOUND",
+			err:        &ekstypes.ResourceNotFoundException{Message: strPtr("missing")},
+			wantStatus: http.StatusNotFound,
+			wantCode:   "E_AWS_NOT_FOUND",
+		},
+		{
+			name:       "Throttling → 429/E_AWS_THROTTLED",
+			err:        &ekstypes.ThrottlingException{Message: strPtr("slow down")},
+			wantStatus: http.StatusTooManyRequests,
+			wantCode:   "E_AWS_THROTTLED",
+		},
+		{
+			name:       "unknown error → 502/E_AWS_API (legacy default preserved)",
+			err:        errors.New("opaque transport blip"),
+			wantStatus: http.StatusBadGateway,
+			wantCode:   "E_AWS_API",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			reg := eksRegistry(t, "prod-eu-west-1", clusters.BackendEKS)
+			fake := &fakeEKSInsightsClient{
+				listFn: func(_ context.Context, _ *eks.ListInsightsInput) (*eks.ListInsightsOutput, error) {
+					return nil, tc.err
+				},
+			}
+			withFakeEKSClient(t, fake)
+
+			rec := invokeInsights(t, reg, newEKSInsightsCache(time.Hour),
+				&recordingSink{}, http.MethodGet,
+				"/api/clusters/prod-eu-west-1/eks/upgrade-insights",
+				map[string]string{"cluster": "prod-eu-west-1"}, false)
+
+			if rec.Code != tc.wantStatus {
+				t.Fatalf("status = %d, want %d; body = %s",
+					rec.Code, tc.wantStatus, rec.Body.String())
+			}
+			if !strings.Contains(rec.Body.String(), tc.wantCode) {
+				t.Errorf("body missing %q: %s", tc.wantCode, rec.Body.String())
+			}
+		})
+	}
+}
+
+func strPtr(s string) *string { return &s }
 
 func TestEKSInsightsList_CacheHitSkipsAWS(t *testing.T) {
 	reg := eksRegistry(t, "prod-eu-west-1", clusters.BackendEKS)

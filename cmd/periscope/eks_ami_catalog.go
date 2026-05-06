@@ -50,12 +50,19 @@ import (
 
 // LatestAMI is the result of a catalog lookup. ImageID is always
 // populated; ReleaseVersion is only available from the SSM source
-// (DescribeImages fallback leaves it empty and PublishedAt holds
-// the AMI's CreationDate so the SPA can still render a date).
+// (DescribeImages fallback leaves it empty).
 type LatestAMI struct {
 	ImageID        string
 	ReleaseVersion string
-	PublishedAt    *time.Time
+	// LatestSeenAt is a best-effort freshness timestamp from whichever
+	// source produced this entry. SSM path: the parameter's
+	// LastModifiedDate (when AWS published a new "recommended"
+	// pointer). EC2 path: the AMI's own CreationDate. They usually
+	// correlate but are not the same clock — treat the value as
+	// "approximately when this AMI became the latest" rather than
+	// a strict release date. The Source field below distinguishes
+	// the two for debugging.
+	LatestSeenAt *time.Time
 	// Source records which path produced the result so audit /
 	// debugging can tell SSM hits from EC2 fallback at a glance.
 	Source string // "ssm" | "ec2"
@@ -82,6 +89,15 @@ func (r *realAMICatalogClient) GetParameter(ctx context.Context, in *ssm.GetPara
 func (r *realAMICatalogClient) DescribeImages(ctx context.Context, in *ec2.DescribeImagesInput, opts ...func(*ec2.Options)) (*ec2.DescribeImagesOutput, error) {
 	return r.ec2.DescribeImages(ctx, in, opts...)
 }
+
+// ec2FallbackOwners is the owner-id list passed to DescribeImages on
+// the EC2 fallback path. The "amazon" alias covers the newer AL2023
+// family; 602401143452 is the historical EKS-optimized AMI account
+// that still owns AL2 AMIs in some commercial partitions. Both have
+// to be listed because the alias does NOT include the EKS account.
+// Exported for the test seam — same package, package-level so the
+// test asserts the exact slice passed to the fake client.
+var ec2FallbackOwners = []string{"amazon", "602401143452"}
 
 // newAMICatalogClient is swapped by tests. Default builds the real
 // SSM + EC2 clients from the request's Provider.
@@ -225,7 +241,7 @@ func lookupSSM(ctx context.Context, client amiCatalogAPI, fam amiFamily, amiType
 	out := &LatestAMI{
 		ImageID:     *imageOut.Parameter.Value,
 		Source:      "ssm",
-		PublishedAt: imageOut.Parameter.LastModifiedDate,
+		LatestSeenAt: imageOut.Parameter.LastModifiedDate,
 	}
 
 	// release_version / image_version is best-effort. A missing
@@ -264,9 +280,14 @@ func ssmPaths(fam amiFamily, amiType ekstypes.AMITypes, k8sVersion string) (stri
 
 func lookupEC2(ctx context.Context, client amiCatalogAPI, fam amiFamily, k8sVersion string) (*LatestAMI, error) {
 	pattern := strings.ReplaceAll(fam.EC2NamePattern, "{v}", k8sVersion)
-	owner := "amazon"
+	// "amazon" is the alias for canonical Amazon AMIs (newer al2023
+	// family is published here); 602401143452 is the historical EKS-
+	// optimized AMI account (al2 lives there in older AWS partitions).
+	// Listing both keeps the fallback usable across every commercial
+	// region. GovCloud / China use different account IDs and are out
+	// of scope for v1 — see docs/setup/eks-upgrade-readiness.md.
 	out, err := client.DescribeImages(ctx, &ec2.DescribeImagesInput{
-		Owners: []string{owner},
+		Owners: ec2FallbackOwners,
 		Filters: []ec2types.Filter{
 			{Name: aws.String("name"), Values: []string{pattern}},
 		},
@@ -290,7 +311,7 @@ func lookupEC2(ctx context.Context, client amiCatalogAPI, fam amiFamily, k8sVers
 		Source:  "ec2",
 	}
 	if t, err := time.Parse(time.RFC3339, strDeref(chosen.CreationDate)); err == nil {
-		res.PublishedAt = &t
+		res.LatestSeenAt = &t
 	}
 	// EKS-optimized AMI names embed the release version, e.g.
 	// "amazon-eks-node-1.30-v20240819". Extract the trailing token

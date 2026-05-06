@@ -174,8 +174,8 @@ func TestLatestForNodegroup_FallsBackToEC2OnSSMFailure(t *testing.T) {
 			return nil, errors.New("AccessDenied: GetParameter")
 		},
 		ec2Fn: func(_ context.Context, in *ec2.DescribeImagesInput) (*ec2.DescribeImagesOutput, error) {
-			if len(in.Owners) != 1 || in.Owners[0] != "amazon" {
-				t.Errorf("expected owners=[amazon], got %v", in.Owners)
+			if len(in.Owners) != 2 || in.Owners[0] != "amazon" || in.Owners[1] != "602401143452" {
+				t.Errorf("expected owners=[amazon 602401143452], got %v", in.Owners)
 			}
 			id := imageID
 			cd := creation
@@ -207,8 +207,10 @@ func TestLookupEC2_PicksMostRecent(t *testing.T) {
 	nameB := "amazon-eks-node-1.30-v20240901"
 
 	fam, _ := familyForAMIType(ekstypes.AMITypesAl2X8664)
+	var capturedOwners []string
 	fake := &fakeAMICatalogClient{
-		ec2Fn: func(_ context.Context, _ *ec2.DescribeImagesInput) (*ec2.DescribeImagesOutput, error) {
+		ec2Fn: func(_ context.Context, in *ec2.DescribeImagesInput) (*ec2.DescribeImagesOutput, error) {
+			capturedOwners = in.Owners
 			// Return out-of-order to confirm the sort.
 			return &ec2.DescribeImagesOutput{Images: []ec2types.Image{
 				{ImageId: aws.String(idA), CreationDate: aws.String(older), Name: aws.String(nameA)},
@@ -222,6 +224,19 @@ func TestLookupEC2_PicksMostRecent(t *testing.T) {
 	}
 	if got.ImageID != idB {
 		t.Errorf("expected newer image, got %q", got.ImageID)
+	}
+	// LatestSeenAt is populated from the AMI's CreationDate on the EC2
+	// path; renaming PublishedAt → LatestSeenAt was a duplicate-code
+	// cleanup so the field's semantics are explicit.
+	if got.LatestSeenAt == nil || got.LatestSeenAt.Year() != 2024 {
+		t.Errorf("LatestSeenAt = %v, want 2024-09-01-ish", got.LatestSeenAt)
+	}
+	// Owners must include both the "amazon" alias (covers AL2023) and
+	// the historical EKS-optimized AMI account 602401143452 (covers
+	// AL2 in older partitions). Without the second owner the fallback
+	// silently returns zero results in those regions.
+	if len(capturedOwners) != 2 || capturedOwners[0] != "amazon" || capturedOwners[1] != "602401143452" {
+		t.Errorf("Owners = %v, want [amazon 602401143452]", capturedOwners)
 	}
 }
 

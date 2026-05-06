@@ -872,6 +872,25 @@ export function isBackendNotEKS(err: unknown): boolean {
   return (err.bodyText ?? "").includes("E_BACKEND_NOT_EKS");
 }
 
+/** True when an ApiError is a 403/E_AWS_FORBIDDEN — i.e. the
+ *  pod-identity / IRSA role lacks the IAM permission for the call.
+ *  The SPA renders a permission-specific hint instead of the generic
+ *  red banner so the operator chases the right diagnostic. */
+export function isAWSForbidden(err: unknown): boolean {
+  if (!(err instanceof ApiError)) return false;
+  if (err.status !== 403) return false;
+  return (err.bodyText ?? "").includes("E_AWS_FORBIDDEN");
+}
+
+/** True when an ApiError is a 429/E_AWS_THROTTLED — AWS rate-limited
+ *  the call. Transient; the SPA suggests a retry rather than a
+ *  permanent error. */
+export function isAWSThrottled(err: unknown): boolean {
+  if (!(err instanceof ApiError)) return false;
+  if (err.status !== 429) return false;
+  return (err.bodyText ?? "").includes("E_AWS_THROTTLED");
+}
+
 // --- write helpers (kept out of `api` block so the call sites stay readable) ---
 
 function resourceURL(args: {

@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useNodegroup, useNodegroups } from "../hooks/useNodegroups";
-import { isBackendNotEKS } from "../lib/api";
+import { isAWSForbidden, isAWSThrottled, isBackendNotEKS } from "../lib/api";
 import { cn } from "../lib/cn";
 import { classifyDrift } from "../lib/nodegroups";
 import type { NodegroupSummary } from "../lib/types";
@@ -24,6 +24,37 @@ export function NodeGroupsPage({ cluster }: { cluster: string }) {
           Managed node group introspection is an EKS feature; this
           cluster is not backed by EKS, so no node group data is
           available.
+        </p>
+      </div>
+    );
+  }
+
+  if (isError && isAWSForbidden(error)) {
+    return (
+      <div className="px-6 py-8">
+        <h1 className="mb-2 text-[16px] font-medium">Node groups</h1>
+        <p className="text-[13px] text-ink-faint">
+          Periscope's AWS role does not have permission to read managed
+          node groups for this cluster. Required IAM actions:{" "}
+          <code className="font-mono text-[12px]">eks:ListNodegroups</code>,{" "}
+          <code className="font-mono text-[12px]">eks:DescribeNodegroup</code>,
+          plus{" "}
+          <code className="font-mono text-[12px]">ssm:GetParameter</code> and{" "}
+          <code className="font-mono text-[12px]">ec2:DescribeImages</code>{" "}
+          for the AMI drift lookups. See{" "}
+          <code className="font-mono text-[12px]">docs/setup/deploy.md</code>.
+        </p>
+      </div>
+    );
+  }
+
+  if (isError && isAWSThrottled(error)) {
+    return (
+      <div className="px-6 py-8">
+        <h1 className="mb-2 text-[16px] font-medium">Node groups</h1>
+        <p className="text-[13px] text-ink-faint">
+          AWS rate-limited this request. Refresh the page in a moment;
+          the cache will absorb subsequent calls.
         </p>
       </div>
     );

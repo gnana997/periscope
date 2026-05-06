@@ -87,6 +87,10 @@ Minimum policy snippet to add to the existing periscope role (extends the snippe
 
 `ec2:DescribeImages` only supports `Resource: *` because the API doesn't have resource-level ARNs for image lookups. The action is read-only.
 
+> **Diagnosing missing permissions in the SPA.** When the role lacks one of these IAM actions, the upgrade-readiness and node-groups pages render a permission-specific hint (`Periscope's AWS role does not have permission to read…`) instead of a generic red error banner. The backend translates AWS `AccessDeniedException` to HTTP 403 with the stable code `E_AWS_FORBIDDEN`; AWS `ThrottlingException` becomes 429 with `E_AWS_THROTTLED` (transient — refresh after a moment). All other AWS errors keep the legacy 502 / `E_AWS_API` shape.
+
+> **Partition support.** The IAM matrix above and the `ec2:DescribeImages` fallback list both Amazon-owned AMIs and the historical EKS-optimized AMI account `602401143452`. This covers every AWS commercial region. **GovCloud and China partitions are not covered for AMI drift detection in v1** — the EC2 AMI account IDs differ there, and the SSM `/aws/service/eks/*` parameter tree may not be published. The SPA will show "—" in the drift column for nodegroups in those partitions.
+
 ---
 
 ## Refresh cadence
