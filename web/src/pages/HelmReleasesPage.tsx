@@ -4,7 +4,7 @@
 // Cluster-wide; the backend impersonates the user, so visibility
 // matches the user's K8s RBAC on the storage Secrets/ConfigMaps.
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useHelmReleases } from "../hooks/useHelm";
 import type { HelmReleaseSummary } from "../lib/types";
@@ -20,12 +20,14 @@ import {
 } from "../components/table/states";
 import { isForbidden } from "../components/table/isForbidden";
 import { cn } from "../lib/cn";
+import { HelmInstallDialog } from "../components/helm/HelmInstallDialog";
 
 export function HelmReleasesPage({ cluster }: { cluster: string }) {
   const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
   const search = params.get("q") ?? "";
   const statusFilter = params.get("status");
+  const [installOpen, setInstallOpen] = useState(false);
 
   const setParam = (key: string, value: string | null) => {
     const next = new URLSearchParams(params);
@@ -119,6 +121,21 @@ export function HelmReleasesPage({ cluster }: { cluster: string }) {
               }`
             : undefined
         }
+        trailing={
+          <button
+            type="button"
+            onClick={() => setInstallOpen(true)}
+            className="border border-accent bg-accent px-3 py-1 font-mono text-[11.5px] lowercase text-white hover:brightness-110"
+            title="Install a Helm chart from a URL or OCI ref"
+          >
+            + install chart
+          </button>
+        }
+      />
+      <HelmInstallDialog
+        open={installOpen}
+        onClose={() => setInstallOpen(false)}
+        cluster={cluster}
       />
       <FilterStrip
         search={search}

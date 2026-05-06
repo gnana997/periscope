@@ -33,6 +33,19 @@ tag.
   Identity / IRSA) is a follow-up sub-task. Frontend types + API
   client + TanStack hooks ship alongside the backend; the install-
   dialog UI lands in a sibling issue.
+- Helm install dialog UI (#74, sub-task of #72). New "+ install
+  chart" button in the Helm releases page header opens a modal with
+  a single-pane top-to-bottom flow: chart-ref input → fetch
+  versions → version dropdown → load values → schema-aware editor.
+  When the chart ships `values.schema.json`, renders a structured
+  form with live `ajv`-backed validation (required fields, enums,
+  type / range / pattern / length); when not, falls back to a
+  Monaco YAML editor. Schema features the form can't render
+  cleanly ($ref / allOf / anyOf / oneOf / arrays-of-objects) are
+  surfaced as "edit in YAML mode" hints rather than silently
+  ignored. `Install` and `Dry-run preview` footer buttons are
+  disabled stubs — those backends are sibling issues under the
+  epic. Rendering only; no install/upgrade actions yet.
 
 ### Security
 
