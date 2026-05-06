@@ -858,6 +858,7 @@ export const api = {
     postJSON<RollbackResponse>(
       `/api/clusters/${enc(cluster)}/${enc(kind)}/${enc(namespace)}/${enc(name)}/rollback`,
       body,
+    ),
   // --- EKS Upgrade Insights (read-only, issue #103) ---------------
   //
   // Both endpoints 422 with `E_BACKEND_NOT_EKS` for non-EKS clusters.
