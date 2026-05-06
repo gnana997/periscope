@@ -1,17 +1,33 @@
 package k8s
 
 // helm.go — read-only Helm release access via direct K8s Secret /
-// ConfigMap reads, no Helm SDK. We decode the release blob (base64
-// + gzip + JSON) ourselves into a minimal struct that captures the
-// fields the SPA renders.
+// ConfigMap reads. We decode the release blob (base64 + gzip + JSON)
+// ourselves into a minimal struct that captures the fields the SPA
+// renders.
 //
-// Why no Helm SDK: helm.sh/helm/{v3,v4} transitively pulls
-// k8s.io/kubectl whose pinned k8s.io/api version conflicts with
-// the rest of Periscope's deps. The release blob format is stable
-// across Helm 3+ — name, namespace, info, chart.metadata, config,
-// manifest are documented and unchanged for the lifetime of the v1
-// storage layout — so owning the decoder is cheap and isolates us
-// from the SDK's transitive dep churn.
+// SDK policy (project-wide, applies across the helm code in this
+// package). Periscope distinguishes read paths from write paths:
+//
+//   - Read paths (this file, helm_chart*.go, the dyff diff helper
+//     below) decode YAML / tarballs / release blobs directly and do
+//     NOT import the helm SDK. The decode logic is small and stable
+//     across Helm 3+; rolling our own buys isolation from the helm
+//     SDK's transitive dep churn (k8s.io/kubectl, k8s.io/cli-runtime,
+//     ~25 indirect deps).
+//
+//   - Write paths (helm_action.go, helm_preview.go, future install/
+//     upgrade/rollback action wrappers) USE the helm SDK directly —
+//     pkg/action wraps hundreds of LoC of helm-internal templating,
+//     hook ordering, capabilities resolution, and post-rendering
+//     that genuinely cannot be reasonably reimplemented. The
+//     transitive dep cost is paid here once and shared across every
+//     write feature.
+//
+// The boundary is "if we'd be reimplementing helm internals, use the
+// SDK; if we'd be reading a YAML file or unpacking a tarball, don't."
+// PR #75 (this preview backend) is the first to introduce
+// helm.sh/helm/v3 to the project; #101 (rollback) and future install/
+// upgrade PRs reuse the helm_action.go infrastructure.
 //
 // Storage backend: Helm 3+ stores release state as Secrets of type
 // helm.sh/release.v1 in the release namespace by default. We
@@ -122,6 +138,19 @@ type HelmReleaseDetail struct {
 	// write ops will reuse the same list to compute compound
 	// permission checks.
 	Resources []HelmManifestObject `json:"resources"`
+	// InstallRef is the (oci|http|https)://… ref the operator used
+	// to install or last-upgraded this release via Periscope. Read
+	// from a periscope.io/install-ref annotation on the helm release
+	// storage Secret/ConfigMap. Empty for releases installed via the
+	// helm CLI directly or via any other tooling — Periscope only
+	// writes this annotation on its own install/upgrade actions.
+	// The SPA pre-fills the upgrade dialog from this when present.
+	InstallRef string `json:"installRef,omitempty"`
+	// InstallChartName is the chart-name component for HTTP repos
+	// (where the ref points at an index.yaml and the operator picks
+	// a chart by name from the index). Empty for OCI refs (the chart
+	// name is implicit in the ref's last segment).
+	InstallChartName string `json:"installChartName,omitempty"`
 }
 
 // HelmHistoryEntry is one row of the history table. Metadata-only —
@@ -494,6 +523,24 @@ func GetHelmRelease(ctx context.Context, p credentials.Provider, c clusters.Clus
 			return nil, fmt.Errorf("helm release %s/%s revision %d: rendered detail %d bytes exceeds %d-byte limit", namespace, name, detail.Revision, size, detailMaxBytes)
 		}
 	}
+
+	// Best-effort: read Periscope install metadata annotations from
+	// the storage object (written by InstallHelmRelease /
+	// UpgradeHelmRelease post-success). When present, the SPA's
+	// upgrade dialog pre-fills chart ref + chart name. Absent for
+	// releases installed via the helm CLI directly or by any other
+	// tooling — silently leaves the fields empty. Never fails the
+	// detail call: a metadata-read error is non-essential and
+	// shouldn't block the operator from seeing the rest of the
+	// release info.
+	if installRef, installChartName, mErr := ReadPeriscopeInstallMetadata(ctx, p, c, namespace, name, detail.Revision); mErr == nil {
+		detail.InstallRef = installRef
+		detail.InstallChartName = installChartName
+	} else {
+		slog.WarnContext(ctx, "helm release detail: metadata read failed (non-fatal, upgrade dialog won't pre-fill)",
+			"cluster", c.Name, "namespace", namespace, "name", name, "revision", detail.Revision, "err", mErr)
+	}
+
 	return detail, nil
 }
 
@@ -587,6 +634,42 @@ func DiffHelmRevisions(ctx context.Context, p credentials.Provider, c clusters.C
 	return &HelmDiff{
 		From:    HelmDiffSide{Revision: from.Revision, YAML: from.ManifestYAML},
 		To:      HelmDiffSide{Revision: to.Revision, YAML: to.ManifestYAML},
+		Changes: changes,
+	}, nil
+}
+
+// DiffHelmManifests is the YAML-string variant of DiffHelmRevisions —
+// same dyff machinery, but the inputs are pre-rendered manifest YAML
+// blobs rather than stored revision numbers. Used by the dry-run
+// preview path (issue #75) where the "from" side is the live release
+// manifest and the "to" side is the manifest helm SDK would render
+// for the proposed install/upgrade.
+//
+// The Revision field on each HelmDiffSide is set to 0 since neither
+// side is a stored revision; the SPA's diff viewer treats 0 as "no
+// revision label" and renders just the YAML.
+//
+// Like DiffHelmRevisions, structured-changes failure is non-fatal:
+// the SPA still has from/to YAML for monaco display. The error is
+// returned so callers can log it; the returned diff is always
+// non-nil on success of the underlying call.
+func DiffHelmManifests(ctx context.Context, fromYAML, toYAML string) (*HelmDiff, error) {
+	changes, err := diffYAMLDocuments(fromYAML, toYAML)
+	if err != nil {
+		// Match DiffHelmRevisions's behavior — log via slog at the
+		// call site (we don't have a cluster identifier here so the
+		// log line goes through the caller). Return the diff anyway
+		// so the SPA has the raw YAML.
+		_ = ctx // reserved for future cancellation if dyff gains it
+		return &HelmDiff{
+			From:    HelmDiffSide{YAML: fromYAML},
+			To:      HelmDiffSide{YAML: toYAML},
+			Changes: nil,
+		}, err
+	}
+	return &HelmDiff{
+		From:    HelmDiffSide{YAML: fromYAML},
+		To:      HelmDiffSide{YAML: toYAML},
 		Changes: changes,
 	}, nil
 }

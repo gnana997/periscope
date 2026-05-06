@@ -39,7 +39,7 @@ export function HelmValuesEditor({
 }: HelmValuesEditorProps) {
   if (!schema) {
     return (
-      <div className="h-[460px] overflow-hidden rounded-sm border border-border bg-bg">
+      <div className="flex min-h-[460px] flex-1 flex-col overflow-hidden rounded-sm border border-border bg-bg">
         <HelmValuesYaml value={valuesYaml} onChange={onValuesYamlChange} />
       </div>
     );

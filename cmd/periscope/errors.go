@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strings"
 
 	"github.com/aws/smithy-go"
+	"helm.sh/helm/v3/pkg/storage/driver"
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
 
 	"github.com/gnana997/periscope/internal/audit"
@@ -133,6 +135,73 @@ func awsErrorToStatus(err error) (int, string) {
 		}
 	}
 	return http.StatusBadGateway, "E_AWS_API"
+}
+
+// helmErrorToStatus classifies a helm SDK error into (httpStatus, code)
+// for the helm preview / write handlers (issue #75 and the rebased
+// rollback in #101). Mirrors awsErrorToStatus's shape: explicit map
+// for recognized sentinels, fall through to (502, "E_HELM_SDK") for
+// anything else.
+//
+// driver.ErrReleaseNotFound is the most common cause an operator can
+// act on (release name typo, namespace mismatch); ErrNoDeployedReleases
+// fires on upgrade preview when the release exists but has no deployed
+// revision to compare against (release was just rolled back to nothing,
+// or every revision is uninstalled).
+//
+// Render / capabilities errors from pkg/action don't have stable
+// sentinel types — they're wrapped errors.New strings. Callers wrap
+// the SDK error with their own annotation; we sniff for the substrings
+// that are operator-actionable. Anything we can't classify falls
+// through to 502, with the caller's slog.Warn still recording the
+// raw error for debugging.
+func helmErrorToStatus(err error) (int, string) {
+	if err == nil {
+		return http.StatusInternalServerError, "E_HELM_SDK"
+	}
+	if errors.Is(err, driver.ErrReleaseNotFound) {
+		return http.StatusNotFound, "E_HELM_RELEASE_NOT_FOUND"
+	}
+	if errors.Is(err, driver.ErrNoDeployedReleases) {
+		return http.StatusUnprocessableEntity, "E_HELM_NO_DEPLOYED_RELEASES"
+	}
+	// Some helm-internal errors wrap an apiserver kerrors.StatusError
+	// (e.g. when discovery is permission-denied). Unwrap and delegate
+	// so a 403 from the apiserver via helm reads as 403 to the SPA.
+	var se *kerrors.StatusError
+	if errors.As(err, &se) {
+		return httpStatusFor(err), classifyHelmK8sError(err)
+	}
+	// Render / template / capability errors. No stable type — sniff
+	// the wrapped message. The substrings below are taken from helm's
+	// own pkg/engine and pkg/action source; they're stable across
+	// minor versions but not part of helm's public API.
+	msg := err.Error()
+	if strings.Contains(msg, "render error") ||
+		strings.Contains(msg, "execution error") ||
+		strings.Contains(msg, "parse error") ||
+		strings.Contains(msg, "template:") {
+		return http.StatusUnprocessableEntity, "E_HELM_RENDER_FAILED"
+	}
+	return http.StatusBadGateway, "E_HELM_SDK"
+}
+
+// classifyHelmK8sError returns a stable error code for helm errors
+// that wrap a kerrors.StatusError. Mirrors ErrorCodeFor's shape but
+// scoped to helm-wrapped k8s errors so the helm and fleet codepaths
+// don't collide on string codes.
+func classifyHelmK8sError(err error) string {
+	switch httpStatusFor(err) {
+	case http.StatusForbidden:
+		return "E_HELM_K8S_FORBIDDEN"
+	case http.StatusUnauthorized:
+		return "E_HELM_K8S_UNAUTHORIZED"
+	case http.StatusNotFound:
+		return "E_HELM_K8S_NOT_FOUND"
+	case http.StatusConflict:
+		return "E_HELM_K8S_CONFLICT"
+	}
+	return "E_HELM_K8S"
 }
 
 func isContextTimeout(err error) bool {

@@ -49,6 +49,53 @@ const (
 	// internal repo URLs end up in the audit trail too. NOT emitted
 	// for the version-list endpoint (called while typing).
 	VerbHelmChartFetch Verb = "helm_chart_fetch"
+	// VerbHelmPreview — operator clicked "Preview" on the install
+	// dialog (issue #75) and the backend ran a dry-run via the helm
+	// SDK to render the manifests + (for upgrade mode) diff against
+	// the live cluster state. Single verb covers both modes; the
+	// `op` field in Extra distinguishes "install" vs "upgrade", same
+	// pattern as VerbEKSInsightsRead's "ListInsights"/"DescribeInsight".
+	// Emitted on every call regardless of outcome — failures (chart
+	// fetch errors, render errors, RBAC denials) are forensically
+	// interesting too.
+	VerbHelmPreview Verb = "helm_preview"
+	// VerbHelmInstallIntent / VerbHelmInstall — pre/post pair for the
+	// helm install action (issue #76). Intent fires BEFORE the helm
+	// SDK call so a partition / hung apiserver / timeout still leaves
+	// a forensic trail of "operator tried to install X". Outcome
+	// fires AFTER, capturing the new release revision on success or
+	// the failure reason. Same pre/post discipline as
+	// VerbRollbackIntent / VerbRollback.
+	//
+	// Extra carries: ref, version, namespace, releaseName,
+	// atomic, wait, timeoutSeconds. Outcome row also carries: revision
+	// (on success), rolledBack (true when atomic caught a partial
+	// failure), manifestKinds (set of kinds in the rendered output —
+	// for forensic queries like "show me every install that included
+	// a Secret").
+	VerbHelmInstallIntent Verb = "helm_install_intent"
+	VerbHelmInstall       Verb = "helm_install"
+	// VerbHelmUpgradeIntent / VerbHelmUpgrade — pre/post pair for the
+	// helm upgrade action. Same shape as VerbHelmInstall* but op-
+	// specific (target release lives in the URL path, body carries
+	// the proposed ref/version/values). Outcome row carries the new
+	// revision number — operators can audit "release X was at
+	// revision N before this upgrade, is at N+1 after."
+	VerbHelmUpgradeIntent Verb = "helm_upgrade_intent"
+	VerbHelmUpgrade       Verb = "helm_upgrade"
+	// VerbHelmUninstallIntent / VerbHelmUninstall — pre/post pair for
+	// the helm uninstall action (issue #123). Destructive, so the
+	// pre/post discipline matters more here than for read paths: an
+	// uninstall that hangs mid-delete leaves resources behind, and
+	// the intent row is the only forensic record that the operator
+	// fired the request at all.
+	//
+	// Extra carries: namespace, releaseName, keepHistory, disableHooks.
+	// Outcome row also carries: revisionsRemoved (count from helm SDK
+	// response) so a forensic query can see "this uninstall removed
+	// 8 revisions of release X" vs "release was already at 1 revision".
+	VerbHelmUninstallIntent Verb = "helm_uninstall_intent"
+	VerbHelmUninstall       Verb = "helm_uninstall"
 	// VerbRollbackIntent is emitted before the apiserver patch fires —
 	// captures the operator's intent (target revision, reason) even
 	// when the patch later fails or the request hangs. Pair with

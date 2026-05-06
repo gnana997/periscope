@@ -7,16 +7,20 @@
 
 import { useMemo, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
-import { useHelmHistory, useHelmRelease } from "../hooks/useHelm";
+import { useHelmHistory, useHelmRelease, useUninstallHelmRelease } from "../hooks/useHelm";
+import { UninstallReleaseModal } from "../components/helm/UninstallReleaseModal";
+import { showToast } from "../lib/toastBus";
+import { ApiError } from "../lib/api";
 import type { HelmHistoryEntry, HelmManifestObject } from "../lib/types";
 import { ageFrom } from "../lib/format";
 import { PageHeader } from "../components/page/PageHeader";
 import { ErrorState, ForbiddenState, LoadingState } from "../components/table/states";
 import { isForbidden } from "../components/table/isForbidden";
 import { MonacoYAML } from "../components/helm/MonacoYAML";
+import { ChartActionDialog } from "../components/helm/ChartActionDialog";
 import { cn } from "../lib/cn";
 
-type Tab = "values" | "manifest" | "history";
+type Tab = "values" | "manifest" | "history" | "notes";
 
 export function HelmReleasePage() {
   const { cluster, namespace, name } = useParams<{
@@ -28,6 +32,8 @@ export function HelmReleasePage() {
   const [params, setParams] = useSearchParams();
   const tab = (params.get("tab") as Tab | null) ?? "values";
   const revisionParam = parseInt(params.get("revision") ?? "0", 10) || 0;
+  const [upgradeOpen, setUpgradeOpen] = useState(false);
+  const [uninstallOpen, setUninstallOpen] = useState(false);
 
   const setParam = (key: string, value: string | null) => {
     const next = new URLSearchParams(params);
@@ -42,6 +48,7 @@ export function HelmReleasePage() {
 
   const detailQuery = useHelmRelease(cl, ns, nm, revisionParam);
   const historyQuery = useHelmHistory(cl, ns, nm);
+  const uninstallMutation = useUninstallHelmRelease(cl, ns, nm);
 
   if (detailQuery.isLoading) return <LoadingState resource="release" />;
   if (detailQuery.isError) {
@@ -62,6 +69,7 @@ export function HelmReleasePage() {
     { id: "values", label: "values" },
     { id: "manifest", label: "manifest" },
     { id: "history", label: "history" },
+    { id: "notes", label: "notes" },
   ];
 
   return (
@@ -73,6 +81,24 @@ export function HelmReleasePage() {
         } · r${detail.revision}${
           detail.appVersion ? ` · app ${detail.appVersion}` : ""
         }`}
+        trailing={
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setUpgradeOpen(true)}
+              className="border border-accent bg-accent px-3 py-1 font-mono text-[12px] text-white"
+            >
+              upgrade
+            </button>
+            <button
+              type="button"
+              onClick={() => setUninstallOpen(true)}
+              className="border border-red px-3 py-1 font-mono text-[12px] text-red hover:bg-red hover:text-white"
+            >
+              uninstall
+            </button>
+          </div>
+        }
       />
       <div className="flex items-center gap-3 border-b border-border bg-bg/80 px-6 py-2 backdrop-blur-md">
         <ResourceSummary resources={detail.resources} />
@@ -125,8 +151,84 @@ export function HelmReleasePage() {
             }
           />
         )}
+        {tab === "notes" && <NotesTab notes={detail.notes ?? ""} />}
       </div>
+
+      <ChartActionDialog
+        mode="upgrade"
+        open={upgradeOpen}
+        onClose={() => setUpgradeOpen(false)}
+        cluster={cl}
+        namespace={ns}
+        releaseName={nm}
+        initialChartRef={detail.installRef}
+        initialChartName={detail.installChartName ?? detail.chartName}
+        initialValues={detail.valuesYaml}
+      />
+
+      <UninstallReleaseModal
+        open={uninstallOpen}
+        releaseName={nm}
+        namespace={ns}
+        resourceCount={detail.resources.length}
+        revisionCount={detail.revision}
+        pending={uninstallMutation.isPending}
+        error={
+          uninstallMutation.error
+            ? {
+                status:
+                  uninstallMutation.error instanceof ApiError
+                    ? uninstallMutation.error.status
+                    : undefined,
+                message:
+                  uninstallMutation.error instanceof ApiError
+                    ? uninstallMutation.error.bodyText ||
+                      uninstallMutation.error.message
+                    : uninstallMutation.error.message,
+              }
+            : null
+        }
+        onClose={() => {
+          setUninstallOpen(false);
+          uninstallMutation.reset();
+        }}
+        onConfirm={(opts) => {
+          uninstallMutation.mutate(opts, {
+            onSuccess: (result) => {
+              showToast(
+                `uninstalled ${nm} (${result.revisionsRemoved} revision${result.revisionsRemoved === 1 ? "" : "s"} removed)`,
+                "success",
+              );
+              setUninstallOpen(false);
+              navigate(`/clusters/${encodeURIComponent(cl)}/helm`);
+            },
+          });
+        }}
+      />
     </div>
+  );
+}
+
+// NotesTab renders the chart's NOTES.txt — helm template-renders this
+// at install/upgrade time and persists it on the release. Operators
+// expect to see post-install instructions ("run kubectl get svc to
+// find the LB IP", "default password is …", etc.) here. The content
+// is plain text, not markdown — we render in a monospaced block to
+// preserve helm's whitespace.
+function NotesTab({ notes }: { notes: string }) {
+  if (!notes.trim()) {
+    return (
+      <div className="flex flex-1 items-center justify-center px-6 py-10">
+        <p className="font-mono text-[12px] text-ink-faint">
+          this chart shipped no NOTES.txt
+        </p>
+      </div>
+    );
+  }
+  return (
+    <pre className="flex-1 overflow-auto bg-bg px-6 py-4 font-mono text-[12.5px] leading-[1.6] text-ink whitespace-pre-wrap">
+      {notes}
+    </pre>
   );
 }
 
