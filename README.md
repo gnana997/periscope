@@ -139,6 +139,7 @@ Both signed (cosign keyless) and discoverable on [Artifact Hub](https://artifact
 - [Pod exec setup](docs/setup/pod-exec.md)
 - [NetworkPolicy](docs/setup/networkpolicy.md)
 - [Multi-cluster onboarding (agent)](docs/setup/agent-onboarding.md) — register a managed cluster via the periscope-agent tunnel
+- [EKS upgrade readiness](docs/setup/eks-upgrade-readiness.md) — Upgrade Insights + managed node group AMI drift
 
 **Architecture**
 - [Architecture overview](docs/architecture/README.md) — component map, source-tree guide, reading order for new contributors

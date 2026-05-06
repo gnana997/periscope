@@ -177,6 +177,67 @@ The role's trust policy uses the cluster's OIDC provider:
 Periscope code is identical for both. Pick whichever your platform team
 already runs.
 
+### 4.1. AWS API permissions on the role
+
+The trust policy above only says *who* can assume the role. The *permissions* policy attached to the role is what determines which AWS APIs Periscope can call. Required for every EKS-backed cluster:
+
+| Action | Resource type | Used by |
+|---|---|---|
+| `eks:DescribeCluster` | cluster | Resolves the apiserver endpoint and CA on every K8s call (auth path). |
+| `eks:ListInsights`, `eks:DescribeInsight` | cluster | Upgrade Insights surface (`/api/clusters/{c}/eks/upgrade-insights*`). EKS-only by design; non-EKS clusters return 422. Cached server-side for 1 hour since AWS itself only refreshes daily. |
+| `eks:ListNodegroups` | cluster | Managed node group list (`GET /api/clusters/{c}/eks/nodegroups`). |
+| `eks:DescribeNodegroup` | **nodegroup** | Managed node group detail + AMI drift (`GET /api/clusters/{c}/eks/nodegroups/{name}`). Per [AWS service authorization](https://docs.aws.amazon.com/service-authorization/latest/reference/list_amazonelasticcontainerserviceforkubernetes.html), this action operates on the **nodegroup** resource (`arn:aws:eks:region:account:nodegroup/cluster-name/nodegroup-name/uuid`), **not** the cluster — scoping it to `cluster/*` yields `AccessDenied` even when the nodegroup is inside a covered cluster. |
+| `ssm:GetParameter` (scoped to `arn:aws:ssm:*::parameter/aws/service/eks/*` and `arn:aws:ssm:*::parameter/aws/service/bottlerocket/*`) | parameter | AMI drift detection — primary "latest AMI" lookup against AWS public parameters. |
+| `ec2:DescribeImages` | * | AMI drift detection — fallback used when the SSM lookup fails (denied / not found / throttled). |
+
+Minimum permissions policy:
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "EKSClusterScoped",
+      "Effect": "Allow",
+      "Action": [
+        "eks:DescribeCluster",
+        "eks:ListInsights",
+        "eks:DescribeInsight",
+        "eks:ListNodegroups"
+      ],
+      "Resource": "arn:aws:eks:*:111111111111:cluster/*"
+    },
+    {
+      "Sid": "EKSNodegroupScoped",
+      "Effect": "Allow",
+      "Action": "eks:DescribeNodegroup",
+      "Resource": "arn:aws:eks:*:111111111111:nodegroup/*/*/*"
+    },
+    {
+      "Sid": "SSMPublicAMIParameters",
+      "Effect": "Allow",
+      "Action": "ssm:GetParameter",
+      "Resource": [
+        "arn:aws:ssm:*::parameter/aws/service/eks/*",
+        "arn:aws:ssm:*::parameter/aws/service/bottlerocket/*"
+      ]
+    },
+    {
+      "Sid": "EC2AMILookup",
+      "Effect": "Allow",
+      "Action": "ec2:DescribeImages",
+      "Resource": "*"
+    }
+  ]
+}
+```
+
+`eks:DescribeNodegroup` lives in its own statement because AWS scopes it to the **nodegroup** resource, not the cluster — the wildcard `nodegroup/*/*/*` matches `nodegroup/<cluster>/<nodegroup-name>/<uuid>` for any nodegroup in any cluster Periscope manages. Tighten to specific cluster names (`nodegroup/prod-eu-west-1/*/*`) if you have a small fixed set.
+
+Tighten the cluster-scoped ARN to specific cluster ARNs once you've decided which clusters Periscope manages. The Insights / node group / SSM-public / `DescribeImages` actions are read-only and produce no mutation surface, so they are safe to grant if your registry is small. `ec2:DescribeImages` only supports `Resource: *` because the API has no resource-level ARN for image lookups.
+
+For the full surface map of what each action enables in the UI, see [`eks-upgrade-readiness.md`](./eks-upgrade-readiness.md).
+
 ---
 
 ## 4.5. Single-cluster install (in-cluster backend)
@@ -458,8 +519,8 @@ clusters are registered.
 ### 10.5 Real-time list updates (watch streams)
 
 Periscope's resource list pages update in real time via SSE for
-21+ kinds spanning workloads, networking, storage, cluster-scoped,
-and core resources. **Every registered kind is on by default**;
+registered kinds spanning core, config, workloads, networking,
+storage, and cluster-scoped resources. **Every registered kind is on by default**;
 the SPA falls back to polling when the EventSource fails. The
 `watchStreams:` helm block lets operators opt out (e.g. behind a
 proxy that mishandles long-lived connections), restrict to a
@@ -469,8 +530,8 @@ at once:
 ```yaml
 watchStreams:
   # Empty / "all" / "off" / "none" / comma list
-  # Per-kind tokens: pods, events, deployments, statefulsets, …
-  # Group aliases:  core, workloads, networking, storage, cluster
+  # Per-kind tokens: pods, events, configmaps, deployments, …
+  # Group aliases:  core, config, workloads, networking, storage, cluster
   kinds: ""
   perUserLimit: 60    # concurrent SSE streams per OIDC subject
 ```

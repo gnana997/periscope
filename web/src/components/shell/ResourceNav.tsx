@@ -25,6 +25,8 @@ function groupForPath(pathname: string): string | null {
 	// Custom (non-resource) sections first.
 	if (pathname.includes("/audit")) return "History";
 	if (pathname.includes("/helm")) return "Packages";
+	if (pathname.includes("/upgrade-readiness")) return "EKS";
+	if (pathname.includes("/nodegroups")) return "EKS";
   for (const group of RESOURCE_GROUPS) {
     for (const r of resourcesByGroup(group)) {
       // match /clusters/:cluster/<resource>
@@ -176,6 +178,65 @@ export function ResourceNav() {
               </div>
             </div>
           </div>
+          {group === "Cluster" && cluster && (
+            <CollapsibleSection
+              id="EKS"
+              label="EKS"
+              isOpen={openGroups.has("EKS")}
+              onToggle={toggleGroup}
+            >
+              <li>
+                <NavLink
+                  to={`/clusters/${encodeURIComponent(cluster)}/upgrade-readiness`}
+                  className={({ isActive }) =>
+                    cn(
+                      "flex items-center gap-2 rounded-sm px-3 py-1.5 text-[12.5px] transition-colors",
+                      isActive
+                        ? "bg-accent-soft text-accent"
+                        : "text-ink hover:bg-surface-2",
+                    )
+                  }
+                >
+                  {({ isActive }) => (
+                    <>
+                      <span
+                        className={cn(
+                          "block size-1 shrink-0 rounded-full",
+                          isActive ? "bg-accent" : "bg-transparent",
+                        )}
+                      />
+                      <span className="flex-1">Upgrade readiness</span>
+                    </>
+                  )}
+                </NavLink>
+              </li>
+              <li>
+                <NavLink
+                  to={`/clusters/${encodeURIComponent(cluster)}/nodegroups`}
+                  className={({ isActive }) =>
+                    cn(
+                      "flex items-center gap-2 rounded-sm px-3 py-1.5 text-[12.5px] transition-colors",
+                      isActive
+                        ? "bg-accent-soft text-accent"
+                        : "text-ink hover:bg-surface-2",
+                    )
+                  }
+                >
+                  {({ isActive }) => (
+                    <>
+                      <span
+                        className={cn(
+                          "block size-1 shrink-0 rounded-full",
+                          isActive ? "bg-accent" : "bg-transparent",
+                        )}
+                      />
+                      <span className="flex-1">Node groups</span>
+                    </>
+                  )}
+                </NavLink>
+              </li>
+            </CollapsibleSection>
+          )}
           {group === "Workloads" && cluster && (
             <CollapsibleSection
               id="Packages"

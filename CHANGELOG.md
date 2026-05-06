@@ -38,7 +38,189 @@ tag.
 - Auth: `/api/auth/whoami` now always emits `"groups": []` for users
   with zero groups, never `null`. The wire shape is now stable across
   all session states — the SPA's UserMenu can drop its null-guard.
+  
+### Added
 
+- Helm chart fetch backend (#73, sub-task of #72). Two new endpoints
+  `GET /api/clusters/{c}/helm/chart/versions` and
+  `POST /api/clusters/{c}/helm/chart/values` for the Helm install
+  dialog's version picker + values loader. Supports public HTTP chart
+  repos (decode `index.yaml` ourselves) and public OCI refs (via
+  `oras.land/oras-go/v2`). Both deps are kubectl-free, preserving the
+  v1.0 release-decoder philosophy of isolating Periscope from helm
+  SDK transitive churn. Rejects charts with sub-chart dependencies
+  with a structured `422 unsupported_dependencies` error. OCI tag
+  listing is pinned: media-type filter
+  (`application/vnd.cncf.helm.config.v1+json`), semver sort, 50-cap.
+  Two independent server-side caches with `?nocache=true` bypass.
+  Audit emits one `verb=helm_chart_fetch` row per `/values` call;
+  `/versions` is silent (called while typing). v1.1 ships
+  unauthenticated public refs only — private OCI auth (ECR via Pod
+  Identity / IRSA) is a follow-up sub-task. Frontend types + API
+  client + TanStack hooks ship alongside the backend; the install-
+  dialog UI lands in a sibling issue.
+- Helm install dialog UI (#74, sub-task of #72). New "+ install
+  chart" button in the Helm releases page header opens a modal with
+  a single-pane top-to-bottom flow: chart-ref input → fetch
+  versions → version dropdown → load values → schema-aware editor.
+  When the chart ships `values.schema.json`, renders a structured
+  form with live `ajv`-backed validation (required fields, enums,
+  type / range / pattern / length); when not, falls back to a
+  Monaco YAML editor. Schema features the form can't render
+  cleanly ($ref / allOf / anyOf / oneOf / arrays-of-objects) are
+  surfaced as "edit in YAML mode" hints rather than silently
+  ignored. `Install` and `Dry-run preview` footer buttons are
+  disabled stubs — those backends are sibling issues under the
+  epic. Rendering only; no install/upgrade actions yet.
+
+### Security
+
+- Helm chart fetch endpoints reject SSRF attempts at dial time
+  (#73). The HTTP / OCI clients now run a `net.Dialer.Control`
+  callback that validates the resolved IP against blocklists:
+  - **Always blocked:** AWS IMDS (`169.254.169.254`), all
+    link-local (covers IPv6 IMDS + `fe80::/10`).
+  - **Blocked by default, env-var opt-in:** RFC1918 + IPv6 ULA
+    via `PERISCOPE_HELM_FETCH_ALLOW_PRIVATE=true` for operators
+    running internal chart repos.
+  - **Loopback** stays blocked even with the opt-in flag (no
+    legitimate chart-repo reason for chart-fetch from a Periscope
+    pod to reach localhost).
+  Caught by CodeQL on PR #106 before merge.
+
+### Fixed
+
+- IAM policy snippet in `docs/setup/deploy.md` §4.1 and
+  `docs/setup/eks-upgrade-readiness.md` was incomplete: it grouped
+  `eks:DescribeNodegroup` with the cluster-scoped EKS actions under
+  `Resource: arn:aws:eks:*:<account>:cluster/*`. AWS scopes
+  `eks:DescribeNodegroup` to the **nodegroup** resource
+  (`arn:aws:eks:region:account:nodegroup/cluster-name/nodegroup-name/uuid`),
+  not the cluster — so operators following the doc literally got
+  `AccessDenied` on the nodegroup detail / AMI drift endpoints
+  even though the list endpoint worked. Split the policy into two
+  statements (cluster-scoped and nodegroup-scoped), added a "Resource
+  type" column to the action table, and called out the gotcha
+  inline so future readers do not reintroduce it.
+
+- EKS Upgrade Insights and Node Groups surfaces now work on
+  `in-cluster`, `agent`, and `kubeconfig` backends when the cluster
+  entry has both `arn` and `region` set. Before this fix, the
+  surfaces 422'd on any non-`eks` backend regardless of ARN, so an
+  operator running Periscope inside an EKS cluster (`backend:
+  in-cluster`, ARN configured for AWS-side queries) saw "this
+  cluster is not backed by EKS" instead of the actual insights.
+  The K8s-auth backend and the AWS-side EKS metadata are now
+  treated as orthogonal, with the same field validation
+  (`arn` + `region` together, ARN parseable to `:cluster/<name>`)
+  applied uniformly. Surfaced via a new `Cluster.EKSCapable()`
+  method; registry validation rejects mismatched configurations
+  (ARN without region, malformed ARN) at startup.
+
+## [1.0.3-rc1] - 2026-05-06
+
+### Added
+
+- **Apply YAML — multi-doc paste / upload, dry-run, server-side apply,
+  per-doc RBAC pre-flight, audit** (#53, #54, #55). New SPA dialog
+  reachable from the page header, the cluster sidebar, the cluster
+  overview banner, and the Cmd+K palette. Drag-drop or paste any number
+  of K8s manifests, get a dry-run + diff before commit, then server-side
+  apply with field-ownership glyphs. Per-doc `SelfSubjectAccessReview`
+  pre-flight blocks docs the user can't write rather than failing
+  mid-stream. Each apply emits one structured audit row per doc with
+  the kind/namespace/name/operation tuple.
+
+- **EKS Upgrade Insights viewer** (#103). New read-only surface wrapping
+  AWS EKS `ListInsights` / `DescribeInsight` (UPGRADE_READINESS
+  category). Worst-first insight rows on a dedicated page, expandable
+  detail with deprecated-API summaries, and per-resource deep links
+  that open the SPA's existing YAML editor on the affected object.
+  Cluster-keyed cache, 1h TTL (AWS itself only refreshes daily).
+  Non-EKS clusters return 422 + stable code `E_BACKEND_NOT_EKS` so the
+  UI renders a calm note instead of a generic error. New audit verb
+  `eks_insights_read` (Periscope's first read verb — added at
+  compliance reviewers' request for upgrade-readiness traceability).
+
+- **EKS managed node groups + AMI drift detection** (#103). New
+  surface listing managed node groups with current AMI release version
+  and days-behind-latest drift. Latest-AMI lookup uses SSM public
+  parameters (`/aws/service/eks/optimized-ami/...`,
+  `/aws/service/bottlerocket/...`) as the primary source and
+  `ec2:DescribeImages` as a fallback when SSM is denied / unavailable.
+  Custom-AMI node groups (`AmiType=CUSTOM`) are explicitly badged "not
+  tracked" — AWS does not publish a "latest" for custom images.
+  Shared `(amiType, k8sVersion)` AMI cache (30 min TTL) so a fleet view
+  of N nodegroups makes 1 SSM call per family per half-hour. New audit
+  verb `eks_nodegroups_read`.
+
+- **Workload rollback** for Deployment / StatefulSet / DaemonSet
+  (#71). Revision picker with Monaco YAML diff preview of the current
+  pod template vs the target revision. Mirrors `kubectl rollout undo`
+  — strategic-merge-patches `spec.template` and writes the
+  `kubernetes.io/change-cause` annotation. Pre-flight warnings cover
+  the three production footguns: GitOps-managed workloads (ArgoCD /
+  Helm / Flux annotations or labels) get a yellow banner warning that
+  reconcile will revert the rollback; paused Deployments get a
+  "resume rollout" pane instead of the picker; HPA-targeted workloads
+  get an inline note. Optional reason field flows into both the
+  change-cause annotation and the structured audit row. New API
+  endpoints `GET /revisions` (history + pre-flight metadata) and
+  `POST /rollback` (the patch); two new audit verbs `rollback_intent`
+  (pre-patch) + `rollback` (post-outcome) so incident review captures
+  attempts that hang or fail mid-flight. See
+  [`docs/setup/workload-rollback.md`](docs/setup/workload-rollback.md).
+
+- SSE watch streams for ConfigMaps, ResourceQuotas, LimitRanges, and
+  ServiceAccounts (#17).
+
+### Changed
+
+- AWS SDK errors are now classified by `smithy.APIError` code and
+  surfaced with meaningful HTTP statuses + stable error codes
+  (`E_AWS_FORBIDDEN` 403, `E_AWS_NOT_FOUND` 404, `E_AWS_THROTTLED`
+  429) instead of always collapsing to `502 / E_AWS_API`. The SPA's
+  Upgrade Readiness and Node Groups pages branch on these codes and
+  render permission-specific or rate-limit copy. Anything
+  unrecognized still reads as `502 / E_AWS_API` so existing callers
+  stay compatible.
+
+- Helm `values.schema.json` now strictly validates
+  `watchStreams.kinds`; deployments with typos that previously
+  silently dropped now fail at helm install time.
+
+### Fixed
+
+- NamespacePicker dropdown was anchored to the button's left edge and
+  clipped off the right of the viewport when used in the page
+  header's trailing slot. The picker is also no longer covered by the
+  FilterStrip — `PageHeader` and `FilterStrip` both opened
+  `backdrop-blur` stacking contexts at z-20, so the picker's inner
+  z-30 only applied within the header bottle. Header bumped to z-30;
+  modal/drawer overlays at z-40+ still win. (#111)
+
+- NamespacePicker on clusters with 50+ namespaces was tedious to
+  scan: added a sticky search input (autofocus on open, case-
+  insensitive substring), bumped the panel max height from 320px to
+  `min(70vh, 520px)` so larger lists no longer require dozens of
+  scrolls. (#111)
+
+### Upgrading
+
+If you plan to use the new EKS Upgrade Insights or Node Groups
+features, extend Periscope's AWS role with the following IAM actions
+(scoped as shown):
+
+- `eks:ListInsights`, `eks:DescribeInsight`
+- `eks:ListNodegroups`, `eks:DescribeNodegroup`
+- `ssm:GetParameter` (resource: `arn:aws:ssm:*::parameter/aws/service/eks/*`
+  and `arn:aws:ssm:*::parameter/aws/service/bottlerocket/*`)
+- `ec2:DescribeImages` (resource: `*` — the API has no per-image ARN)
+
+The full IAM policy snippet is in
+[`docs/setup/deploy.md` §4.1](docs/setup/deploy.md). The Helm chart
+itself does not change; non-EKS clusters and existing features
+continue to work without these additions.
 ## [1.0.0]
 
 Initial stable release.

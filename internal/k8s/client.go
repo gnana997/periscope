@@ -41,6 +41,18 @@ func NewClientset(ctx context.Context, p credentials.Provider, c clusters.Cluste
 	return newClientFn(ctx, p, c)
 }
 
+// SetNewClientFnForTest swaps newClientFn for the duration of a test
+// running in another package. Returns a restore func the caller MUST
+// invoke (typically via t.Cleanup). Test-only — production code paths
+// in this package go through newClientFn directly.
+func SetNewClientFnForTest(cs kubernetes.Interface) func() {
+	orig := newClientFn
+	newClientFn = func(_ context.Context, _ credentials.Provider, _ clusters.Cluster) (kubernetes.Interface, error) {
+		return cs, nil
+	}
+	return func() { newClientFn = orig }
+}
+
 func defaultNewMetricsClient(ctx context.Context, p credentials.Provider, c clusters.Cluster) (metricsversioned.Interface, error) {
 	cfg, err := buildRestConfig(ctx, p, c)
 	if err != nil {

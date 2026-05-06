@@ -133,3 +133,26 @@ func (c Cluster) EKSName() string {
 	}
 	return ""
 }
+
+// EKSCapable reports whether the cluster has the AWS-side metadata
+// (ARN + Region + parseable EKS name) needed to call EKS APIs like
+// ListInsights and ListNodegroups.
+//
+// Independent of the K8s-auth backend — an in-cluster, agent, or
+// kubeconfig cluster is just as capable of EKS-side queries as a
+// BackendEKS cluster, as long as the operator wired up the ARN
+// + Region. The two concerns (K8s identity vs AWS identity) are
+// orthogonal: in-cluster authenticates to the apiserver via the
+// pod ServiceAccount, but Periscope can still call AWS EKS APIs
+// for that cluster's ARN using the pod's IAM role (Pod Identity /
+// IRSA). Same for agent-backed clusters: K8s traffic flows over
+// the tunnel, but AWS API traffic goes server → AWS directly.
+//
+// Registry validation guarantees: when ARN is set on any backend,
+// Region is also required and the ARN parses cleanly. So this
+// method's three-way check is defense-in-depth — any single false
+// branch means a misconfiguration that should have failed at load
+// time.
+func (c Cluster) EKSCapable() bool {
+	return c.ARN != "" && c.Region != "" && c.EKSName() != ""
+}

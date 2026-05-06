@@ -222,8 +222,8 @@ group aliases, and fallback behavior.
 | `watchStreams.kinds` | string | `""` | Empty / `all` / `off` / `none` / comma-separated kinds / group aliases. |
 | `watchStreams.perUserLimit` | int | `60` | Per-user concurrent stream cap. `0` disables (not recommended). |
 
-Group aliases: `core`, `workloads`, `networking`, `storage`,
-`cluster`. Per-kind tokens: see `watchStreams:` block in
+Group aliases: `core`, `config`, `workloads`, `networking`,
+`storage`, `cluster`. Per-kind tokens: see `watchStreams:` block in
 `values.yaml`.
 
 ## pdb

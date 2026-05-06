@@ -259,6 +259,52 @@ func main() {
 	router.Get("/api/clusters/{cluster}/helm/releases/{ns}/{name}/diff", credentials.Wrap(factory,
 		helmDiffHandler(registry)))
 
+
+	// Chart fetch (#73). Two endpoints: GET /versions for the picker,
+	// POST /values for the audited install-dialog open. Caches are
+	// keyed independently so a tagged-version refresh does not have
+	// to invalidate the immutable values payload. v1.1 is
+	// unauthenticated public refs only; the {cluster} path param is
+	// reserved for v1.2's per-cluster credential resolution.
+	chartVerC := newChartVersionsCache()
+	chartValC := newChartValuesCache()
+	router.Get("/api/clusters/{cluster}/helm/chart/versions",
+		credentials.Wrap(factory, chartVersionsHandler(registry, chartVerC)))
+	router.Post("/api/clusters/{cluster}/helm/chart/values",
+		credentials.Wrap(factory, chartValuesHandler(registry, chartValC, auditEmitter)))
+	// --- EKS Upgrade Insights (read-only) ---
+	//
+	// EKS scans every cluster's audit log daily and produces a list
+	// of UPGRADE_READINESS insights. We wrap ListInsights /
+	// DescribeInsight, layer a 1h cluster-keyed cache (AWS only
+	// refreshes daily), and decorate each affected resource with a
+	// deep link into the SPA's editor. EKS-only by design: non-EKS
+	// clusters get a 422 with a stable error code. See
+	// eks_insights_handler.go for the audit and 422 contract.
+	eksInsightsCacheTTL := 1 * time.Hour
+	eksInsightsC := newEKSInsightsCache(eksInsightsCacheTTL)
+	router.Get("/api/clusters/{cluster}/eks/upgrade-insights", credentials.Wrap(factory,
+		eksInsightsListHandler(registry, eksInsightsC, auditEmitter)))
+	router.Get("/api/clusters/{cluster}/eks/upgrade-insights/{insightId}", credentials.Wrap(factory,
+		eksInsightsGetHandler(registry, eksInsightsC, auditEmitter)))
+
+	// --- EKS managed node groups + AMI drift (read-only, issue #103) ---
+	//
+	// List + per-nodegroup detail with drift detection layered in
+	// from the AMI catalog (SSM public parameters as primary,
+	// DescribeImages as fallback). Two caches: the nodegroup cache
+	// is per-cluster (5min TTL — operator changes); the AMI catalog
+	// cache is per-(amiType, k8sVersion) at 30min TTL (AWS publishes
+	// new EKS-optimized AMIs roughly weekly), shared across clusters.
+	eksNodegroupsCacheTTL := 5 * time.Minute
+	eksNodegroupsC := newEKSNodegroupsCache(eksNodegroupsCacheTTL)
+	amiCatalogCacheTTL := 30 * time.Minute
+	amiCatalogC := newAMICatalogCache(amiCatalogCacheTTL)
+	router.Get("/api/clusters/{cluster}/eks/nodegroups", credentials.Wrap(factory,
+		eksNodegroupsListHandler(registry, eksNodegroupsC, amiCatalogC, auditEmitter)))
+	router.Get("/api/clusters/{cluster}/eks/nodegroups/{name}", credentials.Wrap(factory,
+		eksNodegroupsGetHandler(registry, eksNodegroupsC, amiCatalogC, auditEmitter)))
+
 	// --- Overview / dashboard ---
 
 	router.Get("/api/clusters/{cluster}/dashboard", credentials.Wrap(factory,
@@ -582,6 +628,14 @@ func main() {
 
 	router.Post("/api/clusters/{cluster}/cronjobs/{ns}/{name}/trigger",
 		credentials.Wrap(factory, triggerCronJobHandler(registry, auditEmitter)))
+
+	// Workload rollback (#71). Rolls back Deployment / StatefulSet /
+	// DaemonSet to a chosen previous revision. {kind} is the apiserver
+	// resource plural; the handlers reject unsupported kinds with 400.
+	router.Get("/api/clusters/{cluster}/{kind}/{ns}/{name}/revisions",
+		credentials.Wrap(factory, listRevisionsHandler(registry)))
+	router.Post("/api/clusters/{cluster}/{kind}/{ns}/{name}/rollback",
+		credentials.Wrap(factory, rollbackHandler(registry, auditEmitter)))
 	router.Get("/api/clusters/{cluster}/pvcs/{ns}/{name}", credentials.Wrap(factory,
 		detailHandler(registry, "pvc",
 			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, ns, name string) (k8s.PVCDetail, error) {
@@ -963,8 +1017,8 @@ func main() {
 
 	// --- Watch (SSE streaming) endpoints ---
 	//
-	// Real-time push for resource lists. On by default for the four
-	// supported kinds; the PERISCOPE_WATCH_STREAMS env var lets operators
+	// Real-time push for resource lists. On by default for every
+	// registered kind; the PERISCOPE_WATCH_STREAMS env var lets operators
 	// opt out ("off" / "none") or restrict to a subset. When a kind is
 	// disabled the route literally does not exist and the frontend
 	// downgrades to polling via 404. See issue #4.
@@ -2590,12 +2644,16 @@ type watchFn func(ctx context.Context, p credentials.Provider, args k8s.WatchArg
 //   - the route loop below (router.Get registration)
 //
 // To add a new kind: define WatchFoo in internal/k8s and append a
-// kindReg entry to watchKinds. No other call site needs an edit.
+// kindReg entry to watchKinds. Keep the operator-facing allowlist and
+// frontend metadata in sync: deploy/helm/periscope/values.schema.json,
+// docs/setup/watch-streams.md, and web/src/lib/api.ts all enumerate the
+// supported tokens/groups.
 //
 // Group is an optional alias used by the env-var grammar so operators
 // can write "PERISCOPE_WATCH_STREAMS=workloads" instead of enumerating
 // every workload kind. Groups follow K8s API conventions loosely
-// ("core" = core/v1, "workloads" = apps/v1 + batch/v1, "networking" =
+// ("core" = pods/events, "config" = core/v1 config/policy/account
+// resources, "workloads" = apps/v1 + batch/v1, "networking" =
 // networking.k8s.io/v1, "storage" = storage.k8s.io/v1 + core PVCs).
 // An empty Group disables alias selection for that kind — it can only
 // be enabled by its exact Name.
@@ -2610,6 +2668,10 @@ type kindReg struct {
 var watchKinds = []kindReg{
 	{Name: "pods", Group: "core", Watch: k8s.WatchPods},
 	{Name: "events", Group: "core", Watch: k8s.WatchEvents},
+	{Name: "configmaps", Group: "config", Watch: k8s.WatchConfigMaps},
+	{Name: "resourcequotas", Group: "config", Watch: k8s.WatchResourceQuotas},
+	{Name: "limitranges", Group: "config", Watch: k8s.WatchLimitRanges},
+	{Name: "serviceaccounts", Group: "config", Watch: k8s.WatchServiceAccounts},
 	{Name: "deployments", Group: "workloads", Watch: k8s.WatchDeployments},
 	{Name: "statefulsets", Group: "workloads", Watch: k8s.WatchStatefulSets},
 	{Name: "daemonsets", Group: "workloads", Watch: k8s.WatchDaemonSets},

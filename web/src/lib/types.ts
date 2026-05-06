@@ -1438,3 +1438,262 @@ export interface HelmDiffResponse {
   to: HelmDiffSide;
   changes: HelmDiffItem[];
 }
+
+// ─── Helm chart fetch (#73) ───────────────────────────────────────
+
+export interface ChartMaintainer {
+  name?: string;
+  email?: string;
+  url?: string;
+}
+
+export interface ChartDep {
+  name: string;
+  version?: string;
+  repository?: string;
+  alias?: string;
+  condition?: string;
+}
+
+/** Chart.yaml projection — same field set Helm uses for v2. */
+export interface ChartMeta {
+  name: string;
+  version: string;
+  apiVersion: string;
+  appVersion?: string;
+  description?: string;
+  /** Semver constraint, e.g. ">=1.24". Render a warning when the
+   *  cluster's K8s version doesn't satisfy it. */
+  kubeVersion?: string;
+  type?: string;
+  keywords?: string[];
+  home?: string;
+  sources?: string[];
+  maintainers?: ChartMaintainer[];
+  icon?: string;
+  annotations?: Record<string, string>;
+  /** v1.1 rejects charts with non-empty deps; the SPA still
+   *  renders this list so operators understand WHY. */
+  dependencies?: ChartDep[];
+}
+
+export interface ChartFetchResult {
+  meta: ChartMeta;
+  /** Verbatim values.yaml — feed straight to Monaco. */
+  values: string;
+  /** Decoded values.schema.json when shipped with the chart. */
+  schema?: Record<string, unknown>;
+}
+
+export interface ChartVersionsResult {
+  ref: string;
+  versions: string[];
+  latest?: string;
+}
+
+export interface ChartFetchRequest {
+  ref: string;
+  /** Required for HTTP repos (chart name in index.yaml). Empty for
+   *  OCI refs (chart name is implicit in the ref's last segment). */
+  chart?: string;
+  version: string;
+}
+
+// ─── Workload rollback (#71) ─────────────────────────────────────────
+
+/** One entry in the rollout history of a Deployment / StatefulSet /
+ *  DaemonSet. `podTemplate` is the full PodTemplateSpec serialized
+ *  as a generic record so the dialog can drive the diff viewer
+ *  without an extra round-trip per click. */
+export interface Revision {
+  revision: number;
+  isCurrent: boolean;
+  changeCause?: string;
+  createdAt: string;
+  podTemplateHash?: string;
+  images: string[];
+  podTemplate: Record<string, unknown>;
+}
+
+/** Detected upstream reconciler. The dialog renders a yellow banner
+ *  warning the operator that a rollback may be reverted on the next
+ *  reconcile cycle unless they also revert the source. */
+export interface ManagedBy {
+  controller: "argocd" | "helm" | "flux";
+  instance?: string;
+}
+
+export interface RevisionHistory {
+  currentRevision: number;
+  revisions: Revision[];
+  /** Deployment-only; null/undefined for STS / DS. When true, the
+   *  dialog refuses the rollback path and offers a Resume button. */
+  paused?: boolean;
+  managedBy?: ManagedBy;
+  /** Name of an HPA in the same namespace whose scaleTargetRef
+   *  points at this workload. Empty when none. */
+  hpaTarget?: string;
+}
+
+export interface RollbackRequest {
+  revision: number;
+  /** Optional human reason. Flows into the
+   *  `kubernetes.io/change-cause` annotation on the new revision and
+   *  the structured audit row. */
+  reason?: string;
+}
+
+export interface RollbackResponse {
+  newRevision: number;
+  patchedAt: string;
+}
+
+// --- EKS Upgrade Insights (issue #103) ---------------------------------
+//
+// Mirrors cmd/periscope/eks_insights_handler.go. Three observations
+// for the SPA developer:
+//
+//   1. `status` is one of PASSING / WARNING / ERROR / UNKNOWN — the
+//      same string AWS returns. Render with the existing traffic-
+//      light glyphs.
+//   2. `editorPath` on a UpgradeInsightResource is empty when the
+//      backend couldn't parse the kubernetesResourceUri. The SPA
+//      should render the raw URI as monospace text in that case
+//      rather than a broken link.
+//   3. The 422 error envelope has `code: "E_BACKEND_NOT_EKS"` for
+//      non-EKS clusters; branch on that to render the empty state.
+
+export interface UpgradeInsightCounts {
+  passing: number;
+  warning: number;
+  error: number;
+  unknown: number;
+}
+
+export type UpgradeInsightStatus = "PASSING" | "WARNING" | "ERROR" | "UNKNOWN";
+
+export interface UpgradeInsightSummary {
+  id: string;
+  name: string;
+  category: string;
+  kubernetesVersion?: string;
+  status: UpgradeInsightStatus;
+  statusReason?: string;
+  lastRefreshTime?: string;
+  lastTransitionTime?: string;
+  description?: string;
+}
+
+export interface UpgradeInsightsListResponse {
+  insights: UpgradeInsightSummary[];
+  counts: UpgradeInsightCounts;
+  targetKubernetesVersion?: string;
+}
+
+export interface UpgradeInsightResource {
+  kubernetesResourceUri: string;
+  arn?: string;
+  group?: string;
+  version?: string;
+  resource?: string;
+  namespace?: string;
+  name?: string;
+  /** Cluster-rooted SPA path that opens the resource's YAML editor.
+   *  Empty when the backend couldn't map the URI to a known route. */
+  editorPath?: string;
+  status?: UpgradeInsightStatus;
+  statusReason?: string;
+}
+
+export interface DeprecationClientStat {
+  userAgent?: string;
+  numberOfRequestsLast30Days?: number;
+  lastRequestTime?: string;
+}
+
+export interface DeprecationDetail {
+  usage?: string;
+  replacedWith?: string;
+  stopServingVersion?: string;
+  startServingReplacementVersion?: string;
+  clientStats?: DeprecationClientStat[];
+}
+
+export interface UpgradeInsightDetail extends UpgradeInsightSummary {
+  recommendation?: string;
+  additionalInfo?: Record<string, string>;
+  resources: UpgradeInsightResource[];
+  deprecationDetails?: DeprecationDetail[];
+}
+
+// --- EKS managed node groups (issue #103) ------------------------------
+//
+// Mirrors cmd/periscope/eks_nodegroups_handler.go.
+//
+// PR-2: drift fields are present in the type but always come back
+// false / empty until PR-3 wires the SSM-based latest-AMI lookup.
+// The SPA renders drift badges only when `driftComputed` is true.
+//
+// Custom AMIs (`customAmi: true`, AmiType="CUSTOM") never get drift
+// computed by design — when an operator ships a custom image, AWS
+// can't tell us what "latest" means.
+
+export interface NodegroupSummary {
+  name: string;
+  status: string;
+  amiType: string;
+  capacityType?: string;
+  kubernetesVersion?: string;
+  releaseVersion?: string;
+  customAmi: boolean;
+  instanceTypesPreview?: string;
+  desiredSize: number;
+  minSize: number;
+  maxSize: number;
+  healthIssueCount: number;
+  createdAt?: string;
+
+  // Drift fields — populated only when driftComputed is true.
+  driftComputed: boolean;
+  latestReleaseVersion?: string;
+  daysBehind?: number;
+  isBehind?: boolean;
+}
+
+export interface NodegroupsCounts {
+  total: number;
+  behind: number;
+  custom: number;
+  healthy: number;
+}
+
+export interface NodegroupsListResponse {
+  nodegroups: NodegroupSummary[];
+  counts: NodegroupsCounts;
+}
+
+export interface NodegroupHealthIssue {
+  code?: string;
+  message?: string;
+  resourceIds?: string[];
+}
+
+export interface LaunchTemplateRef {
+  id?: string;
+  name?: string;
+  version?: string;
+}
+
+export interface NodegroupDetail extends NodegroupSummary {
+  arn?: string;
+  nodeRole?: string;
+  instanceTypes?: string[];
+  subnets?: string[];
+  diskSize?: number;
+  labels?: Record<string, string>;
+  tags?: Record<string, string>;
+  healthIssues?: NodegroupHealthIssue[];
+  launchTemplate?: LaunchTemplateRef;
+  modifiedAt?: string;
+  autoScalingGroups?: string[];
+}

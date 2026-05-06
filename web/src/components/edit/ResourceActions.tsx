@@ -37,6 +37,8 @@ import { useScaleResource, isScalable } from "../../hooks/mutations/useScaleReso
 import { useEditLabels } from "../../hooks/mutations/useEditLabels";
 import { useDeleteResource } from "../../hooks/mutations/useDeleteResource";
 import { useRolloutRestart, isRestartable } from "../../hooks/mutations/useRolloutRestart";
+import { isRollbackable, type RollbackableKind } from "../../lib/api";
+import { RollbackDialog } from "../workload/RollbackDialog";
 import { useToggleSuspend } from "../../hooks/mutations/useToggleSuspend";
 import { useTriggerCronJob } from "../../hooks/mutations/useTriggerCronJob";
 import { useToggleCordon } from "../../hooks/mutations/useToggleCordon";
@@ -48,6 +50,7 @@ import { EditButton } from "../detail/yaml/EditButton";
 import {
   Ban,
   CircleCheck,
+  History,
   Pause,
   Play,
   PlayCircle,
@@ -98,6 +101,7 @@ function BuiltinActions({
   const [showDelete, setShowDelete] = useState(false);
   const [showLabels, setShowLabels] = useState(false);
   const [showRestart, setShowRestart] = useState(false);
+  const [showRollback, setShowRollback] = useState(false);
   const [showSuspend, setShowSuspend] = useState(false);
   const [showTrigger, setShowTrigger] = useState(false);
   const [showCordon, setShowCordon] = useState(false);
@@ -172,6 +176,7 @@ function BuiltinActions({
   // tooltip below; the kind dimension stays as visibility gates so
   // we don't render "scale" on a ConfigMap.
   const showRestartButton = isRestartable(yamlKind);
+  const showRollbackButton = isRollbackable(yamlKind);
   const showSuspendButton = yamlKind === "cronjobs";
   const showTriggerButton = yamlKind === "cronjobs";
   const showCordonButton = yamlKind === "nodes";
@@ -255,6 +260,15 @@ function BuiltinActions({
           label="Restart"
           icon={<RotateCw size={14} />}
           onClick={() => setShowRestart(true)}
+          disabled={!canEdit.allowed}
+          disabledTooltip={canEdit.tooltip}
+        />
+      )}
+      {showRollbackButton && (
+        <IconAction
+          label="Rollback"
+          icon={<History size={14} />}
+          onClick={() => setShowRollback(true)}
           disabled={!canEdit.allowed}
           disabledTooltip={canEdit.tooltip}
         />
@@ -355,6 +369,17 @@ function BuiltinActions({
           });
         }}
       />
+
+      {showRollbackButton && (
+        <RollbackDialog
+          open={showRollback}
+          onClose={() => setShowRollback(false)}
+          cluster={cluster}
+          kind={yamlKind as RollbackableKind}
+          namespace={ns ?? ""}
+          name={name}
+        />
+      )}
 
       <ConfirmActionModal
         open={showSuspend}

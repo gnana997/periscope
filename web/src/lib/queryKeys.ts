@@ -76,6 +76,9 @@ export const queryKeys = {
       // single prefix invalidation sweeps it.
       yamlDrift: (ns: string, name: string) =>
         ["cluster", c, "kind", kind, "yaml-drift", ns, name] as const,
+      // Workload rollback (#71) — revision history + pre-flight.
+      revisions: (ns: string, name: string) =>
+        ["cluster", c, "kind", kind, "revisions", ns, name] as const,
     }),
 
     // Helm release browser. Cluster-scoped; the storage Secret/CM
@@ -88,6 +91,31 @@ export const queryKeys = {
         ["cluster", c, "helm", "history", ns, name] as const,
       diff: (ns: string, name: string, from: number, to: number) =>
         ["cluster", c, "helm", "diff", ns, name, from, to] as const,
+      // Chart fetch (#73) — keyed under helm subtree so the install
+      // dialog's queries stay groupable. Versions key keeps refs +
+      // chart distinct; values key adds version (immutable per tag).
+      chartVersions: (ref: string, chartName: string) =>
+        ["cluster", c, "helm", "chart", "versions", ref, chartName] as const,
+      chartValues: (ref: string, chartName: string, version: string) =>
+        ["cluster", c, "helm", "chart", "values", ref, chartName, version] as const,
+    },
+
+    // EKS Upgrade Insights (issue #103). Cluster-scoped; the
+    // backend cache is also cluster-keyed so the same shape mirrors
+    // through the React Query layer cleanly.
+    upgradeInsights: {
+      list: () => ["cluster", c, "upgradeInsights", "list"] as const,
+      detail: (id: string) =>
+        ["cluster", c, "upgradeInsights", "detail", id] as const,
+    },
+
+    // EKS managed node groups (issue #103). Drift fields share the
+    // same query subtree because the data is computed on the same
+    // backend handler — no point invalidating drift independently.
+    nodegroups: {
+      list: () => ["cluster", c, "nodegroups", "list"] as const,
+      detail: (name: string) =>
+        ["cluster", c, "nodegroups", "detail", name] as const,
     },
 
     // Custom resources are addressed by GVR (no static registry), so
