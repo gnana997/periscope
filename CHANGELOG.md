@@ -15,6 +15,19 @@ tag.
 
 ### Fixed
 
+- IAM policy snippet in `docs/setup/deploy.md` §4.1 and
+  `docs/setup/eks-upgrade-readiness.md` was incomplete: it grouped
+  `eks:DescribeNodegroup` with the cluster-scoped EKS actions under
+  `Resource: arn:aws:eks:*:<account>:cluster/*`. AWS scopes
+  `eks:DescribeNodegroup` to the **nodegroup** resource
+  (`arn:aws:eks:region:account:nodegroup/cluster-name/nodegroup-name/uuid`),
+  not the cluster — so operators following the doc literally got
+  `AccessDenied` on the nodegroup detail / AMI drift endpoints
+  even though the list endpoint worked. Split the policy into two
+  statements (cluster-scoped and nodegroup-scoped), added a "Resource
+  type" column to the action table, and called out the gotcha
+  inline so future readers do not reintroduce it.
+
 - EKS Upgrade Insights and Node Groups surfaces now work on
   `in-cluster`, `agent`, and `kubeconfig` backends when the cluster
   entry has both `arn` and `region` set. Before this fix, the

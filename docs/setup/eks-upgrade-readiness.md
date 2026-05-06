@@ -63,14 +63,23 @@ Minimum policy snippet to add to the existing periscope role (extends the snippe
   "Version": "2012-10-17",
   "Statement": [
     {
+      "Sid": "EKSClusterScoped",
       "Effect": "Allow",
       "Action": [
-        "eks:ListInsights", "eks:DescribeInsight",
-        "eks:ListNodegroups", "eks:DescribeNodegroup"
+        "eks:ListInsights",
+        "eks:DescribeInsight",
+        "eks:ListNodegroups"
       ],
       "Resource": "arn:aws:eks:*:111111111111:cluster/*"
     },
     {
+      "Sid": "EKSNodegroupScoped",
+      "Effect": "Allow",
+      "Action": "eks:DescribeNodegroup",
+      "Resource": "arn:aws:eks:*:111111111111:nodegroup/*/*/*"
+    },
+    {
+      "Sid": "SSMPublicAMIParameters",
       "Effect": "Allow",
       "Action": "ssm:GetParameter",
       "Resource": [
@@ -79,6 +88,7 @@ Minimum policy snippet to add to the existing periscope role (extends the snippe
       ]
     },
     {
+      "Sid": "EC2AMILookup",
       "Effect": "Allow",
       "Action": "ec2:DescribeImages",
       "Resource": "*"
@@ -87,7 +97,7 @@ Minimum policy snippet to add to the existing periscope role (extends the snippe
 }
 ```
 
-`ec2:DescribeImages` only supports `Resource: *` because the API doesn't have resource-level ARNs for image lookups. The action is read-only.
+`eks:DescribeNodegroup` is the one action in this set scoped to the **nodegroup** resource rather than the parent cluster — it lives in its own statement so the cluster-scoped wildcard above doesn't try to apply to it (AWS would return `AccessDenied`). The `nodegroup/*/*/*` wildcard matches `nodegroup/<cluster>/<nodegroup-name>/<uuid>`. `ec2:DescribeImages` only supports `Resource: *` because the API doesn't have resource-level ARNs for image lookups. The action is read-only.
 
 > **Diagnosing missing permissions in the SPA.** When the role lacks one of these IAM actions, the upgrade-readiness and node-groups pages render a permission-specific hint (`Periscope's AWS role does not have permission to read…`) instead of a generic red error banner. The backend translates AWS `AccessDeniedException` to HTTP 403 with the stable code `E_AWS_FORBIDDEN`; AWS `ThrottlingException` becomes 429 with `E_AWS_THROTTLED` (transient — refresh after a moment). All other AWS errors keep the legacy 502 / `E_AWS_API` shape.
 
