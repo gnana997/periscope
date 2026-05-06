@@ -66,6 +66,18 @@ type addonInstallRequest struct {
 	ResolveConflicts      string `json:"resolveConflicts,omitempty"`
 }
 
+// addonUpgradeRequest is the PUT /eks/addons/{name} body shape.
+// Same fields as install minus `addonName` (URL param) — `addonVersion`
+// is the *target* version. Empty `addonVersion` is rejected so the
+// SPA must explicitly choose; AWS would happily accept the default
+// otherwise but the operator's intent is opaque without it.
+type addonUpgradeRequest struct {
+	AddonVersion          string `json:"addonVersion"`
+	ConfigurationValues   string `json:"configurationValues,omitempty"`
+	ServiceAccountRoleARN string `json:"serviceAccountRoleArn,omitempty"`
+	ResolveConflicts      string `json:"resolveConflicts,omitempty"`
+}
+
 // AddonConfigurationResponse is the GET .../configuration payload —
 // just the JSON-Schema string AWS publishes for the (addon, version)
 // pair. Nil/empty is a legitimate response (older versions ship no
@@ -291,5 +303,227 @@ func eksAddonConfigurationHandler(reg *clusters.Registry, schemas *addonConfigSc
 		schemas.Put(name, version, val, nil)
 		writeJSON(w, http.StatusOK, AddonConfigurationResponse{ConfigurationSchema: val.ConfigurationSchema})
 		emitAddonsRead(r.Context(), emitter, c, audit.OutcomeSuccess, "configuration", "")
+	}
+}
+
+// eksAddonUpgradeHandler — PUT /eks/addons/{name}. Body shape
+// matches install minus `addonName` (URL param). Wraps eks:UpdateAddon
+// with the same async-by-design contract: returns 202 with the
+// addon detail in status=UPDATING; SPA polls /eks/addons/{name} for
+// the flip.
+func eksAddonUpgradeHandler(reg *clusters.Registry, addons *eksAddonsCache, emitter *audit.Emitter) func(http.ResponseWriter, *http.Request, credentials.Provider) {
+	return func(w http.ResponseWriter, r *http.Request, p credentials.Provider) {
+		c, ok := reg.ByName(chi.URLParam(r, "cluster"))
+		if !ok {
+			http.Error(w, "cluster not found", http.StatusNotFound)
+			return
+		}
+		if !c.EKSCapable() {
+			writeAPIErrorJSON(w, http.StatusUnprocessableEntity,
+				errBackendNotEKSCode,
+				"add-on upgrades are only available for EKS-backed clusters")
+			return
+		}
+		name := chi.URLParam(r, "name")
+		if name == "" {
+			http.Error(w, "missing add-on name", http.StatusBadRequest)
+			return
+		}
+
+		body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, addonInstallMaxBodyBytes))
+		if err != nil {
+			http.Error(w, "request body too large", http.StatusBadRequest)
+			return
+		}
+		var req addonUpgradeRequest
+		if err := json.Unmarshal(body, &req); err != nil {
+			http.Error(w, "expected JSON body { addonVersion, ... }", http.StatusBadRequest)
+			return
+		}
+		if req.AddonVersion == "" {
+			writeAPIErrorJSON(w, http.StatusBadRequest, "E_BAD_REQUEST",
+				"addonVersion is required (target version)")
+			return
+		}
+		resolveConflicts, ok := validResolveConflicts[req.ResolveConflicts]
+		if !ok {
+			writeAPIErrorJSON(w, http.StatusBadRequest, "E_BAD_REQUEST",
+				"resolveConflicts must be one of NONE, OVERWRITE, PRESERVE (or omitted)")
+			return
+		}
+
+		actor := actorFromContext(r.Context())
+		intent := audit.Event{
+			Actor:   actor,
+			Verb:    audit.VerbEKSAddonUpgradeIntent,
+			Outcome: audit.OutcomeSuccess,
+			Cluster: c.Name,
+			Extra: map[string]any{
+				"addonName":        name,
+				"addonVersion":     req.AddonVersion,
+				"resolveConflicts": req.ResolveConflicts,
+			},
+		}
+		emitter.Record(r.Context(), intent)
+
+		client := newEKSAddonsClient(p, c)
+		eksName := c.EKSName()
+
+		ctx, cancel := context.WithTimeout(r.Context(), addonWriteSDKTimeout)
+		defer cancel()
+		in := &eks.UpdateAddonInput{
+			ClusterName:      &eksName,
+			AddonName:        &name,
+			AddonVersion:     &req.AddonVersion,
+			ResolveConflicts: resolveConflicts,
+		}
+		if req.ConfigurationValues != "" {
+			in.ConfigurationValues = &req.ConfigurationValues
+		}
+		if req.ServiceAccountRoleARN != "" {
+			in.ServiceAccountRoleArn = &req.ServiceAccountRoleARN
+		}
+		_, sdkErr := client.UpdateAddon(ctx, in)
+
+		// Cache invalidation runs unconditionally — see the install
+		// handler's rationale.
+		addons.InvalidateList(c.Name)
+		addons.InvalidateDetail(c.Name, name)
+
+		evt := audit.Event{
+			Actor:   actor,
+			Verb:    audit.VerbEKSAddonUpgrade,
+			Cluster: c.Name,
+			Extra: map[string]any{
+				"addonName":        name,
+				"addonVersion":     req.AddonVersion,
+				"resolveConflicts": req.ResolveConflicts,
+			},
+		}
+		if sdkErr != nil {
+			if errors.Is(sdkErr, context.Canceled) {
+				return
+			}
+			slog.Warn("eks update addon failed",
+				"cluster", c.Name, "addon", name, "err", sdkErr)
+			evt.Outcome = audit.OutcomeFailure
+			evt.Reason = sdkErr.Error()
+			emitter.Record(r.Context(), evt)
+			status, code := awsErrorToStatus(sdkErr)
+			writeAPIErrorJSON(w, status, code,
+				"failed to upgrade add-on: "+sdkErr.Error())
+			return
+		}
+
+		// UpdateAddonOutput carries an Update record (id + status),
+		// not a full Addon resource. The SPA's poll of
+		// GET /eks/addons/{name} will surface the new state; here
+		// we return a thin status-only shape so the dialog can
+		// confirm the request was accepted.
+		evt.Outcome = audit.OutcomeSuccess
+		emitter.Record(r.Context(), evt)
+		writeJSON(w, http.StatusAccepted, AddonDetail{
+			AddonSummary: AddonSummary{
+				Name:    name,
+				Status:  string(ekstypes.AddonStatusUpdating),
+				Version: req.AddonVersion,
+			},
+		})
+	}
+}
+
+// eksAddonDeleteHandler — DELETE /eks/addons/{name}?preserve=true|false.
+// Wraps eks:DeleteAddon. The optional `preserve` query param maps
+// to AWS's Preserve flag — when true, the underlying K8s resources
+// (deployments, configmaps, etc.) stay even after the addon resource
+// is gone. Default false.
+//
+// Returns 202; status flips to DELETING and the resource disappears
+// once AWS finishes tearing it down.
+func eksAddonDeleteHandler(reg *clusters.Registry, addons *eksAddonsCache, emitter *audit.Emitter) func(http.ResponseWriter, *http.Request, credentials.Provider) {
+	return func(w http.ResponseWriter, r *http.Request, p credentials.Provider) {
+		c, ok := reg.ByName(chi.URLParam(r, "cluster"))
+		if !ok {
+			http.Error(w, "cluster not found", http.StatusNotFound)
+			return
+		}
+		if !c.EKSCapable() {
+			writeAPIErrorJSON(w, http.StatusUnprocessableEntity,
+				errBackendNotEKSCode,
+				"add-on deletes are only available for EKS-backed clusters")
+			return
+		}
+		name := chi.URLParam(r, "name")
+		if name == "" {
+			http.Error(w, "missing add-on name", http.StatusBadRequest)
+			return
+		}
+		// `preserve` accepts standard truthy strings. Anything else
+		// (including missing) is false.
+		preserve := false
+		switch r.URL.Query().Get("preserve") {
+		case "true", "1", "yes":
+			preserve = true
+		}
+
+		actor := actorFromContext(r.Context())
+		intent := audit.Event{
+			Actor:   actor,
+			Verb:    audit.VerbEKSAddonDeleteIntent,
+			Outcome: audit.OutcomeSuccess,
+			Cluster: c.Name,
+			Extra: map[string]any{
+				"addonName": name,
+				"preserve":  preserve,
+			},
+		}
+		emitter.Record(r.Context(), intent)
+
+		client := newEKSAddonsClient(p, c)
+		eksName := c.EKSName()
+
+		ctx, cancel := context.WithTimeout(r.Context(), addonWriteSDKTimeout)
+		defer cancel()
+		_, sdkErr := client.DeleteAddon(ctx, &eks.DeleteAddonInput{
+			ClusterName: &eksName,
+			AddonName:   &name,
+			Preserve:    preserve,
+		})
+
+		addons.InvalidateList(c.Name)
+		addons.InvalidateDetail(c.Name, name)
+
+		evt := audit.Event{
+			Actor:   actor,
+			Verb:    audit.VerbEKSAddonDelete,
+			Cluster: c.Name,
+			Extra: map[string]any{
+				"addonName": name,
+				"preserve":  preserve,
+			},
+		}
+		if sdkErr != nil {
+			if errors.Is(sdkErr, context.Canceled) {
+				return
+			}
+			slog.Warn("eks delete addon failed",
+				"cluster", c.Name, "addon", name, "err", sdkErr)
+			evt.Outcome = audit.OutcomeFailure
+			evt.Reason = sdkErr.Error()
+			emitter.Record(r.Context(), evt)
+			status, code := awsErrorToStatus(sdkErr)
+			writeAPIErrorJSON(w, status, code,
+				"failed to delete add-on: "+sdkErr.Error())
+			return
+		}
+
+		evt.Outcome = audit.OutcomeSuccess
+		emitter.Record(r.Context(), evt)
+		writeJSON(w, http.StatusAccepted, AddonDetail{
+			AddonSummary: AddonSummary{
+				Name:   name,
+				Status: string(ekstypes.AddonStatusDeleting),
+			},
+		})
 	}
 }

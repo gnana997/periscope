@@ -15,6 +15,29 @@ tag.
 
 ### Added
 
+- EKS add-on upgrade + delete actions (#119, PR-3 of three,
+  closing the issue). New `PUT /api/clusters/{c}/eks/addons/{name}`
+  and `DELETE /api/clusters/{c}/eks/addons/{name}?preserve=...`
+  wire `eks:UpdateAddon` and `eks:DeleteAddon`. Same async-by-design
+  contract as install: returns 202 with status `UPDATING` /
+  `DELETING`; the SPA's status-aware polling watches the flip. Both
+  endpoints reuse the install handler's body validation, audit
+  pair (`eks_addon_upgrade_intent` + `eks_addon_upgrade`,
+  `eks_addon_delete_intent` + `eks_addon_delete`), and cache-
+  invalidation paths. New `KebabMenu` UI primitive surfaces
+  Upgrade / Delete on installed-addon rows in both `AddOnsPage`
+  and `EKSAddOnsCatalogPage`. New `UpgradeAddOnDialog` parallels
+  the install dialog (target version radio, schema-aware config
+  editor, `PRESERVE` default for resolveConflicts since upgrades
+  usually keep cluster-side overrides). New `DeleteAddOnModal`
+  wraps `ConfirmActionModal` with a `preserve` checkbox so an
+  operator doesn't accidentally rip out coredns and break DNS.
+  Kebab actions are disabled while AWS is mid-transition
+  (`CREATING`/`UPDATING`/`DELETING`) — sending another mutation
+  during a pending one produces opaque AWS errors. The new IAM
+  actions `eks:UpdateAddon` and `eks:DeleteAddon` join the
+  `EKSAddonScoped` statement (same addon-ARN scoping as
+  `eks:DescribeAddon`).
 - EKS add-on install action (#119, PR-2 of three). New
   `POST /api/clusters/{c}/eks/addons` wires `eks:CreateAddon`;
   body whitelist-validates `resolveConflicts ∈ {NONE, OVERWRITE,

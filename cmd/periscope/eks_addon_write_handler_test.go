@@ -370,3 +370,219 @@ func TestEKSAddonConfiguration_NonEKSReturns422(t *testing.T) {
 		t.Errorf("status = %d, want 422", rec.Code)
 	}
 }
+
+// ── Upgrade endpoint ────────────────────────────────────────────────
+
+func invokeAddonUpgrade(t *testing.T, reg *clusters.Registry, addons *eksAddonsCache, sink *recordingSink, cluster, name string, body []byte) *httptest.ResponseRecorder {
+	t.Helper()
+	emitter := audit.New(sink)
+	h := eksAddonUpgradeHandler(reg, addons, emitter)
+	req := httptest.NewRequest(http.MethodPut, "/api/clusters/"+cluster+"/eks/addons/"+name, bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("cluster", cluster)
+	rctx.URLParams.Add("name", name)
+	req = req.WithContext(credentials.WithSession(
+		context.WithValue(req.Context(), chi.RouteCtxKey, rctx),
+		credentials.Session{Subject: "alice@corp", Email: "alice@corp", Groups: []string{"eng"}},
+	))
+	rec := httptest.NewRecorder()
+	h(rec, req, fakeProvider{actor: "alice@corp"})
+	return rec
+}
+
+func TestEKSAddonUpgrade_HappyPath(t *testing.T) {
+	reg := eksRegistry(t, "prod-eu-west-1", clusters.BackendEKS)
+
+	fake := &fakeEKSAddonsClient{
+		updateFn: func(_ context.Context, in *eks.UpdateAddonInput) (*eks.UpdateAddonOutput, error) {
+			if *in.AddonName != "vpc-cni" {
+				t.Errorf("AddonName = %q", *in.AddonName)
+			}
+			if *in.AddonVersion != "v1.18.5" {
+				t.Errorf("AddonVersion = %q", *in.AddonVersion)
+			}
+			if in.ResolveConflicts != ekstypes.ResolveConflictsOverwrite {
+				t.Errorf("ResolveConflicts = %q", in.ResolveConflicts)
+			}
+			return &eks.UpdateAddonOutput{}, nil
+		},
+	}
+	withFakeEKSAddonsClient(t, fake)
+
+	addons := newEKSAddonsCache(time.Hour)
+	addons.PutDetail("prod-eu-west-1", "vpc-cni", AddonDetail{AddonSummary: AddonSummary{Name: "vpc-cni", Version: "stale"}})
+
+	sink := &recordingSink{}
+	body := []byte(`{"addonVersion":"v1.18.5","resolveConflicts":"OVERWRITE"}`)
+	rec := invokeAddonUpgrade(t, reg, addons, sink, "prod-eu-west-1", "vpc-cni", body)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want 202; body = %s", rec.Code, rec.Body.String())
+	}
+	var got AddonDetail
+	if err := json.NewDecoder(rec.Body).Decode(&got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if got.Status != string(ekstypes.AddonStatusUpdating) {
+		t.Errorf("Status = %q, want UPDATING", got.Status)
+	}
+	if _, ok := addons.GetDetail("prod-eu-west-1", "vpc-cni"); ok {
+		t.Errorf("detail cache should be invalidated post-upgrade")
+	}
+	events := sink.snapshot()
+	if len(events) != 2 {
+		t.Fatalf("audit events = %d, want 2", len(events))
+	}
+	if events[0].Verb != audit.VerbEKSAddonUpgradeIntent {
+		t.Errorf("event[0].Verb = %q", events[0].Verb)
+	}
+	if events[1].Verb != audit.VerbEKSAddonUpgrade {
+		t.Errorf("event[1].Verb = %q", events[1].Verb)
+	}
+}
+
+func TestEKSAddonUpgrade_RequiresAddonVersion(t *testing.T) {
+	reg := eksRegistry(t, "prod-eu-west-1", clusters.BackendEKS)
+	withFakeEKSAddonsClient(t, &fakeEKSAddonsClient{})
+	rec := invokeAddonUpgrade(t, reg, newEKSAddonsCache(time.Hour), &recordingSink{}, "prod-eu-west-1", "vpc-cni", []byte(`{}`))
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", rec.Code)
+	}
+}
+
+func TestEKSAddonUpgrade_AWSFailureEmitsOutcome(t *testing.T) {
+	reg := eksRegistry(t, "prod-eu-west-1", clusters.BackendEKS)
+	fake := &fakeEKSAddonsClient{
+		updateFn: func(_ context.Context, _ *eks.UpdateAddonInput) (*eks.UpdateAddonOutput, error) {
+			return nil, &ekstypes.AccessDeniedException{Message: strPtrAddons("denied")}
+		},
+	}
+	withFakeEKSAddonsClient(t, fake)
+
+	sink := &recordingSink{}
+	rec := invokeAddonUpgrade(t, reg, newEKSAddonsCache(time.Hour), sink, "prod-eu-west-1", "vpc-cni",
+		[]byte(`{"addonVersion":"v1.18.5"}`))
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403", rec.Code)
+	}
+	events := sink.snapshot()
+	if len(events) != 2 {
+		t.Fatalf("audit events = %d, want 2 (intent + outcome)", len(events))
+	}
+	if events[1].Outcome != audit.OutcomeFailure {
+		t.Errorf("event[1].Outcome = %q, want failure", events[1].Outcome)
+	}
+}
+
+func TestEKSAddonUpgrade_NonEKSReturns422(t *testing.T) {
+	reg := eksRegistry(t, "kind-local", clusters.BackendInCluster)
+	rec := invokeAddonUpgrade(t, reg, newEKSAddonsCache(time.Hour), &recordingSink{}, "kind-local", "vpc-cni",
+		[]byte(`{"addonVersion":"v1.18.5"}`))
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("status = %d, want 422", rec.Code)
+	}
+}
+
+// ── Delete endpoint ─────────────────────────────────────────────────
+
+func invokeAddonDelete(t *testing.T, reg *clusters.Registry, addons *eksAddonsCache, sink *recordingSink, cluster, name, query string) *httptest.ResponseRecorder {
+	t.Helper()
+	emitter := audit.New(sink)
+	h := eksAddonDeleteHandler(reg, addons, emitter)
+	url := "/api/clusters/" + cluster + "/eks/addons/" + name
+	if query != "" {
+		url += "?" + query
+	}
+	req := httptest.NewRequest(http.MethodDelete, url, http.NoBody)
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("cluster", cluster)
+	rctx.URLParams.Add("name", name)
+	req = req.WithContext(credentials.WithSession(
+		context.WithValue(req.Context(), chi.RouteCtxKey, rctx),
+		credentials.Session{Subject: "alice@corp", Email: "alice@corp", Groups: []string{"eng"}},
+	))
+	rec := httptest.NewRecorder()
+	h(rec, req, fakeProvider{actor: "alice@corp"})
+	return rec
+}
+
+func TestEKSAddonDelete_HappyPath_PreserveTrue(t *testing.T) {
+	reg := eksRegistry(t, "prod-eu-west-1", clusters.BackendEKS)
+
+	fake := &fakeEKSAddonsClient{
+		deleteFn: func(_ context.Context, in *eks.DeleteAddonInput) (*eks.DeleteAddonOutput, error) {
+			if *in.AddonName != "vpc-cni" {
+				t.Errorf("AddonName = %q", *in.AddonName)
+			}
+			if !in.Preserve {
+				t.Errorf("Preserve = false, want true")
+			}
+			return &eks.DeleteAddonOutput{}, nil
+		},
+	}
+	withFakeEKSAddonsClient(t, fake)
+
+	sink := &recordingSink{}
+	rec := invokeAddonDelete(t, reg, newEKSAddonsCache(time.Hour), sink, "prod-eu-west-1", "vpc-cni", "preserve=true")
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want 202; body = %s", rec.Code, rec.Body.String())
+	}
+	events := sink.snapshot()
+	if len(events) != 2 {
+		t.Fatalf("audit events = %d, want 2", len(events))
+	}
+	if events[0].Verb != audit.VerbEKSAddonDeleteIntent {
+		t.Errorf("event[0].Verb = %q", events[0].Verb)
+	}
+	if v, _ := events[0].Extra["preserve"].(bool); !v {
+		t.Errorf("event[0].Extra[preserve] = false, want true")
+	}
+}
+
+func TestEKSAddonDelete_DefaultsPreserveFalse(t *testing.T) {
+	reg := eksRegistry(t, "prod-eu-west-1", clusters.BackendEKS)
+	fake := &fakeEKSAddonsClient{
+		deleteFn: func(_ context.Context, in *eks.DeleteAddonInput) (*eks.DeleteAddonOutput, error) {
+			if in.Preserve {
+				t.Errorf("Preserve = true, want false (default)")
+			}
+			return &eks.DeleteAddonOutput{}, nil
+		},
+	}
+	withFakeEKSAddonsClient(t, fake)
+	rec := invokeAddonDelete(t, reg, newEKSAddonsCache(time.Hour), &recordingSink{}, "prod-eu-west-1", "vpc-cni", "")
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("status = %d", rec.Code)
+	}
+}
+
+func TestEKSAddonDelete_AWSFailureEmitsOutcome(t *testing.T) {
+	reg := eksRegistry(t, "prod-eu-west-1", clusters.BackendEKS)
+	fake := &fakeEKSAddonsClient{
+		deleteFn: func(_ context.Context, _ *eks.DeleteAddonInput) (*eks.DeleteAddonOutput, error) {
+			return nil, &ekstypes.ResourceNotFoundException{Message: strPtrAddons("missing")}
+		},
+	}
+	withFakeEKSAddonsClient(t, fake)
+
+	sink := &recordingSink{}
+	rec := invokeAddonDelete(t, reg, newEKSAddonsCache(time.Hour), sink, "prod-eu-west-1", "vpc-cni", "")
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", rec.Code)
+	}
+	events := sink.snapshot()
+	if len(events) != 2 {
+		t.Fatalf("audit events = %d, want 2", len(events))
+	}
+	if events[1].Outcome != audit.OutcomeFailure {
+		t.Errorf("event[1].Outcome = %q, want failure", events[1].Outcome)
+	}
+}
+
+func TestEKSAddonDelete_NonEKSReturns422(t *testing.T) {
+	reg := eksRegistry(t, "kind-local", clusters.BackendInCluster)
+	rec := invokeAddonDelete(t, reg, newEKSAddonsCache(time.Hour), &recordingSink{}, "kind-local", "vpc-cni", "")
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("status = %d, want 422", rec.Code)
+	}
+}

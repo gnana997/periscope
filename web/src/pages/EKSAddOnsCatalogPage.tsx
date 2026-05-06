@@ -13,9 +13,12 @@
 // over to AddOnsPage for the existing detail surface.
 
 import { useMemo, useState } from "react";
+import { DeleteAddOnModal } from "../components/eks/DeleteAddOnModal";
 import { InstallAddOnDialog } from "../components/eks/InstallAddOnDialog";
+import { UpgradeAddOnDialog } from "../components/eks/UpgradeAddOnDialog";
+import { KebabMenu } from "../components/ui/KebabMenu";
 import { useAddonCatalog } from "../hooks/useAddonCatalog";
-import { useAddons } from "../hooks/useAddons";
+import { useAddon, useAddons } from "../hooks/useAddons";
 import {
   compatRangeOf,
   isAWSOwned,
@@ -41,6 +44,12 @@ export function EKSAddOnsCatalogPage({ cluster }: { cluster: string }) {
   // installTarget is the catalog row whose "+ Install" button was
   // clicked. null when the dialog is closed.
   const [installTarget, setInstallTarget] = useState<CatalogAddon | null>(null);
+  // Upgrade / delete targets — invoked from the kebab on installed
+  // rows. Same dialogs as AddOnsPage so the action UX is identical
+  // across both surfaces.
+  const [upgradeTarget, setUpgradeTarget] = useState<CatalogAddon | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
+  const upgradeDetail = useAddon(cluster, upgradeTarget?.name ?? "");
 
   const rows = useMemo(() => {
     if (!catalog.data) return [] as CatalogAddon[];
@@ -202,10 +211,11 @@ export function EKSAddOnsCatalogPage({ cluster }: { cluster: string }) {
               {filtered.map((row) => (
                 <CatalogRow
                   key={row.name}
-                  cluster={cluster}
                   row={row}
                   k8sVersion={catalog.data?.kubernetesVersion}
                   onInstall={() => setInstallTarget(row)}
+                  onUpgrade={() => setUpgradeTarget(row)}
+                  onDelete={() => setDeleteTarget(row.name)}
                 />
               ))}
             </tbody>
@@ -219,6 +229,20 @@ export function EKSAddOnsCatalogPage({ cluster }: { cluster: string }) {
         cluster={cluster}
         addon={installTarget}
         kubernetesVersion={catalog.data?.kubernetesVersion}
+      />
+      <UpgradeAddOnDialog
+        open={upgradeTarget !== null}
+        onClose={() => setUpgradeTarget(null)}
+        cluster={cluster}
+        catalogAddon={upgradeTarget}
+        detail={upgradeDetail.data ?? null}
+        kubernetesVersion={catalog.data?.kubernetesVersion}
+      />
+      <DeleteAddOnModal
+        open={deleteTarget !== null}
+        onClose={() => setDeleteTarget(null)}
+        cluster={cluster}
+        addonName={deleteTarget}
       />
     </div>
   );
@@ -250,18 +274,24 @@ function FilterChip({
 }
 
 function CatalogRow({
-  cluster,
   row,
   k8sVersion,
   onInstall,
+  onUpgrade,
+  onDelete,
 }: {
-  cluster: string;
   row: CatalogAddon;
   k8sVersion?: string;
   onInstall: () => void;
+  onUpgrade: () => void;
+  onDelete: () => void;
 }) {
   const latest = pickLatestForK8s(row.compatibleVersions, k8sVersion);
   const compatRange = compatRangeOf(latest?.kubernetesVersions ?? []);
+  const transient =
+    row.installed?.status === "CREATING" ||
+    row.installed?.status === "UPDATING" ||
+    row.installed?.status === "DELETING";
 
   return (
     <tr className="border-b border-border last:border-0 transition-colors hover:bg-surface-2">
@@ -297,12 +327,22 @@ function CatalogRow({
       </td>
       <td className="px-3 py-2 text-right">
         {row.installed ? (
-          <a
-            href={`/clusters/${encodeURIComponent(cluster)}/addons`}
-            className="font-mono text-[11px] text-accent hover:underline"
-          >
-            manage →
-          </a>
+          <KebabMenu
+            label={`actions for ${row.name}`}
+            items={[
+              {
+                label: "Upgrade…",
+                onSelect: onUpgrade,
+                disabled: transient,
+              },
+              {
+                label: "Delete…",
+                onSelect: onDelete,
+                variant: "danger",
+                disabled: transient,
+              },
+            ]}
+          />
         ) : (
           <button
             type="button"

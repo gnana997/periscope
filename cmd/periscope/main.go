@@ -349,6 +349,10 @@ func main() {
 		eksAddonInstallHandler(registry, eksAddonsC, auditEmitter)))
 	router.Get("/api/clusters/{cluster}/eks/addons/{name}", credentials.Wrap(factory,
 		eksAddonsGetHandler(registry, eksAddonsC, addonVersionsC, auditEmitter)))
+	router.Put("/api/clusters/{cluster}/eks/addons/{name}", credentials.Wrap(factory,
+		eksAddonUpgradeHandler(registry, eksAddonsC, auditEmitter)))
+	router.Delete("/api/clusters/{cluster}/eks/addons/{name}", credentials.Wrap(factory,
+		eksAddonDeleteHandler(registry, eksAddonsC, auditEmitter)))
 
 	// --- Overview / dashboard ---
 

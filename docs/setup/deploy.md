@@ -192,7 +192,9 @@ The trust policy above only says *who* can assume the role. The *permissions* po
 | `eks:DescribeAddonVersions` | * | Add-on freshness + catalog browse (`GET /api/clusters/{c}/eks/addons/catalog`). One unfiltered call per `(k8sVersion)` drives the catalog page; per-addon filtered calls drive the freshness annotation on `/eks/addons`. Resource-scoping is not supported by the API; cached server-side for 6 h since AWS publishes new versions roughly weekly. |
 | `eks:DescribeAddonConfiguration` | * | AWS-published JSON Schema for an `(addon, version)` pair, used by the install / upgrade dialogs (`GET /api/clusters/{c}/eks/addons/catalog/{name}/configuration?version=X`). Resource-scoping is not supported by the API. Cached for 24 h since schemas are immutable per version. |
 | `eks:CreateAddon` | cluster | Add-on install (`POST /api/clusters/{c}/eks/addons`). Returns immediately with status `CREATING`; AWS provisions over 1-5 minutes and the SPA polls `/eks/addons/{name}` to watch the flip. |
-| `iam:PassRole` | specific IAM role ARNs | **Conditional.** Only required if operators install add-ons with the optional `serviceAccountRoleArn` field (IRSA / Pod Identity). Scope to the exact role ARNs Periscope is allowed to delegate; do NOT grant on `Resource: *`. Omit the statement entirely if your operators never set `serviceAccountRoleArn`. |
+| `eks:UpdateAddon` | **addon** | Add-on upgrade / reconfigure (`PUT /api/clusters/{c}/eks/addons/{name}`). Same addon-ARN scoping gotcha as `DescribeAddon` — must live in the `EKSAddonScoped` statement. Returns status `UPDATING`. |
+| `eks:DeleteAddon` | **addon** | Add-on uninstall (`DELETE /api/clusters/{c}/eks/addons/{name}?preserve=true|false`). Same addon-ARN scoping. Returns status `DELETING`. |
+| `iam:PassRole` | specific IAM role ARNs | **Conditional.** Only required if operators install or upgrade add-ons with the optional `serviceAccountRoleArn` field (IRSA / Pod Identity). Scope to the exact role ARNs Periscope is allowed to delegate; do NOT grant on `Resource: *`. Omit the statement entirely if your operators never set `serviceAccountRoleArn`. |
 | `ssm:GetParameter` (scoped to `arn:aws:ssm:*::parameter/aws/service/eks/*` and `arn:aws:ssm:*::parameter/aws/service/bottlerocket/*`) | parameter | AMI drift detection — primary "latest AMI" lookup against AWS public parameters. |
 | `ec2:DescribeImages` | * | AMI drift detection — fallback used when the SSM lookup fails (denied / not found / throttled). |
 
@@ -224,7 +226,11 @@ Minimum permissions policy:
     {
       "Sid": "EKSAddonScoped",
       "Effect": "Allow",
-      "Action": "eks:DescribeAddon",
+      "Action": [
+        "eks:DescribeAddon",
+        "eks:UpdateAddon",
+        "eks:DeleteAddon"
+      ],
       "Resource": "arn:aws:eks:*:111111111111:addon/*/*/*"
     },
     {

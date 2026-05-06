@@ -122,6 +122,20 @@ const (
 	// AWS request ID for AWS-side correlation.
 	VerbEKSAddonInstallIntent Verb = "eks_addon_install_intent"
 	VerbEKSAddonInstall       Verb = "eks_addon_install"
+	// VerbEKSAddonUpgradeIntent / VerbEKSAddonUpgrade pair (#119,
+	// PR-3). Same async-by-design contract and paired-intent shape
+	// as install — UpdateAddon returns status=UPDATING; provisioning
+	// completes AWS-side over 1-5 min. Extra carries `addonName`,
+	// `addonVersion` (the *target* version), and `resolveConflicts`.
+	VerbEKSAddonUpgradeIntent Verb = "eks_addon_upgrade_intent"
+	VerbEKSAddonUpgrade       Verb = "eks_addon_upgrade"
+	// VerbEKSAddonDeleteIntent / VerbEKSAddonDelete pair (#119,
+	// PR-3). DeleteAddon returns status=DELETING. Extra carries
+	// `addonName` and `preserve` — the boolean operator choice for
+	// whether the underlying K8s resources stay (preserve=true) or
+	// are torn down with the addon.
+	VerbEKSAddonDeleteIntent Verb = "eks_addon_delete_intent"
+	VerbEKSAddonDelete       Verb = "eks_addon_delete"
 )
 
 // Outcome is the result classification.

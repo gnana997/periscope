@@ -1831,6 +1831,16 @@ export interface AddonInstallRequest {
   resolveConflicts?: AddonResolveConflicts;
 }
 
+/** Body shape for PUT /api/clusters/{c}/eks/addons/{name} (#119, PR-3).
+ *  Same fields as AddonInstallRequest minus addonName (URL param). */
+export interface AddonUpgradeRequest {
+  /** The *target* version. Required — the SPA must explicitly choose. */
+  addonVersion: string;
+  configurationValues?: string;
+  serviceAccountRoleArn?: string;
+  resolveConflicts?: AddonResolveConflicts;
+}
+
 export interface AddonConfigurationResponse {
   /** AWS-published JSON Schema for the (addon, version) pair as a
    *  raw string. Empty when AWS returned no schema for the version

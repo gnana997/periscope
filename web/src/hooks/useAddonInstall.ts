@@ -29,6 +29,7 @@ import type {
   AddonConfigurationResponse,
   AddonDetail,
   AddonInstallRequest,
+  AddonUpgradeRequest,
 } from "../lib/types";
 
 // 24h staleTime — schemas are immutable per (addon, version) so a
@@ -78,6 +79,54 @@ export function useInstallAddon(cluster: string) {
       qc.invalidateQueries({ queryKey: queryKeys.cluster(cluster).addons.list() });
       qc.invalidateQueries({
         queryKey: queryKeys.cluster(cluster).addons.detail(req.addonName),
+      });
+      qc.invalidateQueries({
+        queryKey: queryKeys.cluster(cluster).addons.catalog(),
+      });
+    },
+  });
+}
+
+// useUpgradeAddon — PUT /eks/addons/{name} (#119, PR-3). Same
+// onSettled invalidation contract as install: list + per-addon
+// detail + catalog query all refresh, success or failure.
+interface UpgradeVars {
+  name: string;
+  request: AddonUpgradeRequest;
+}
+
+export function useUpgradeAddon(cluster: string) {
+  const qc = useQueryClient();
+  return useMutation<AddonDetail, ApiError | Error, UpgradeVars>({
+    mutationFn: ({ name, request }) => api.upgradeAddon(cluster, name, request),
+    onSettled: (_data, _err, vars) => {
+      qc.invalidateQueries({ queryKey: queryKeys.cluster(cluster).addons.list() });
+      qc.invalidateQueries({
+        queryKey: queryKeys.cluster(cluster).addons.detail(vars.name),
+      });
+      qc.invalidateQueries({
+        queryKey: queryKeys.cluster(cluster).addons.catalog(),
+      });
+    },
+  });
+}
+
+// useDeleteAddon — DELETE /eks/addons/{name}?preserve=... (#119,
+// PR-3). `preserve` is the operator's choice on whether the
+// underlying K8s resources stay after the addon resource is gone.
+interface DeleteVars {
+  name: string;
+  preserve: boolean;
+}
+
+export function useDeleteAddon(cluster: string) {
+  const qc = useQueryClient();
+  return useMutation<AddonDetail, ApiError | Error, DeleteVars>({
+    mutationFn: ({ name, preserve }) => api.deleteAddon(cluster, name, preserve),
+    onSettled: (_data, _err, vars) => {
+      qc.invalidateQueries({ queryKey: queryKeys.cluster(cluster).addons.list() });
+      qc.invalidateQueries({
+        queryKey: queryKeys.cluster(cluster).addons.detail(vars.name),
       });
       qc.invalidateQueries({
         queryKey: queryKeys.cluster(cluster).addons.catalog(),

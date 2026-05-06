@@ -69,6 +69,8 @@ type eksAddonsAPI interface {
 	DescribeAddonConfiguration(ctx context.Context, in *eks.DescribeAddonConfigurationInput, opts ...func(*eks.Options)) (*eks.DescribeAddonConfigurationOutput, error)
 	DescribeCluster(ctx context.Context, in *eks.DescribeClusterInput, opts ...func(*eks.Options)) (*eks.DescribeClusterOutput, error)
 	CreateAddon(ctx context.Context, in *eks.CreateAddonInput, opts ...func(*eks.Options)) (*eks.CreateAddonOutput, error)
+	UpdateAddon(ctx context.Context, in *eks.UpdateAddonInput, opts ...func(*eks.Options)) (*eks.UpdateAddonOutput, error)
+	DeleteAddon(ctx context.Context, in *eks.DeleteAddonInput, opts ...func(*eks.Options)) (*eks.DeleteAddonOutput, error)
 }
 
 var newEKSAddonsClient = defaultNewEKSAddonsClient
