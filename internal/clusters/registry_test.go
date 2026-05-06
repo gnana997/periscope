@@ -148,6 +148,13 @@ func TestLoadFromFile_errors(t *testing.T) {
 		{"eks: missing arn", "clusters:\n  - name: a\n    region: us-east-1\n"},
 		{"eks: missing region", "clusters:\n  - name: a\n    arn: arn:aws:eks:us-east-1:1:cluster/a\n"},
 		{"eks: invalid arn", "clusters:\n  - name: a\n    arn: not-an-arn\n    region: us-east-1\n"},
+		// ARN+Region pairing on non-EKS backends — operator opted into
+		// EKS-side metadata but did not supply the matching region or a
+		// parseable ARN. Same enforcement as BackendEKS so AWS calls
+		// have a real region to dial and a parseable cluster name.
+		{"in-cluster: arn without region", "clusters:\n  - name: a\n    backend: in-cluster\n    arn: arn:aws:eks:us-east-1:1:cluster/a\n"},
+		{"agent: malformed arn", "clusters:\n  - name: a\n    backend: agent\n    arn: not-an-arn\n    region: us-east-1\n"},
+		{"kubeconfig: arn without region", "clusters:\n  - name: a\n    backend: kubeconfig\n    kubeconfigPath: /tmp/kc\n    arn: arn:aws:eks:us-east-1:1:cluster/a\n"},
 		{"kubeconfig: missing path", "clusters:\n  - name: a\n    backend: kubeconfig\n"},
 		{"unknown backend", "clusters:\n  - name: a\n    backend: weird\n"},
 		{"duplicate name", `
@@ -284,5 +291,85 @@ func TestLoadFromFile_emptyRegistryReturnsEmpty(t *testing.T) {
 	}
 	if got := len(r.List()); got != 0 {
 		t.Errorf("List() len = %d, want 0", got)
+	}
+}
+
+func TestCluster_EKSCapable(t *testing.T) {
+	cases := []struct {
+		name    string
+		yaml    string
+		want    bool
+		cluster string
+	}{
+		{
+			name: "eks backend (canonical)",
+			yaml: "clusters:\n" +
+				"  - name: prod\n" +
+				"    arn: arn:aws:eks:us-east-1:1:cluster/prod\n" +
+				"    region: us-east-1\n",
+			cluster: "prod",
+			want:    true,
+		},
+		{
+			name: "in-cluster + arn + region",
+			yaml: "clusters:\n" +
+				"  - name: self\n" +
+				"    backend: in-cluster\n" +
+				"    arn: arn:aws:eks:us-west-2:1:cluster/self\n" +
+				"    region: us-west-2\n",
+			cluster: "self",
+			want:    true,
+		},
+		{
+			name: "agent + arn + region",
+			yaml: "clusters:\n" +
+				"  - name: pre-prod\n" +
+				"    backend: agent\n" +
+				"    arn: arn:aws:eks:us-west-2:1:cluster/pre-prod\n" +
+				"    region: us-west-2\n",
+			cluster: "pre-prod",
+			want:    true,
+		},
+		{
+			name: "in-cluster (no arn) — not capable",
+			yaml: "clusters:\n" +
+				"  - name: kind-local\n" +
+				"    backend: in-cluster\n",
+			cluster: "kind-local",
+			want:    false,
+		},
+		{
+			name: "agent (no arn) — not capable",
+			yaml: "clusters:\n" +
+				"  - name: edge-1\n" +
+				"    backend: agent\n",
+			cluster: "edge-1",
+			want:    false,
+		},
+		{
+			name: "kubeconfig (no arn) — not capable",
+			yaml: "clusters:\n" +
+				"  - name: dev\n" +
+				"    backend: kubeconfig\n" +
+				"    kubeconfigPath: /tmp/kc\n",
+			cluster: "dev",
+			want:    false,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			p := writeTempFile(t, tc.yaml)
+			r, err := LoadFromFile(p)
+			if err != nil {
+				t.Fatalf("LoadFromFile: %v", err)
+			}
+			c, ok := r.ByName(tc.cluster)
+			if !ok {
+				t.Fatalf("cluster %q not found in registry", tc.cluster)
+			}
+			if got := c.EKSCapable(); got != tc.want {
+				t.Errorf("EKSCapable() = %v, want %v (cluster=%+v)", got, tc.want, c)
+			}
+		})
 	}
 }

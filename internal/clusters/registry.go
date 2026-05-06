@@ -87,6 +87,25 @@ func LoadFromFile(path string) (*Registry, error) {
 				c.Name, c.Backend, BackendEKS, BackendKubeconfig, BackendInCluster, BackendAgent)
 		}
 
+		// EKS-side metadata (ARN + Region) is orthogonal to the
+		// K8s-auth backend — in-cluster / agent / kubeconfig clusters
+		// can opt in to EKS Upgrade Insights, Node Groups, and AMI
+		// drift by providing the EKS ARN. When they do, the same
+		// validation that BackendEKS enforces applies, so AWS calls
+		// have a real region to dial and a parseable cluster name.
+		// Skipped for BackendEKS because the switch above already
+		// validated. Operators who omit ARN here keep the backend's
+		// no-EKS shape; the EKS handlers then return 422 with
+		// E_BACKEND_NOT_EKS as before.
+		if c.Backend != BackendEKS && c.ARN != "" {
+			if c.Region == "" {
+				return nil, fmt.Errorf("cluster %q (%s): arn is set but region is empty — both are required to enable EKS APIs", c.Name, c.Backend)
+			}
+			if c.EKSName() == "" {
+				return nil, fmt.Errorf("cluster %q (%s): invalid ARN %q (expected ':cluster/<name>')", c.Name, c.Backend, c.ARN)
+			}
+		}
+
 		if _, dup := byName[c.Name]; dup {
 			return nil, fmt.Errorf("duplicate cluster name %q", c.Name)
 		}

@@ -7,6 +7,8 @@ Two surfaces, both EKS-only, both pure read-only:
 
 Both surfaces ship as part of issue #103 and are paired in the UI on the cluster overview page so an operator preparing an upgrade can see "are my manifests OK *and* are my node images current?" in one place.
 
+> **Backend-independent.** These features are AWS-side API queries (`eks:*`, `ssm:*`, `ec2:DescribeImages`) — they do **not** touch the cluster's apiserver. They light up on any registered cluster as long as the cluster entry has both `arn` *and* `region` set, regardless of how Periscope authenticates to that cluster's K8s API. A common pattern: Periscope deployed inside an EKS cluster with `backend: in-cluster` (using the pod ServiceAccount for K8s auth) plus `arn` + `region` set so the same cluster also gets EKS Insights / Node Groups via the pod's IAM role. Same applies to `agent`-backed clusters — K8s traffic flows over the tunnel, AWS API traffic goes server→AWS directly.
+
 ---
 
 ## What you see
