@@ -1,9 +1,13 @@
-import { useState } from "react";
-import { useAddons } from "../hooks/useAddons";
+import { useMemo, useState } from "react";
 import { AddonDetailBody } from "../components/eks/AddonDetailBody";
+import { DeleteAddOnModal } from "../components/eks/DeleteAddOnModal";
+import { UpgradeAddOnDialog } from "../components/eks/UpgradeAddOnDialog";
+import { KebabMenu } from "../components/ui/KebabMenu";
+import { useAddon, useAddons } from "../hooks/useAddons";
+import { useAddonCatalog } from "../hooks/useAddonCatalog";
 import { isAWSForbidden, isAWSThrottled, isBackendNotEKS } from "../lib/api";
 import { cn } from "../lib/cn";
-import type { AddonHealthGlyph, AddonSummary } from "../lib/types";
+import type { AddonHealthGlyph, AddonSummary, CatalogAddon } from "../lib/types";
 
 // AddOnsPage — dedicated /clusters/{c}/addons view (issue #117).
 //
@@ -16,6 +20,27 @@ import type { AddonHealthGlyph, AddonSummary } from "../lib/types";
 
 export function AddOnsPage({ cluster }: { cluster: string }) {
   const { data, isLoading, isError, error } = useAddons(cluster);
+  // Catalog query runs in parallel — needed by the upgrade dialog
+  // (compatible-versions list) when an operator clicks Upgrade. It's
+  // already cached server-side at 6h, so this is cheap.
+  const catalog = useAddonCatalog(cluster);
+  const catalogByName = useMemo(() => {
+    const m = new Map<string, CatalogAddon>();
+    if (catalog.data?.available) {
+      for (const a of catalog.data.available) m.set(a.name, a);
+    }
+    return m;
+  }, [catalog.data]);
+
+  // Action targets: which addon's kebab the operator just clicked.
+  // null = no dialog open. Upgrade needs (catalogAddon + detail);
+  // delete needs only the name.
+  const [upgradeTarget, setUpgradeTarget] = useState<string | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
+  // Detail blob for the upgrade dialog. Lazy fetch — only fires
+  // when an upgrade target is set, since useAddon respects the
+  // enabled flag inside the hook (Boolean(cluster && name)).
+  const upgradeDetail = useAddon(cluster, upgradeTarget ?? "");
 
   if (isError && isBackendNotEKS(error)) {
     return (
@@ -123,16 +148,42 @@ export function AddOnsPage({ cluster }: { cluster: string }) {
                 <th className="px-3 py-2 text-left">Latest</th>
                 <th className="px-3 py-2 text-left">Compat (k8s)</th>
                 <th className="px-3 py-2 text-left">Status</th>
+                <th className="px-3 py-2 text-right">Actions</th>
               </tr>
             </thead>
             <tbody>
               {rows.map((row) => (
-                <AddonRow key={row.name} cluster={cluster} addon={row} />
+                <AddonRow
+                  key={row.name}
+                  cluster={cluster}
+                  addon={row}
+                  onUpgrade={() => setUpgradeTarget(row.name)}
+                  onDelete={() => setDeleteTarget(row.name)}
+                />
               ))}
             </tbody>
           </table>
         </div>
       )}
+
+      <UpgradeAddOnDialog
+        open={upgradeTarget !== null}
+        onClose={() => setUpgradeTarget(null)}
+        cluster={cluster}
+        catalogAddon={
+          upgradeTarget ? catalogByName.get(upgradeTarget) ?? null : null
+        }
+        detail={upgradeDetail.data ?? null}
+        kubernetesVersion={
+          catalog.data?.kubernetesVersion ?? data?.clusterKubernetesVersion
+        }
+      />
+      <DeleteAddOnModal
+        open={deleteTarget !== null}
+        onClose={() => setDeleteTarget(null)}
+        cluster={cluster}
+        addonName={deleteTarget}
+      />
     </div>
   );
 }
@@ -140,11 +191,23 @@ export function AddOnsPage({ cluster }: { cluster: string }) {
 function AddonRow({
   cluster,
   addon,
+  onUpgrade,
+  onDelete,
 }: {
   cluster: string;
   addon: AddonSummary;
+  onUpgrade: () => void;
+  onDelete: () => void;
 }) {
   const [open, setOpen] = useState(false);
+  // Disable Upgrade / Delete kebab items while AWS is mid-transition —
+  // sending another mutation while CREATING/UPDATING/DELETING is in
+  // flight produces opaque AWS errors. The status flips back via
+  // the polling refetch; the kebab re-enables.
+  const transient =
+    addon.status === "CREATING" ||
+    addon.status === "UPDATING" ||
+    addon.status === "DELETING";
   return (
     <>
       <tr
@@ -185,11 +248,29 @@ function AddonRow({
         <td className="px-3 py-2">
           <StatusBadge status={addon.status} />
         </td>
+        <td className="px-3 py-2 text-right">
+          <KebabMenu
+            label={`actions for ${addon.name}`}
+            items={[
+              {
+                label: "Upgrade…",
+                onSelect: onUpgrade,
+                disabled: transient,
+              },
+              {
+                label: "Delete…",
+                onSelect: onDelete,
+                variant: "danger",
+                disabled: transient,
+              },
+            ]}
+          />
+        </td>
       </tr>
       {open && (
         <tr>
           <td
-            colSpan={6}
+            colSpan={7}
             className="border-b border-border bg-surface-2/40 px-6 py-3"
           >
             <AddonDetailBody cluster={cluster} name={addon.name} />

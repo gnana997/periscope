@@ -189,7 +189,12 @@ The trust policy above only says *who* can assume the role. The *permissions* po
 | `eks:DescribeNodegroup` | **nodegroup** | Managed node group detail + AMI drift (`GET /api/clusters/{c}/eks/nodegroups/{name}`). Per [AWS service authorization](https://docs.aws.amazon.com/service-authorization/latest/reference/list_amazonelasticcontainerserviceforkubernetes.html), this action operates on the **nodegroup** resource (`arn:aws:eks:region:account:nodegroup/cluster-name/nodegroup-name/uuid`), **not** the cluster — scoping it to `cluster/*` yields `AccessDenied` even when the nodegroup is inside a covered cluster. |
 | `eks:ListAddons` | cluster | Managed add-on list (`GET /api/clusters/{c}/eks/addons`). |
 | `eks:DescribeAddon` | **addon** | Managed add-on detail (`GET /api/clusters/{c}/eks/addons/{name}`). Like `DescribeNodegroup`, AWS scopes this to the **addon** resource (`arn:aws:eks:region:account:addon/cluster-name/addon-name/uuid`), **not** the cluster — must live in its own statement to avoid the same `AccessDenied` trap. |
-| `eks:DescribeAddonVersions` | * | Add-on freshness — catalog query against the AWS-published add-on version list. Resource-scoping is not supported by the API; cached server-side for 6 h since AWS publishes new versions roughly weekly. |
+| `eks:DescribeAddonVersions` | * | Add-on freshness + catalog browse (`GET /api/clusters/{c}/eks/addons/catalog`). One unfiltered call per `(k8sVersion)` drives the catalog page; per-addon filtered calls drive the freshness annotation on `/eks/addons`. Resource-scoping is not supported by the API; cached server-side for 6 h since AWS publishes new versions roughly weekly. |
+| `eks:DescribeAddonConfiguration` | * | AWS-published JSON Schema for an `(addon, version)` pair, used by the install / upgrade dialogs (`GET /api/clusters/{c}/eks/addons/catalog/{name}/configuration?version=X`). Resource-scoping is not supported by the API. Cached for 24 h since schemas are immutable per version. |
+| `eks:CreateAddon` | cluster | Add-on install (`POST /api/clusters/{c}/eks/addons`). Returns immediately with status `CREATING`; AWS provisions over 1-5 minutes and the SPA polls `/eks/addons/{name}` to watch the flip. |
+| `eks:UpdateAddon` | **addon** | Add-on upgrade / reconfigure (`PUT /api/clusters/{c}/eks/addons/{name}`). Same addon-ARN scoping gotcha as `DescribeAddon` — must live in the `EKSAddonScoped` statement. Returns status `UPDATING`. |
+| `eks:DeleteAddon` | **addon** | Add-on uninstall (`DELETE /api/clusters/{c}/eks/addons/{name}?preserve=true|false`). Same addon-ARN scoping. Returns status `DELETING`. |
+| `iam:PassRole` | specific IAM role ARNs | **Conditional.** Only required if operators install or upgrade add-ons with the optional `serviceAccountRoleArn` field (IRSA / Pod Identity). Scope to the exact role ARNs Periscope is allowed to delegate; do NOT grant on `Resource: *`. Omit the statement entirely if your operators never set `serviceAccountRoleArn`. |
 | `ssm:GetParameter` (scoped to `arn:aws:ssm:*::parameter/aws/service/eks/*` and `arn:aws:ssm:*::parameter/aws/service/bottlerocket/*`) | parameter | AMI drift detection — primary "latest AMI" lookup against AWS public parameters. |
 | `ec2:DescribeImages` | * | AMI drift detection — fallback used when the SSM lookup fails (denied / not found / throttled). |
 
@@ -207,7 +212,8 @@ Minimum permissions policy:
         "eks:ListInsights",
         "eks:DescribeInsight",
         "eks:ListNodegroups",
-        "eks:ListAddons"
+        "eks:ListAddons",
+        "eks:CreateAddon"
       ],
       "Resource": "arn:aws:eks:*:111111111111:cluster/*"
     },
@@ -220,13 +226,20 @@ Minimum permissions policy:
     {
       "Sid": "EKSAddonScoped",
       "Effect": "Allow",
-      "Action": "eks:DescribeAddon",
+      "Action": [
+        "eks:DescribeAddon",
+        "eks:UpdateAddon",
+        "eks:DeleteAddon"
+      ],
       "Resource": "arn:aws:eks:*:111111111111:addon/*/*/*"
     },
     {
       "Sid": "EKSAddonCatalog",
       "Effect": "Allow",
-      "Action": "eks:DescribeAddonVersions",
+      "Action": [
+        "eks:DescribeAddonVersions",
+        "eks:DescribeAddonConfiguration"
+      ],
       "Resource": "*"
     },
     {
@@ -251,6 +264,29 @@ Minimum permissions policy:
 `eks:DescribeNodegroup` lives in its own statement because AWS scopes it to the **nodegroup** resource, not the cluster — the wildcard `nodegroup/*/*/*` matches `nodegroup/<cluster>/<nodegroup-name>/<uuid>` for any nodegroup in any cluster Periscope manages. Tighten to specific cluster names (`nodegroup/prod-eu-west-1/*/*`) if you have a small fixed set.
 
 `eks:DescribeAddon` follows the same pattern: AWS scopes it to the **addon** resource (`arn:aws:eks:*:account:addon/cluster-name/addon-name/uuid`), not the cluster, so it must live in its own statement (`EKSAddonScoped`). Scoping it to `cluster/*` yields `AccessDenied` even for addons that belong to a covered cluster. `eks:DescribeAddonVersions` is a catalog query against AWS-published metadata and the API does not support resource-level ARNs, so it must remain `Resource: *` (`EKSAddonCatalog`).
+
+#### Optional: add-on installs with IAM service account roles
+
+If operators want to install add-ons with the optional `serviceAccountRoleArn` field (IRSA / Pod Identity), add a fourth statement granting `iam:PassRole` scoped to the **exact** role ARNs Periscope is allowed to delegate. Do **not** grant `iam:PassRole` on `Resource: *` — that effectively gives Periscope the ability to assume any role in the account.
+
+```json
+{
+  "Sid": "AddonPassRole",
+  "Effect": "Allow",
+  "Action": "iam:PassRole",
+  "Resource": [
+    "arn:aws:iam::111111111111:role/vpc-cni-addon",
+    "arn:aws:iam::111111111111:role/aws-ebs-csi-driver"
+  ],
+  "Condition": {
+    "StringEquals": {
+      "iam:PassedToService": "eks.amazonaws.com"
+    }
+  }
+}
+```
+
+Omit this statement entirely if your operators never set `serviceAccountRoleArn` on installs. The install dialog leaves it blank by default; the field is opt-in per-install.
 
 Tighten the cluster-scoped ARN to specific cluster ARNs once you've decided which clusters Periscope manages. The Insights / node group / add-on / SSM-public / `DescribeImages` actions are read-only and produce no mutation surface, so they are safe to grant if your registry is small. `ec2:DescribeImages` and `eks:DescribeAddonVersions` only support `Resource: *` because their APIs have no resource-level ARN.
 

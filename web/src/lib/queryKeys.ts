@@ -119,11 +119,17 @@ export const queryKeys = {
     },
 
     // EKS managed add-ons (issue #117). Same per-cluster shape as
-    // nodegroups — list + detail under one subtree.
+    // nodegroups — list + detail under one subtree. Catalog (issue
+    // #119) is keyed under the same subtree so a single
+    // queryClient.invalidateQueries(addons.*) refreshes everything
+    // related to add-ons after a write.
     addons: {
       list: () => ["cluster", c, "addons", "list"] as const,
       detail: (name: string) =>
         ["cluster", c, "addons", "detail", name] as const,
+      catalog: () => ["cluster", c, "addons", "catalog"] as const,
+      configurationSchema: (name: string, version: string) =>
+        ["cluster", c, "addons", "configSchema", name, version] as const,
     },
 
     // Custom resources are addressed by GVR (no static registry), so

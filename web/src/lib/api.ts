@@ -90,6 +90,10 @@ import type {
   NodegroupDetail,
   AddonsListResponse,
   AddonDetail,
+  AddonCatalogResponse,
+  AddonConfigurationResponse,
+  AddonInstallRequest,
+  AddonUpgradeRequest,
 } from "./types";
 
 class ApiError extends Error {
@@ -133,6 +137,48 @@ async function postJSON<T>(
       ...(body !== undefined ? { "Content-Type": "application/json" } : {}),
     },
     body: body !== undefined ? JSON.stringify(body) : undefined,
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new ApiError(
+      `${res.status} ${res.statusText} on ${path}`,
+      res.status,
+      text,
+    );
+  }
+  return (await res.json()) as T;
+}
+
+async function putJSON<T>(
+  path: string,
+  body: unknown,
+  signal?: AbortSignal,
+): Promise<T> {
+  const res = await fetch(path, {
+    method: "PUT",
+    signal,
+    headers: {
+      Accept: "application/json",
+      ...(body !== undefined ? { "Content-Type": "application/json" } : {}),
+    },
+    body: body !== undefined ? JSON.stringify(body) : undefined,
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new ApiError(
+      `${res.status} ${res.statusText} on ${path}`,
+      res.status,
+      text,
+    );
+  }
+  return (await res.json()) as T;
+}
+
+async function deleteJSON<T>(path: string, signal?: AbortSignal): Promise<T> {
+  const res = await fetch(path, {
+    method: "DELETE",
+    signal,
+    headers: { Accept: "application/json" },
   });
   if (!res.ok) {
     const text = await res.text().catch(() => "");
@@ -956,6 +1002,78 @@ export const api = {
       `/api/clusters/${enc(cluster)}/eks/addons/${enc(name)}`,
       signal,
     ),
+
+  // Add-on catalog (issue #119, PR-1) — what could the operator
+  // install on this cluster's K8s version. Server-side merges the
+  // per-cluster install state when its cache is warm; otherwise the
+  // SPA layers from useAddons() data already in flight.
+  addonCatalog: (cluster: string, signal?: AbortSignal) =>
+    getJSON<AddonCatalogResponse>(
+      `/api/clusters/${enc(cluster)}/eks/addons/catalog`,
+      signal,
+    ),
+
+  // AWS-published JSON Schema for an (addon, version) pair (#119,
+  // PR-2). Drives the schema-aware install / upgrade dialogs.
+  // Empty `configurationSchema` is a legitimate response — older
+  // addon versions ship without one and the SPA falls back to YAML.
+  addonConfigurationSchema: (
+    cluster: string,
+    name: string,
+    version: string,
+    signal?: AbortSignal,
+  ) =>
+    getJSON<AddonConfigurationResponse>(
+      `/api/clusters/${enc(cluster)}/eks/addons/catalog/${enc(name)}/configuration?version=${enc(version)}`,
+      signal,
+    ),
+
+  // Install an EKS managed add-on (#119, PR-2). Returns 202 with
+  // the addon detail in status=CREATING; the SPA polls
+  // GET /eks/addons/{name} to watch the status flip.
+  installAddon: (
+    cluster: string,
+    req: AddonInstallRequest,
+    signal?: AbortSignal,
+  ) =>
+    postJSON<AddonDetail>(
+      `/api/clusters/${enc(cluster)}/eks/addons`,
+      req,
+      signal,
+    ),
+
+  // Upgrade an EKS managed add-on (#119, PR-3). Body shape matches
+  // install minus addonName (URL param). Returns 202 with status
+  // UPDATING; SPA polls GET /eks/addons/{name} for the flip.
+  upgradeAddon: (
+    cluster: string,
+    name: string,
+    req: AddonUpgradeRequest,
+    signal?: AbortSignal,
+  ) =>
+    putJSON<AddonDetail>(
+      `/api/clusters/${enc(cluster)}/eks/addons/${enc(name)}`,
+      req,
+      signal,
+    ),
+
+  // Delete an EKS managed add-on (#119, PR-3). `preserve=true` keeps
+  // the underlying K8s resources (deployments, configmaps, …) in
+  // place after the addon resource is gone — surfaced as a checkbox
+  // so operators don't accidentally rip out coredns and break DNS.
+  // Returns 202 with status DELETING.
+  deleteAddon: (
+    cluster: string,
+    name: string,
+    preserve: boolean,
+    signal?: AbortSignal,
+  ) => {
+    const q = preserve ? "?preserve=true" : "";
+    return deleteJSON<AddonDetail>(
+      `/api/clusters/${enc(cluster)}/eks/addons/${enc(name)}${q}`,
+      signal,
+    );
+  },
 };
 
 /** Workload kinds that have apiserver-native rollout history. */

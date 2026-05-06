@@ -126,6 +126,27 @@ func (c *eksAddonsCache) evictLocked() {
 	}
 }
 
+// InvalidateList drops the per-cluster list entry. Called by
+// every write handler (install / upgrade / delete, #119 PR-2/3)
+// after the SDK call returns — success or failure — so the SPA's
+// next poll of GET /eks/addons sees fresh status (CREATING →
+// ACTIVE, etc.) instead of a stale cached row.
+func (c *eksAddonsCache) InvalidateList(cluster string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	delete(c.m, addonsListKey(cluster))
+}
+
+// InvalidateDetail drops the per-(cluster, addon) detail entry.
+// Same rationale as InvalidateList: writes change the addon's
+// status server-side (AWS), so the cache must not serve a stale
+// pre-write detail blob.
+func (c *eksAddonsCache) InvalidateDetail(cluster, name string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	delete(c.m, addonsDetailKey(cluster, name))
+}
+
 func (c *eksAddonsCache) Len() int {
 	c.mu.Lock()
 	defer c.mu.Unlock()

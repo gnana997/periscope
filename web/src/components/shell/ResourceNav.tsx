@@ -239,6 +239,7 @@ export function ResourceNav() {
               <li>
                 <NavLink
                   to={`/clusters/${encodeURIComponent(cluster)}/addons`}
+                  end
                   className={({ isActive }) =>
                     cn(
                       "flex items-center gap-2 rounded-sm px-3 py-1.5 text-[12.5px] transition-colors",
@@ -257,6 +258,31 @@ export function ResourceNav() {
                         )}
                       />
                       <span className="flex-1">Add-ons</span>
+                    </>
+                  )}
+                </NavLink>
+              </li>
+              <li>
+                <NavLink
+                  to={`/clusters/${encodeURIComponent(cluster)}/addons/catalog`}
+                  className={({ isActive }) =>
+                    cn(
+                      "flex items-center gap-2 rounded-sm px-3 py-1.5 text-[12.5px] transition-colors",
+                      isActive
+                        ? "bg-accent-soft text-accent"
+                        : "text-ink hover:bg-surface-2",
+                    )
+                  }
+                >
+                  {({ isActive }) => (
+                    <>
+                      <span
+                        className={cn(
+                          "block size-1 shrink-0 rounded-full",
+                          isActive ? "bg-accent" : "bg-transparent",
+                        )}
+                      />
+                      <span className="flex-1">Add-ons catalog</span>
                     </>
                   )}
                 </NavLink>
