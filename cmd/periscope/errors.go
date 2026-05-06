@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 
+	"github.com/aws/smithy-go"
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
 
 	"github.com/gnana997/periscope/internal/audit"
@@ -108,6 +109,30 @@ func ErrorCodeFor(err error) string {
 		return "apiserver_unreachable"
 	}
 	return "unknown"
+}
+
+// awsErrorToStatus classifies an AWS SDK error into (httpStatus, code)
+// for the EKS read-only handlers. Falls through to (502, "E_AWS_API")
+// for unrecognized errors so the existing default behavior is
+// preserved. Recognized smithy.APIError codes are shared across the
+// EKS / SSM / EC2 services Periscope talks to today; the recognized
+// set covers the failures an operator can actually act on (fix IAM,
+// wait out a throttle, check that the resource exists). Anything else
+// stays a generic 502 — the caller's slog.Warn line still records the
+// raw error for debugging.
+func awsErrorToStatus(err error) (int, string) {
+	var apiErr smithy.APIError
+	if errors.As(err, &apiErr) {
+		switch apiErr.ErrorCode() {
+		case "AccessDeniedException", "UnauthorizedOperation":
+			return http.StatusForbidden, "E_AWS_FORBIDDEN"
+		case "ResourceNotFoundException", "NotFoundException":
+			return http.StatusNotFound, "E_AWS_NOT_FOUND"
+		case "ThrottlingException", "TooManyRequestsException", "RequestLimitExceeded":
+			return http.StatusTooManyRequests, "E_AWS_THROTTLED"
+		}
+	}
+	return http.StatusBadGateway, "E_AWS_API"
 }
 
 func isContextTimeout(err error) bool {

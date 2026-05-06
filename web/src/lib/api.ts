@@ -81,6 +81,13 @@ import type {
   ChartFetchResult,
   ChartVersionsResult,
   ChartFetchRequest,
+  RevisionHistory,
+  RollbackRequest,
+  RollbackResponse,
+  UpgradeInsightsListResponse,
+  UpgradeInsightDetail,
+  NodegroupsListResponse,
+  NodegroupDetail,
 } from "./types";
 
 class ApiError extends Error {
@@ -862,7 +869,114 @@ export const api = {
     }`;
     return postJSON<ChartFetchResult>(url, body, signal);
   },
+
+  /**
+   * Workload rollback (#71). Two endpoints, called from the
+   * RollbackDialog: GET history (revision picker) and POST rollback
+   * (the patch). Both are kind-gated server-side — supplying an
+   * unsupported kind returns 400.
+   */
+  revisions: (
+    cluster: string,
+    kind: RollbackableKind,
+    namespace: string,
+    name: string,
+    signal?: AbortSignal,
+  ) =>
+    getJSON<RevisionHistory>(
+      `/api/clusters/${enc(cluster)}/${enc(kind)}/${enc(namespace)}/${enc(name)}/revisions`,
+      signal,
+    ),
+
+  rollback: (
+    cluster: string,
+    kind: RollbackableKind,
+    namespace: string,
+    name: string,
+    body: RollbackRequest,
+    signal?: AbortSignal,
+  ) =>
+    postJSON<RollbackResponse>(
+      `/api/clusters/${enc(cluster)}/${enc(kind)}/${enc(namespace)}/${enc(name)}/rollback`,
+      body,
+      signal,
+    ),
+  // --- EKS Upgrade Insights (read-only, issue #103) ---------------
+  //
+  // Both endpoints 422 with `E_BACKEND_NOT_EKS` for non-EKS clusters.
+  // Callers should branch on ApiError.status === 422 + bodyText that
+  // contains the code (or use isBackendNotEKS) and render the empty
+  // state instead of an error banner.
+
+  upgradeInsights: (cluster: string, signal?: AbortSignal) =>
+    getJSON<UpgradeInsightsListResponse>(
+      `/api/clusters/${enc(cluster)}/eks/upgrade-insights`,
+      signal,
+    ),
+
+  upgradeInsight: (cluster: string, insightId: string, signal?: AbortSignal) =>
+    getJSON<UpgradeInsightDetail>(
+      `/api/clusters/${enc(cluster)}/eks/upgrade-insights/${enc(insightId)}`,
+      signal,
+    ),
+
+  // --- EKS managed node groups (read-only, issue #103) ------------
+  //
+  // Same E_BACKEND_NOT_EKS contract as upgrade insights — callers
+  // branch on isBackendNotEKS for the empty state.
+
+  nodegroups: (cluster: string, signal?: AbortSignal) =>
+    getJSON<NodegroupsListResponse>(
+      `/api/clusters/${enc(cluster)}/eks/nodegroups`,
+      signal,
+    ),
+
+  nodegroup: (cluster: string, name: string, signal?: AbortSignal) =>
+    getJSON<NodegroupDetail>(
+      `/api/clusters/${enc(cluster)}/eks/nodegroups/${enc(name)}`,
+      signal,
+    ),
 };
+
+/** Workload kinds that have apiserver-native rollout history. */
+export type RollbackableKind = "deployments" | "statefulsets" | "daemonsets";
+
+export const ROLLBACKABLE_KINDS: RollbackableKind[] = [
+  "deployments",
+  "statefulsets",
+  "daemonsets",
+];
+
+export function isRollbackable(kind: string): kind is RollbackableKind {
+  return (ROLLBACKABLE_KINDS as string[]).includes(kind);
+}
+/** True when an ApiError is the structured 422/E_BACKEND_NOT_EKS
+ *  response from one of the EKS-only surfaces. Lets callers render
+ *  a clear empty state rather than a generic error. */
+export function isBackendNotEKS(err: unknown): boolean {
+  if (!(err instanceof ApiError)) return false;
+  if (err.status !== 422) return false;
+  return (err.bodyText ?? "").includes("E_BACKEND_NOT_EKS");
+}
+
+/** True when an ApiError is a 403/E_AWS_FORBIDDEN — i.e. the
+ *  pod-identity / IRSA role lacks the IAM permission for the call.
+ *  The SPA renders a permission-specific hint instead of the generic
+ *  red banner so the operator chases the right diagnostic. */
+export function isAWSForbidden(err: unknown): boolean {
+  if (!(err instanceof ApiError)) return false;
+  if (err.status !== 403) return false;
+  return (err.bodyText ?? "").includes("E_AWS_FORBIDDEN");
+}
+
+/** True when an ApiError is a 429/E_AWS_THROTTLED — AWS rate-limited
+ *  the call. Transient; the SPA suggests a retry rather than a
+ *  permanent error. */
+export function isAWSThrottled(err: unknown): boolean {
+  if (!(err instanceof ApiError)) return false;
+  if (err.status !== 429) return false;
+  return (err.bodyText ?? "").includes("E_AWS_THROTTLED");
+}
 
 // --- write helpers (kept out of `api` block so the call sites stay readable) ---
 

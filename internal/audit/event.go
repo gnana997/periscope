@@ -49,10 +49,40 @@ const (
 	// internal repo URLs end up in the audit trail too. NOT emitted
 	// for the version-list endpoint (called while typing).
 	VerbHelmChartFetch Verb = "helm_chart_fetch"
+	// VerbRollbackIntent is emitted before the apiserver patch fires —
+	// captures the operator's intent (target revision, reason) even
+	// when the patch later fails or the request hangs. Pair with
+	// VerbRollback (post-outcome) for a complete forensics trace.
+	VerbRollbackIntent Verb = "rollback_intent"
+	// VerbRollback is the outcome row for a workload rollback (issue
+	// #71). Carries the new revision number on success in Extra.
+	VerbRollback Verb = "rollback"
 	// VerbLogOpen is reserved for pod/workload log stream opens. No
 	// emission site exists yet; declared so the taxonomy is visible
 	// and a follow-up PR can wire it without revisiting this file.
 	VerbLogOpen Verb = "log_open"
+	// VerbEKSInsightsRead records a read against the EKS Upgrade
+	// Insights surface (ListInsights / DescribeInsight). It is the
+	// first read verb in the taxonomy — the rest of the audit trail
+	// captures privileged mutations only, but compliance reviewers
+	// asked specifically for a record that an operator checked
+	// upgrade readiness on a cluster, since "did anyone look before
+	// we shipped 1.32?" is an answerable question only if the look
+	// itself is logged. The verb is scoped to this AWS-side surface;
+	// other read endpoints (helm list, resource list, …) remain
+	// unaudited and a separate decision is required to broaden the
+	// pattern.
+	VerbEKSInsightsRead Verb = "eks_insights_read"
+	// VerbEKSNodegroupsRead records a read against the managed node
+	// group surface (ListNodegroups / DescribeNodegroup, plus the
+	// derived AMI drift). Same precedent as VerbEKSInsightsRead:
+	// compliance wants a record of who checked node-pool freshness
+	// before an upgrade, so the read itself is auditable. Drift
+	// computation pulls in additional AWS API calls (SSM
+	// GetParameter, ec2 DescribeImages) under the same row — we do
+	// not split those into separate verbs because the caller's
+	// intent is the same operator action.
+	VerbEKSNodegroupsRead Verb = "eks_nodegroups_read"
 )
 
 // Outcome is the result classification.
