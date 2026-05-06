@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -500,7 +501,7 @@ func TestEKSAddonsList_ParallelFanoutRaceClean(t *testing.T) {
 	const N = 16
 	names := make([]string, N)
 	for i := 0; i < N; i++ {
-		names[i] = "addon-" + itoa(i)
+		names[i] = "addon-" + strconv.Itoa(i)
 	}
 	fake := &fakeEKSAddonsClient{
 		listFn: func(_ context.Context, _ *eks.ListAddonsInput) (*eks.ListAddonsOutput, error) {

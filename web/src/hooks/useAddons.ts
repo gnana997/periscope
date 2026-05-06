@@ -36,6 +36,23 @@ const TRANSIENT_STATUSES = new Set([
   "DELETING",
 ]);
 
+// retryUnless422 is the shared retry predicate. The backend returns
+// 422 + E_BACKEND_NOT_EKS for non-EKS clusters; that's a permanent
+// branch (no amount of retrying turns a kind cluster into EKS) so
+// short-circuit the retry budget on it. All other errors get the
+// default budget of two retries.
+function retryUnless422(count: number, err: unknown): boolean {
+  if (
+    err &&
+    typeof err === "object" &&
+    "status" in err &&
+    (err as { status: number }).status === 422
+  ) {
+    return false;
+  }
+  return count < 2;
+}
+
 export function useAddons(cluster: string) {
   return useQuery<AddonsListResponse>({
     queryKey: queryKeys.cluster(cluster).addons.list(),
@@ -51,17 +68,7 @@ export function useAddons(cluster: string) {
       );
       return anyTransient ? TRANSIENT_POLL_MS : false;
     },
-    retry: (count, err) => {
-      if (
-        err &&
-        typeof err === "object" &&
-        "status" in err &&
-        (err as { status: number }).status === 422
-      ) {
-        return false;
-      }
-      return count < 2;
-    },
+    retry: retryUnless422,
   });
 }
 
@@ -78,16 +85,6 @@ export function useAddon(cluster: string, name: string) {
       if (!data) return false;
       return TRANSIENT_STATUSES.has(data.status) ? TRANSIENT_POLL_MS : false;
     },
-    retry: (count, err) => {
-      if (
-        err &&
-        typeof err === "object" &&
-        "status" in err &&
-        (err as { status: number }).status === 422
-      ) {
-        return false;
-      }
-      return count < 2;
-    },
+    retry: retryUnless422,
   });
 }

@@ -212,10 +212,18 @@ func eksAddonInstallHandler(reg *clusters.Registry, addons *eksAddonsCache, emit
 		// detail endpoint so the SPA can render it without a
 		// follow-up GET. The SPA's poll will pick up the status
 		// flip from the cache-invalidated detail endpoint.
+		//
+		// buildAddonSummary expects (addon, catalog, clusterVer) but
+		// we don't have the catalog or cluster k8s version on hand
+		// here, and a CREATING addon hasn't installed any version
+		// the catalog could annotate yet — pass nil/"" so the catalog-
+		// derived fields stay zero. The follow-up GET (driven by
+		// status-aware polling in useAddon) will fold the catalog in
+		// once the addon is ACTIVE.
 		var detail AddonDetail
 		if out != nil && out.Addon != nil {
 			detail = AddonDetail{
-				AddonSummary:          buildAddonSummary(out.Addon),
+				AddonSummary:          buildAddonSummary(out.Addon, nil, ""),
 				ARN:                   deref(out.Addon.AddonArn),
 				ServiceAccountRoleARN: deref(out.Addon.ServiceAccountRoleArn),
 				ConfigurationValues:   deref(out.Addon.ConfigurationValues),
