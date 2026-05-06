@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strings"
 
+	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
@@ -163,12 +164,7 @@ func ListServiceAccounts(ctx context.Context, p credentials.Provider, args ListS
 	}
 	out := ServiceAccountList{ServiceAccounts: make([]ServiceAccount, 0, len(raw.Items))}
 	for _, sa := range raw.Items {
-		out.ServiceAccounts = append(out.ServiceAccounts, ServiceAccount{
-			Name:      sa.Name,
-			Namespace: sa.Namespace,
-			Secrets:   len(sa.Secrets),
-			CreatedAt: sa.CreationTimestamp.Time,
-		})
+		out.ServiceAccounts = append(out.ServiceAccounts, serviceAccountSummary(&sa))
 	}
 	return out, nil
 }
@@ -285,16 +281,20 @@ func GetServiceAccount(ctx context.Context, p credentials.Provider, args GetServ
 		secrets = append(secrets, s.Name)
 	}
 	return ServiceAccountDetail{
-		ServiceAccount: ServiceAccount{
-			Name:      raw.Name,
-			Namespace: raw.Namespace,
-			Secrets:   len(raw.Secrets),
-			CreatedAt: raw.CreationTimestamp.Time,
-		},
-		SecretNames: secrets,
-		Labels:      raw.Labels,
-		Annotations: raw.Annotations,
+		ServiceAccount: serviceAccountSummary(raw),
+		SecretNames:    secrets,
+		Labels:         raw.Labels,
+		Annotations:    raw.Annotations,
 	}, nil
+}
+
+func serviceAccountSummary(sa *corev1.ServiceAccount) ServiceAccount {
+	return ServiceAccount{
+		Name:      sa.Name,
+		Namespace: sa.Namespace,
+		Secrets:   len(sa.Secrets),
+		CreatedAt: sa.CreationTimestamp.Time,
+	}
 }
 
 // --- YAML ---

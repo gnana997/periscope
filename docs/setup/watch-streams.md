@@ -1,7 +1,7 @@
 # Watch streams (real-time list updates)
 
-Periscope's pod, event, replicaset, and job list pages update in
-real time via Server-Sent Events (SSE) instead of polling. The SPA
+Periscope's registered resource list pages update in real time via
+Server-Sent Events (SSE) instead of polling. The SPA
 falls back to polling for any kind whose stream cannot be opened,
 so the bad case is graceful degradation rather than a hard failure.
 
@@ -19,10 +19,10 @@ list-then-watch lifecycle — see
 
 ## 1. Default behavior
 
-**On by default for all four shipped kinds:** pods, events,
-replicasets, jobs. With no helm config, each list page in the SPA
-opens an `EventSource` to `/api/clusters/{cluster}/{kind}/watch` and
-reconciles deltas into the React Query cache as they arrive.
+**On by default for every registered kind.** With no helm config,
+each supported list page in the SPA opens an `EventSource` to
+`/api/clusters/{cluster}/{kind}/watch` and reconciles deltas into
+the React Query cache as they arrive.
 
 When a stream fails (404, network error, server tear-down), the SPA
 automatically falls back to a polling `useResource` query for that
@@ -58,17 +58,19 @@ The `kinds` value accepts:
 | `"core,workloads"` | Multiple groups, one token each |
 | `"pods,workloads"` | Mixed kinds and groups |
 
-Per-kind tokens (current registry): `pods`, `events`, `deployments`, `statefulsets`, `daemonsets`, `replicasets`, `jobs`, `cronjobs`, `horizontalpodautoscalers`, `poddisruptionbudgets`, `services`, `ingresses`, `networkpolicies`, `endpointslices`, `ingressclasses`, `pvs`, `pvcs`, `storageclasses`, `nodes`, `namespaces`, `priorityclasses`, `runtimeclasses`.
+Per-kind tokens (current registry): `pods`, `events`, `configmaps`, `resourcequotas`, `limitranges`, `serviceaccounts`, `deployments`, `statefulsets`, `daemonsets`, `replicasets`, `jobs`, `cronjobs`, `horizontalpodautoscalers`, `poddisruptionbudgets`, `services`, `ingresses`, `networkpolicies`, `endpointslices`, `ingressclasses`, `pvs`, `pvcs`, `storageclasses`, `nodes`, `namespaces`, `priorityclasses`, `runtimeclasses`.
 
 Group aliases (current registry):
 
 - `core` = `pods`, `events`
+- `config` = `configmaps`, `resourcequotas`, `limitranges`, `serviceaccounts`
 - `workloads` = `deployments`, `statefulsets`, `daemonsets`, `replicasets`, `jobs`, `cronjobs`, `horizontalpodautoscalers`, `poddisruptionbudgets`
 - `networking` = `services`, `ingresses`, `networkpolicies`, `endpointslices`, `ingressclasses`
 - `storage` = `pvs`, `pvcs`, `storageclasses`
 - `cluster` = `nodes`, `namespaces`, `priorityclasses`, `runtimeclasses`
 
-Groups expand as new kinds register; the env grammar is forward-compatible.
+Groups expand as new kinds register; the chart schema is updated
+alongside the server registry.
 
 The schema rejects misspellings (`banana,pods` won't pass `helm
 template`), so a typo fails at deploy time rather than silently
@@ -115,7 +117,7 @@ but mangles event streams):
 
 ```yaml
 watchStreams:
-  kinds: "pods,replicasets,jobs"
+  kinds: "pods,configmaps,jobs"
 ```
 
 ---
@@ -177,7 +179,7 @@ curl -i http://localhost:8080/debug/streams
 
 # 4. Server-side defaults (kinds is unset):
 kubectl -n periscope logs deploy/periscope | grep "watch streams"
-# `watch streams enabled: pods=true events=true replicasets=true jobs=true`
+# `watch streams enabled: pods=true events=true configmaps=true ...`
 ```
 
 ---

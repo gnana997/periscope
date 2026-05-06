@@ -68,6 +68,10 @@ interface ResourceQueryArgs {
 const LIST_REFETCH_INTERVAL: Partial<Record<ResourceKind, number>> = {
   pods: 15_000,
   events: 15_000,
+  configmaps: 60_000,
+  resourcequotas: 60_000,
+  limitranges: 60_000,
+  serviceaccounts: 60_000,
   deployments: 30_000,
   statefulsets: 30_000,
   daemonsets: 30_000,
@@ -105,6 +109,10 @@ const LIST_REFETCH_INTERVAL: Partial<Record<ResourceKind, number>> = {
 const WATCH_STREAM_KINDS: ReadonlyArray<ResourceKind> = [
   "pods",
   "events",
+  "configmaps",
+  "resourcequotas",
+  "limitranges",
+  "serviceaccounts",
   "deployments",
   "statefulsets",
   "daemonsets",
@@ -241,8 +249,8 @@ export function useResource({
   });
 
   // streamStatus surfaces only when the kind is a watch kind AND the
-  // server has it enabled. Polling-only kinds (deployments, services,
-  // configmaps, …) get undefined — the StreamHealthBadge renders nothing.
+  // server has it enabled. Polling-only kinds get undefined — the
+  // StreamHealthBadge renders nothing.
   return Object.assign(query, {
     streamStatus:
       isWatchStreamKind(resource) && featureEnabled

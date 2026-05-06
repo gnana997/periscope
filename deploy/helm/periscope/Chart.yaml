@@ -46,7 +46,7 @@ annotations:
     - kind: added
       description: initial v1.0 stable release
     - kind: added
-      description: real-time SSE updates for 21+ resource kinds
+      description: real-time SSE updates for registered resource kinds
     - kind: added
       description: searchable SQLite-backed audit log
     - kind: added

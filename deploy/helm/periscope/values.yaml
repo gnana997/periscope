@@ -419,13 +419,13 @@ exec:
 # -----------------------------------------------------------------------------
 # Watch streams (SSE push for live resource lists)
 #
-# Periscope serves the four highest-churn resource lists (pods, events,
-# replicasets, jobs) over Server-Sent Events so the UI updates in real
-# time instead of polling on a 15s tick. The frontend has a tested
+# Periscope serves registered resource lists over Server-Sent Events
+# so the UI updates in real time instead of polling on a timer. The
+# frontend has a tested
 # polling-fallback path for any kind whose stream cannot be opened, so
 # the bad case is graceful degradation, not a hard failure.
 #
-# Default: enabled for all four kinds.
+# Default: enabled for all registered kinds.
 #
 # Set .Values.watchStreams.kinds to one of:
 #
@@ -433,11 +433,12 @@ exec:
 #   "all"          same as unset; explicit form
 #   "off"          disable all SSE routes; UI uses polling everywhere
 #   "none"         same as "off"
-#   "pods,events"  comma-separated subset of per-kind tokens
+#   "pods,configmaps"  comma-separated subset of per-kind tokens
 #   "workloads"    group alias — every kind in the workloads group
-#   "core,workloads"  multiple groups, one token each
+#   "core,config"  multiple groups, one token each
 #
-# Per-kind tokens (current registry): pods, events, deployments,
+# Per-kind tokens (current registry): pods, events, configmaps,
+# resourcequotas, limitranges, serviceaccounts, deployments,
 # statefulsets, daemonsets, replicasets, jobs, cronjobs,
 # horizontalpodautoscalers, poddisruptionbudgets, services,
 # ingresses, networkpolicies, endpointslices, ingressclasses,
@@ -445,6 +446,8 @@ exec:
 # runtimeclasses.
 # Group aliases (current registry):
 #   core       = pods, events
+#   config     = configmaps, resourcequotas, limitranges,
+#                serviceaccounts
 #   workloads  = deployments, statefulsets, daemonsets, replicasets,
 #                jobs, cronjobs, horizontalpodautoscalers,
 #                poddisruptionbudgets

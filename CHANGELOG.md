@@ -31,6 +31,15 @@ tag.
   `rollback_intent` (pre-patch) + `rollback` (post-outcome) so
   incident review captures attempts that hang or fail mid-flight.
   See [`docs/setup/workload-rollback.md`](docs/setup/workload-rollback.md).
+  
+- SSE watch streams for ConfigMaps, ResourceQuotas, LimitRanges, and
+  ServiceAccounts (#17).
+
+### Changed
+
+- Helm `values.schema.json` now strictly validates
+  `watchStreams.kinds`; deployments with typos that previously
+  silently dropped now fail at helm install time.
 
 ## [1.0.0]
 
