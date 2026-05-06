@@ -259,6 +259,39 @@ func main() {
 	router.Get("/api/clusters/{cluster}/helm/releases/{ns}/{name}/diff", credentials.Wrap(factory,
 		helmDiffHandler(registry)))
 
+	// --- EKS Upgrade Insights (read-only) ---
+	//
+	// EKS scans every cluster's audit log daily and produces a list
+	// of UPGRADE_READINESS insights. We wrap ListInsights /
+	// DescribeInsight, layer a 1h cluster-keyed cache (AWS only
+	// refreshes daily), and decorate each affected resource with a
+	// deep link into the SPA's editor. EKS-only by design: non-EKS
+	// clusters get a 422 with a stable error code. See
+	// eks_insights_handler.go for the audit and 422 contract.
+	eksInsightsCacheTTL := 1 * time.Hour
+	eksInsightsC := newEKSInsightsCache(eksInsightsCacheTTL)
+	router.Get("/api/clusters/{cluster}/eks/upgrade-insights", credentials.Wrap(factory,
+		eksInsightsListHandler(registry, eksInsightsC, auditEmitter)))
+	router.Get("/api/clusters/{cluster}/eks/upgrade-insights/{insightId}", credentials.Wrap(factory,
+		eksInsightsGetHandler(registry, eksInsightsC, auditEmitter)))
+
+	// --- EKS managed node groups + AMI drift (read-only, issue #103) ---
+	//
+	// List + per-nodegroup detail with drift detection layered in
+	// from the AMI catalog (SSM public parameters as primary,
+	// DescribeImages as fallback). Two caches: the nodegroup cache
+	// is per-cluster (5min TTL — operator changes); the AMI catalog
+	// cache is per-(amiType, k8sVersion) at 30min TTL (AWS publishes
+	// new EKS-optimized AMIs roughly weekly), shared across clusters.
+	eksNodegroupsCacheTTL := 5 * time.Minute
+	eksNodegroupsC := newEKSNodegroupsCache(eksNodegroupsCacheTTL)
+	amiCatalogCacheTTL := 30 * time.Minute
+	amiCatalogC := newAMICatalogCache(amiCatalogCacheTTL)
+	router.Get("/api/clusters/{cluster}/eks/nodegroups", credentials.Wrap(factory,
+		eksNodegroupsListHandler(registry, eksNodegroupsC, amiCatalogC, auditEmitter)))
+	router.Get("/api/clusters/{cluster}/eks/nodegroups/{name}", credentials.Wrap(factory,
+		eksNodegroupsGetHandler(registry, eksNodegroupsC, amiCatalogC, auditEmitter)))
+
 	// --- Overview / dashboard ---
 
 	router.Get("/api/clusters/{cluster}/dashboard", credentials.Wrap(factory,

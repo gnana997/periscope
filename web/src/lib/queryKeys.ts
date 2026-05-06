@@ -93,6 +93,24 @@ export const queryKeys = {
         ["cluster", c, "helm", "diff", ns, name, from, to] as const,
     },
 
+    // EKS Upgrade Insights (issue #103). Cluster-scoped; the
+    // backend cache is also cluster-keyed so the same shape mirrors
+    // through the React Query layer cleanly.
+    upgradeInsights: {
+      list: () => ["cluster", c, "upgradeInsights", "list"] as const,
+      detail: (id: string) =>
+        ["cluster", c, "upgradeInsights", "detail", id] as const,
+    },
+
+    // EKS managed node groups (issue #103). Drift fields share the
+    // same query subtree because the data is computed on the same
+    // backend handler — no point invalidating drift independently.
+    nodegroups: {
+      list: () => ["cluster", c, "nodegroups", "list"] as const,
+      detail: (name: string) =>
+        ["cluster", c, "nodegroups", "detail", name] as const,
+    },
+
     // Custom resources are addressed by GVR (no static registry), so
     // they get a parallel subtree keyed on (group, version, plural).
     cr: (group: string, version: string, plural: string) => ({
