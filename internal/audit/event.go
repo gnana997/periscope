@@ -83,6 +83,18 @@ const (
 	// not split those into separate verbs because the caller's
 	// intent is the same operator action.
 	VerbEKSNodegroupsRead Verb = "eks_nodegroups_read"
+	// VerbEKSAddonsRead records a read against the EKS managed add-on
+	// surface (ListAddons / DescribeAddon, plus the shared
+	// DescribeAddonVersions catalog). Same precedent as
+	// VerbEKSInsightsRead and VerbEKSNodegroupsRead: compliance wants
+	// a record of who checked add-on freshness — "is anything blocking
+	// the next minor?" — before an upgrade. The catalog lookup
+	// (DescribeAddonVersions) is rolled into the same row because the
+	// caller's intent is the same operator action; `op` in Extra
+	// distinguishes "list" / "list:cache_hit" / "detail" /
+	// "detail:cache_hit" so a reviewer can see the read kind without
+	// adding new verbs.
+	VerbEKSAddonsRead Verb = "eks_addons_read"
 )
 
 // Outcome is the result classification.

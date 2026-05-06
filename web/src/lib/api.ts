@@ -88,6 +88,8 @@ import type {
   UpgradeInsightDetail,
   NodegroupsListResponse,
   NodegroupDetail,
+  AddonsListResponse,
+  AddonDetail,
 } from "./types";
 
 class ApiError extends Error {
@@ -934,6 +936,24 @@ export const api = {
   nodegroup: (cluster: string, name: string, signal?: AbortSignal) =>
     getJSON<NodegroupDetail>(
       `/api/clusters/${enc(cluster)}/eks/nodegroups/${enc(name)}`,
+      signal,
+    ),
+
+  // --- EKS managed add-ons (read-only, issue #117) ----------------
+  //
+  // Same E_BACKEND_NOT_EKS contract as upgrade insights / nodegroups
+  // — callers branch on isBackendNotEKS for the empty state, and on
+  // isAWSForbidden for the IAM-permission hint.
+
+  addons: (cluster: string, signal?: AbortSignal) =>
+    getJSON<AddonsListResponse>(
+      `/api/clusters/${enc(cluster)}/eks/addons`,
+      signal,
+    ),
+
+  addon: (cluster: string, name: string, signal?: AbortSignal) =>
+    getJSON<AddonDetail>(
+      `/api/clusters/${enc(cluster)}/eks/addons/${enc(name)}`,
       signal,
     ),
 };

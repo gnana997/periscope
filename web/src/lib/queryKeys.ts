@@ -118,6 +118,14 @@ export const queryKeys = {
         ["cluster", c, "nodegroups", "detail", name] as const,
     },
 
+    // EKS managed add-ons (issue #117). Same per-cluster shape as
+    // nodegroups — list + detail under one subtree.
+    addons: {
+      list: () => ["cluster", c, "addons", "list"] as const,
+      detail: (name: string) =>
+        ["cluster", c, "addons", "detail", name] as const,
+    },
+
     // Custom resources are addressed by GVR (no static registry), so
     // they get a parallel subtree keyed on (group, version, plural).
     cr: (group: string, version: string, plural: string) => ({

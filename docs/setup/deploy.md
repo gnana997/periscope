@@ -187,6 +187,9 @@ The trust policy above only says *who* can assume the role. The *permissions* po
 | `eks:ListInsights`, `eks:DescribeInsight` | cluster | Upgrade Insights surface (`/api/clusters/{c}/eks/upgrade-insights*`). EKS-only by design; non-EKS clusters return 422. Cached server-side for 1 hour since AWS itself only refreshes daily. |
 | `eks:ListNodegroups` | cluster | Managed node group list (`GET /api/clusters/{c}/eks/nodegroups`). |
 | `eks:DescribeNodegroup` | **nodegroup** | Managed node group detail + AMI drift (`GET /api/clusters/{c}/eks/nodegroups/{name}`). Per [AWS service authorization](https://docs.aws.amazon.com/service-authorization/latest/reference/list_amazonelasticcontainerserviceforkubernetes.html), this action operates on the **nodegroup** resource (`arn:aws:eks:region:account:nodegroup/cluster-name/nodegroup-name/uuid`), **not** the cluster — scoping it to `cluster/*` yields `AccessDenied` even when the nodegroup is inside a covered cluster. |
+| `eks:ListAddons` | cluster | Managed add-on list (`GET /api/clusters/{c}/eks/addons`). |
+| `eks:DescribeAddon` | **addon** | Managed add-on detail (`GET /api/clusters/{c}/eks/addons/{name}`). Like `DescribeNodegroup`, AWS scopes this to the **addon** resource (`arn:aws:eks:region:account:addon/cluster-name/addon-name/uuid`), **not** the cluster — must live in its own statement to avoid the same `AccessDenied` trap. |
+| `eks:DescribeAddonVersions` | * | Add-on freshness — catalog query against the AWS-published add-on version list. Resource-scoping is not supported by the API; cached server-side for 6 h since AWS publishes new versions roughly weekly. |
 | `ssm:GetParameter` (scoped to `arn:aws:ssm:*::parameter/aws/service/eks/*` and `arn:aws:ssm:*::parameter/aws/service/bottlerocket/*`) | parameter | AMI drift detection — primary "latest AMI" lookup against AWS public parameters. |
 | `ec2:DescribeImages` | * | AMI drift detection — fallback used when the SSM lookup fails (denied / not found / throttled). |
 
@@ -203,7 +206,8 @@ Minimum permissions policy:
         "eks:DescribeCluster",
         "eks:ListInsights",
         "eks:DescribeInsight",
-        "eks:ListNodegroups"
+        "eks:ListNodegroups",
+        "eks:ListAddons"
       ],
       "Resource": "arn:aws:eks:*:111111111111:cluster/*"
     },
@@ -212,6 +216,18 @@ Minimum permissions policy:
       "Effect": "Allow",
       "Action": "eks:DescribeNodegroup",
       "Resource": "arn:aws:eks:*:111111111111:nodegroup/*/*/*"
+    },
+    {
+      "Sid": "EKSAddonScoped",
+      "Effect": "Allow",
+      "Action": "eks:DescribeAddon",
+      "Resource": "arn:aws:eks:*:111111111111:addon/*/*/*"
+    },
+    {
+      "Sid": "EKSAddonCatalog",
+      "Effect": "Allow",
+      "Action": "eks:DescribeAddonVersions",
+      "Resource": "*"
     },
     {
       "Sid": "SSMPublicAMIParameters",
@@ -234,7 +250,9 @@ Minimum permissions policy:
 
 `eks:DescribeNodegroup` lives in its own statement because AWS scopes it to the **nodegroup** resource, not the cluster — the wildcard `nodegroup/*/*/*` matches `nodegroup/<cluster>/<nodegroup-name>/<uuid>` for any nodegroup in any cluster Periscope manages. Tighten to specific cluster names (`nodegroup/prod-eu-west-1/*/*`) if you have a small fixed set.
 
-Tighten the cluster-scoped ARN to specific cluster ARNs once you've decided which clusters Periscope manages. The Insights / node group / SSM-public / `DescribeImages` actions are read-only and produce no mutation surface, so they are safe to grant if your registry is small. `ec2:DescribeImages` only supports `Resource: *` because the API has no resource-level ARN for image lookups.
+`eks:DescribeAddon` follows the same pattern: AWS scopes it to the **addon** resource (`arn:aws:eks:*:account:addon/cluster-name/addon-name/uuid`), not the cluster, so it must live in its own statement (`EKSAddonScoped`). Scoping it to `cluster/*` yields `AccessDenied` even for addons that belong to a covered cluster. `eks:DescribeAddonVersions` is a catalog query against AWS-published metadata and the API does not support resource-level ARNs, so it must remain `Resource: *` (`EKSAddonCatalog`).
+
+Tighten the cluster-scoped ARN to specific cluster ARNs once you've decided which clusters Periscope manages. The Insights / node group / add-on / SSM-public / `DescribeImages` actions are read-only and produce no mutation surface, so they are safe to grant if your registry is small. `ec2:DescribeImages` and `eks:DescribeAddonVersions` only support `Resource: *` because their APIs have no resource-level ARN.
 
 For the full surface map of what each action enables in the UI, see [`eks-upgrade-readiness.md`](./eks-upgrade-readiness.md).
 

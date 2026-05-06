@@ -1697,3 +1697,72 @@ export interface NodegroupDetail extends NodegroupSummary {
   modifiedAt?: string;
   autoScalingGroups?: string[];
 }
+
+// --- EKS managed add-ons (issue #117) -------------------------------
+
+export type AddonHealthGlyph = "ok" | "update" | "fail";
+
+export interface AddonHealthIssue {
+  code?: string;
+  message?: string;
+  resourceIds?: string[];
+}
+
+export interface AddonSummary {
+  name: string;
+  status: string;
+  version?: string;
+  kubernetesVersion?: string;
+  healthIssueCount: number;
+  /** Three-state symbol the SPA renders:
+   *   "ok"     → ●  healthy & current
+   *   "update" → ▲  newer version exists or blocks next minor
+   *   "fail"   → ✕  health issues present */
+  healthGlyph: AddonHealthGlyph;
+  updateAvailable: boolean;
+  latestVersion?: string;
+  /** Min/max K8s minors the *installed* add-on version supports. Empty
+   *  when the catalog had nothing to say (custom builds or soft-fail). */
+  compatMinK8s?: string;
+  compatMaxK8s?: string;
+  /** True when the installed version's compat list does NOT include
+   *  (cluster.k8s + 1). Surfaces as the "blocks 1.30" subtitle. */
+  blocksNextMinor: boolean;
+  createdAt?: string;
+  modifiedAt?: string;
+}
+
+export interface AddonsCounts {
+  total: number;
+  healthy: number;
+  updateAvailable: number;
+  unhealthy: number;
+  blocksNextMinor: number;
+}
+
+export interface AddonsListResponse {
+  addons: AddonSummary[];
+  counts: AddonsCounts;
+  /** Cluster's K8s version as AWS reports it. Drives the table
+   *  header — "EKS add-ons · prod-eu-west-1 (k8s 1.29)". */
+  clusterKubernetesVersion?: string;
+}
+
+export interface AddonVersionEntry {
+  version: string;
+  compatibleK8sVersions: string[];
+  defaultVersion: boolean;
+}
+
+export interface AddonDetail extends AddonSummary {
+  arn?: string;
+  serviceAccountRoleArn?: string;
+  configurationValues?: string;
+  /** AWS-published JSON schema for the addon's config. May be empty
+   *  if DescribeAddonConfiguration soft-failed. */
+  configurationSchema?: string;
+  healthIssues?: AddonHealthIssue[];
+  availableVersions?: AddonVersionEntry[];
+  owner?: string;
+  publisher?: string;
+}
