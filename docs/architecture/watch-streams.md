@@ -14,8 +14,8 @@ relevant `web/` files; this page covers only the server side.
 
 ## 1. What "watch stream" means here
 
-Periscope's resource list pages (Pods, Events, ReplicaSets, Jobs)
-need to update in near-real-time. The naive answer is "poll every 5s
+Periscope's resource list pages need to update in near-real-time.
+The naive answer is "poll every 5s
 and diff in the client." We do better:
 
 1. The browser opens an `EventSource` to `/api/clusters/{cluster}/{kind}/watch`.
@@ -42,6 +42,10 @@ same DTO shape, so feature parity is automatic.
 |---|---|---|---|
 | Pods | `/api/clusters/{cluster}/pods/watch` | `Pod` | `internal/k8s/watch.go: WatchPods` |
 | Events | `/api/clusters/{cluster}/events/watch` | `ClusterEvent` | `internal/k8s/watch.go: WatchEvents` |
+| ConfigMaps | `/api/clusters/{cluster}/configmaps/watch` | `ConfigMap` | `internal/k8s/watch.go: WatchConfigMaps` |
+| ResourceQuotas | `/api/clusters/{cluster}/resourcequotas/watch` | `ResourceQuota` | `internal/k8s/watch.go: WatchResourceQuotas` |
+| LimitRanges | `/api/clusters/{cluster}/limitranges/watch` | `LimitRange` | `internal/k8s/watch.go: WatchLimitRanges` |
+| ServiceAccounts | `/api/clusters/{cluster}/serviceaccounts/watch` | `ServiceAccount` | `internal/k8s/watch.go: WatchServiceAccounts` |
 | Deployments | `/api/clusters/{cluster}/deployments/watch` | `Deployment` | `internal/k8s/watch.go: WatchDeployments` |
 | StatefulSets | `/api/clusters/{cluster}/statefulsets/watch` | `StatefulSet` | `internal/k8s/watch.go: WatchStatefulSets` |
 | DaemonSets | `/api/clusters/{cluster}/daemonsets/watch` | `DaemonSet` | `internal/k8s/watch.go: WatchDaemonSets` |
@@ -159,8 +163,9 @@ returns HTTP 429. The cap exists to stop a runaway SPA bug from
 opening hundreds of EventSources and exhausting apiserver watch
 budget on the user's behalf.
 
-The 30-stream default reflects "10 list pages × 3 kinds at peak,"
-which is well above realistic usage.
+The 60-stream default reflects "~10 tabs × 6 list views" with
+headroom for the larger kind set unlocked as more controllers gain
+SSE streams.
 
 ---
 
@@ -336,7 +341,7 @@ auth layer broadcasts to every registered stream.
 
 ## 12. Related code
 
-- `internal/k8s/watch.go` — `watchKind`, `watchSpec`, the four
+- `internal/k8s/watch.go` — `watchKind`, `watchSpec`, the
   `Watch*` wrappers
 - `internal/k8s/watch_test.go` — generic primitive tests
 - `internal/sse/` — SSE writer, heartbeat, last-event-id parsing

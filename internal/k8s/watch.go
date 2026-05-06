@@ -561,6 +561,98 @@ func WatchServices(ctx context.Context, p credentials.Provider, args WatchArgs, 
 	}, args.ResumeFrom, sink)
 }
 
+// WatchConfigMaps runs a list-then-watch loop on ConfigMaps in the
+// given namespace. See watchKind for lifecycle details.
+func WatchConfigMaps(ctx context.Context, p credentials.Provider, args WatchArgs, sink WatchSink) error {
+	cs, err := newClientFn(ctx, p, args.Cluster)
+	if err != nil {
+		return fmt.Errorf("build clientset: %w", err)
+	}
+	return watchKind(ctx, watchSpec[corev1.ConfigMap, ConfigMap]{
+		Kind: "configmaps",
+		List: func(ctx context.Context, opts metav1.ListOptions) ([]corev1.ConfigMap, string, error) {
+			list, err := cs.CoreV1().ConfigMaps(args.Namespace).List(ctx, opts)
+			if err != nil {
+				return nil, "", err
+			}
+			return list.Items, list.ResourceVersion, nil
+		},
+		Watch: func(ctx context.Context, opts metav1.ListOptions) (watch.Interface, error) {
+			return cs.CoreV1().ConfigMaps(args.Namespace).Watch(ctx, opts)
+		},
+		Summary: configMapSummary,
+	}, args.ResumeFrom, sink)
+}
+
+// WatchResourceQuotas runs a list-then-watch loop on ResourceQuotas
+// in the given namespace. See watchKind for lifecycle details.
+func WatchResourceQuotas(ctx context.Context, p credentials.Provider, args WatchArgs, sink WatchSink) error {
+	cs, err := newClientFn(ctx, p, args.Cluster)
+	if err != nil {
+		return fmt.Errorf("build clientset: %w", err)
+	}
+	return watchKind(ctx, watchSpec[corev1.ResourceQuota, ResourceQuota]{
+		Kind: "resourcequotas",
+		List: func(ctx context.Context, opts metav1.ListOptions) ([]corev1.ResourceQuota, string, error) {
+			list, err := cs.CoreV1().ResourceQuotas(args.Namespace).List(ctx, opts)
+			if err != nil {
+				return nil, "", err
+			}
+			return list.Items, list.ResourceVersion, nil
+		},
+		Watch: func(ctx context.Context, opts metav1.ListOptions) (watch.Interface, error) {
+			return cs.CoreV1().ResourceQuotas(args.Namespace).Watch(ctx, opts)
+		},
+		Summary: resourceQuotaSummary,
+	}, args.ResumeFrom, sink)
+}
+
+// WatchLimitRanges runs a list-then-watch loop on LimitRanges in the
+// given namespace. See watchKind for lifecycle details.
+func WatchLimitRanges(ctx context.Context, p credentials.Provider, args WatchArgs, sink WatchSink) error {
+	cs, err := newClientFn(ctx, p, args.Cluster)
+	if err != nil {
+		return fmt.Errorf("build clientset: %w", err)
+	}
+	return watchKind(ctx, watchSpec[corev1.LimitRange, LimitRange]{
+		Kind: "limitranges",
+		List: func(ctx context.Context, opts metav1.ListOptions) ([]corev1.LimitRange, string, error) {
+			list, err := cs.CoreV1().LimitRanges(args.Namespace).List(ctx, opts)
+			if err != nil {
+				return nil, "", err
+			}
+			return list.Items, list.ResourceVersion, nil
+		},
+		Watch: func(ctx context.Context, opts metav1.ListOptions) (watch.Interface, error) {
+			return cs.CoreV1().LimitRanges(args.Namespace).Watch(ctx, opts)
+		},
+		Summary: limitRangeSummary,
+	}, args.ResumeFrom, sink)
+}
+
+// WatchServiceAccounts runs a list-then-watch loop on ServiceAccounts
+// in the given namespace. See watchKind for lifecycle details.
+func WatchServiceAccounts(ctx context.Context, p credentials.Provider, args WatchArgs, sink WatchSink) error {
+	cs, err := newClientFn(ctx, p, args.Cluster)
+	if err != nil {
+		return fmt.Errorf("build clientset: %w", err)
+	}
+	return watchKind(ctx, watchSpec[corev1.ServiceAccount, ServiceAccount]{
+		Kind: "serviceaccounts",
+		List: func(ctx context.Context, opts metav1.ListOptions) ([]corev1.ServiceAccount, string, error) {
+			list, err := cs.CoreV1().ServiceAccounts(args.Namespace).List(ctx, opts)
+			if err != nil {
+				return nil, "", err
+			}
+			return list.Items, list.ResourceVersion, nil
+		},
+		Watch: func(ctx context.Context, opts metav1.ListOptions) (watch.Interface, error) {
+			return cs.CoreV1().ServiceAccounts(args.Namespace).Watch(ctx, opts)
+		},
+		Summary: serviceAccountSummary,
+	}, args.ResumeFrom, sink)
+}
+
 // WatchIngresses runs a list-then-watch loop on Ingresses in the
 // given namespace. See watchKind for lifecycle details.
 func WatchIngresses(ctx context.Context, p credentials.Provider, args WatchArgs, sink WatchSink) error {

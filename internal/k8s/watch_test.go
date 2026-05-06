@@ -19,6 +19,7 @@ import (
 	schedulingv1 "k8s.io/api/scheduling/v1"
 	storagev1 "k8s.io/api/storage/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/watch"
@@ -1091,6 +1092,217 @@ func TestWatchServices_SnapshotAndAdded(t *testing.T) {
 	}
 	if svcObj.Name != "svc-b" {
 		t.Errorf("added service name = %q, want svc-b", svcObj.Name)
+	}
+}
+
+// --- Config smoke tests ---
+
+func TestWatchConfigMaps_SnapshotAndAdded(t *testing.T) {
+	cm := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{Name: "cm-a", Namespace: "default", ResourceVersion: "1"},
+		Data:       map[string]string{"app": "demo"},
+	}
+	cs := fake.NewSimpleClientset(cm)
+	swapNewClientFn(t, cs)
+
+	sink := newTestSink(8)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go func() {
+		_ = WatchConfigMaps(ctx, stubProvider{}, WatchArgs{
+			Cluster:   clusters.Cluster{Name: "demo", Backend: clusters.BackendKubeconfig},
+			Namespace: "default",
+		}, sink)
+	}()
+
+	snap := awaitEvent(t, sink)
+	if snap.Type != WatchSnapshot {
+		t.Fatalf("first event = %v, want snapshot", snap.Type)
+	}
+	items, ok := snap.Items.([]ConfigMap)
+	if !ok {
+		t.Fatalf("Items type = %T, want []ConfigMap", snap.Items)
+	}
+	if len(items) != 1 || items[0].Name != "cm-a" || items[0].KeyCount != 1 {
+		t.Fatalf("snapshot items = %+v, want one cm-a with one key", items)
+	}
+
+	cm2 := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{Name: "cm-b", Namespace: "default", ResourceVersion: "2"},
+	}
+	if _, err := cs.CoreV1().ConfigMaps("default").Create(ctx, cm2, metav1.CreateOptions{}); err != nil {
+		t.Fatalf("create configmap: %v", err)
+	}
+
+	got := awaitEvent(t, sink)
+	if got.Type != WatchAdded {
+		t.Fatalf("event = %v, want added", got.Type)
+	}
+	cmObj, ok := got.Object.(ConfigMap)
+	if !ok {
+		t.Fatalf("Object type = %T, want ConfigMap", got.Object)
+	}
+	if cmObj.Name != "cm-b" {
+		t.Errorf("added configmap name = %q, want cm-b", cmObj.Name)
+	}
+}
+
+func TestWatchResourceQuotas_SnapshotAndAdded(t *testing.T) {
+	rq := &corev1.ResourceQuota{
+		ObjectMeta: metav1.ObjectMeta{Name: "rq-a", Namespace: "default", ResourceVersion: "1"},
+		Status: corev1.ResourceQuotaStatus{
+			Hard: corev1.ResourceList{corev1.ResourcePods: resource.MustParse("10")},
+			Used: corev1.ResourceList{corev1.ResourcePods: resource.MustParse("2")},
+		},
+	}
+	cs := fake.NewSimpleClientset(rq)
+	swapNewClientFn(t, cs)
+
+	sink := newTestSink(8)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go func() {
+		_ = WatchResourceQuotas(ctx, stubProvider{}, WatchArgs{
+			Cluster:   clusters.Cluster{Name: "demo", Backend: clusters.BackendKubeconfig},
+			Namespace: "default",
+		}, sink)
+	}()
+
+	snap := awaitEvent(t, sink)
+	if snap.Type != WatchSnapshot {
+		t.Fatalf("first event = %v, want snapshot", snap.Type)
+	}
+	items, ok := snap.Items.([]ResourceQuota)
+	if !ok {
+		t.Fatalf("Items type = %T, want []ResourceQuota", snap.Items)
+	}
+	if len(items) != 1 || items[0].Name != "rq-a" || items[0].Items["pods"].Hard != "10" {
+		t.Fatalf("snapshot items = %+v, want one rq-a with pods quota", items)
+	}
+
+	rq2 := &corev1.ResourceQuota{
+		ObjectMeta: metav1.ObjectMeta{Name: "rq-b", Namespace: "default", ResourceVersion: "2"},
+	}
+	if _, err := cs.CoreV1().ResourceQuotas("default").Create(ctx, rq2, metav1.CreateOptions{}); err != nil {
+		t.Fatalf("create resourcequota: %v", err)
+	}
+
+	got := awaitEvent(t, sink)
+	if got.Type != WatchAdded {
+		t.Fatalf("event = %v, want added", got.Type)
+	}
+	rqObj, ok := got.Object.(ResourceQuota)
+	if !ok {
+		t.Fatalf("Object type = %T, want ResourceQuota", got.Object)
+	}
+	if rqObj.Name != "rq-b" {
+		t.Errorf("added resourcequota name = %q, want rq-b", rqObj.Name)
+	}
+}
+
+func TestWatchLimitRanges_SnapshotAndAdded(t *testing.T) {
+	lr := &corev1.LimitRange{
+		ObjectMeta: metav1.ObjectMeta{Name: "lr-a", Namespace: "default", ResourceVersion: "1"},
+		Spec: corev1.LimitRangeSpec{
+			Limits: []corev1.LimitRangeItem{{Type: corev1.LimitTypeContainer}},
+		},
+	}
+	cs := fake.NewSimpleClientset(lr)
+	swapNewClientFn(t, cs)
+
+	sink := newTestSink(8)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go func() {
+		_ = WatchLimitRanges(ctx, stubProvider{}, WatchArgs{
+			Cluster:   clusters.Cluster{Name: "demo", Backend: clusters.BackendKubeconfig},
+			Namespace: "default",
+		}, sink)
+	}()
+
+	snap := awaitEvent(t, sink)
+	if snap.Type != WatchSnapshot {
+		t.Fatalf("first event = %v, want snapshot", snap.Type)
+	}
+	items, ok := snap.Items.([]LimitRange)
+	if !ok {
+		t.Fatalf("Items type = %T, want []LimitRange", snap.Items)
+	}
+	if len(items) != 1 || items[0].Name != "lr-a" || items[0].LimitCount != 1 {
+		t.Fatalf("snapshot items = %+v, want one lr-a with one limit", items)
+	}
+
+	lr2 := &corev1.LimitRange{
+		ObjectMeta: metav1.ObjectMeta{Name: "lr-b", Namespace: "default", ResourceVersion: "2"},
+	}
+	if _, err := cs.CoreV1().LimitRanges("default").Create(ctx, lr2, metav1.CreateOptions{}); err != nil {
+		t.Fatalf("create limitrange: %v", err)
+	}
+
+	got := awaitEvent(t, sink)
+	if got.Type != WatchAdded {
+		t.Fatalf("event = %v, want added", got.Type)
+	}
+	lrObj, ok := got.Object.(LimitRange)
+	if !ok {
+		t.Fatalf("Object type = %T, want LimitRange", got.Object)
+	}
+	if lrObj.Name != "lr-b" {
+		t.Errorf("added limitrange name = %q, want lr-b", lrObj.Name)
+	}
+}
+
+func TestWatchServiceAccounts_SnapshotAndAdded(t *testing.T) {
+	sa := &corev1.ServiceAccount{
+		ObjectMeta: metav1.ObjectMeta{Name: "sa-a", Namespace: "default", ResourceVersion: "1"},
+		Secrets:    []corev1.ObjectReference{{Name: "token-a"}},
+	}
+	cs := fake.NewSimpleClientset(sa)
+	swapNewClientFn(t, cs)
+
+	sink := newTestSink(8)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go func() {
+		_ = WatchServiceAccounts(ctx, stubProvider{}, WatchArgs{
+			Cluster:   clusters.Cluster{Name: "demo", Backend: clusters.BackendKubeconfig},
+			Namespace: "default",
+		}, sink)
+	}()
+
+	snap := awaitEvent(t, sink)
+	if snap.Type != WatchSnapshot {
+		t.Fatalf("first event = %v, want snapshot", snap.Type)
+	}
+	items, ok := snap.Items.([]ServiceAccount)
+	if !ok {
+		t.Fatalf("Items type = %T, want []ServiceAccount", snap.Items)
+	}
+	if len(items) != 1 || items[0].Name != "sa-a" || items[0].Secrets != 1 {
+		t.Fatalf("snapshot items = %+v, want one sa-a with one secret", items)
+	}
+
+	sa2 := &corev1.ServiceAccount{
+		ObjectMeta: metav1.ObjectMeta{Name: "sa-b", Namespace: "default", ResourceVersion: "2"},
+	}
+	if _, err := cs.CoreV1().ServiceAccounts("default").Create(ctx, sa2, metav1.CreateOptions{}); err != nil {
+		t.Fatalf("create serviceaccount: %v", err)
+	}
+
+	got := awaitEvent(t, sink)
+	if got.Type != WatchAdded {
+		t.Fatalf("event = %v, want added", got.Type)
+	}
+	saObj, ok := got.Object.(ServiceAccount)
+	if !ok {
+		t.Fatalf("Object type = %T, want ServiceAccount", got.Object)
+	}
+	if saObj.Name != "sa-b" {
+		t.Errorf("added serviceaccount name = %q, want sa-b", saObj.Name)
 	}
 }
 
