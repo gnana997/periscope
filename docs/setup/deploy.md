@@ -458,8 +458,8 @@ clusters are registered.
 ### 10.5 Real-time list updates (watch streams)
 
 Periscope's resource list pages update in real time via SSE for
-21+ kinds spanning workloads, networking, storage, cluster-scoped,
-and core resources. **Every registered kind is on by default**;
+registered kinds spanning core, config, workloads, networking,
+storage, and cluster-scoped resources. **Every registered kind is on by default**;
 the SPA falls back to polling when the EventSource fails. The
 `watchStreams:` helm block lets operators opt out (e.g. behind a
 proxy that mishandles long-lived connections), restrict to a
@@ -469,8 +469,8 @@ at once:
 ```yaml
 watchStreams:
   # Empty / "all" / "off" / "none" / comma list
-  # Per-kind tokens: pods, events, deployments, statefulsets, …
-  # Group aliases:  core, workloads, networking, storage, cluster
+  # Per-kind tokens: pods, events, configmaps, deployments, …
+  # Group aliases:  core, config, workloads, networking, storage, cluster
   kinds: ""
   perUserLimit: 60    # concurrent SSE streams per OIDC subject
 ```

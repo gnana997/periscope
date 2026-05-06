@@ -963,8 +963,8 @@ func main() {
 
 	// --- Watch (SSE streaming) endpoints ---
 	//
-	// Real-time push for resource lists. On by default for the four
-	// supported kinds; the PERISCOPE_WATCH_STREAMS env var lets operators
+	// Real-time push for resource lists. On by default for every
+	// registered kind; the PERISCOPE_WATCH_STREAMS env var lets operators
 	// opt out ("off" / "none") or restrict to a subset. When a kind is
 	// disabled the route literally does not exist and the frontend
 	// downgrades to polling via 404. See issue #4.
@@ -2569,12 +2569,16 @@ type watchFn func(ctx context.Context, p credentials.Provider, args k8s.WatchArg
 //   - the route loop below (router.Get registration)
 //
 // To add a new kind: define WatchFoo in internal/k8s and append a
-// kindReg entry to watchKinds. No other call site needs an edit.
+// kindReg entry to watchKinds. Keep the operator-facing allowlist and
+// frontend metadata in sync: deploy/helm/periscope/values.schema.json,
+// docs/setup/watch-streams.md, and web/src/lib/api.ts all enumerate the
+// supported tokens/groups.
 //
 // Group is an optional alias used by the env-var grammar so operators
 // can write "PERISCOPE_WATCH_STREAMS=workloads" instead of enumerating
 // every workload kind. Groups follow K8s API conventions loosely
-// ("core" = core/v1, "workloads" = apps/v1 + batch/v1, "networking" =
+// ("core" = pods/events, "config" = core/v1 config/policy/account
+// resources, "workloads" = apps/v1 + batch/v1, "networking" =
 // networking.k8s.io/v1, "storage" = storage.k8s.io/v1 + core PVCs).
 // An empty Group disables alias selection for that kind — it can only
 // be enabled by its exact Name.
@@ -2589,6 +2593,10 @@ type kindReg struct {
 var watchKinds = []kindReg{
 	{Name: "pods", Group: "core", Watch: k8s.WatchPods},
 	{Name: "events", Group: "core", Watch: k8s.WatchEvents},
+	{Name: "configmaps", Group: "config", Watch: k8s.WatchConfigMaps},
+	{Name: "resourcequotas", Group: "config", Watch: k8s.WatchResourceQuotas},
+	{Name: "limitranges", Group: "config", Watch: k8s.WatchLimitRanges},
+	{Name: "serviceaccounts", Group: "config", Watch: k8s.WatchServiceAccounts},
 	{Name: "deployments", Group: "workloads", Watch: k8s.WatchDeployments},
 	{Name: "statefulsets", Group: "workloads", Watch: k8s.WatchStatefulSets},
 	{Name: "daemonsets", Group: "workloads", Watch: k8s.WatchDaemonSets},

@@ -5,6 +5,9 @@ import (
 	"maps"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"regexp"
 	"sync"
 	"testing"
 	"time"
@@ -54,6 +57,10 @@ func TestParseWatchStreamsEnv(t *testing.T) {
 		// typo in the registry's Name field shows up as a test failure.
 		{name: "pods", raw: "pods", want: watchStreamsConfig{"pods": true}},
 		{name: "events", raw: "events", want: watchStreamsConfig{"events": true}},
+		{name: "configmaps", raw: "configmaps", want: watchStreamsConfig{"configmaps": true}},
+		{name: "resourcequotas", raw: "resourcequotas", want: watchStreamsConfig{"resourcequotas": true}},
+		{name: "limitranges", raw: "limitranges", want: watchStreamsConfig{"limitranges": true}},
+		{name: "serviceaccounts", raw: "serviceaccounts", want: watchStreamsConfig{"serviceaccounts": true}},
 		{name: "deployments", raw: "deployments", want: watchStreamsConfig{"deployments": true}},
 		{name: "statefulsets", raw: "statefulsets", want: watchStreamsConfig{"statefulsets": true}},
 		{name: "daemonsets", raw: "daemonsets", want: watchStreamsConfig{"daemonsets": true}},
@@ -68,7 +75,9 @@ func TestParseWatchStreamsEnv(t *testing.T) {
 		// expands them to every kind in that group. Both group and kind
 		// tokens may mix freely in a single comma-separated value.
 		{name: "core group", raw: "core", want: groupOn("core")},
+		{name: "config group", raw: "config", want: groupOn("config")},
 		{name: "workloads group", raw: "workloads", want: groupOn("workloads")},
+		{name: "core,config", raw: "core,config", want: merge(groupOn("core"), groupOn("config"))},
 		{name: "core,workloads", raw: "core,workloads", want: merge(groupOn("core"), groupOn("workloads"))},
 		{name: "kind plus group", raw: "pods,workloads", want: merge(watchStreamsConfig{"pods": true}, groupOn("workloads"))},
 		{name: "duplicate group is idempotent", raw: "core,core", want: groupOn("core")},
@@ -133,6 +142,61 @@ func TestFeaturesHandler(t *testing.T) {
 				t.Fatalf("watchStreams = %v, want %v", body.WatchStreams, tt.want)
 			}
 		})
+	}
+}
+
+func TestWatchStreamsHelmSchemaPattern(t *testing.T) {
+	var schema struct {
+		Properties struct {
+			WatchStreams struct {
+				Properties struct {
+					Kinds struct {
+						Pattern string `json:"pattern"`
+					} `json:"kinds"`
+				} `json:"properties"`
+			} `json:"watchStreams"`
+		} `json:"properties"`
+	}
+
+	raw, err := os.ReadFile(filepath.Join("..", "..", "deploy", "helm", "periscope", "values.schema.json"))
+	if err != nil {
+		t.Fatalf("read values schema: %v", err)
+	}
+	if err := json.Unmarshal(raw, &schema); err != nil {
+		t.Fatalf("decode values schema: %v", err)
+	}
+
+	re, err := regexp.Compile(schema.Properties.WatchStreams.Properties.Kinds.Pattern)
+	if err != nil {
+		t.Fatalf("compile watchStreams.kinds pattern: %v", err)
+	}
+
+	accepted := []string{
+		"",
+		"all",
+		"off",
+		"none",
+		"pods,config",
+		" pods , config ",
+		"configmaps,resourcequotas,limitranges,serviceaccounts",
+		"core,workloads,networking,storage,cluster,config",
+	}
+	for _, value := range accepted {
+		if !re.MatchString(value) {
+			t.Errorf("schema rejected %q, want accepted", value)
+		}
+	}
+
+	rejected := []string{
+		"banana",
+		"pods,banana",
+		"configmap",
+		"pods,,events",
+	}
+	for _, value := range rejected {
+		if re.MatchString(value) {
+			t.Errorf("schema accepted %q, want rejected", value)
+		}
 	}
 }
 

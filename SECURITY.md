@@ -96,3 +96,10 @@ We follow [coordinated disclosure](https://en.wikipedia.org/wiki/Coordinated_vul
 ## Compliance posture (non-vulnerability)
 
 For non-vulnerability questions about Periscope's compliance posture (audit-event coverage, secret handling, container hardening), please open a regular [GitHub Discussion](https://github.com/gnana997/periscope/discussions) — those don't need to be private.
+
+For an in-depth view of the RBAC objects Periscope creates on managed
+clusters — including the CIS Kubernetes Benchmark / AWS Guardrails
+findings the default install will trigger, why each fires, and how to
+opt out — see [`docs/security/rbac-posture.md`](docs/security/rbac-posture.md).
+That document is written for security-team reviewers evaluating
+Periscope for adoption.

@@ -2,6 +2,7 @@ import { useNavigate } from "react-router-dom";
 import { useClusterSummary, useClusterEvents } from "../hooks/useResource";
 import { CircularGauge } from "../components/ui/CircularGauge";
 import { ThemeToggle } from "../components/shell/ThemeToggle";
+import { ApplyYamlEntry } from "../components/apply/ApplyYamlEntry";
 import { ageFrom } from "../lib/format";
 import { cn } from "../lib/cn";
 import type {
@@ -283,7 +284,10 @@ function ClusterIdentityBanner({
           </span>
         </div>
       </div>
-      <ThemeToggle />
+      <div className="flex shrink-0 items-center gap-2">
+        <ApplyYamlEntry />
+        <ThemeToggle />
+      </div>
     </div>
   );
 }

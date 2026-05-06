@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { cn } from "../../lib/cn";
 import { ThemeToggle } from "../shell/ThemeToggle";
+import { ApplyYamlEntry } from "../apply/ApplyYamlEntry";
 import { StreamHealthBadge } from "./StreamHealthBadge";
 import type { StreamStatus } from "../../hooks/useResourceStream";
 
@@ -54,6 +55,7 @@ export function PageHeader({
         {chips?.map((chip) => <Chip key={chip.label} {...chip} />)}
         <StreamHealthBadge status={streamStatus} />
         {trailing}
+        <ApplyYamlEntry />
         <ThemeToggle />
       </div>
     </div>

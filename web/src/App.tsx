@@ -12,6 +12,7 @@ import { Drawer } from "./exec/Drawer";
 import { Toaster } from "./lib/toast";
 import { SearchPalette } from "./components/search/SearchPalette";
 import { GlobalFetchingBar } from "./components/shell/GlobalFetchingBar";
+import { ApplyDialogProvider } from "./components/apply/ApplyDialogProvider";
 import { useAuth } from "./auth/useAuth";
 import { LoginScreen } from "./auth/LoginScreen";
 import { useTheme } from "./hooks/useTheme";
@@ -55,6 +56,7 @@ export default function App() {
 
   return (
     <ExecSessionsProvider>
+      <ApplyDialogProvider>
       <div className="flex h-full flex-col">
         <GlobalFetchingBar />
         <div className="min-h-0 flex-1 overflow-hidden">
@@ -64,6 +66,7 @@ export default function App() {
         <Drawer />
         <Toaster />
       </div>
+      </ApplyDialogProvider>
     </ExecSessionsProvider>
   );
 }

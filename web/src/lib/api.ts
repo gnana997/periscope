@@ -203,6 +203,10 @@ export type YamlKind =
 export type WatchStreamKind =
   | "pods"
   | "events"
+  | "configmaps"
+  | "resourcequotas"
+  | "limitranges"
+  | "serviceaccounts"
   | "deployments"
   | "statefulsets"
   | "daemonsets"
