@@ -178,7 +178,7 @@ func eksNodegroupsListHandler(reg *clusters.Registry, cache *eksNodegroupsCache,
 			http.Error(w, "cluster not found", http.StatusNotFound)
 			return
 		}
-		if !isEKSBackend(c) {
+		if !c.EKSCapable() {
 			writeAPIErrorJSON(w, http.StatusUnprocessableEntity,
 				errBackendNotEKSCode,
 				"managed node group introspection is only available for EKS-backed clusters")
@@ -291,7 +291,7 @@ func eksNodegroupsGetHandler(reg *clusters.Registry, cache *eksNodegroupsCache, 
 			http.Error(w, "cluster not found", http.StatusNotFound)
 			return
 		}
-		if !isEKSBackend(c) {
+		if !c.EKSCapable() {
 			writeAPIErrorJSON(w, http.StatusUnprocessableEntity,
 				errBackendNotEKSCode,
 				"managed node group introspection is only available for EKS-backed clusters")

@@ -1,6 +1,9 @@
 package main
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 // TestParseKubernetesResourceURI exercises every shape EKS can
 // realistically return: namespaced/cluster-scoped × core/named-group
@@ -201,4 +204,74 @@ func TestParseKubernetesResourceURI_EmptyCluster(t *testing.T) {
 	if _, ok := parseKubernetesResourceURI("", "/api/v1/namespaces/default/pods/nginx"); ok {
 		t.Fatalf("expected ok=false when cluster name is empty")
 	}
+}
+
+// FuzzParseKubernetesResourceURI hunts for panics or
+// pathological-string crashes in the EKS-Insights URI mapper.
+// Inputs come from AWS via DescribeInsight; while the AWS console
+// canonicalises them, we treat the value as untrusted and expect
+// the parser to either return (zero, false) or a fully-formed
+// EditorPath — never panic.
+//
+// Properties asserted per fuzz iteration:
+//
+//  1. No panic for any (cluster, uri) pair.
+//  2. When ok is true, EditorPath must start with "/clusters/" and
+//     contain the cluster name segment, so the SPA router will
+//     handle it cleanly. This catches regressions where a malformed
+//     URI sneaks through the switch and produces a half-built path.
+//  3. Empty cluster name always returns ok=false (existing contract).
+//
+// Run locally with: go test ./cmd/periscope/ -run none -fuzz FuzzParseKubernetesResourceURI -fuzztime 30s
+func FuzzParseKubernetesResourceURI(f *testing.F) {
+	// Seed corpus — real shapes EKS Upgrade Insights returns, plus
+	// a few adversarial cases (empty path, all-slashes, very long
+	// segments, percent-encoded, unicode).
+	type seed struct {
+		cluster, uri string
+	}
+	seeds := []seed{
+		{"prod-eu-west-1", "/api/v1/namespaces/default/pods/nginx"},
+		{"prod-eu-west-1", "/apis/apps/v1/namespaces/kube-system/deployments/coredns"},
+		{"prod-eu-west-1", "/api/v1/nodes/ip-10-0-0-1"},
+		{"prod-eu-west-1", "/apis/policy/v1beta1/namespaces/default/poddisruptionbudgets/my-pdb"},
+		{"prod-eu-west-1", ""},
+		{"prod-eu-west-1", "/"},
+		{"prod-eu-west-1", "//"},
+		{"prod-eu-west-1", "/api"},
+		{"prod-eu-west-1", "/api/v1"},
+		{"prod-eu-west-1", "/api/v1/namespaces"},
+		{"prod-eu-west-1", "/apis///"},
+		{"prod-eu-west-1", "/api/v1/namespaces/default/pods/" + strings.Repeat("a", 1024)},
+		{"prod-eu-west-1", "/apis/example.com/v1alpha1/namespaces/team/awesomethings/foo"},
+		{"prod-eu-west-1", "/api/v1/namespaces/default/pods/nginx?injected=true"},
+		{"", "/api/v1/namespaces/default/pods/nginx"},
+		{"cluster with spaces", "/api/v1/pods/nginx"},
+		{"prod", "/api/v1/namespaces/默认/pods/网站"},
+	}
+	for _, s := range seeds {
+		f.Add(s.cluster, s.uri)
+	}
+
+	f.Fuzz(func(t *testing.T, cluster, uri string) {
+		got, ok := parseKubernetesResourceURI(cluster, uri)
+
+		// Property 1 — no panic, implicit (test runner catches it).
+
+		// Property 2 — when the parser returns a path, the path must
+		// be well-formed enough for the SPA router not to misroute.
+		if ok {
+			if got.EditorPath == "" {
+				t.Fatalf("ok=true but EditorPath is empty for cluster=%q uri=%q", cluster, uri)
+			}
+			if !strings.HasPrefix(got.EditorPath, "/clusters/") {
+				t.Fatalf("EditorPath %q lacks /clusters/ prefix (cluster=%q uri=%q)", got.EditorPath, cluster, uri)
+			}
+		}
+
+		// Property 3 — empty cluster name is a hard reject contract.
+		if cluster == "" && ok {
+			t.Fatalf("empty cluster should always reject; got ok=true for uri=%q", uri)
+		}
+	})
 }

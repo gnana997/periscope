@@ -196,7 +196,7 @@ func eksInsightsListHandler(reg *clusters.Registry, cache *eksInsightsCache, emi
 			http.Error(w, "cluster not found", http.StatusNotFound)
 			return
 		}
-		if !isEKSBackend(c) {
+		if !c.EKSCapable() {
 			// No audit row here — the backend mismatch is a SPA-side
 			// branch, not a privileged action that needs a forensic
 			// record. The SPA only hits this endpoint speculatively
@@ -258,7 +258,7 @@ func eksInsightsGetHandler(reg *clusters.Registry, cache *eksInsightsCache, emit
 			http.Error(w, "cluster not found", http.StatusNotFound)
 			return
 		}
-		if !isEKSBackend(c) {
+		if !c.EKSCapable() {
 			writeAPIErrorJSON(w, http.StatusUnprocessableEntity,
 				errBackendNotEKSCode,
 				"upgrade insights are only available for EKS-backed clusters")
@@ -432,12 +432,6 @@ func mapDeprecationDetail(in *ekstypes.DeprecationDetail) DeprecationDetail {
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────
-
-func isEKSBackend(c clusters.Cluster) bool {
-	// Empty backend defaults to EKS — same convention as
-	// internal/k8s/client.go's buildRestConfig switch.
-	return c.Backend == clusters.BackendEKS || c.Backend == ""
-}
 
 func insightStatus(s *ekstypes.InsightStatus) string {
 	if s == nil {

@@ -86,6 +86,24 @@ func eksRegistry(t *testing.T, name, backend string) *clusters.Registry {
 		yaml = "clusters:\n" +
 			"  - name: " + name + "\n" +
 			"    backend: agent\n"
+	case "in-cluster+arn":
+		// in-cluster cluster that ALSO supplies the EKS ARN+Region —
+		// the supported pattern when the server runs inside an EKS
+		// cluster and uses its ServiceAccount for K8s auth, but
+		// still wants EKS Insights / Node Groups via Pod Identity.
+		yaml = "clusters:\n" +
+			"  - name: " + name + "\n" +
+			"    backend: in-cluster\n" +
+			"    arn: arn:aws:eks:eu-west-1:111111111111:cluster/" + name + "\n" +
+			"    region: eu-west-1\n"
+	case "agent+arn":
+		// agent-backed cluster with EKS metadata — K8s traffic flows
+		// over the tunnel, AWS API traffic goes server → AWS.
+		yaml = "clusters:\n" +
+			"  - name: " + name + "\n" +
+			"    backend: agent\n" +
+			"    arn: arn:aws:eks:eu-west-1:111111111111:cluster/" + name + "\n" +
+			"    region: eu-west-1\n"
 	default:
 		t.Fatalf("eksRegistry: unhandled backend %q", backend)
 	}
@@ -230,6 +248,45 @@ func TestEKSInsightsList_AgentBackendReturns422(t *testing.T) {
 		map[string]string{"cluster": "edge-1"}, false)
 	if rec.Code != http.StatusUnprocessableEntity {
 		t.Fatalf("status = %d, want 422", rec.Code)
+	}
+}
+
+// TestEKSInsightsList_CapableNonEKSBackends asserts the EKS gate
+// reflects ARN+Region capability rather than the K8s-auth backend.
+// in-cluster and agent backends with EKS metadata should bypass the
+// 422 envelope and reach the AWS call (here served by a fake).
+// Regression cover for v1.0.3-rc1 where isEKSBackend rejected any
+// non-eks backend regardless of ARN.
+func TestEKSInsightsList_CapableNonEKSBackends(t *testing.T) {
+	cases := []struct {
+		name    string
+		backend string
+		cluster string
+	}{
+		{"in-cluster + arn", "in-cluster+arn", "self"},
+		{"agent + arn", "agent+arn", "pre-prod"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			reg := eksRegistry(t, tc.cluster, tc.backend)
+			fake := &fakeEKSInsightsClient{
+				listFn: func(_ context.Context, _ *eks.ListInsightsInput) (*eks.ListInsightsOutput, error) {
+					return &eks.ListInsightsOutput{}, nil
+				},
+			}
+			withFakeEKSClient(t, fake)
+			sink := &recordingSink{}
+			cache := newEKSInsightsCache(time.Hour)
+			rec := invokeInsights(t, reg, cache, sink, http.MethodGet,
+				"/api/clusters/"+tc.cluster+"/eks/upgrade-insights",
+				map[string]string{"cluster": tc.cluster}, false)
+			if rec.Code == http.StatusUnprocessableEntity {
+				t.Fatalf("status = 422 (gate rejected capable cluster); want non-422")
+			}
+			if rec.Code != http.StatusOK {
+				t.Fatalf("status = %d, want 200", rec.Code)
+			}
+		})
 	}
 }
 
