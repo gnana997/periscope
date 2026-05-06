@@ -1810,3 +1810,31 @@ export interface AddonCatalogResponse {
    *  filter and the table header. */
   kubernetesVersion?: string;
 }
+
+// --- EKS add-on writes (issue #119, PR-2/3) ------------------------
+
+/** AWS-accepted resolveConflicts values. NONE preserves operator-set
+ *  fields and fails on conflict; OVERWRITE replaces them; PRESERVE
+ *  keeps existing values. Empty string lets AWS default (NONE). */
+export type AddonResolveConflicts = "" | "NONE" | "OVERWRITE" | "PRESERVE";
+
+export interface AddonInstallRequest {
+  addonName: string;
+  addonVersion: string;
+  /** JSON or YAML string. AWS infers from content; the SPA emits
+   *  whichever the editor produced (form mode → JSON, YAML mode →
+   *  YAML). */
+  configurationValues?: string;
+  /** Optional IAM role ARN for the addon's service account. Requires
+   *  iam:PassRole on the operator's IAM policy if set. */
+  serviceAccountRoleArn?: string;
+  resolveConflicts?: AddonResolveConflicts;
+}
+
+export interface AddonConfigurationResponse {
+  /** AWS-published JSON Schema for the (addon, version) pair as a
+   *  raw string. Empty when AWS returned no schema for the version
+   *  (older addon versions ship without one); the SPA falls back to
+   *  the YAML editor in that case. */
+  configurationSchema: string;
+}

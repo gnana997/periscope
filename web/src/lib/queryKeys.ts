@@ -128,6 +128,8 @@ export const queryKeys = {
       detail: (name: string) =>
         ["cluster", c, "addons", "detail", name] as const,
       catalog: () => ["cluster", c, "addons", "catalog"] as const,
+      configurationSchema: (name: string, version: string) =>
+        ["cluster", c, "addons", "configSchema", name, version] as const,
     },
 
     // Custom resources are addressed by GVR (no static registry), so

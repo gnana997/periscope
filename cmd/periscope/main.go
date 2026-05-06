@@ -329,13 +329,24 @@ func main() {
 	// existing #117 hot path is untouched.
 	addonCatalogCacheTTL := 6 * time.Hour
 	addonCatalogC := newAddonCatalogCache(addonCatalogCacheTTL)
-	// Catalog route registers BEFORE /eks/addons/{name} so the static
-	// "catalog" segment wins. chi prefers static over wildcard, but
-	// the explicit ordering removes any doubt for future readers.
+	// addonConfigSchemaCache (issue #119, PR-2) is keyed by
+	// (addonName, version). Schemas are immutable per version so a
+	// 24h TTL is safe — any change ships as a new version with its
+	// own cache entry.
+	addonConfigSchemaCacheTTL := 24 * time.Hour
+	addonConfigSchemaC := newAddonConfigSchemaCache(addonConfigSchemaCacheTTL)
+	// Catalog + configuration routes register BEFORE /eks/addons/{name}
+	// so the static "catalog" segment wins. chi prefers static over
+	// wildcard, but the explicit ordering removes any doubt for
+	// future readers.
 	router.Get("/api/clusters/{cluster}/eks/addons/catalog", credentials.Wrap(factory,
 		eksAddonCatalogHandler(registry, addonCatalogC, eksAddonsC, auditEmitter)))
+	router.Get("/api/clusters/{cluster}/eks/addons/catalog/{name}/configuration", credentials.Wrap(factory,
+		eksAddonConfigurationHandler(registry, addonConfigSchemaC, auditEmitter)))
 	router.Get("/api/clusters/{cluster}/eks/addons", credentials.Wrap(factory,
 		eksAddonsListHandler(registry, eksAddonsC, addonVersionsC, auditEmitter)))
+	router.Post("/api/clusters/{cluster}/eks/addons", credentials.Wrap(factory,
+		eksAddonInstallHandler(registry, eksAddonsC, auditEmitter)))
 	router.Get("/api/clusters/{cluster}/eks/addons/{name}", credentials.Wrap(factory,
 		eksAddonsGetHandler(registry, eksAddonsC, addonVersionsC, auditEmitter)))
 

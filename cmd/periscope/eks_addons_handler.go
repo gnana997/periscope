@@ -58,12 +58,17 @@ const addonDescribeTimeout = 4 * time.Second
 
 // eksAddonsAPI is the SDK seam for testability. The real client
 // returned by eks.NewFromConfig satisfies this implicitly.
+//
+// CreateAddon is grouped here (rather than a separate write seam)
+// because all add-on handlers share the same eks.Client — the
+// fakeEKSAddonsClient harness in tests stubs the same interface.
 type eksAddonsAPI interface {
 	ListAddons(ctx context.Context, in *eks.ListAddonsInput, opts ...func(*eks.Options)) (*eks.ListAddonsOutput, error)
 	DescribeAddon(ctx context.Context, in *eks.DescribeAddonInput, opts ...func(*eks.Options)) (*eks.DescribeAddonOutput, error)
 	DescribeAddonVersions(ctx context.Context, in *eks.DescribeAddonVersionsInput, opts ...func(*eks.Options)) (*eks.DescribeAddonVersionsOutput, error)
 	DescribeAddonConfiguration(ctx context.Context, in *eks.DescribeAddonConfigurationInput, opts ...func(*eks.Options)) (*eks.DescribeAddonConfigurationOutput, error)
 	DescribeCluster(ctx context.Context, in *eks.DescribeClusterInput, opts ...func(*eks.Options)) (*eks.DescribeClusterOutput, error)
+	CreateAddon(ctx context.Context, in *eks.CreateAddonInput, opts ...func(*eks.Options)) (*eks.CreateAddonOutput, error)
 }
 
 var newEKSAddonsClient = defaultNewEKSAddonsClient

@@ -1,18 +1,19 @@
 // EKSAddOnsCatalogPage — /clusters/{c}/eks/addons/catalog (issue
-// #119, PR-1).
+// #119, PR-1 + PR-2).
 //
-// Read-only browse of every AWS-published add-on available on this
-// cluster's K8s version. Pairs with AddOnsPage (#117): catalog is
-// "what could I install", AddOnsPage is "what's installed and is it
-// stale". Filter chips narrow by ownership (AWS vs third-party) and
-// by type (networking / storage / observability / security).
+// Browse of every AWS-published add-on available on this cluster's
+// K8s version. Pairs with AddOnsPage (#117): catalog is "what could
+// I install", AddOnsPage is "what's installed and is it stale".
+// Filter chips narrow by ownership (AWS vs third-party) and by
+// type (networking / storage / observability / security).
 //
-// Install / Upgrade / Delete actions are intentionally absent in
-// PR-1. Available rows show a disabled "+ Install" stub that PR-2
-// wires; installed rows link to AddOnsPage for the existing detail
-// surface (and pick up Upgrade/Delete kebabs in PR-3).
+// Install action is wired in PR-2: clicking "+ Install" on a row
+// opens InstallAddOnDialog. Upgrade / Delete from installed rows
+// land in PR-3 (kebab menu); for now installed rows still link
+// over to AddOnsPage for the existing detail surface.
 
 import { useMemo, useState } from "react";
+import { InstallAddOnDialog } from "../components/eks/InstallAddOnDialog";
 import { useAddonCatalog } from "../hooks/useAddonCatalog";
 import { useAddons } from "../hooks/useAddons";
 import {
@@ -37,6 +38,9 @@ export function EKSAddOnsCatalogPage({ cluster }: { cluster: string }) {
 
   const [ownerFilter, setOwnerFilter] = useState<OwnerFilter>("all");
   const [typeFilter, setTypeFilter] = useState<string>("all");
+  // installTarget is the catalog row whose "+ Install" button was
+  // clicked. null when the dialog is closed.
+  const [installTarget, setInstallTarget] = useState<CatalogAddon | null>(null);
 
   const rows = useMemo(() => {
     if (!catalog.data) return [] as CatalogAddon[];
@@ -201,12 +205,21 @@ export function EKSAddOnsCatalogPage({ cluster }: { cluster: string }) {
                   cluster={cluster}
                   row={row}
                   k8sVersion={catalog.data?.kubernetesVersion}
+                  onInstall={() => setInstallTarget(row)}
                 />
               ))}
             </tbody>
           </table>
         </div>
       )}
+
+      <InstallAddOnDialog
+        open={installTarget !== null}
+        onClose={() => setInstallTarget(null)}
+        cluster={cluster}
+        addon={installTarget}
+        kubernetesVersion={catalog.data?.kubernetesVersion}
+      />
     </div>
   );
 }
@@ -240,10 +253,12 @@ function CatalogRow({
   cluster,
   row,
   k8sVersion,
+  onInstall,
 }: {
   cluster: string;
   row: CatalogAddon;
   k8sVersion?: string;
+  onInstall: () => void;
 }) {
   const latest = pickLatestForK8s(row.compatibleVersions, k8sVersion);
   const compatRange = compatRangeOf(latest?.kubernetesVersions ?? []);
@@ -289,12 +304,10 @@ function CatalogRow({
             manage →
           </a>
         ) : (
-          // PR-2 wires this. Disabled stub keeps the layout final.
           <button
             type="button"
-            disabled
-            className="cursor-not-allowed rounded-sm border border-border px-2 py-1 text-[11px] text-ink-faint"
-            title="Install action ships in a follow-up PR (#119, PR-2)"
+            onClick={onInstall}
+            className="rounded-sm border border-accent bg-accent-soft px-2 py-1 font-mono text-[11px] text-accent hover:bg-accent/10"
           >
             + Install
           </button>

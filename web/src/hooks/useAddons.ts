@@ -10,6 +10,14 @@
 // so a cluster operator who just kicked off an add-on update sees
 // the new state quickly. The 1h backend cache still bounds AWS-side
 // cost across users.
+//
+// Status-aware polling (issue #119, PR-2): when an addon is in a
+// transient state (CREATING / UPDATING / DELETING), the hook
+// switches to a 4s refetchInterval until the row settles. This
+// lets the operator watch the install/upgrade/delete flip happen
+// without manual refresh. Polling is bounded by transient-state
+// detection — once everything is ACTIVE / *_FAILED the interval
+// goes back to undefined and the hook stops polling.
 
 import { skipToken, useQuery } from "@tanstack/react-query";
 import { api } from "../lib/api";
@@ -17,6 +25,16 @@ import { queryKeys } from "../lib/queryKeys";
 import type { AddonDetail, AddonsListResponse } from "../lib/types";
 
 const STALE_MS = 60_000;
+const TRANSIENT_POLL_MS = 4_000;
+
+// Transient AWS add-on statuses: an SDK write just kicked the addon
+// into one of these and AWS is provisioning. Polling continues until
+// the status leaves the set.
+const TRANSIENT_STATUSES = new Set([
+  "CREATING",
+  "UPDATING",
+  "DELETING",
+]);
 
 export function useAddons(cluster: string) {
   return useQuery<AddonsListResponse>({
@@ -25,6 +43,14 @@ export function useAddons(cluster: string) {
       ? ({ signal }) => api.addons(cluster, signal)
       : skipToken,
     staleTime: STALE_MS,
+    refetchInterval: (query) => {
+      const data = query.state.data;
+      if (!data) return false;
+      const anyTransient = data.addons.some((a) =>
+        TRANSIENT_STATUSES.has(a.status),
+      );
+      return anyTransient ? TRANSIENT_POLL_MS : false;
+    },
     retry: (count, err) => {
       if (
         err &&
@@ -47,6 +73,11 @@ export function useAddon(cluster: string, name: string) {
       ? ({ signal }) => api.addon(cluster, name, signal)
       : skipToken,
     staleTime: STALE_MS,
+    refetchInterval: (query) => {
+      const data = query.state.data;
+      if (!data) return false;
+      return TRANSIENT_STATUSES.has(data.status) ? TRANSIENT_POLL_MS : false;
+    },
     retry: (count, err) => {
       if (
         err &&

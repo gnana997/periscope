@@ -29,12 +29,14 @@ type fakeEKSAddonsClient struct {
 	descVersionsCals int32
 	descConfigCalls  int32
 	descClusterCalls int32
+	createAddonCalls int32
 
-	listFn       func(ctx context.Context, in *eks.ListAddonsInput) (*eks.ListAddonsOutput, error)
-	descFn       func(ctx context.Context, in *eks.DescribeAddonInput) (*eks.DescribeAddonOutput, error)
-	versionsFn   func(ctx context.Context, in *eks.DescribeAddonVersionsInput) (*eks.DescribeAddonVersionsOutput, error)
-	configFn     func(ctx context.Context, in *eks.DescribeAddonConfigurationInput) (*eks.DescribeAddonConfigurationOutput, error)
-	clusterFn    func(ctx context.Context, in *eks.DescribeClusterInput) (*eks.DescribeClusterOutput, error)
+	listFn     func(ctx context.Context, in *eks.ListAddonsInput) (*eks.ListAddonsOutput, error)
+	descFn     func(ctx context.Context, in *eks.DescribeAddonInput) (*eks.DescribeAddonOutput, error)
+	versionsFn func(ctx context.Context, in *eks.DescribeAddonVersionsInput) (*eks.DescribeAddonVersionsOutput, error)
+	configFn   func(ctx context.Context, in *eks.DescribeAddonConfigurationInput) (*eks.DescribeAddonConfigurationOutput, error)
+	clusterFn  func(ctx context.Context, in *eks.DescribeClusterInput) (*eks.DescribeClusterOutput, error)
+	createFn   func(ctx context.Context, in *eks.CreateAddonInput) (*eks.CreateAddonOutput, error)
 }
 
 func (f *fakeEKSAddonsClient) ListAddons(ctx context.Context, in *eks.ListAddonsInput, _ ...func(*eks.Options)) (*eks.ListAddonsOutput, error) {
@@ -77,6 +79,14 @@ func (f *fakeEKSAddonsClient) DescribeCluster(ctx context.Context, in *eks.Descr
 		}, nil
 	}
 	return f.clusterFn(ctx, in)
+}
+
+func (f *fakeEKSAddonsClient) CreateAddon(ctx context.Context, in *eks.CreateAddonInput, _ ...func(*eks.Options)) (*eks.CreateAddonOutput, error) {
+	atomic.AddInt32(&f.createAddonCalls, 1)
+	if f.createFn == nil {
+		return nil, errors.New("createFn not set")
+	}
+	return f.createFn(ctx, in)
 }
 
 func withFakeEKSAddonsClient(t *testing.T, fake *fakeEKSAddonsClient) {

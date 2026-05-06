@@ -15,6 +15,28 @@ tag.
 
 ### Added
 
+- EKS add-on install action (#119, PR-2 of three). New
+  `POST /api/clusters/{c}/eks/addons` wires `eks:CreateAddon`;
+  body whitelist-validates `resolveConflicts ∈ {NONE, OVERWRITE,
+  PRESERVE}` server-side and forwards `configurationValues` /
+  `serviceAccountRoleArn` verbatim. Returns 202 with the addon
+  detail in status `CREATING`; the SPA polls `/eks/addons/{name}`
+  to watch the flip via status-aware refetch in `useAddons` /
+  `useAddon` (4s interval while any addon is in
+  `CREATING`/`UPDATING`/`DELETING`, off otherwise). New
+  `InstallAddOnDialog` component opens from the catalog page's
+  "+ Install" button — schema-aware via the existing
+  `HelmValuesEditor` (form when AWS ships a JSON Schema for the
+  version, Monaco YAML when it doesn't). New
+  `GET /api/clusters/{c}/eks/addons/catalog/{name}/configuration?version=X`
+  fetches the schema lazily; 24 h cache keyed by `(addon, version)`
+  since AWS schemas are immutable per version. Audit pair
+  `eks_addon_install_intent` + `eks_addon_install` mirrors the
+  workload-rollback shape (intent before the SDK call, outcome
+  after — denial / failure / success). The new IAM action
+  `eks:CreateAddon` joins the cluster-scoped statement; optional
+  `iam:PassRole` documented as a conditional add-on for operators
+  who set `serviceAccountRoleArn`.
 - EKS add-on catalog (#119, PR-1 of three). New
   `GET /api/clusters/{c}/eks/addons/catalog` returns every
   AWS-published add-on available on the cluster's K8s version, with

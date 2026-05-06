@@ -91,6 +91,8 @@ import type {
   AddonsListResponse,
   AddonDetail,
   AddonCatalogResponse,
+  AddonConfigurationResponse,
+  AddonInstallRequest,
 } from "./types";
 
 class ApiError extends Error {
@@ -965,6 +967,35 @@ export const api = {
   addonCatalog: (cluster: string, signal?: AbortSignal) =>
     getJSON<AddonCatalogResponse>(
       `/api/clusters/${enc(cluster)}/eks/addons/catalog`,
+      signal,
+    ),
+
+  // AWS-published JSON Schema for an (addon, version) pair (#119,
+  // PR-2). Drives the schema-aware install / upgrade dialogs.
+  // Empty `configurationSchema` is a legitimate response — older
+  // addon versions ship without one and the SPA falls back to YAML.
+  addonConfigurationSchema: (
+    cluster: string,
+    name: string,
+    version: string,
+    signal?: AbortSignal,
+  ) =>
+    getJSON<AddonConfigurationResponse>(
+      `/api/clusters/${enc(cluster)}/eks/addons/catalog/${enc(name)}/configuration?version=${enc(version)}`,
+      signal,
+    ),
+
+  // Install an EKS managed add-on (#119, PR-2). Returns 202 with
+  // the addon detail in status=CREATING; the SPA polls
+  // GET /eks/addons/{name} to watch the status flip.
+  installAddon: (
+    cluster: string,
+    req: AddonInstallRequest,
+    signal?: AbortSignal,
+  ) =>
+    postJSON<AddonDetail>(
+      `/api/clusters/${enc(cluster)}/eks/addons`,
+      req,
       signal,
     ),
 };
