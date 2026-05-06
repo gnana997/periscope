@@ -1766,3 +1766,47 @@ export interface AddonDetail extends AddonSummary {
   owner?: string;
   publisher?: string;
 }
+
+// --- EKS add-on catalog (issue #119, PR-1) --------------------------
+//
+// "What could I install?" — the unfiltered DescribeAddonVersions
+// catalog scoped to the cluster's K8s version, with installed-state
+// annotation layered in server-side from #117's per-cluster cache.
+// Pairs with AddonsListResponse ("what's installed?").
+
+export interface CatalogAddonVersion {
+  version: string;
+  kubernetesVersions: string[];
+  default?: boolean;
+}
+
+export interface CatalogInstalled {
+  version: string;
+  status?: string;
+}
+
+export interface CatalogAddon {
+  name: string;
+  type?: string;
+  /** AWS-reported ownership: "aws" / "amazon-web-services" mark
+   *  AWS-authored add-ons; anything else is third-party. */
+  owner?: string;
+  publisher?: string;
+  /** True when AWS reports the addon as a marketplace listing.
+   *  Operators must accept the marketplace EULA outside Periscope
+   *  before install will succeed; the catalog flags these rows. */
+  marketplaceProduct?: boolean;
+  compatibleVersions: CatalogAddonVersion[];
+  /** Non-null when the addon is installed on this cluster.
+   *  Best-effort: only populated when the per-cluster addons-list
+   *  cache is warm; the SPA falls back to layering from useAddons()
+   *  if the field is absent. */
+  installed?: CatalogInstalled | null;
+}
+
+export interface AddonCatalogResponse {
+  available: CatalogAddon[];
+  /** Cluster's K8s version as AWS reports it. Drives the catalog
+   *  filter and the table header. */
+  kubernetesVersion?: string;
+}

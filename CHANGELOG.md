@@ -15,6 +15,19 @@ tag.
 
 ### Added
 
+- EKS add-on catalog (#119, PR-1 of three). New
+  `GET /api/clusters/{c}/eks/addons/catalog` returns every
+  AWS-published add-on available on the cluster's K8s version, with
+  per-addon ownership / type / publisher / marketplace flag /
+  compatibility matrix and installed-state annotation merged from
+  the existing `/eks/addons` cache. New `Add-ons catalog` sidebar
+  entry under EKS opens the browse page; filter chips narrow by
+  AWS / third-party / type. One unfiltered
+  `eks:DescribeAddonVersions` call per `(k8sVersion)` drives the
+  endpoint; cached server-side for 6 h with sticky errors so a
+  fleet of N 1.30 clusters hits AWS once per cache window.
+  Read-only in this PR; install / upgrade / delete actions ship in
+  follow-up PRs.
 - Helm chart fetch backend (#73, sub-task of #72). Two new endpoints
   `GET /api/clusters/{c}/helm/chart/versions` and
   `POST /api/clusters/{c}/helm/chart/values` for the Helm install

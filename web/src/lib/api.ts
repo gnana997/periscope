@@ -90,6 +90,7 @@ import type {
   NodegroupDetail,
   AddonsListResponse,
   AddonDetail,
+  AddonCatalogResponse,
 } from "./types";
 
 class ApiError extends Error {
@@ -954,6 +955,16 @@ export const api = {
   addon: (cluster: string, name: string, signal?: AbortSignal) =>
     getJSON<AddonDetail>(
       `/api/clusters/${enc(cluster)}/eks/addons/${enc(name)}`,
+      signal,
+    ),
+
+  // Add-on catalog (issue #119, PR-1) — what could the operator
+  // install on this cluster's K8s version. Server-side merges the
+  // per-cluster install state when its cache is warm; otherwise the
+  // SPA layers from useAddons() data already in flight.
+  addonCatalog: (cluster: string, signal?: AbortSignal) =>
+    getJSON<AddonCatalogResponse>(
+      `/api/clusters/${enc(cluster)}/eks/addons/catalog`,
       signal,
     ),
 };

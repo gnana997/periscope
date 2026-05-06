@@ -91,9 +91,14 @@ const (
 	// the next minor?" — before an upgrade. The catalog lookup
 	// (DescribeAddonVersions) is rolled into the same row because the
 	// caller's intent is the same operator action; `op` in Extra
-	// distinguishes "list" / "list:cache_hit" / "detail" /
-	// "detail:cache_hit" so a reviewer can see the read kind without
-	// adding new verbs.
+	// distinguishes the read kind so a reviewer can see what was
+	// touched without adding new verbs:
+	//   "list"                  — installed-addons list (#117)
+	//   "list:cache_hit"
+	//   "detail"                — per-addon detail (#117)
+	//   "detail:cache_hit"
+	//   "catalog"               — full add-on catalog (#119)
+	//   "catalog:cache_hit"
 	VerbEKSAddonsRead Verb = "eks_addons_read"
 )
 

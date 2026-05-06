@@ -75,6 +75,7 @@ const HelmDiffPage = lazyNamed(() => import("./pages/HelmDiffPage"), "HelmDiffPa
 const UpgradeReadinessPage = lazyNamed(() => import("./pages/UpgradeReadinessPage"), "UpgradeReadinessPage");
 const NodeGroupsPage = lazyNamed(() => import("./pages/NodeGroupsPage"), "NodeGroupsPage");
 const AddOnsPage = lazyNamed(() => import("./pages/AddOnsPage"), "AddOnsPage");
+const EKSAddOnsCatalogPage = lazyNamed(() => import("./pages/EKSAddOnsCatalogPage"), "EKSAddOnsCatalogPage");
 
 export const router = createBrowserRouter(
   createRoutesFromElements(
@@ -130,6 +131,7 @@ export const router = createBrowserRouter(
         <Route path="upgrade-readiness" element={<WithCluster Page={UpgradeReadinessPage} />} />
         <Route path="nodegroups" element={<WithCluster Page={NodeGroupsPage} />} />
         <Route path="addons" element={<WithCluster Page={AddOnsPage} />} />
+        <Route path="addons/catalog" element={<WithCluster Page={EKSAddOnsCatalogPage} />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Route>,
