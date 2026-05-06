@@ -156,7 +156,7 @@ export function useUpgradeHelmRelease(
     mutationFn: (body) => api.helmUpgrade(cluster, namespace, name, body),
     onSuccess: () => {
       qc.invalidateQueries({
-        queryKey: queryKeys.cluster(cluster).helm.detail(namespace, name),
+        queryKey: ["cluster", cluster, "helm", "detail", namespace, name],
       });
       qc.invalidateQueries({
         queryKey: queryKeys.cluster(cluster).helm.history(namespace, name),
