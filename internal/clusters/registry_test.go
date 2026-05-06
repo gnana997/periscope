@@ -3,6 +3,7 @@ package clusters
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -249,7 +250,7 @@ clusters:
 	if dev.Environment != "" {
 		t.Errorf("dev.Environment = %q, want empty", dev.Environment)
 	}
-	if dev.Tags != nil && len(dev.Tags) != 0 {
+	if len(dev.Tags) != 0 {
 		t.Errorf("dev.Tags = %v, want nil/empty", dev.Tags)
 	}
 }
@@ -372,4 +373,94 @@ func TestCluster_EKSCapable(t *testing.T) {
 			}
 		})
 	}
+}
+
+// FuzzLoadRegistryBytes hammers the registry YAML loader with
+// arbitrary byte sequences. Operator-supplied input — a pod that
+// panics on a typo'd config is worse than one that errors cleanly,
+// so the contract under fuzz is "either a valid Registry or a
+// non-nil error, never a panic".
+//
+// We additionally check that any cluster present in a successfully-
+// loaded registry passes the same invariants the loader enforces:
+// non-empty name, recognized backend, and (when ARN is set on any
+// backend) a parseable EKSName + non-empty Region. This catches
+// regressions where new validation paths leak through.
+//
+// Run locally with:
+//
+//	go test ./internal/clusters/ -run none -fuzz FuzzLoadRegistryBytes -fuzztime 30s
+func FuzzLoadRegistryBytes(f *testing.F) {
+	// Seed corpus — happy paths plus the kinds of malformed YAML an
+	// operator could realistically paste in (anchors, merge keys,
+	// numeric vs string scalar coercion, deeply nested aliases).
+	seeds := []string{
+		``,
+		`clusters: []`,
+		"clusters:\n  - name: a\n    arn: arn:aws:eks:us-east-1:1:cluster/a\n    region: us-east-1\n",
+		"clusters:\n  - name: a\n    backend: in-cluster\n",
+		"clusters:\n  - name: a\n    backend: agent\n    arn: arn:aws:eks:us-east-1:1:cluster/a\n    region: us-east-1\n",
+		"clusters:\n  - name: a\n    backend: kubeconfig\n    kubeconfigPath: /tmp/kc\n",
+		"clusters:\n  - name: a\n    backend: weird\n",
+		"clusters:\n  - name: a\n    arn: not-an-arn\n    region: us-east-1\n",
+		"clusters:\n  - {}\n",
+		"clusters: 42",
+		"clusters:\n  - &x\n    name: a\n    arn: arn:aws:eks:us-east-1:1:cluster/a\n    region: us-east-1\n  - <<: *x\n    name: b\n",
+		"clusters:\n  - name: \"\\x00\"\n    backend: in-cluster\n",
+		strings.Repeat("a: b\n", 1000),
+	}
+	for _, s := range seeds {
+		f.Add([]byte(s))
+	}
+
+	f.Fuzz(func(t *testing.T, raw []byte) {
+		// 64 KiB is well above any realistic cluster registry; cap
+		// here so the fuzzer doesn't burn cycles on multi-MB inputs
+		// that don't materially expand coverage. Real-world the file
+		// is read from disk so size is operator-bounded anyway.
+		if len(raw) > 64*1024 {
+			t.Skip("oversized input — out of realistic config-file range")
+		}
+
+		reg, err := LoadFromBytes(raw)
+
+		// Property 1 — exactly one of (reg, err) is non-nil.
+		switch {
+		case reg == nil && err == nil:
+			t.Fatalf("both reg and err are nil")
+		case reg != nil && err != nil:
+			t.Fatalf("both reg and err are non-nil: reg=%+v err=%v", reg, err)
+		}
+
+		if reg == nil {
+			return
+		}
+
+		// Property 2 — every loaded cluster satisfies invariants.
+		for _, c := range reg.List() {
+			if c.Name == "" {
+				t.Fatalf("loaded cluster has empty Name: %+v", c)
+			}
+			switch c.Backend {
+			case BackendEKS, BackendKubeconfig, BackendInCluster, BackendAgent:
+				// recognized
+			default:
+				t.Fatalf("loaded cluster has unrecognized Backend %q: %+v", c.Backend, c)
+			}
+			// When ARN is set on any backend, the loader must have
+			// validated Region presence + ARN parseability. The
+			// EKSCapable invariant should hold uniformly.
+			if c.ARN != "" {
+				if c.Region == "" {
+					t.Fatalf("loaded cluster %q has ARN but empty Region", c.Name)
+				}
+				if c.EKSName() == "" {
+					t.Fatalf("loaded cluster %q has unparseable ARN %q", c.Name, c.ARN)
+				}
+				if !c.EKSCapable() {
+					t.Fatalf("loaded cluster %q has ARN+Region but EKSCapable=false: %+v", c.Name, c)
+				}
+			}
+		}
+	})
 }

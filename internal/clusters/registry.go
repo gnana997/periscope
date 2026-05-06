@@ -34,10 +34,24 @@ func LoadFromFile(path string) (*Registry, error) {
 	if err != nil {
 		return nil, fmt.Errorf("read registry %q: %w", path, err)
 	}
+	r, err := LoadFromBytes(raw)
+	if err != nil {
+		return nil, fmt.Errorf("registry %q: %w", path, err)
+	}
+	return r, nil
+}
 
+// LoadFromBytes parses the registry YAML directly from a byte slice
+// and returns a Registry. Same validation as LoadFromFile minus the
+// I/O wrapper; the path-bearing wrapper adds it via fmt.Errorf so
+// operator-facing errors keep file context.
+//
+// Exposed for tests and fuzzing — production callers should use
+// LoadFromFile.
+func LoadFromBytes(raw []byte) (*Registry, error) {
 	var f registryFile
 	if err := yaml.Unmarshal(raw, &f); err != nil {
-		return nil, fmt.Errorf("parse registry %q: %w", path, err)
+		return nil, fmt.Errorf("parse: %w", err)
 	}
 
 	if len(f.Clusters) == 0 {
