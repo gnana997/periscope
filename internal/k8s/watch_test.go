@@ -567,11 +567,24 @@ func TestWatchPods_ResumeStaleRVFallsBackToFreshList(t *testing.T) {
 
 	// Fake the Watch opener: first call (the resume attempt) returns
 	// 410 Gone; subsequent call (the fallback) returns the real watcher.
+	//
+	// secondWatchOpened lets the test wait deterministically for the
+	// second Watch call. Between the WatchPods goroutine emitting the
+	// fallback Snapshot via sink.Send and re-entering spec.Watch(...)
+	// there is no synchronization point, so reading watchCalls.Load()
+	// immediately after awaitEvent was racy under load (CI-only flake).
 	var watchCalls atomic.Int32
+	secondWatchOpened := make(chan struct{}, 1)
 	cs.PrependWatchReactor("pods", func(action ktesting.Action) (bool, watch.Interface, error) {
 		n := watchCalls.Add(1)
 		if n == 1 {
 			return true, nil, apierrors.NewResourceExpired("too old resource version")
+		}
+		if n == 2 {
+			select {
+			case secondWatchOpened <- struct{}{}:
+			default:
+			}
 		}
 		// Subsequent calls fall through to the default tracker.
 		return false, nil, nil
@@ -600,6 +613,16 @@ func TestWatchPods_ResumeStaleRVFallsBackToFreshList(t *testing.T) {
 	items, ok := ev.Items.([]Pod)
 	if !ok || len(items) != 1 || items[0].Name != "a" {
 		t.Errorf("snapshot items = %+v, want one pod 'a'", ev.Items)
+	}
+
+	// Wait for the WatchPods goroutine to reach its second Watch call —
+	// the snapshot is emitted just before that call, and on a busy CI
+	// runner the goroutine may not have reached spec.Watch(...) yet
+	// when the test goroutine receives the snapshot.
+	select {
+	case <-secondWatchOpened:
+	case <-time.After(2 * time.Second):
+		t.Fatalf("second Watch call never fired (watchCalls=%d, want 2)", watchCalls.Load())
 	}
 	if got := watchCalls.Load(); got != 2 {
 		t.Errorf("Watch was called %d times, want 2 (resume + fallback)", got)
