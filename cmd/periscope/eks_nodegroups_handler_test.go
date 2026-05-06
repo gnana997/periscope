@@ -177,6 +177,44 @@ func TestEKSNodegroupsList_NonEKSReturns422(t *testing.T) {
 	}
 }
 
+// TestEKSNodegroupsList_CapableNonEKSBackends — same regression cover
+// as the insights handler's CapableNonEKSBackends test. Operators
+// running periscope inside an EKS cluster (in-cluster K8s auth) or
+// reaching clusters via the agent tunnel can still query EKS-side
+// node groups as long as ARN + Region are configured.
+func TestEKSNodegroupsList_CapableNonEKSBackends(t *testing.T) {
+	cases := []struct {
+		name    string
+		backend string
+		cluster string
+	}{
+		{"in-cluster + arn", "in-cluster+arn", "self"},
+		{"agent + arn", "agent+arn", "pre-prod"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			reg := eksRegistry(t, tc.cluster, tc.backend)
+			fake := &fakeEKSNodegroupsClient{
+				listFn: func(_ context.Context, _ *eks.ListNodegroupsInput) (*eks.ListNodegroupsOutput, error) {
+					return &eks.ListNodegroupsOutput{}, nil
+				},
+			}
+			withFakeNodegroupsClient(t, fake)
+			sink := &recordingSink{}
+			cache := newEKSNodegroupsCache(time.Hour)
+			rec := invokeNodegroups(t, reg, cache, sink,
+				"/api/clusters/"+tc.cluster+"/eks/nodegroups",
+				map[string]string{"cluster": tc.cluster}, false)
+			if rec.Code == http.StatusUnprocessableEntity {
+				t.Fatalf("status = 422 (gate rejected capable cluster); want non-422")
+			}
+			if rec.Code != http.StatusOK {
+				t.Fatalf("status = %d, want 200", rec.Code)
+			}
+		})
+	}
+}
+
 func TestEKSNodegroupsList_AWSListErrorEmitsFailureAudit(t *testing.T) {
 	reg := eksRegistry(t, "prod-eu-west-1", clusters.BackendEKS)
 	fake := &fakeEKSNodegroupsClient{

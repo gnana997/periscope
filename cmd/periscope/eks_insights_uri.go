@@ -168,7 +168,17 @@ func parseKubernetesResourceURI(cluster, uri string) (parsedResourceURI, bool) {
 		Namespace: ns,
 		Name:      name,
 	}
+	// buildEditorPath returns "" for unmappable shapes (e.g. an
+	// unknown plural without a group+version pair). Promote that
+	// signal into ok=false so callers don't render a struct that
+	// has no actionable EditorPath. Without this, a URI like
+	// "api//0/0" parses to {plural:"0",name:"0"} but produces no
+	// route, and the SPA renders a dead link. Caught by
+	// FuzzParseKubernetesResourceURI.
 	out.EditorPath = buildEditorPath(cluster, group, version, plural, ns, name)
+	if out.EditorPath == "" {
+		return parsedResourceURI{}, false
+	}
 	return out, true
 }
 
