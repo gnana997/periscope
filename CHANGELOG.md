@@ -13,6 +13,42 @@ tag.
 
 ## [Unreleased]
 
+### Added
+
+- Helm chart fetch backend (#73, sub-task of #72). Two new endpoints
+  `GET /api/clusters/{c}/helm/chart/versions` and
+  `POST /api/clusters/{c}/helm/chart/values` for the Helm install
+  dialog's version picker + values loader. Supports public HTTP chart
+  repos (decode `index.yaml` ourselves) and public OCI refs (via
+  `oras.land/oras-go/v2`). Both deps are kubectl-free, preserving the
+  v1.0 release-decoder philosophy of isolating Periscope from helm
+  SDK transitive churn. Rejects charts with sub-chart dependencies
+  with a structured `422 unsupported_dependencies` error. OCI tag
+  listing is pinned: media-type filter
+  (`application/vnd.cncf.helm.config.v1+json`), semver sort, 50-cap.
+  Two independent server-side caches with `?nocache=true` bypass.
+  Audit emits one `verb=helm_chart_fetch` row per `/values` call;
+  `/versions` is silent (called while typing). v1.1 ships
+  unauthenticated public refs only — private OCI auth (ECR via Pod
+  Identity / IRSA) is a follow-up sub-task. Frontend types + API
+  client + TanStack hooks ship alongside the backend; the install-
+  dialog UI lands in a sibling issue.
+
+### Security
+
+- Helm chart fetch endpoints reject SSRF attempts at dial time
+  (#73). The HTTP / OCI clients now run a `net.Dialer.Control`
+  callback that validates the resolved IP against blocklists:
+  - **Always blocked:** AWS IMDS (`169.254.169.254`), all
+    link-local (covers IPv6 IMDS + `fe80::/10`).
+  - **Blocked by default, env-var opt-in:** RFC1918 + IPv6 ULA
+    via `PERISCOPE_HELM_FETCH_ALLOW_PRIVATE=true` for operators
+    running internal chart repos.
+  - **Loopback** stays blocked even with the opt-in flag (no
+    legitimate chart-repo reason for chart-fetch from a Periscope
+    pod to reach localhost).
+  Caught by CodeQL on PR #106 before merge.
+
 ### Fixed
 
 - IAM policy snippet in `docs/setup/deploy.md` §4.1 and

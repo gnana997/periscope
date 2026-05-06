@@ -259,6 +259,19 @@ func main() {
 	router.Get("/api/clusters/{cluster}/helm/releases/{ns}/{name}/diff", credentials.Wrap(factory,
 		helmDiffHandler(registry)))
 
+
+	// Chart fetch (#73). Two endpoints: GET /versions for the picker,
+	// POST /values for the audited install-dialog open. Caches are
+	// keyed independently so a tagged-version refresh does not have
+	// to invalidate the immutable values payload. v1.1 is
+	// unauthenticated public refs only; the {cluster} path param is
+	// reserved for v1.2's per-cluster credential resolution.
+	chartVerC := newChartVersionsCache()
+	chartValC := newChartValuesCache()
+	router.Get("/api/clusters/{cluster}/helm/chart/versions",
+		credentials.Wrap(factory, chartVersionsHandler(registry, chartVerC)))
+	router.Post("/api/clusters/{cluster}/helm/chart/values",
+		credentials.Wrap(factory, chartValuesHandler(registry, chartValC, auditEmitter)))
 	// --- EKS Upgrade Insights (read-only) ---
 	//
 	// EKS scans every cluster's audit log daily and produces a list

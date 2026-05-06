@@ -1439,6 +1439,66 @@ export interface HelmDiffResponse {
   changes: HelmDiffItem[];
 }
 
+// ─── Helm chart fetch (#73) ───────────────────────────────────────
+
+export interface ChartMaintainer {
+  name?: string;
+  email?: string;
+  url?: string;
+}
+
+export interface ChartDep {
+  name: string;
+  version?: string;
+  repository?: string;
+  alias?: string;
+  condition?: string;
+}
+
+/** Chart.yaml projection — same field set Helm uses for v2. */
+export interface ChartMeta {
+  name: string;
+  version: string;
+  apiVersion: string;
+  appVersion?: string;
+  description?: string;
+  /** Semver constraint, e.g. ">=1.24". Render a warning when the
+   *  cluster's K8s version doesn't satisfy it. */
+  kubeVersion?: string;
+  type?: string;
+  keywords?: string[];
+  home?: string;
+  sources?: string[];
+  maintainers?: ChartMaintainer[];
+  icon?: string;
+  annotations?: Record<string, string>;
+  /** v1.1 rejects charts with non-empty deps; the SPA still
+   *  renders this list so operators understand WHY. */
+  dependencies?: ChartDep[];
+}
+
+export interface ChartFetchResult {
+  meta: ChartMeta;
+  /** Verbatim values.yaml — feed straight to Monaco. */
+  values: string;
+  /** Decoded values.schema.json when shipped with the chart. */
+  schema?: Record<string, unknown>;
+}
+
+export interface ChartVersionsResult {
+  ref: string;
+  versions: string[];
+  latest?: string;
+}
+
+export interface ChartFetchRequest {
+  ref: string;
+  /** Required for HTTP repos (chart name in index.yaml). Empty for
+   *  OCI refs (chart name is implicit in the ref's last segment). */
+  chart?: string;
+  version: string;
+}
+
 // ─── Workload rollback (#71) ─────────────────────────────────────────
 
 /** One entry in the rollout history of a Deployment / StatefulSet /

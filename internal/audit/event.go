@@ -43,6 +43,12 @@ const (
 	VerbExecClose    Verb = "exec_close"
 	VerbSecretReveal Verb = "secret_reveal"
 	VerbBulkDownload Verb = "bulk_download"
+	// VerbHelmChartFetch — operator pasted a chart ref (HTTP repo or
+	// OCI) and clicked Fetch to load values + schema for the install
+	// dialog (issue #73). User-initiated read, worth attributing —
+	// internal repo URLs end up in the audit trail too. NOT emitted
+	// for the version-list endpoint (called while typing).
+	VerbHelmChartFetch Verb = "helm_chart_fetch"
 	// VerbRollbackIntent is emitted before the apiserver patch fires —
 	// captures the operator's intent (target revision, reason) even
 	// when the patch later fails or the request hangs. Pair with

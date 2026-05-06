@@ -91,6 +91,13 @@ export const queryKeys = {
         ["cluster", c, "helm", "history", ns, name] as const,
       diff: (ns: string, name: string, from: number, to: number) =>
         ["cluster", c, "helm", "diff", ns, name, from, to] as const,
+      // Chart fetch (#73) — keyed under helm subtree so the install
+      // dialog's queries stay groupable. Versions key keeps refs +
+      // chart distinct; values key adds version (immutable per tag).
+      chartVersions: (ref: string, chartName: string) =>
+        ["cluster", c, "helm", "chart", "versions", ref, chartName] as const,
+      chartValues: (ref: string, chartName: string, version: string) =>
+        ["cluster", c, "helm", "chart", "values", ref, chartName, version] as const,
     },
 
     // EKS Upgrade Insights (issue #103). Cluster-scoped; the
