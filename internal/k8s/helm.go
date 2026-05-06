@@ -1,17 +1,33 @@
 package k8s
 
 // helm.go — read-only Helm release access via direct K8s Secret /
-// ConfigMap reads, no Helm SDK. We decode the release blob (base64
-// + gzip + JSON) ourselves into a minimal struct that captures the
-// fields the SPA renders.
+// ConfigMap reads. We decode the release blob (base64 + gzip + JSON)
+// ourselves into a minimal struct that captures the fields the SPA
+// renders.
 //
-// Why no Helm SDK: helm.sh/helm/{v3,v4} transitively pulls
-// k8s.io/kubectl whose pinned k8s.io/api version conflicts with
-// the rest of Periscope's deps. The release blob format is stable
-// across Helm 3+ — name, namespace, info, chart.metadata, config,
-// manifest are documented and unchanged for the lifetime of the v1
-// storage layout — so owning the decoder is cheap and isolates us
-// from the SDK's transitive dep churn.
+// SDK policy (project-wide, applies across the helm code in this
+// package). Periscope distinguishes read paths from write paths:
+//
+//   - Read paths (this file, helm_chart*.go, the dyff diff helper
+//     below) decode YAML / tarballs / release blobs directly and do
+//     NOT import the helm SDK. The decode logic is small and stable
+//     across Helm 3+; rolling our own buys isolation from the helm
+//     SDK's transitive dep churn (k8s.io/kubectl, k8s.io/cli-runtime,
+//     ~25 indirect deps).
+//
+//   - Write paths (helm_action.go, helm_preview.go, future install/
+//     upgrade/rollback action wrappers) USE the helm SDK directly —
+//     pkg/action wraps hundreds of LoC of helm-internal templating,
+//     hook ordering, capabilities resolution, and post-rendering
+//     that genuinely cannot be reasonably reimplemented. The
+//     transitive dep cost is paid here once and shared across every
+//     write feature.
+//
+// The boundary is "if we'd be reimplementing helm internals, use the
+// SDK; if we'd be reading a YAML file or unpacking a tarball, don't."
+// PR #75 (this preview backend) is the first to introduce
+// helm.sh/helm/v3 to the project; #101 (rollback) and future install/
+// upgrade PRs reuse the helm_action.go infrastructure.
 //
 // Storage backend: Helm 3+ stores release state as Secrets of type
 // helm.sh/release.v1 in the release namespace by default. We
@@ -587,6 +603,42 @@ func DiffHelmRevisions(ctx context.Context, p credentials.Provider, c clusters.C
 	return &HelmDiff{
 		From:    HelmDiffSide{Revision: from.Revision, YAML: from.ManifestYAML},
 		To:      HelmDiffSide{Revision: to.Revision, YAML: to.ManifestYAML},
+		Changes: changes,
+	}, nil
+}
+
+// DiffHelmManifests is the YAML-string variant of DiffHelmRevisions —
+// same dyff machinery, but the inputs are pre-rendered manifest YAML
+// blobs rather than stored revision numbers. Used by the dry-run
+// preview path (issue #75) where the "from" side is the live release
+// manifest and the "to" side is the manifest helm SDK would render
+// for the proposed install/upgrade.
+//
+// The Revision field on each HelmDiffSide is set to 0 since neither
+// side is a stored revision; the SPA's diff viewer treats 0 as "no
+// revision label" and renders just the YAML.
+//
+// Like DiffHelmRevisions, structured-changes failure is non-fatal:
+// the SPA still has from/to YAML for monaco display. The error is
+// returned so callers can log it; the returned diff is always
+// non-nil on success of the underlying call.
+func DiffHelmManifests(ctx context.Context, fromYAML, toYAML string) (*HelmDiff, error) {
+	changes, err := diffYAMLDocuments(fromYAML, toYAML)
+	if err != nil {
+		// Match DiffHelmRevisions's behavior — log via slog at the
+		// call site (we don't have a cluster identifier here so the
+		// log line goes through the caller). Return the diff anyway
+		// so the SPA has the raw YAML.
+		_ = ctx // reserved for future cancellation if dyff gains it
+		return &HelmDiff{
+			From:    HelmDiffSide{YAML: fromYAML},
+			To:      HelmDiffSide{YAML: toYAML},
+			Changes: nil,
+		}, err
+	}
+	return &HelmDiff{
+		From:    HelmDiffSide{YAML: fromYAML},
+		To:      HelmDiffSide{YAML: toYAML},
 		Changes: changes,
 	}, nil
 }

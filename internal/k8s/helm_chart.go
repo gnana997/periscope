@@ -148,6 +148,34 @@ func FetchChartVersions(ctx context.Context, args FetchVersionsArgs) (ChartVersi
 	return ChartVersionsResult{}, ErrChartUnsupportedRef
 }
 
+// FetchChartArchive returns the raw tarball bytes for a chart at the
+// given (ref, version). Used by the dry-run preview path (issue #75)
+// which feeds the bytes into helm's pkg/chart/loader.LoadArchive to
+// get a *chart.Chart for action.NewInstall / NewUpgrade.
+//
+// Unlike FetchChartValues, this does NOT call unpackChart — callers
+// hand the bytes to the helm SDK loader, which does its own validation.
+// The dependency rejection still happens in the preview path: after
+// LoadArchive, callers must check chart.Metadata.Dependencies and
+// reject non-empty (mirrors the unpacker's contract for parity with
+// the chart-fetch endpoint).
+func FetchChartArchive(ctx context.Context, args FetchValuesArgs) ([]byte, error) {
+	if args.Version == "" {
+		return nil, fmt.Errorf("FetchChartArchive: version is required")
+	}
+	scheme, err := schemeFor(args.Ref)
+	if err != nil {
+		return nil, err
+	}
+	switch scheme {
+	case "oci":
+		return fetchOCIChartTarball(ctx, args.Ref, args.Version)
+	case "http", "https":
+		return fetchHTTPChartTarball(ctx, args.Ref, args.ChartName, args.Version)
+	}
+	return nil, ErrChartUnsupportedRef
+}
+
 // FetchChartValues returns the chart's full metadata projection plus
 // values.yaml + values.schema.json for the given (ref, version).
 // Rejects charts with non-empty dependencies — that's a v1.1 scope

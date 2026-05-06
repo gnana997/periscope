@@ -49,6 +49,16 @@ const (
 	// internal repo URLs end up in the audit trail too. NOT emitted
 	// for the version-list endpoint (called while typing).
 	VerbHelmChartFetch Verb = "helm_chart_fetch"
+	// VerbHelmPreview — operator clicked "Preview" on the install
+	// dialog (issue #75) and the backend ran a dry-run via the helm
+	// SDK to render the manifests + (for upgrade mode) diff against
+	// the live cluster state. Single verb covers both modes; the
+	// `op` field in Extra distinguishes "install" vs "upgrade", same
+	// pattern as VerbEKSInsightsRead's "ListInsights"/"DescribeInsight".
+	// Emitted on every call regardless of outcome — failures (chart
+	// fetch errors, render errors, RBAC denials) are forensically
+	// interesting too.
+	VerbHelmPreview Verb = "helm_preview"
 	// VerbRollbackIntent is emitted before the apiserver patch fires —
 	// captures the operator's intent (target revision, reason) even
 	// when the patch later fails or the request hangs. Pair with

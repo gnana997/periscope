@@ -15,6 +15,25 @@ tag.
 
 ### Added
 
+- Helm dry-run + diff preview backend (#75, sub-task of #72). Two new
+  endpoints — `POST /api/clusters/{c}/helm/install-preview` and
+  `POST /api/clusters/{c}/helm/releases/{ns}/{name}/upgrade-preview` —
+  return the rendered manifest list helm would apply, plus (for upgrade
+  mode) a semantic diff against the live cluster state via the existing
+  dyff helper. Both endpoints run a per-manifest RBAC pre-flight (verb
+  `create` for install, `patch` for upgrade) and surface the denied
+  list inline so the install dialog can show the operator exactly what
+  the apiserver would reject before they hit Apply. Audit emits one
+  `verb=helm_preview` row per call with `op` distinguishing install
+  vs upgrade in `Extra`; pre-flight denials mark the row
+  `OutcomeDenied`. **This PR introduces `helm.sh/helm/v3` to the
+  project** as the foundation for write-path features (preview now,
+  rollback / install / upgrade later). The boundary is documented in
+  ``internal/k8s/helm.go``'s preamble: read paths use minimal
+  kubectl-free decoders; write paths use `pkg/action` directly because
+  the helm internals it wraps (templating, hook ordering, capabilities
+  resolution, post-rendering) are non-trivial to reimplement.
+
 - Helm chart fetch backend (#73, sub-task of #72). Two new endpoints
   `GET /api/clusters/{c}/helm/chart/versions` and
   `POST /api/clusters/{c}/helm/chart/values` for the Helm install
