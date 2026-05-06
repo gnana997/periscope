@@ -45,6 +45,11 @@ export function InlineDiff({ original, proposed }: InlineDiffProps) {
       ignoreTrimWhitespace: false,
       padding: { top: 10, bottom: 10 },
     });
+    // Inline mode renders TWO line-number gutters by default — the original
+    // file's numbers and the modified file's numbers. For the operator's
+    // mental model ("what will the file look like after upgrade?") only the
+    // modified numbers matter; suppress the original gutter.
+    editor.getOriginalEditor().updateOptions({ lineNumbers: "off" });
     editorRef.current = editor;
 
     return () => {

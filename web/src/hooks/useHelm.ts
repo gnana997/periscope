@@ -84,3 +84,108 @@ export function useHelmDiff(
     staleTime: DETAIL_STALE_MS,
   });
 }
+
+// ─── Helm preview + install + upgrade (#75 / #76) ───────────────────
+
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import type {
+  HelmActionResult,
+  HelmInstallPreviewRequest,
+  HelmInstallRequest,
+  HelmUpgradePreviewRequest,
+  HelmUpgradeRequest,
+  PreviewResponse,
+} from "../lib/types";
+
+/**
+ * useHelmInstallPreview — POST install-preview as a TanStack mutation
+ * because Preview is operator-triggered (button click), not auto-fired
+ * on a query key. Returns rendered manifests + RBAC denial list.
+ */
+export function useHelmInstallPreview(cluster: string) {
+  return useMutation<PreviewResponse, Error, HelmInstallPreviewRequest>({
+    mutationFn: (body) => api.helmInstallPreview(cluster, body),
+  });
+}
+
+/**
+ * useHelmUpgradePreview — POST upgrade-preview. ns + releaseName come
+ * from the URL on the backend; the SPA carries them via the mutation
+ * arg shape (object with body + namespace + name) so callers don't
+ * have to thread three args through.
+ */
+export function useHelmUpgradePreview(cluster: string) {
+  return useMutation<
+    PreviewResponse,
+    Error,
+    { namespace: string; name: string; body: HelmUpgradePreviewRequest }
+  >({
+    mutationFn: ({ namespace, name, body }) =>
+      api.helmUpgradePreview(cluster, namespace, name, body),
+  });
+}
+
+/**
+ * useInstallHelmRelease — POST install action. Sync; mutation can take
+ * 10-60s+ for slow charts. onSuccess invalidates the helm releases
+ * list query so the new release appears in the SPA's release table
+ * immediately (no manual refresh).
+ */
+export function useInstallHelmRelease(cluster: string) {
+  const qc = useQueryClient();
+  return useMutation<HelmActionResult, Error, HelmInstallRequest>({
+    mutationFn: (body) => api.helmInstall(cluster, body),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: queryKeys.cluster(cluster).helm.list() });
+    },
+  });
+}
+
+/**
+ * useUpgradeHelmRelease — POST upgrade action. onSuccess invalidates
+ * the per-release detail + history queries so the SPA renders the new
+ * revision immediately.
+ */
+export function useUpgradeHelmRelease(
+  cluster: string,
+  namespace: string,
+  name: string,
+) {
+  const qc = useQueryClient();
+  return useMutation<HelmActionResult, Error, HelmUpgradeRequest>({
+    mutationFn: (body) => api.helmUpgrade(cluster, namespace, name, body),
+    onSuccess: () => {
+      qc.invalidateQueries({
+        queryKey: ["cluster", cluster, "helm", "detail", namespace, name],
+      });
+      qc.invalidateQueries({
+        queryKey: queryKeys.cluster(cluster).helm.history(namespace, name),
+      });
+    },
+  });
+}
+
+/**
+ * useUninstallHelmRelease — DELETE /helm/releases/{ns}/{name}. Sync.
+ * On success invalidates the helm releases list (the SPA's release
+ * table no longer shows the uninstalled release). The release detail
+ * page navigates away on success since the underlying route 404s
+ * once the release is gone — handled at the call site.
+ */
+export function useUninstallHelmRelease(
+  cluster: string,
+  namespace: string,
+  name: string,
+) {
+  const qc = useQueryClient();
+  return useMutation<
+    import("../lib/types").HelmUninstallResult,
+    Error,
+    { keepHistory?: boolean; disableHooks?: boolean }
+  >({
+    mutationFn: (opts) => api.helmUninstall(cluster, namespace, name, opts),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: queryKeys.cluster(cluster).helm.list() });
+    },
+  });
+}
