@@ -13,34 +13,110 @@ tag.
 
 ## [Unreleased]
 
+## [1.0.3-rc1] - 2026-05-06
+
 ### Added
 
-- Workload rollback button for Deployment / StatefulSet / DaemonSet
-  (#71). Opens a revision picker with Monaco YAML diff preview of the
-  current pod template vs the target revision. Mirrors `kubectl
-  rollout undo` — strategic-merge-patches `spec.template` and writes
-  the `kubernetes.io/change-cause` annotation. Pre-flight warnings
-  cover the three production footguns: GitOps-managed workloads
-  (ArgoCD / Helm / Flux annotations or labels) get a yellow banner
-  warning that reconcile will revert the rollback; paused Deployments
-  get a "resume rollout" pane instead of the picker; HPA-targeted
-  workloads get an inline note. Optional reason field flows into both
-  the change-cause annotation and the structured audit row. New API
+- **Apply YAML — multi-doc paste / upload, dry-run, server-side apply,
+  per-doc RBAC pre-flight, audit** (#53, #54, #55). New SPA dialog
+  reachable from the page header, the cluster sidebar, the cluster
+  overview banner, and the Cmd+K palette. Drag-drop or paste any number
+  of K8s manifests, get a dry-run + diff before commit, then server-side
+  apply with field-ownership glyphs. Per-doc `SelfSubjectAccessReview`
+  pre-flight blocks docs the user can't write rather than failing
+  mid-stream. Each apply emits one structured audit row per doc with
+  the kind/namespace/name/operation tuple.
+
+- **EKS Upgrade Insights viewer** (#103). New read-only surface wrapping
+  AWS EKS `ListInsights` / `DescribeInsight` (UPGRADE_READINESS
+  category). Worst-first insight rows on a dedicated page, expandable
+  detail with deprecated-API summaries, and per-resource deep links
+  that open the SPA's existing YAML editor on the affected object.
+  Cluster-keyed cache, 1h TTL (AWS itself only refreshes daily).
+  Non-EKS clusters return 422 + stable code `E_BACKEND_NOT_EKS` so the
+  UI renders a calm note instead of a generic error. New audit verb
+  `eks_insights_read` (Periscope's first read verb — added at
+  compliance reviewers' request for upgrade-readiness traceability).
+
+- **EKS managed node groups + AMI drift detection** (#103). New
+  surface listing managed node groups with current AMI release version
+  and days-behind-latest drift. Latest-AMI lookup uses SSM public
+  parameters (`/aws/service/eks/optimized-ami/...`,
+  `/aws/service/bottlerocket/...`) as the primary source and
+  `ec2:DescribeImages` as a fallback when SSM is denied / unavailable.
+  Custom-AMI node groups (`AmiType=CUSTOM`) are explicitly badged "not
+  tracked" — AWS does not publish a "latest" for custom images.
+  Shared `(amiType, k8sVersion)` AMI cache (30 min TTL) so a fleet view
+  of N nodegroups makes 1 SSM call per family per half-hour. New audit
+  verb `eks_nodegroups_read`.
+
+- **Workload rollback** for Deployment / StatefulSet / DaemonSet
+  (#71). Revision picker with Monaco YAML diff preview of the current
+  pod template vs the target revision. Mirrors `kubectl rollout undo`
+  — strategic-merge-patches `spec.template` and writes the
+  `kubernetes.io/change-cause` annotation. Pre-flight warnings cover
+  the three production footguns: GitOps-managed workloads (ArgoCD /
+  Helm / Flux annotations or labels) get a yellow banner warning that
+  reconcile will revert the rollback; paused Deployments get a
+  "resume rollout" pane instead of the picker; HPA-targeted workloads
+  get an inline note. Optional reason field flows into both the
+  change-cause annotation and the structured audit row. New API
   endpoints `GET /revisions` (history + pre-flight metadata) and
-  `POST /rollback` (the patch); two new audit verbs
-  `rollback_intent` (pre-patch) + `rollback` (post-outcome) so
-  incident review captures attempts that hang or fail mid-flight.
-  See [`docs/setup/workload-rollback.md`](docs/setup/workload-rollback.md).
-  
+  `POST /rollback` (the patch); two new audit verbs `rollback_intent`
+  (pre-patch) + `rollback` (post-outcome) so incident review captures
+  attempts that hang or fail mid-flight. See
+  [`docs/setup/workload-rollback.md`](docs/setup/workload-rollback.md).
+
 - SSE watch streams for ConfigMaps, ResourceQuotas, LimitRanges, and
   ServiceAccounts (#17).
 
 ### Changed
 
+- AWS SDK errors are now classified by `smithy.APIError` code and
+  surfaced with meaningful HTTP statuses + stable error codes
+  (`E_AWS_FORBIDDEN` 403, `E_AWS_NOT_FOUND` 404, `E_AWS_THROTTLED`
+  429) instead of always collapsing to `502 / E_AWS_API`. The SPA's
+  Upgrade Readiness and Node Groups pages branch on these codes and
+  render permission-specific or rate-limit copy. Anything
+  unrecognized still reads as `502 / E_AWS_API` so existing callers
+  stay compatible.
+
 - Helm `values.schema.json` now strictly validates
   `watchStreams.kinds`; deployments with typos that previously
   silently dropped now fail at helm install time.
 
+### Fixed
+
+- NamespacePicker dropdown was anchored to the button's left edge and
+  clipped off the right of the viewport when used in the page
+  header's trailing slot. The picker is also no longer covered by the
+  FilterStrip — `PageHeader` and `FilterStrip` both opened
+  `backdrop-blur` stacking contexts at z-20, so the picker's inner
+  z-30 only applied within the header bottle. Header bumped to z-30;
+  modal/drawer overlays at z-40+ still win. (#111)
+
+- NamespacePicker on clusters with 50+ namespaces was tedious to
+  scan: added a sticky search input (autofocus on open, case-
+  insensitive substring), bumped the panel max height from 320px to
+  `min(70vh, 520px)` so larger lists no longer require dozens of
+  scrolls. (#111)
+
+### Upgrading
+
+If you plan to use the new EKS Upgrade Insights or Node Groups
+features, extend Periscope's AWS role with the following IAM actions
+(scoped as shown):
+
+- `eks:ListInsights`, `eks:DescribeInsight`
+- `eks:ListNodegroups`, `eks:DescribeNodegroup`
+- `ssm:GetParameter` (resource: `arn:aws:ssm:*::parameter/aws/service/eks/*`
+  and `arn:aws:ssm:*::parameter/aws/service/bottlerocket/*`)
+- `ec2:DescribeImages` (resource: `*` — the API has no per-image ARN)
+
+The full IAM policy snippet is in
+[`docs/setup/deploy.md` §4.1](docs/setup/deploy.md). The Helm chart
+itself does not change; non-EKS clusters and existing features
+continue to work without these additions.
 ## [1.0.0]
 
 Initial stable release.

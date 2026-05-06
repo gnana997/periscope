@@ -42,12 +42,8 @@ annotations:
   # workflow can sync these from PR titles since the previous tag
   # (matches the server chart's convention).
   artifacthub.io/changes: |
-    - kind: added
-      description: initial agent backend release — per-cluster tunnel client
-    - kind: added
-      description: mTLS-pinned WebSocket dial-out to the central tunnel listener
-    - kind: added
-      description: persisted state Secret (cert + key + server CA) for stable identity across restarts
+    - kind: changed
+      description: "Tracks server v1.0.3 — no agent-side protocol or compatibility changes (server N is compatible with agent N and N-1, unchanged)"
   # Cosign keyless signing (Sigstore). Same signing identity as the
   # server chart — the release workflow signs both in one run. Verify
   # via: cosign verify-blob ... --certificate-oidc-issuer=https://token.actions.githubusercontent.com

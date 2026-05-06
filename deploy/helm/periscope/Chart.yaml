@@ -44,13 +44,19 @@ annotations:
   # release notes for Artifact Hub's "What changed" panel).
   artifacthub.io/changes: |
     - kind: added
-      description: initial v1.0 stable release
+      description: "Apply YAML dialog — paste / upload multi-doc YAML with dry-run, server-side apply, per-doc RBAC pre-flight, audit per doc"
     - kind: added
-      description: real-time SSE updates for registered resource kinds
+      description: "EKS Upgrade Insights viewer with deep links from affected resources to the YAML editor"
     - kind: added
-      description: searchable SQLite-backed audit log
+      description: "EKS managed node groups view with current AMI release version and days-behind-latest drift detection (SSM primary, EC2 DescribeImages fallback)"
     - kind: added
-      description: read-only Helm release browser with revision diff
+      description: "Workload rollback for Deployment / StatefulSet / DaemonSet with revision diff preview and GitOps / paused / HPA pre-flight warnings"
+    - kind: added
+      description: "SSE watch streams extended to ConfigMaps, ResourceQuotas, LimitRanges, ServiceAccounts"
+    - kind: changed
+      description: "AWS SDK errors mapped to meaningful HTTP statuses (403/404/429) and stable codes (E_AWS_FORBIDDEN, E_AWS_NOT_FOUND, E_AWS_THROTTLED) instead of collapsing every error to 502"
+    - kind: fixed
+      description: "NamespacePicker dropdown no longer clipped at the viewport edge or painted over by the FilterStrip; gained a search input and a taller responsive panel"
   # Cosign signing — Artifact Hub will display a "Signed" badge when
   # the chart is verifiable via cosign. The signKey block teaches it
   # how to verify; for keyless (Sigstore) signatures the URL points
