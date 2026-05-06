@@ -48,6 +48,15 @@ tag.
     legitimate chart-repo reason for chart-fetch from a Periscope
     pod to reach localhost).
   Caught by CodeQL on PR #106 before merge.
+  
+- SSE watch streams for ConfigMaps, ResourceQuotas, LimitRanges, and
+  ServiceAccounts (#17).
+
+### Changed
+
+- Helm `values.schema.json` now strictly validates
+  `watchStreams.kinds`; deployments with typos that previously
+  silently dropped now fail at helm install time.
 
 ## [1.0.0]
 

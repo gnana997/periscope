@@ -219,20 +219,22 @@ Grammar:
 
 ```
 ""           # unset = "all"
-"all"        # every registered kind (~22)
+"all"        # every registered kind
 "off"        # no SSE; SPA falls back to polling everywhere
 "none"       # synonym for "off"
 "pods"       # one kind
+"config"     # group alias (configmaps, resourcequotas, limitranges, serviceaccounts)
 "workloads"  # group alias (deployments, statefulsets, daemonsets, replicasets, jobs, cronjobs, hpas, pdbs)
-"core,workloads,networking"   # multiple groups
+"core,config,workloads"       # multiple groups
 "pods,workloads"              # mixed kinds and groups
 ```
 
-Group aliases: `core`, `workloads`, `networking`, `storage`,
-`cluster`. The kind ↔ group mapping is the `watchKinds` registry
+Group aliases: `core`, `config`, `workloads`, `networking`,
+`storage`, `cluster`. The kind ↔ group mapping is the `watchKinds` registry
 in `cmd/periscope/main.go`. Unknown tokens are silently dropped;
-operators see a startup `slog` line summarizing what's enabled, so
-typos surface immediately.
+operators see a startup `slog` line summarizing what's enabled.
+When configured through Helm, the chart schema rejects unknown
+tokens before deploy.
 
 Default is "all on" because the SSE plumbing has a per-user stream
 cap and a tested polling-fallback path — restrictive proxies that

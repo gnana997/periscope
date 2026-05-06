@@ -614,13 +614,7 @@ func ListLimitRanges(ctx context.Context, p credentials.Provider, args ListLimit
 	}
 	out := LimitRangeList{LimitRanges: make([]LimitRange, 0, len(raw.Items))}
 	for i := range raw.Items {
-		lr := &raw.Items[i]
-		out.LimitRanges = append(out.LimitRanges, LimitRange{
-			Name:       lr.Name,
-			Namespace:  lr.Namespace,
-			CreatedAt:  lr.CreationTimestamp.Time,
-			LimitCount: len(lr.Spec.Limits),
-		})
+		out.LimitRanges = append(out.LimitRanges, limitRangeSummary(&raw.Items[i]))
 	}
 	return out, nil
 }
@@ -646,12 +640,7 @@ func GetLimitRange(ctx context.Context, p credentials.Provider, args GetLimitRan
 		})
 	}
 	return LimitRangeDetail{
-		LimitRange: LimitRange{
-			Name:       raw.Name,
-			Namespace:  raw.Namespace,
-			CreatedAt:  raw.CreationTimestamp.Time,
-			LimitCount: len(raw.Spec.Limits),
-		},
+		LimitRange:  limitRangeSummary(raw),
 		Limits:      limits,
 		Labels:      raw.Labels,
 		Annotations: raw.Annotations,
@@ -668,6 +657,15 @@ func GetLimitRangeYAML(ctx context.Context, p credentials.Provider, args GetLimi
 		return "", fmt.Errorf("get limitrange: %w", err)
 	}
 	return formatYAML(raw)
+}
+
+func limitRangeSummary(lr *corev1.LimitRange) LimitRange {
+	return LimitRange{
+		Name:       lr.Name,
+		Namespace:  lr.Namespace,
+		CreatedAt:  lr.CreationTimestamp.Time,
+		LimitCount: len(lr.Spec.Limits),
+	}
 }
 
 func quantityMapToStr(m corev1.ResourceList) map[string]string {
