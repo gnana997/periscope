@@ -2569,7 +2569,10 @@ type watchFn func(ctx context.Context, p credentials.Provider, args k8s.WatchArg
 //   - the route loop below (router.Get registration)
 //
 // To add a new kind: define WatchFoo in internal/k8s and append a
-// kindReg entry to watchKinds. No other call site needs an edit.
+// kindReg entry to watchKinds. Keep the operator-facing allowlist and
+// frontend metadata in sync: deploy/helm/periscope/values.schema.json,
+// docs/setup/watch-streams.md, and web/src/lib/api.ts all enumerate the
+// supported tokens/groups.
 //
 // Group is an optional alias used by the env-var grammar so operators
 // can write "PERISCOPE_WATCH_STREAMS=workloads" instead of enumerating
