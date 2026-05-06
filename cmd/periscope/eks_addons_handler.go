@@ -30,7 +30,9 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"slices"
 	"sort"
+	"strconv"
 	"sync"
 	"time"
 
@@ -282,6 +284,10 @@ func eksAddonsGetHandler(reg *clusters.Registry, cache *eksAddonsCache, versions
 			return
 		}
 
+		// Cache short-circuit MUST stay before any AWS calls below —
+		// a hit returns the previously-built detail blob without
+		// touching DescribeCluster / DescribeAddon / DescribeAddon-
+		// Versions / DescribeAddonConfiguration.
 		if cached, ok := cache.GetDetail(c.Name, name); ok {
 			writeJSON(w, http.StatusOK, *cached)
 			emitAddonsRead(r.Context(), emitter, c, audit.OutcomeSuccess, "detail:cache_hit", "")
@@ -328,9 +334,8 @@ func eksAddonsGetHandler(reg *clusters.Registry, cache *eksAddonsCache, versions
 			return
 		}
 
-		summary := buildAddonSummary(out.Addon)
 		catalog := lookupAddonVersions(r.Context(), client, versions, name, clusterVer)
-		annotateFromCatalog(&summary, catalog, clusterVer)
+		summary := buildAddonSummary(out.Addon, catalog, clusterVer)
 
 		detail := AddonDetail{
 			AddonSummary:          summary,
@@ -433,13 +438,23 @@ func describeAndAnnotate(parent context.Context, client eksAddonsAPI, versions *
 			HealthGlyph: "fail",
 		}
 	}
-	summary := buildAddonSummary(out.Addon)
 	catalog := lookupAddonVersions(parent, client, versions, addonName, clusterVer)
-	annotateFromCatalog(&summary, catalog, clusterVer)
-	return summary
+	return buildAddonSummary(out.Addon, catalog, clusterVer)
 }
 
-func buildAddonSummary(in *ekstypes.Addon) AddonSummary {
+// buildAddonSummary builds the wire summary in one pass, folding in
+// catalog-derived fields (UpdateAvailable, LatestVersion, compat
+// range, BlocksNextMinor) before computing the health glyph. catalog
+// == nil is the soft-fail case (cache returned a sticky error or the
+// lookup itself failed); catalog fields stay zero and the glyph is
+// driven from health alone.
+//
+// CAVEAT — BlocksNextMinor when no version is compatible: when AWS
+// hasn't yet published *any* version for cluster.k8s+1, every addon
+// flags as blocking. The more useful signal is "this addon family is
+// the bottleneck" (i.e. blocks only when at least one OTHER version
+// in the catalog supports the next minor). Tracked as a follow-up.
+func buildAddonSummary(in *ekstypes.Addon, catalog *addonVersionsCacheValue, clusterVer string) AddonSummary {
 	out := AddonSummary{
 		Name:       deref(in.AddonName),
 		Status:     string(in.Status),
@@ -450,7 +465,24 @@ func buildAddonSummary(in *ekstypes.Addon) AddonSummary {
 	if in.Health != nil {
 		out.HealthIssueCount = len(in.Health.Issues)
 	}
-	out.HealthGlyph = computeHealthGlyph(out.Status, out.HealthIssueCount, false, false)
+	if catalog != nil {
+		out.LatestVersion = catalog.Latest
+		if out.LatestVersion != "" && out.Version != "" && out.LatestVersion != out.Version {
+			out.UpdateAvailable = true
+		}
+		// Compat range derived from the *installed* version's entry in
+		// the catalog. If the installed version isn't in the catalog
+		// (custom build, hand-installed), we leave compat empty rather
+		// than guessing.
+		if installed := findVersionEntry(catalog.Versions, out.Version); installed != nil {
+			out.CompatMinK8s, out.CompatMaxK8s = compatRange(installed.CompatibleK8sVersions)
+			out.KubernetesVersion = clusterVer
+			if next := nextMinor(clusterVer); next != "" {
+				out.BlocksNextMinor = !slices.Contains(installed.CompatibleK8sVersions, next)
+			}
+		}
+	}
+	out.HealthGlyph = computeHealthGlyph(out.Status, out.HealthIssueCount, out.UpdateAvailable, out.BlocksNextMinor)
 	return out
 }
 
@@ -539,36 +571,6 @@ func buildAddonVersionsValue(out *eks.DescribeAddonVersionsOutput, k8sVersion st
 		}
 	}
 	return val
-}
-
-// annotateFromCatalog folds catalog-derived fields onto a summary in
-// place. UpdateAvailable / LatestVersion / CompatMin/Max /
-// BlocksNextMinor + glyph are all driven from the catalog lookup.
-// catalog == nil is the soft-fail case (cache returned a sticky
-// error or the lookup itself failed); leave catalog fields zero,
-// keep the summary's basic health-derived glyph intact.
-func annotateFromCatalog(s *AddonSummary, catalog *addonVersionsCacheValue, clusterVer string) {
-	if catalog == nil {
-		// catalog-soft-fail path: BlocksNextMinor stays false, glyph
-		// stays whatever buildAddonSummary computed from health.
-		return
-	}
-	s.LatestVersion = catalog.Latest
-	if s.LatestVersion != "" && s.Version != "" && s.LatestVersion != s.Version {
-		s.UpdateAvailable = true
-	}
-	// Compat range derived from the *installed* version's entry in
-	// the catalog. If the installed version isn't in the catalog
-	// (custom build, hand-installed), we leave compat empty rather
-	// than guessing.
-	if installed := findVersionEntry(catalog.Versions, s.Version); installed != nil {
-		s.CompatMinK8s, s.CompatMaxK8s = compatRange(installed.CompatibleK8sVersions)
-		s.KubernetesVersion = clusterVer
-		if next := nextMinor(clusterVer); next != "" {
-			s.BlocksNextMinor = !containsString(installed.CompatibleK8sVersions, next)
-		}
-	}
-	s.HealthGlyph = computeHealthGlyph(s.Status, s.HealthIssueCount, s.UpdateAvailable, s.BlocksNextMinor)
 }
 
 func buildAddonsCounts(summaries []AddonSummary) AddonsCounts {
@@ -674,8 +676,8 @@ func nextMinor(v string) string {
 }
 
 // parseK8sMinor splits "1.29" into (1, 29). Tolerates trailing
-// noise after a "+" (e.g. "1.29.1+eksbuild.1") and returns (0, 0,
-// false) for shapes that don't fit.
+// noise after the second segment (e.g. "1.29.1+eksbuild.1") and
+// returns (0, 0, false) for shapes that don't fit.
 func parseK8sMinor(v string) (int, int, bool) {
 	if v == "" {
 		return 0, 0, false
@@ -690,8 +692,8 @@ func parseK8sMinor(v string) (int, int, bool) {
 	if dot <= 0 || dot == len(v)-1 {
 		return 0, 0, false
 	}
-	major, ok := atoi(v[:dot])
-	if !ok {
+	major, err := strconv.Atoi(v[:dot])
+	if err != nil {
 		return 0, 0, false
 	}
 	rest := v[dot+1:]
@@ -705,55 +707,15 @@ func parseK8sMinor(v string) (int, int, bool) {
 	if end == 0 {
 		return 0, 0, false
 	}
-	minor, ok := atoi(rest[:end])
-	if !ok {
+	minor, err := strconv.Atoi(rest[:end])
+	if err != nil {
 		return 0, 0, false
 	}
 	return major, minor, true
 }
 
 func formatK8sMinor(major, minor int) string {
-	return itoa(major) + "." + itoa(minor)
-}
-
-func atoi(s string) (int, bool) {
-	if len(s) == 0 {
-		return 0, false
-	}
-	n := 0
-	for _, ch := range s {
-		if ch < '0' || ch > '9' {
-			return 0, false
-		}
-		n = n*10 + int(ch-'0')
-	}
-	return n, true
-}
-
-func itoa(n int) string {
-	if n == 0 {
-		return "0"
-	}
-	if n < 0 {
-		return "-" + itoa(-n)
-	}
-	var buf [20]byte
-	i := len(buf)
-	for n > 0 {
-		i--
-		buf[i] = byte('0' + n%10)
-		n /= 10
-	}
-	return string(buf[i:])
-}
-
-func containsString(haystack []string, needle string) bool {
-	for _, s := range haystack {
-		if s == needle {
-			return true
-		}
-	}
-	return false
+	return strconv.Itoa(major) + "." + strconv.Itoa(minor)
 }
 
 func emitAddonsRead(ctx context.Context, emitter *audit.Emitter, c clusters.Cluster, outcome audit.Outcome, op, reason string) {
