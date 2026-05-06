@@ -858,6 +858,7 @@ export const api = {
     postJSON<RollbackResponse>(
       `/api/clusters/${enc(cluster)}/${enc(kind)}/${enc(namespace)}/${enc(name)}/rollback`,
       body,
+      signal,
     ),
   // --- EKS Upgrade Insights (read-only, issue #103) ---------------
   //
@@ -907,6 +908,7 @@ export const ROLLBACKABLE_KINDS: RollbackableKind[] = [
 
 export function isRollbackable(kind: string): kind is RollbackableKind {
   return (ROLLBACKABLE_KINDS as string[]).includes(kind);
+}
 /** True when an ApiError is the structured 422/E_BACKEND_NOT_EKS
  *  response from one of the EKS-only surfaces. Lets callers render
  *  a clear empty state rather than a generic error. */
