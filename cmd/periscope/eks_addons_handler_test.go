@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
-	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -25,7 +24,6 @@ import (
 // pluggable per-test; default behavior returns errors so a test that
 // forgot to wire one fails loudly.
 type fakeEKSAddonsClient struct {
-	mu               sync.Mutex
 	listAddonsCalls  int32
 	descAddonCalls   int32
 	descVersionsCals int32
@@ -546,10 +544,10 @@ func TestEKSAddonsList_AddonVersionsCacheShared(t *testing.T) {
 		// Each cluster gets its own per-cluster cache so the addons
 		// list is fetched fresh; the catalog cache is shared.
 		var name string
-		switch {
-		case reg == regA:
+		switch reg {
+		case regA:
 			name = "cluster-a"
-		case reg == regB:
+		case regB:
 			name = "cluster-b"
 		}
 		rec := invokeAddons(t, reg, cache, sharedVersions, &recordingSink{}, http.MethodGet,
