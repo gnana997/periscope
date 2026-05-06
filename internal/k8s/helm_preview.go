@@ -65,10 +65,19 @@ type PreviewArgs struct {
 // Diff is nil for install mode (nothing to compare against). Denied
 // is nil when every manifest passed the SAR pre-flight; non-nil
 // when one or more kinds would be rejected by the apiserver.
+//
+// ManifestYAML is the full rendered multi-doc YAML helm would apply
+// — same source as Diff.To.YAML in upgrade mode, surfaced separately
+// so install mode also has the rendered output to display. The SPA
+// renders this in a Monaco viewer so operators can read what's
+// actually going to be created before committing to install. Empty
+// only when the chart genuinely produced no manifests (vanishingly
+// rare; a chart with only NOTES.txt and no templates).
 type PreviewResult struct {
-	Manifests []HelmManifestObject `json:"manifests"`
-	Diff      *HelmDiff            `json:"diff,omitempty"`
-	Denied    []PreviewDenial      `json:"denied,omitempty"`
+	Manifests    []HelmManifestObject `json:"manifests"`
+	ManifestYAML string               `json:"manifestYaml"`
+	Diff         *HelmDiff            `json:"diff,omitempty"`
+	Denied       []PreviewDenial      `json:"denied,omitempty"`
 }
 
 // PreviewDenial is one entry in PreviewResult.Denied. Fields mirror
@@ -191,7 +200,11 @@ func PreviewHelmInstall(ctx context.Context, p credentials.Provider, c clusters.
 	if err != nil {
 		return nil, fmt.Errorf("preflight: %w", err)
 	}
-	return &PreviewResult{Manifests: manifests, Denied: denied}, nil
+	return &PreviewResult{
+		Manifests:    manifests,
+		ManifestYAML: manifestYAML,
+		Denied:       denied,
+	}, nil
 }
 
 // PreviewHelmUpgrade renders the manifests helm would apply for an
@@ -229,7 +242,12 @@ func PreviewHelmUpgrade(ctx context.Context, p credentials.Provider, c clusters.
 	if err != nil {
 		return nil, fmt.Errorf("preflight: %w", err)
 	}
-	return &PreviewResult{Manifests: manifests, Diff: diff, Denied: denied}, nil
+	return &PreviewResult{
+		Manifests:    manifests,
+		ManifestYAML: manifestYAML,
+		Diff:         diff,
+		Denied:       denied,
+	}, nil
 }
 
 // fetchAndLoadChart pulls the tarball from OCI/HTTP, hands it to

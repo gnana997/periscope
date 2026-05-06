@@ -1,27 +1,25 @@
 // ChartActionDialog — install + upgrade workflow modal (#74 / #75 / #76).
 //
-// Supersedes HelmInstallDialog (#74). Same single-pane top-to-bottom
-// flow, now bilingual:
+// Two-column "proposal ↔ rendered" layout. Left rail collects the
+// inputs (chart ref, version, target, values); right panel shows
+// helm's response (chart metadata, manifests, diff, or RBAC denial).
 //
-//   1. Operator pastes a chart ref OR (upgrade mode) lands on the
-//      dialog with the current release's chart pre-filled.
-//   2. For HTTP repos, also enters a chart name.
-//   3. Picks a version → values + schema land in the editor.
-//   4. (Install only) Picks a namespace + release name.
-//   5. Edits values via HelmValuesEditor.
-//   6. Click Preview → renders the manifests + (upgrade) diff inline,
-//      with the RBAC denial list if any kind would be rejected.
-//   7. Click Install / Upgrade → fires the real action. Atomic by
-//      default (failed installs auto-rollback, no half-deployed state).
-//      On success, the modal closes and the SPA navigates to the
-//      release detail page.
+// Mode prop is the discriminant. install mode collects ns + release
+// name; upgrade mode reads them from props (URL params upstream).
+// The right panel's default tab differs by mode: install defaults to
+// "manifest" (what would be created); upgrade defaults to "diff"
+// (what would change). Both modes share the same components.
 //
-// The mode prop ("install" | "upgrade") is the discriminant. Install
-// mode collects ns + releaseName as inputs; upgrade mode reads them
-// from props and pre-fills chart ref + values from the current
-// release. The preview pane reuses the same component for both.
+// Pre-flight RBAC denials replace the right panel entirely — no tabs,
+// no diff. The action button shows "install · blocked by rbac" until
+// the operator's role is broadened.
+//
+// Equivalent helm CLI footer is the unforgettable move: a live-updating
+// copyable shell command that operators can audit or run themselves.
+// Matches the dashboard's voice — "we're not hiding anything; here's
+// the command this dialog would run."
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   useChartValuesMutation,
@@ -35,6 +33,7 @@ import {
 } from "../../hooks/useHelm";
 import type {
   ChartFetchResult,
+  HelmDiffResponse,
   HelmManifestObject,
   PreviewDenial,
   PreviewResponse,
@@ -44,6 +43,9 @@ import { Modal } from "../ui/Modal";
 import { ApiError } from "../../lib/api";
 import { showToast } from "../../lib/toastBus";
 import { HelmValuesEditor } from "./HelmValuesEditor";
+import { MonacoYAML } from "./MonacoYAML";
+import { InlineDiff } from "../detail/yaml/InlineDiff";
+import { cn } from "../../lib/cn";
 
 interface InstallModeProps {
   mode: "install";
@@ -51,17 +53,10 @@ interface InstallModeProps {
 
 interface UpgradeModeProps {
   mode: "upgrade";
-  /** Current release name, taken from URL on the release detail page. */
   releaseName: string;
-  /** Current release namespace. */
   namespace: string;
-  /** Current chart ref — pre-fills the input. Operator can change to
-   *  upgrade across charts (rare but valid). */
   initialChartRef?: string;
-  /** Current chart name within an HTTP repo. */
   initialChartName?: string;
-  /** Current values YAML — pre-fills the editor so operators see what
-   *  they're modifying, not a blank slate. */
   initialValues?: string;
 }
 
@@ -70,6 +65,8 @@ type ChartActionDialogProps = (InstallModeProps | UpgradeModeProps) & {
   onClose: () => void;
   cluster: string;
 };
+
+type RenderedTab = "manifest" | "diff" | "resources";
 
 export function ChartActionDialog(props: ChartActionDialogProps) {
   const { open, onClose, cluster } = props;
@@ -89,21 +86,22 @@ export function ChartActionDialog(props: ChartActionDialogProps) {
   );
   const [chart, setChart] = useState<ChartFetchResult | null>(null);
 
-  // Install-mode only: ns + release name as operator inputs.
+  // Install-mode inputs.
   const [installNamespace, setInstallNamespace] = useState("default");
   const [installReleaseName, setInstallReleaseName] = useState("");
 
-  // Computed ns + release name — reads from props in upgrade mode.
   const targetNamespace =
     props.mode === "upgrade" ? props.namespace : installNamespace;
   const targetReleaseName =
     props.mode === "upgrade" ? props.releaseName : installReleaseName;
 
   // ── Preview state ─────────────────────────────────────────────
-  const [showPreview, setShowPreview] = useState(false);
   const [preview, setPreview] = useState<PreviewResponse | null>(null);
+  const [activeTab, setActiveTab] = useState<RenderedTab>(
+    props.mode === "install" ? "manifest" : "diff",
+  );
 
-  // ── Chart fetch (existing flow from #74) ──────────────────────
+  // ── Chart fetch ────────────────────────────────────────────────
   const isOCI = chartRef.startsWith("oci://");
   const versionsEnabled =
     chartRef.length > 0 && (isOCI || chartName.length > 0);
@@ -115,7 +113,6 @@ export function ChartActionDialog(props: ChartActionDialogProps) {
   });
   const valuesMutation = useChartValuesMutation(cluster);
 
-  // ── Action mutations (#75 + #76) ───────────────────────────────
   const installPreviewMutation = useHelmInstallPreview(cluster);
   const upgradePreviewMutation = useHelmUpgradePreview(cluster);
   const installMutation = useInstallHelmRelease(cluster);
@@ -128,37 +125,45 @@ export function ChartActionDialog(props: ChartActionDialogProps) {
     installPreviewMutation.isPending || upgradePreviewMutation.isPending;
   const actionPending = installMutation.isPending || upgradeMutation.isPending;
 
-  // Fetch values automatically when version is picked (vs. the
-  // older two-click flow). Better UX in upgrade mode where operators
-  // expect the values to populate without an extra button.
-  const fetchValues = () => {
-    if (!chartRef || !version) return;
-    valuesMutation.mutate(
-      { ref: chartRef, chart: chartName || undefined, version },
-      {
-        onSuccess: (result) => {
-          setChart(result);
-          // Only overwrite valuesYaml in install mode; upgrade mode
-          // keeps the operator's edits-on-top-of-current.
-          if (props.mode === "install") {
-            setValuesYaml(result.values);
-          } else if (!valuesYaml) {
-            setValuesYaml(result.values);
-          }
-          // Reset preview when chart version changes — the rendered
-          // manifests would be stale.
-          setPreview(null);
+  // Auto-fetch values whenever a version is picked. Better UX than
+  // requiring a second click.
+  useEffect(() => {
+    if (chartRef && version) {
+      valuesMutation.mutate(
+        { ref: chartRef, chart: chartName || undefined, version },
+        {
+          onSuccess: (result) => {
+            setChart(result);
+            // Install mode: replace values with chart defaults.
+            // Upgrade mode: keep operator's existing values; only
+            // populate from defaults if the editor is currently empty.
+            if (props.mode === "install" || !valuesYaml) {
+              setValuesYaml(result.values);
+            }
+            setPreview(null);
+          },
+          onError: (err) => {
+            showToast(`fetch failed: ${friendlyError(err)}`, "error");
+          },
         },
-        onError: (err) => {
-          showToast(`fetch failed: ${friendlyError(err)}`, "error");
-        },
-      },
-    );
-  };
+      );
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally narrow
+  }, [version]);
 
   // ── Submit handlers ───────────────────────────────────────────
   const onPreviewClick = () => {
-    setShowPreview(true);
+    const onSuccess = (result: PreviewResponse) => {
+      setPreview(result);
+      // If denials are present, the panel renders the denial state
+      // and the active tab is moot. If preview is clean, jump the
+      // active tab to "diff" (upgrade) or "manifest" (install) so
+      // operator sees the answer without needing to click a tab.
+      const denied = result.denied?.length ?? 0;
+      if (denied === 0) {
+        setActiveTab(props.mode === "install" ? "manifest" : "diff");
+      }
+    };
     if (props.mode === "install") {
       installPreviewMutation.mutate(
         {
@@ -170,7 +175,7 @@ export function ChartActionDialog(props: ChartActionDialogProps) {
           values: valuesYaml,
         },
         {
-          onSuccess: setPreview,
+          onSuccess,
           onError: (err) => showToast(`preview failed: ${friendlyError(err)}`, "error"),
         },
       );
@@ -187,7 +192,7 @@ export function ChartActionDialog(props: ChartActionDialogProps) {
           },
         },
         {
-          onSuccess: setPreview,
+          onSuccess,
           onError: (err) => showToast(`preview failed: ${friendlyError(err)}`, "error"),
         },
       );
@@ -236,7 +241,7 @@ export function ChartActionDialog(props: ChartActionDialogProps) {
             const msg = result.rolledBack
               ? `upgrade rolled back (now at revision ${result.release.revision})`
               : `upgraded to revision ${result.release.revision}`;
-            showToast(msg, result.rolledBack ? "warning" : "success");
+            showToast(msg, result.rolledBack ? "warn" : "success");
             onCloseAndReset();
           },
           onError: (err) => {
@@ -247,38 +252,20 @@ export function ChartActionDialog(props: ChartActionDialogProps) {
     }
   };
 
-  // ── Lifecycle ─────────────────────────────────────────────────
   const onCloseAndReset = () => {
     onClose();
     setTimeout(() => {
-      // In upgrade mode, props.initialChartRef etc. may persist across
-      // open/close; we reset to the props' initial state, not blank.
-      setChartRef(
-        props.mode === "upgrade" ? (props.initialChartRef ?? "") : "",
-      );
-      setChartName(
-        props.mode === "upgrade" ? (props.initialChartName ?? "") : "",
-      );
+      setChartRef(props.mode === "upgrade" ? (props.initialChartRef ?? "") : "");
+      setChartName(props.mode === "upgrade" ? (props.initialChartName ?? "") : "");
       setVersion("");
-      setValuesYaml(
-        props.mode === "upgrade" ? (props.initialValues ?? "") : "",
-      );
+      setValuesYaml(props.mode === "upgrade" ? (props.initialValues ?? "") : "");
       setChart(null);
       setInstallNamespace("default");
       setInstallReleaseName("");
-      setShowPreview(false);
       setPreview(null);
+      setActiveTab(props.mode === "install" ? "manifest" : "diff");
     }, 0);
   };
-
-  // Auto-fetch values when version changes — better UX than
-  // requiring a second click. This is the one flow change vs. #74.
-  useEffect(() => {
-    if (chartRef && version) {
-      fetchValues();
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally narrow
-  }, [version]);
 
   // ── Validation gates ──────────────────────────────────────────
   const valuesReady = chart != null;
@@ -288,8 +275,18 @@ export function ChartActionDialog(props: ChartActionDialogProps) {
       : Boolean(installNamespace.trim()) && Boolean(installReleaseName.trim());
   const previewReady =
     valuesReady && targetIdentityReady && version.length > 0;
-  const actionReady =
-    previewReady && (preview == null || (preview.denied?.length ?? 0) === 0);
+  const denied = preview?.denied ?? null;
+  const hasDenials = denied != null && denied.length > 0;
+  const actionReady = previewReady && !hasDenials;
+
+  // Panel state discriminator drives the right column.
+  const panelState: "empty" | "chart" | "preview" | "denied" = !chart
+    ? "empty"
+    : hasDenials
+      ? "denied"
+      : preview
+        ? "preview"
+        : "chart";
 
   return (
     <Modal
@@ -297,8 +294,9 @@ export function ChartActionDialog(props: ChartActionDialogProps) {
       onClose={onCloseAndReset}
       labelledBy={labelId}
       size="lg"
-      panelClassName="max-h-[90vh] flex flex-col"
+      panelClassName="max-w-[900px] h-[90vh] flex flex-col"
     >
+      {/* ── Header ───────────────────────────────────────────── */}
       <header className="flex shrink-0 items-baseline justify-between border-b border-border px-5 py-3">
         <h2 id={labelId} className="font-display text-[20px] italic text-ink">
           {props.mode === "install" ? "Install Helm chart" : "Upgrade Helm release"}{" "}
@@ -317,432 +315,765 @@ export function ChartActionDialog(props: ChartActionDialogProps) {
         </button>
       </header>
 
-      <div className="min-h-0 flex-1 overflow-y-auto space-y-4 px-5 py-4">
-        <RefInputBlock
+      {/* ── Two-column body: proposal ↔ rendered ───────────────── */}
+      <div className="grid min-h-0 flex-1 grid-cols-[40fr_60fr] divide-x divide-border">
+        <ProposalRail
+          mode={props.mode}
           chartRef={chartRef}
-          chartName={chartName}
-          onRefChange={(next) => {
-            setChartRef(next);
+          onChartRefChange={(s) => {
+            setChartRef(s);
             setVersion("");
             setChart(null);
             setPreview(null);
           }}
-          onChartNameChange={(next) => {
-            setChartName(next);
+          chartName={chartName}
+          onChartNameChange={(s) => {
+            setChartName(s);
             setVersion("");
             setChart(null);
             setPreview(null);
           }}
           onFetchClick={() => versions.refetch()}
+          versions={versions.data?.versions ?? []}
           versionsLoading={versions.isFetching}
           versionsError={versions.error}
+          version={version}
+          onVersionChange={setVersion}
+          valuesLoading={valuesMutation.isPending}
+          valuesError={valuesMutation.error}
+          installNamespace={installNamespace}
+          onInstallNamespaceChange={(s) => {
+            setInstallNamespace(s);
+            setPreview(null);
+          }}
+          installReleaseName={installReleaseName}
+          onInstallReleaseNameChange={(s) => {
+            setInstallReleaseName(s);
+            setPreview(null);
+          }}
+          chart={chart}
+          valuesYaml={valuesYaml}
+          onValuesYamlChange={(s) => {
+            setValuesYaml(s);
+            setPreview(null);
+          }}
         />
 
-        {versions.data && versions.data.versions.length > 0 ? (
-          <VersionPickerBlock
-            versions={versions.data.versions}
-            value={version}
-            onChange={setVersion}
-            valuesLoading={valuesMutation.isPending}
-            valuesError={valuesMutation.error}
-          />
-        ) : null}
-
-        {/* Install mode only: target namespace + release name. */}
-        {props.mode === "install" && chart ? (
-          <TargetIdentityBlock
-            namespace={installNamespace}
-            releaseName={installReleaseName}
-            onNamespaceChange={(s) => {
-              setInstallNamespace(s);
-              setPreview(null);
-            }}
-            onReleaseNameChange={(s) => {
-              setInstallReleaseName(s);
-              setPreview(null);
-            }}
-          />
-        ) : null}
-
-        {chart ? <ChartHeaderBlock chart={chart} /> : null}
-        {chart ? (
-          <HelmValuesEditor
-            valuesYaml={valuesYaml}
-            schema={chart.schema as JSONSchema | undefined}
-            onValuesYamlChange={(s) => {
-              setValuesYaml(s);
-              setPreview(null);
-            }}
-          />
-        ) : null}
-
-        {/* Collapsible preview pane — only renders after Preview is
-            clicked and there's a result OR the request is pending. */}
-        {showPreview ? (
-          <PreviewPaneBlock
-            mode={props.mode}
-            pending={previewPending}
-            preview={preview}
-            onClose={() => {
-              setShowPreview(false);
-              setPreview(null);
-            }}
-          />
-        ) : null}
+        <RenderedPanel
+          mode={props.mode}
+          state={panelState}
+          chart={chart}
+          preview={preview}
+          previewPending={previewPending}
+          activeTab={activeTab}
+          onTabChange={setActiveTab}
+        />
       </div>
 
-      <footer className="flex shrink-0 flex-wrap items-center justify-between gap-x-3 gap-y-2 border-t border-border bg-surface-2 px-5 py-3">
-        <span className="font-mono text-[11px] text-ink-faint">
-          {props.mode === "install"
-            ? "atomic install — failures auto-roll-back"
-            : "atomic upgrade — failures auto-roll-back to previous revision"}
-        </span>
-        <div className="flex flex-wrap items-center gap-2">
-          <button
-            type="button"
-            onClick={onCloseAndReset}
-            disabled={actionPending}
-            className="border border-border px-3 py-1 font-mono text-[12px] text-ink-muted hover:text-ink disabled:opacity-50"
-          >
-            cancel
-          </button>
-          <button
-            type="button"
-            onClick={onPreviewClick}
-            disabled={!previewReady || previewPending || actionPending}
-            className="border border-border px-3 py-1 font-mono text-[12px] text-ink hover:bg-surface disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {previewPending ? "previewing…" : "preview"}
-          </button>
-          <button
-            type="button"
-            onClick={onActionClick}
-            disabled={!actionReady || actionPending}
-            className="border border-accent bg-accent px-3 py-1 font-mono text-[12px] text-white disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {actionPending
-              ? props.mode === "install"
-                ? "installing…"
-                : "upgrading…"
-              : props.mode}
-          </button>
+      {/* ── Footer: equivalent CLI + action buttons ─────────────── */}
+      <footer className="shrink-0 border-t border-border bg-surface-2">
+        <EquivalentCLI
+          mode={props.mode}
+          chartRef={chartRef}
+          chartName={chartName}
+          version={version}
+          namespace={targetNamespace}
+          releaseName={targetReleaseName}
+          hasValues={valuesYaml.trim().length > 0}
+        />
+        <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 border-t border-border px-5 py-3">
+          <span className="font-mono text-[11px] text-ink-faint">
+            {props.mode === "install"
+              ? "atomic install — failures auto-roll-back"
+              : "atomic upgrade — failures auto-roll-back to previous revision"}
+          </span>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={onCloseAndReset}
+              disabled={actionPending}
+              className="border border-border px-3 py-1 font-mono text-[12px] text-ink-muted hover:text-ink disabled:opacity-50"
+            >
+              cancel
+            </button>
+            <button
+              type="button"
+              onClick={onPreviewClick}
+              disabled={!previewReady || previewPending || actionPending}
+              className="border border-border px-3 py-1 font-mono text-[12px] text-ink hover:bg-surface disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {previewPending ? "previewing…" : "preview"}
+            </button>
+            <button
+              type="button"
+              onClick={onActionClick}
+              disabled={!actionReady || actionPending}
+              className={cn(
+                "border px-3 py-1 font-mono text-[12px] disabled:cursor-not-allowed disabled:opacity-50",
+                hasDenials
+                  ? "border-red bg-red/10 text-red"
+                  : "border-accent bg-accent text-white",
+              )}
+              title={hasDenials ? "rbac pre-flight blocked this action — see right panel" : undefined}
+            >
+              {actionPending
+                ? props.mode === "install"
+                  ? "installing…"
+                  : "upgrading…"
+                : hasDenials
+                  ? `${props.mode} · blocked by rbac`
+                  : props.mode}
+            </button>
+          </div>
         </div>
       </footer>
     </Modal>
   );
 }
 
-// ─── Sub-blocks ─────────────────────────────────────────────────────
+// ─── Left rail: ProposalRail ────────────────────────────────────────
 
-function RefInputBlock({
-  chartRef,
-  chartName,
-  onRefChange,
-  onChartNameChange,
-  onFetchClick,
-  versionsLoading,
-  versionsError,
-}: {
+interface ProposalRailProps {
+  mode: "install" | "upgrade";
   chartRef: string;
+  onChartRefChange: (s: string) => void;
   chartName: string;
-  onRefChange: (s: string) => void;
   onChartNameChange: (s: string) => void;
   onFetchClick: () => void;
+  versions: string[];
   versionsLoading: boolean;
   versionsError: unknown;
-}) {
-  const isOCI = chartRef.startsWith("oci://");
-  return (
-    <section className="space-y-2">
-      <label className="font-mono text-[10.5px] uppercase tracking-[0.18em] text-ink-faint">
-        chart reference
-      </label>
-      <div className="flex flex-wrap gap-2">
-        <input
-          type="text"
-          value={chartRef}
-          onChange={(e) => onRefChange(e.target.value)}
-          placeholder="https://charts.bitnami.com/bitnami  or  oci://ghcr.io/owner/charts/foo"
-          className="min-w-0 flex-1 rounded-sm border border-border bg-bg px-2.5 py-1.5 font-mono text-[12.5px] text-ink placeholder:text-ink-faint focus:border-accent focus:outline-none"
-        />
-        {!isOCI && chartRef.length > 0 ? (
-          <input
-            type="text"
-            value={chartName}
-            onChange={(e) => onChartNameChange(e.target.value)}
-            placeholder="chart name (e.g. nginx)"
-            className="w-full rounded-sm border border-border bg-bg px-2.5 py-1.5 font-mono text-[12.5px] text-ink placeholder:text-ink-faint focus:border-accent focus:outline-none sm:w-48"
-          />
-        ) : null}
-        <button
-          type="button"
-          onClick={onFetchClick}
-          disabled={chartRef.length === 0 || (!isOCI && chartName.length === 0)}
-          className="border border-accent bg-accent px-3 py-1 font-mono text-[12px] text-white disabled:opacity-50"
-        >
-          {versionsLoading ? "fetching…" : "fetch"}
-        </button>
-      </div>
-      {versionsError ? (
-        <p className="font-mono text-[12px] text-red">
-          {friendlyError(versionsError)}
-        </p>
-      ) : null}
-    </section>
-  );
-}
-
-function VersionPickerBlock({
-  versions,
-  value,
-  onChange,
-  valuesLoading,
-  valuesError,
-}: {
-  versions: string[];
-  value: string;
-  onChange: (v: string) => void;
+  version: string;
+  onVersionChange: (s: string) => void;
   valuesLoading: boolean;
   valuesError: unknown;
-}) {
-  return (
-    <section className="space-y-2">
-      <label className="font-mono text-[10.5px] uppercase tracking-[0.18em] text-ink-faint">
-        version
-      </label>
-      <div className="flex flex-wrap gap-2">
-        <select
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          disabled={valuesLoading}
-          className="min-w-0 flex-1 rounded-sm border border-border bg-bg px-2.5 py-1.5 font-mono text-[12.5px] text-ink focus:border-accent focus:outline-none disabled:opacity-50"
-        >
-          <option value="">— pick a version ({versions.length} available) —</option>
-          {versions.map((v) => (
-            <option key={v} value={v}>
-              {v}
-            </option>
-          ))}
-        </select>
-        {valuesLoading ? (
-          <span className="self-center font-mono text-[12px] text-ink-faint">
-            loading values…
-          </span>
-        ) : null}
-      </div>
-      {valuesError ? (
-        <p className="font-mono text-[12px] text-red">
-          {friendlyError(valuesError)}
-        </p>
-      ) : null}
-    </section>
-  );
+  installNamespace: string;
+  onInstallNamespaceChange: (s: string) => void;
+  installReleaseName: string;
+  onInstallReleaseNameChange: (s: string) => void;
+  chart: ChartFetchResult | null;
+  valuesYaml: string;
+  onValuesYamlChange: (s: string) => void;
 }
 
-function TargetIdentityBlock({
-  namespace,
-  releaseName,
-  onNamespaceChange,
-  onReleaseNameChange,
-}: {
-  namespace: string;
-  releaseName: string;
-  onNamespaceChange: (s: string) => void;
-  onReleaseNameChange: (s: string) => void;
-}) {
+function ProposalRail(props: ProposalRailProps) {
+  const isOCI = props.chartRef.startsWith("oci://");
+  const fetchDisabled =
+    props.chartRef.length === 0 || (!isOCI && props.chartName.length === 0);
   return (
-    <section className="space-y-2">
-      <label className="font-mono text-[10.5px] uppercase tracking-[0.18em] text-ink-faint">
-        target identity
-      </label>
-      <div className="flex flex-wrap gap-2">
-        <input
-          type="text"
-          value={namespace}
-          onChange={(e) => onNamespaceChange(e.target.value)}
-          placeholder="namespace"
-          className="min-w-0 flex-1 rounded-sm border border-border bg-bg px-2.5 py-1.5 font-mono text-[12.5px] text-ink placeholder:text-ink-faint focus:border-accent focus:outline-none"
-        />
-        <input
-          type="text"
-          value={releaseName}
-          onChange={(e) => onReleaseNameChange(e.target.value)}
-          placeholder="release name"
-          className="min-w-0 flex-1 rounded-sm border border-border bg-bg px-2.5 py-1.5 font-mono text-[12.5px] text-ink placeholder:text-ink-faint focus:border-accent focus:outline-none"
-        />
-      </div>
-    </section>
-  );
-}
-
-function ChartHeaderBlock({ chart }: { chart: ChartFetchResult }) {
-  return (
-    <section className="rounded-sm border border-border bg-surface px-4 py-3">
-      <div className="flex flex-wrap items-baseline justify-between gap-3">
-        <h3 className="font-display text-[18px] italic text-ink">
-          {chart.meta.name}{" "}
-          <span className="font-mono text-[12px] text-ink-muted not-italic">
-            {chart.meta.version}
-          </span>
-        </h3>
-        <span className="font-mono text-[10.5px] uppercase tracking-[0.18em] text-ink-faint">
-          chart {chart.meta.apiVersion}
-        </span>
-      </div>
-      {chart.meta.description ? (
-        <p className="mt-1 text-[13px] text-ink-muted">{chart.meta.description}</p>
-      ) : null}
-      <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 font-mono text-[11px] text-ink-faint">
-        {chart.meta.appVersion ? <span>app: {chart.meta.appVersion}</span> : null}
-        {chart.meta.kubeVersion ? (
-          <span>k8s: {chart.meta.kubeVersion}</span>
-        ) : null}
-        {chart.meta.type ? <span>type: {chart.meta.type}</span> : null}
-        {chart.schema ? (
-          <span className="text-data">schema: yes (form mode)</span>
-        ) : (
-          <span>schema: none (yaml mode)</span>
-        )}
-      </div>
-    </section>
-  );
-}
-
-function PreviewPaneBlock({
-  mode,
-  pending,
-  preview,
-  onClose,
-}: {
-  mode: "install" | "upgrade";
-  pending: boolean;
-  preview: PreviewResponse | null;
-  onClose: () => void;
-}) {
-  const denied = preview?.denied ?? null;
-  return (
-    <section className="rounded-sm border border-border bg-surface">
-      <header className="flex items-center justify-between border-b border-border px-3 py-2">
-        <span className="font-mono text-[11px] uppercase tracking-[0.18em] text-ink-faint">
-          preview · dry-run
-        </span>
-        <button
-          type="button"
-          onClick={onClose}
-          className="font-mono text-[11px] text-ink-faint hover:text-ink"
-        >
-          hide
-        </button>
-      </header>
-
-      {pending ? (
-        <p className="px-3 py-3 font-mono text-[12px] text-ink-faint">
-          rendering…
-        </p>
-      ) : preview == null ? (
-        <p className="px-3 py-3 font-mono text-[12px] text-ink-faint">
-          no preview yet — click preview to render
-        </p>
-      ) : (
-        <div className="space-y-3 px-3 py-3">
-          {denied && denied.length > 0 ? (
-            <DenialList denied={denied} />
-          ) : (
-            <p className="font-mono text-[11px] text-data">
-              ✓ rbac pre-flight passed — no denials
-            </p>
-          )}
-          <ManifestList manifests={preview.manifests} />
-          {mode === "upgrade" && preview.diff ? (
-            <DiffSummary diff={preview.diff} />
+    <section className="flex min-h-0 flex-col overflow-hidden">
+      <Eyebrow text="proposal ·" />
+      <div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-5 pb-4">
+        {/* Chart reference */}
+        <Field label="chart reference">
+          <div className="flex flex-wrap gap-2">
+            <input
+              type="text"
+              value={props.chartRef}
+              onChange={(e) => props.onChartRefChange(e.target.value)}
+              placeholder="oci://… or https://…"
+              className="min-w-0 flex-1 rounded-sm border border-border bg-bg px-2.5 py-1.5 font-mono text-[12.5px] text-ink placeholder:text-ink-faint focus:border-accent focus:outline-none"
+            />
+            <button
+              type="button"
+              onClick={props.onFetchClick}
+              disabled={fetchDisabled}
+              className="border border-accent bg-accent px-3 py-1 font-mono text-[12px] text-white disabled:opacity-50"
+            >
+              {props.versionsLoading ? "fetching…" : "fetch"}
+            </button>
+          </div>
+          {!isOCI && props.chartRef.length > 0 ? (
+            <input
+              type="text"
+              value={props.chartName}
+              onChange={(e) => props.onChartNameChange(e.target.value)}
+              placeholder="chart name (e.g. nginx)"
+              className="mt-2 w-full rounded-sm border border-border bg-bg px-2.5 py-1.5 font-mono text-[12.5px] text-ink placeholder:text-ink-faint focus:border-accent focus:outline-none"
+            />
           ) : null}
-        </div>
-      )}
+          {props.versionsError ? (
+            <p className="mt-1 font-mono text-[11.5px] text-red">
+              {friendlyError(props.versionsError)}
+            </p>
+          ) : null}
+        </Field>
+
+        {/* Version */}
+        {props.versions.length > 0 ? (
+          <Field label="version">
+            <select
+              value={props.version}
+              onChange={(e) => props.onVersionChange(e.target.value)}
+              disabled={props.valuesLoading}
+              className="w-full rounded-sm border border-border bg-bg px-2.5 py-1.5 font-mono text-[12.5px] text-ink focus:border-accent focus:outline-none disabled:opacity-50"
+            >
+              <option value="">— pick a version ({props.versions.length} available) —</option>
+              {props.versions.map((v) => (
+                <option key={v} value={v}>
+                  {v}
+                </option>
+              ))}
+            </select>
+            {props.valuesLoading ? (
+              <p className="mt-1 font-mono text-[11.5px] text-ink-faint">loading values…</p>
+            ) : null}
+            {props.valuesError ? (
+              <p className="mt-1 font-mono text-[11.5px] text-red">
+                {friendlyError(props.valuesError)}
+              </p>
+            ) : null}
+          </Field>
+        ) : null}
+
+        {/* Target identity */}
+        {props.mode === "install" && props.chart ? (
+          <Field label="target">
+            <div className="grid grid-cols-2 gap-2">
+              <input
+                type="text"
+                value={props.installNamespace}
+                onChange={(e) => props.onInstallNamespaceChange(e.target.value)}
+                placeholder="namespace"
+                className="min-w-0 rounded-sm border border-border bg-bg px-2.5 py-1.5 font-mono text-[12.5px] text-ink placeholder:text-ink-faint focus:border-accent focus:outline-none"
+              />
+              <input
+                type="text"
+                value={props.installReleaseName}
+                onChange={(e) => props.onInstallReleaseNameChange(e.target.value)}
+                placeholder="release name"
+                className="min-w-0 rounded-sm border border-border bg-bg px-2.5 py-1.5 font-mono text-[12.5px] text-ink placeholder:text-ink-faint focus:border-accent focus:outline-none"
+              />
+            </div>
+          </Field>
+        ) : null}
+
+        {/* Values editor — sized to fill remaining space */}
+        {props.chart ? (
+          <Field label="values" grow>
+            <HelmValuesEditor
+              valuesYaml={props.valuesYaml}
+              schema={props.chart.schema as JSONSchema | undefined}
+              onValuesYamlChange={props.onValuesYamlChange}
+            />
+          </Field>
+        ) : null}
+      </div>
     </section>
   );
 }
 
-function DenialList({ denied }: { denied: PreviewDenial[] }) {
+// ─── Right panel: RenderedPanel ─────────────────────────────────────
+
+interface RenderedPanelProps {
+  mode: "install" | "upgrade";
+  state: "empty" | "chart" | "preview" | "denied";
+  chart: ChartFetchResult | null;
+  preview: PreviewResponse | null;
+  previewPending: boolean;
+  activeTab: RenderedTab;
+  onTabChange: (t: RenderedTab) => void;
+}
+
+function RenderedPanel({ mode, state, chart, preview, previewPending, activeTab, onTabChange }: RenderedPanelProps) {
   return (
-    <div className="space-y-1">
-      <p className="font-mono text-[11px] uppercase tracking-[0.16em] text-red">
-        rbac pre-flight denied {denied.length} resource{denied.length === 1 ? "" : "s"}
-      </p>
-      <ul className="space-y-0.5 font-mono text-[11.5px] text-ink-muted">
-        {denied.map((d, i) => (
-          <li key={i}>
-            <span className="text-red">×</span>{" "}
-            <span>
-              {d.verb} {d.group ? `${d.group}/` : ""}
-              {d.resource}
-              {d.namespace ? ` in ${d.namespace}` : ""}
-              {d.name ? ` (${d.name})` : ""}
-            </span>
-            <span className="ml-2 text-ink-faint">— {d.reason}</span>
-          </li>
-        ))}
-      </ul>
-      <p className="font-mono text-[10.5px] text-ink-faint">
-        the apiserver would reject these — install / upgrade is blocked until your role is broadened
+    <section className="flex min-h-0 flex-col overflow-hidden bg-surface">
+      <Eyebrow text={state === "denied" ? "rbac →" : "rendered →"} arrow={state === "denied" ? false : true}>
+        {state === "preview" && preview ? (
+          <RenderedTabStrip
+            mode={mode}
+            active={activeTab}
+            onChange={onTabChange}
+            counts={{
+              manifests: preview.manifests.length,
+              changes: preview.diff?.changes.length ?? 0,
+            }}
+          />
+        ) : null}
+      </Eyebrow>
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+        {state === "empty" ? (
+          <EmptyHint mode={mode} />
+        ) : state === "chart" && chart ? (
+          <ChartMetadataPanel chart={chart} previewPending={previewPending} />
+        ) : state === "preview" && preview ? (
+          <PreviewContent mode={mode} preview={preview} activeTab={activeTab} />
+        ) : state === "denied" && preview ? (
+          <DenialPane denied={preview.denied ?? []} />
+        ) : null}
+      </div>
+    </section>
+  );
+}
+
+// ─── EmptyHint: no chart fetched yet ───────────────────────────────
+
+function EmptyHint({ mode }: { mode: "install" | "upgrade" }) {
+  return (
+    <div className="flex flex-1 items-center justify-center px-8 py-10">
+      <p className="max-w-xs font-display text-[18px] italic leading-tight text-ink-faint">
+        {mode === "install"
+          ? "paste a chart reference to begin →"
+          : "edit the chart reference above to start an upgrade preview →"}
       </p>
     </div>
   );
 }
 
-function ManifestList({ manifests }: { manifests: HelmManifestObject[] }) {
-  if (manifests.length === 0) {
-    return (
-      <p className="font-mono text-[11.5px] text-ink-faint">
-        no manifests rendered
-      </p>
-    );
-  }
+// ─── ChartMetadataPanel: chart fetched, no preview yet ─────────────
+
+function ChartMetadataPanel({ chart, previewPending }: { chart: ChartFetchResult; previewPending: boolean }) {
   return (
-    <details className="font-mono text-[11.5px]">
-      <summary className="cursor-pointer text-ink hover:text-accent">
-        {manifests.length} manifest{manifests.length === 1 ? "" : "s"} (click to expand)
-      </summary>
-      <ul className="mt-1.5 space-y-0.5 pl-4 text-ink-muted">
-        {manifests.map((m, i) => (
-          <li key={i}>
-            <span className="text-ink-faint">{m.apiVersion}</span>{" "}
-            <span className="text-ink">{m.kind}</span>
-            {m.namespace ? (
-              <span className="text-ink-faint">/{m.namespace}</span>
-            ) : null}
-            <span className="text-ink">/{m.name}</span>
-          </li>
-        ))}
-      </ul>
-    </details>
+    <div className="flex flex-1 flex-col overflow-y-auto px-5 py-5 space-y-4">
+      <div>
+        <h3 className="font-display text-[24px] italic leading-tight text-ink">
+          {chart.meta.name}{" "}
+          <span className="font-mono text-[14px] not-italic text-ink-muted">
+            {chart.meta.version}
+          </span>
+        </h3>
+        {chart.meta.description ? (
+          <p className="mt-2 max-w-prose text-[13px] leading-relaxed text-ink-muted">
+            {chart.meta.description}
+          </p>
+        ) : null}
+      </div>
+
+      <dl className="grid grid-cols-[120px_1fr] gap-x-4 gap-y-1.5 font-mono text-[11.5px]">
+        {chart.meta.appVersion ? (
+          <MetaRow label="app version" value={chart.meta.appVersion} />
+        ) : null}
+        {chart.meta.kubeVersion ? (
+          <MetaRow label="k8s constraint" value={chart.meta.kubeVersion} />
+        ) : null}
+        {chart.meta.type ? <MetaRow label="type" value={chart.meta.type} /> : null}
+        <MetaRow
+          label="schema"
+          value={chart.schema ? "yes (form mode)" : "none (yaml mode)"}
+          tone={chart.schema ? "data" : "muted"}
+        />
+        {chart.meta.maintainers && chart.meta.maintainers.length > 0 ? (
+          <MetaRow
+            label="maintainers"
+            value={chart.meta.maintainers
+              .map((m) => m.name ?? m.email ?? "")
+              .filter(Boolean)
+              .join(", ")}
+          />
+        ) : null}
+      </dl>
+
+      <div className="mt-2 rounded-sm border border-dashed border-border-strong px-4 py-3">
+        <p className="font-mono text-[11.5px] text-ink-muted">
+          {previewPending ? (
+            <>rendering preview…</>
+          ) : (
+            <>
+              edit values on the left, then click{" "}
+              <span className="text-ink">preview</span> below to render
+              the manifests + rbac pre-flight
+              <span className="text-ink-faint"> + diff vs current state</span>.
+            </>
+          )}
+        </p>
+      </div>
+    </div>
   );
 }
 
-function DiffSummary({
-  diff,
+function MetaRow({
+  label,
+  value,
+  tone = "default",
 }: {
-  diff: NonNullable<PreviewResponse["diff"]>;
+  label: string;
+  value: string;
+  tone?: "default" | "muted" | "data";
 }) {
-  const counts = diff.changes.reduce(
-    (acc, c) => {
-      acc[c.kind] = (acc[c.kind] ?? 0) + 1;
-      return acc;
-    },
-    {} as Record<string, number>,
-  );
   return (
-    <div className="space-y-1 font-mono text-[11.5px]">
-      <p className="text-ink-faint uppercase tracking-[0.16em] text-[10.5px]">
-        diff vs current cluster state
-      </p>
-      <p className="text-ink">
-        {diff.changes.length} change{diff.changes.length === 1 ? "" : "s"}
+    <>
+      <dt className="text-ink-faint uppercase tracking-[0.16em] text-[10.5px]">{label}</dt>
+      <dd
+        className={cn(
+          tone === "data"
+            ? "text-data"
+            : tone === "muted"
+              ? "text-ink-faint"
+              : "text-ink",
+        )}
+      >
+        {value}
+      </dd>
+    </>
+  );
+}
+
+// ─── PreviewContent: tab body for preview state ────────────────────
+
+function PreviewContent({
+  mode,
+  preview,
+  activeTab,
+}: {
+  mode: "install" | "upgrade";
+  preview: PreviewResponse;
+  activeTab: RenderedTab;
+}) {
+  // Upgrade mode without a diff payload (e.g. from-release-fetch
+  // failed) collapses to manifest view.
+  const effectiveTab: RenderedTab =
+    activeTab === "diff" && (mode === "install" || !preview.diff)
+      ? "manifest"
+      : activeTab;
+  if (effectiveTab === "diff" && preview.diff) {
+    return <DiffTab diff={preview.diff} />;
+  }
+  if (effectiveTab === "manifest") {
+    return <ManifestTab yaml={preview.manifestYaml} />;
+  }
+  return <ResourcesTab manifests={preview.manifests} />;
+}
+
+function DiffTab({ diff }: { diff: HelmDiffResponse }) {
+  const counts = useMemo(() => {
+    return diff.changes.reduce(
+      (acc, c) => {
+        acc[c.kind] = (acc[c.kind] ?? 0) + 1;
+        return acc;
+      },
+      {} as Record<string, number>,
+    );
+  }, [diff.changes]);
+  return (
+    <div className="flex min-h-0 flex-1 flex-col">
+      <div className="border-b border-border px-5 py-2 font-mono text-[11.5px]">
+        <span className="text-ink">
+          {diff.changes.length} change{diff.changes.length === 1 ? "" : "s"}
+        </span>
         {Object.entries(counts).map(([k, v]) => (
           <span key={k} className="ml-3 text-ink-muted">
-            {k}: {v}
+            <span
+              className={cn(
+                k === "add"
+                  ? "text-data"
+                  : k === "remove"
+                    ? "text-red"
+                    : "text-ink-muted",
+              )}
+            >
+              {k}
+            </span>
+            : {v}
           </span>
         ))}
+      </div>
+      <div className="min-h-0 flex-1">
+        <InlineDiff original={diff.from.yaml} proposed={diff.to.yaml} />
+      </div>
+    </div>
+  );
+}
+
+function ManifestTab({ yaml }: { yaml: string }) {
+  if (!yaml) {
+    return (
+      <div className="flex flex-1 items-center justify-center px-8 py-10">
+        <p className="font-mono text-[12px] italic text-ink-faint">
+          chart rendered no manifests
+        </p>
+      </div>
+    );
+  }
+  return (
+    <div className="min-h-0 flex-1">
+      <MonacoYAML value={yaml} emptyLabel="no manifests rendered" />
+    </div>
+  );
+}
+
+function ResourcesTab({ manifests }: { manifests: HelmManifestObject[] }) {
+  if (manifests.length === 0) {
+    return (
+      <div className="flex flex-1 items-center justify-center px-8 py-10">
+        <p className="font-mono text-[12px] italic text-ink-faint">
+          no resources rendered
+        </p>
+      </div>
+    );
+  }
+  // Group by Kind for an at-a-glance grouping.
+  const byKind = manifests.reduce(
+    (acc, m) => {
+      const k = m.kind || "Unknown";
+      acc[k] = acc[k] ?? [];
+      acc[k].push(m);
+      return acc;
+    },
+    {} as Record<string, HelmManifestObject[]>,
+  );
+  const kindsSorted = Object.keys(byKind).sort();
+  return (
+    <div className="flex-1 overflow-y-auto px-5 py-4 font-mono text-[12px]">
+      {kindsSorted.map((kind) => (
+        <div key={kind} className="mb-4">
+          <h4 className="mb-1 text-ink-faint uppercase tracking-[0.16em] text-[10.5px]">
+            {kind} <span className="ml-1 text-ink-muted">({byKind[kind].length})</span>
+          </h4>
+          <ul className="space-y-0.5 text-ink-muted">
+            {byKind[kind].map((m, i) => (
+              <li key={i}>
+                <span className="text-ink-faint">{m.apiVersion}</span>
+                {m.namespace ? (
+                  <span className="text-ink-faint"> · {m.namespace}/</span>
+                ) : (
+                  <span className="text-ink-faint"> · </span>
+                )}
+                <span className="text-ink">{m.name}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ─── DenialPane: full-bleed RBAC denial state ───────────────────────
+
+function DenialPane({ denied }: { denied: PreviewDenial[] }) {
+  return (
+    <div className="flex-1 overflow-y-auto px-5 py-5">
+      <h3 className="font-display text-[22px] italic leading-tight text-ink">
+        <span className="text-red">✕</span> apiserver would reject this operation.
+      </h3>
+      <p className="mt-2 max-w-prose text-[13px] text-ink-muted">
+        Your role lacks the following verbs. Periscope ran a per-manifest
+        SelfSubjectAccessReview before opening this dialog's diff to spare
+        you a half-applied install.
       </p>
+
+      <ul className="mt-4 space-y-2">
+        {denied.map((d, i) => (
+          <li
+            key={i}
+            className="border-l-[3px] border-red bg-red/5 px-3 py-2 font-mono text-[11.5px]"
+          >
+            <div className="text-ink">
+              <span className="text-red">{d.verb}</span>{" "}
+              <span className="text-ink-muted">
+                {d.group ? `${d.group}/` : ""}
+              </span>
+              <span className="text-ink">{d.resource}</span>
+              {d.namespace ? (
+                <span className="text-ink-muted"> in namespace {d.namespace}</span>
+              ) : null}
+              {d.name ? (
+                <span className="text-ink-muted"> ({d.name})</span>
+              ) : null}
+            </div>
+            <div className="text-ink-faint">→ server: {d.reason}</div>
+          </li>
+        ))}
+      </ul>
+
+      <p className="mt-5 font-mono text-[11.5px] text-ink-muted">
+        See{" "}
+        <a
+          href="https://github.com/gnana997/periscope/blob/main/docs/setup/cluster-rbac.md"
+          target="_blank"
+          rel="noreferrer"
+          className="text-ink underline decoration-dotted decoration-accent underline-offset-[3px] hover:text-accent"
+        >
+          docs/setup/cluster-rbac.md
+        </a>{" "}
+        for the periscope-tier:write role definition.
+      </p>
+    </div>
+  );
+}
+
+// ─── EquivalentCLI: copyable shell command ──────────────────────────
+
+interface EquivalentCLIProps {
+  mode: "install" | "upgrade";
+  chartRef: string;
+  chartName: string;
+  version: string;
+  namespace: string;
+  releaseName: string;
+  hasValues: boolean;
+}
+
+function EquivalentCLI({
+  mode,
+  chartRef,
+  chartName,
+  version,
+  namespace,
+  releaseName,
+  hasValues,
+}: EquivalentCLIProps) {
+  const command = useMemo(
+    () => buildHelmCommand({ mode, chartRef, chartName, version, namespace, releaseName, hasValues }),
+    [mode, chartRef, chartName, version, namespace, releaseName, hasValues],
+  );
+  const [copied, setCopied] = useState(false);
+  const onCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(command);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      showToast("clipboard copy failed", "error");
+    }
+  };
+  return (
+    <div className="flex items-start gap-3 px-5 py-2">
+      <pre className="flex-1 overflow-x-auto whitespace-pre font-mono text-[11.5px] leading-[1.55] text-ink-muted">
+        <span className="text-ink-faint select-none">$ </span>
+        {command}
+      </pre>
+      <button
+        type="button"
+        onClick={onCopy}
+        className="shrink-0 border border-border px-2 py-0.5 font-mono text-[10.5px] text-ink-faint hover:border-border-strong hover:text-ink"
+        title="copy equivalent helm command"
+      >
+        {copied ? "copied" : "⎘ copy"}
+      </button>
+    </div>
+  );
+}
+
+function buildHelmCommand({
+  mode,
+  chartRef,
+  chartName,
+  version,
+  namespace,
+  releaseName,
+  hasValues,
+}: EquivalentCLIProps): string {
+  // Empty-state placeholder so the footer is never blank — operators
+  // see the shape of the eventual command from the moment the dialog
+  // opens.
+  if (!chartRef && !releaseName) {
+    return mode === "install"
+      ? "helm install <release> <chart-ref> --version <v> --namespace <ns> --atomic --wait"
+      : "helm upgrade <release> <chart-ref> --version <v> --namespace <ns> --atomic --wait";
+  }
+  const release = releaseName || "<release>";
+  const ns = namespace || "<namespace>";
+  const ver = version || "<version>";
+  const isOCI = chartRef.startsWith("oci://");
+  // For HTTP repos, helm v3 supports `--repo <url>` to reference a
+  // chart by name; for OCI, the chart name is part of the ref.
+  const chartArg = isOCI ? chartRef : chartName || "<chart>";
+  const parts = [
+    `helm ${mode}`,
+    release,
+    chartArg,
+    `--version ${ver}`,
+    `--namespace ${ns}`,
+    "--atomic",
+    "--wait",
+  ];
+  if (!isOCI && chartRef) {
+    parts.push(`--repo ${chartRef}`);
+  }
+  if (hasValues) {
+    parts.push("-f values.yaml");
+  }
+  // Soft-wrap with backslash continuations after the chart args so
+  // the command stays readable when it overflows.
+  return parts.slice(0, 3).join(" ") + " \\\n    " + parts.slice(3).join(" ");
+}
+
+// ─── Small layout primitives ────────────────────────────────────────
+
+function Eyebrow({
+  text,
+  arrow,
+  children,
+}: {
+  text: string;
+  arrow?: boolean;
+  children?: React.ReactNode;
+}) {
+  return (
+    <div className="flex shrink-0 items-center justify-between gap-3 border-b border-border bg-bg/40 px-5 py-2">
+      <span
+        className={cn(
+          "font-mono text-[10.5px] uppercase tracking-[0.18em]",
+          arrow ? "text-accent" : "text-ink-faint",
+        )}
+      >
+        {text}
+      </span>
+      {children}
+    </div>
+  );
+}
+
+function Field({
+  label,
+  children,
+  grow,
+}: {
+  label: string;
+  children: React.ReactNode;
+  grow?: boolean;
+}) {
+  return (
+    <div className={cn("mt-4", grow && "flex min-h-0 flex-1 flex-col")}>
+      <label className="font-mono text-[10.5px] uppercase tracking-[0.18em] text-ink-faint">
+        {label}
+      </label>
+      <div className={cn("mt-1.5", grow && "flex min-h-0 flex-1 flex-col")}>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+function RenderedTabStrip({
+  mode,
+  active,
+  onChange,
+  counts,
+}: {
+  mode: "install" | "upgrade";
+  active: RenderedTab;
+  onChange: (t: RenderedTab) => void;
+  counts: { manifests: number; changes: number };
+}) {
+  const tabs: { id: RenderedTab; label: string; count?: number }[] = [
+    ...(mode === "upgrade"
+      ? [{ id: "diff" as const, label: "diff", count: counts.changes }]
+      : []),
+    { id: "manifest" as const, label: "manifest" },
+    { id: "resources" as const, label: "resources", count: counts.manifests },
+  ];
+  return (
+    <div className="flex items-center gap-1">
+      {tabs.map((t) => (
+        <button
+          key={t.id}
+          type="button"
+          onClick={() => onChange(t.id)}
+          className={cn(
+            "border-b-2 px-2 py-0.5 font-mono text-[11px] transition-colors",
+            active === t.id
+              ? "border-accent text-accent"
+              : "border-transparent text-ink-muted hover:text-ink",
+          )}
+        >
+          {t.label}
+          {t.count != null ? (
+            <span className="ml-1 text-ink-faint">({t.count})</span>
+          ) : null}
+        </button>
+      ))}
     </div>
   );
 }

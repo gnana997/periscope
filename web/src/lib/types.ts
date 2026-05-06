@@ -1526,6 +1526,7 @@ export interface PreviewDenial {
  *  is null when every kind passes the SAR pre-flight. */
 export interface PreviewResponse {
   manifests: HelmManifestObject[];
+  manifestYaml: string;
   diff: HelmDiffResponse | null;
   denied: PreviewDenial[] | null;
 }

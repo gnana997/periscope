@@ -32,8 +32,7 @@ func metaCluster(t *testing.T, drv string) clusters.Cluster {
 }
 
 // TestWritePeriscopeInstallMetadata_SecretDriver covers the happy path
-// for the default Secret-backed driver. Patches an existing storage
-// Secret with the install-ref annotation; verifies the round-trip.
+// for the default Secret-backed driver.
 func TestWritePeriscopeInstallMetadata_SecretDriver(t *testing.T) {
 	cs := fake.NewSimpleClientset(&corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
@@ -66,8 +65,7 @@ func TestWritePeriscopeInstallMetadata_SecretDriver(t *testing.T) {
 }
 
 // TestWritePeriscopeInstallMetadata_ConfigMapDriver mirrors the
-// secret-driver test for the ConfigMap-backed deployment shape. Both
-// annotations land when both args are non-empty.
+// secret-driver test for the ConfigMap-backed deployment shape.
 func TestWritePeriscopeInstallMetadata_ConfigMapDriver(t *testing.T) {
 	cs := fake.NewSimpleClientset(&corev1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{
@@ -108,7 +106,7 @@ func TestWritePeriscopeInstallMetadata_NoOpOnEmpty(t *testing.T) {
 	c := metaCluster(t, "secret")
 
 	patchCount := 0
-	cs.Fake.PrependReactor("patch", "secrets", func(_ clienttesting.Action) (bool, runtime.Object, error) {
+	cs.PrependReactor("patch", "secrets", func(_ clienttesting.Action) (bool, runtime.Object, error) {
 		patchCount++
 		return false, nil, nil
 	})
@@ -153,9 +151,7 @@ func TestReadPeriscopeInstallMetadata_HappyPath(t *testing.T) {
 }
 
 // TestReadPeriscopeInstallMetadata_NotFoundReturnsEmpty confirms a
-// missing storage Secret returns ("", "", nil) — the common case for
-// freshly-installed releases that the read happens against before
-// any annotation has been written.
+// missing storage Secret returns ("", "", nil).
 func TestReadPeriscopeInstallMetadata_NotFoundReturnsEmpty(t *testing.T) {
 	cs := fake.NewSimpleClientset()
 	withFakeClient(t, cs)
@@ -173,8 +169,8 @@ func TestReadPeriscopeInstallMetadata_NotFoundReturnsEmpty(t *testing.T) {
 }
 
 // TestReadPeriscopeInstallMetadata_NoAnnotationsReturnsEmpty covers
-// the common case for releases NOT installed via Periscope: the
-// storage Secret exists but has no Periscope annotations on it.
+// releases NOT installed via Periscope: the storage Secret exists but
+// has no Periscope annotations on it.
 func TestReadPeriscopeInstallMetadata_NoAnnotationsReturnsEmpty(t *testing.T) {
 	cs := fake.NewSimpleClientset(&corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
@@ -198,10 +194,9 @@ func TestReadPeriscopeInstallMetadata_NoAnnotationsReturnsEmpty(t *testing.T) {
 
 // TestReadPeriscopeInstallMetadata_ReturnsRealError ensures non-NotFound
 // errors (e.g., 403 RBAC denial) are surfaced rather than swallowed.
-// The caller (GetHelmRelease) decides whether to log + continue.
 func TestReadPeriscopeInstallMetadata_ReturnsRealError(t *testing.T) {
 	cs := fake.NewSimpleClientset()
-	cs.Fake.PrependReactor("get", "secrets", func(_ clienttesting.Action) (bool, runtime.Object, error) {
+	cs.PrependReactor("get", "secrets", func(_ clienttesting.Action) (bool, runtime.Object, error) {
 		return true, nil, apierrors.NewForbidden(
 			schema.GroupResource{Group: "", Resource: "secrets"},
 			"sh.helm.release.v1.web.v1",
