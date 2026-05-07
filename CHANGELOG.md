@@ -13,6 +13,36 @@ tag.
 
 ## [Unreleased]
 
+### Added
+
+- Schema-aware form editor for ConfigMap, Secret, Service, and
+  Ingress (#116, supersedes #130). The detail-pane YAML tab on these
+  four kinds now renders a structured form by default, driven by the
+  apiserver's OpenAPI v3 schema filtered through per-kind allowlists
+  that hide noise (status, managedFields, creationTimestamp, etc.).
+  Operators toggle to a Monaco YAML view via a header switch that
+  persists per-user in localStorage; switching modes with unsaved
+  edits prompts a confirm-discard. metadata.name, metadata.namespace,
+  and Service spec.clusterIP render read-only in edit mode (immutable
+  on update). Secret data values are decoded to plaintext for editing
+  with a "show raw base64" toggle, and the apply payload re-encodes
+  to base64 so AWS / apiserver receives the canonical wire shape.
+  Apply flows through the same SSA pipeline as the YAML editor; on
+  409 conflict the form-mode banner directs the operator to YAML for
+  the per-field conflict-resolution view.
+  
+  Internal: extracts the JSON Schema → React form engine (originally
+  built for Helm in #109) into a reusable `web/src/lib/schemaForm/`
+  library with K8s-specific extensions (`resolveRef`, `allowKvMap`,
+  `allowArrayOfObjects`, `createOnlyPaths`). The Helm install /
+  upgrade dialogs and the EKS add-on install / upgrade dialogs now
+  share the same renderer; their existing form/YAML toggle (#126),
+  controlled `mode` / `onModeChange` props (#128), comment-loss
+  banner, and YAML-stub auto-default behavior all consume the
+  shared `SchemaFormBridge` via the bridge's optional `banner`
+  slot. Soft-deprecates `web/src/lib/helmSchema.ts` to a re-export
+  shim — drop in v1.2.
+
 ## [1.0.4] - 2026-05-07
 
 ### Added
