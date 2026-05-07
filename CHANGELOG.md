@@ -13,7 +13,89 @@ tag.
 
 ## [Unreleased]
 
+## [1.0.4] - 2026-05-07
+
 ### Added
+
+- EKS add-on detail pane: configurationValues + Pod Identity, plus
+  state-stickiness fixes (#128). New `describe` / `config` tab strip
+  on the right-edge `AddonDetailPane` in installed mode. The `config`
+  tab renders the addon's stored `configurationValues` (the operator's
+  own overrides) in a read-only Monaco YAML viewer — the data was
+  already in the `AddonDetail` blob from AWS, but the pane never
+  rendered it, so operators had to open the Upgrade dialog just to
+  see what they previously set. Backend now exposes
+  `podIdentityAssociations` from the `DescribeAddon` response (was
+  being dropped on the floor in the SDK mapper); the describe tab
+  surfaces Pod Identity ARNs under a dedicated section, with a
+  "No IAM identity attached — addon runs with the cluster's
+  node-instance role" fallback when both IRSA and Pod Identity are
+  absent. State-stickiness fixes from rc-2 testing: stale-selection
+  guard clears the pane when the underlying row vanishes from the
+  addons / catalog list (delete settled, refetch returned a smaller
+  set — was sticking on "Failed to load detail" before); YAML stub
+  re-seeds on schema change only when the buffer matches the
+  previously-seeded stub (preserves operator edits across version
+  pick); explicit Form/YAML mode is preserved across version change
+  via lifted dialog-level state. No new IAM action — Pod Identity
+  is part of the existing `eks:DescribeAddon` response.
+
+- EKS add-on dialog polish (#127). `Upgrade to` button on the pane's
+  version-history rows now only renders for versions strictly newer
+  than installed — the original implementation offered downgrades by
+  reflex, which carry CRD / IAM / schema risk that one-click obscures
+  (downgrade path stays available via the kebab → Upgrade modal,
+  where the deliberate older-eksbuild pick is visible). Generated
+  commented YAML stub seeds the install / upgrade dialog editor
+  when an addon has no `configurationValues` yet, so YAML mode is
+  discoverable for `$ref` / `allOf`-heavy schemas — `aws-ebs-csi-driver`
+  no longer opens to a blank textarea. Monaco container height fix:
+  YAML wrappers now use fixed `h-[420px]` / `h-[460px]` instead of
+  `min-h-` + `flex-1`, since `min-height` alone is indefinite for
+  percentage resolution and Monaco's `h-full` container needs a
+  definite-height parent — without this the editor rendered as a
+  silent grey rectangle.
+
+- Right-edge detail pane + form/yaml toggle for EKS add-ons (#126).
+  Replaces the original inline-row-expand on `AddOnsPage` and
+  `EKSAddOnsCatalogPage` with a `SplitPane` + new `AddonDetailPane`,
+  matching the pattern every other resource page (pods / deps /
+  configmaps / secrets / RBAC) already uses. The pane scrolls
+  independently of the page (so the version-history table no longer
+  pushes the ARN below the fold) and width persists under the shared
+  `periscope.detailWidth.v4` storage key — operator's chosen pane
+  width travels across every resource page in the app. Both installed
+  rows (Upgrade / Delete) and available catalog rows (Install) open
+  the pane on click; the row's primary action button stops
+  propagation so the modal-direct path still works. New form/yaml
+  toggle on `HelmValuesEditor` lets operators escape to raw YAML
+  when a chart's `values.schema.json` contains `$ref` / `allOf` /
+  `anyOf` / arrays-of-objects (auto-defaults to YAML when the schema
+  has any required-but-unrenderable field). Version-history rows in
+  the pane are clickable to open the upgrade dialog with that version
+  pre-selected; new `compatible with k8s [X ▼]` dropdown above the
+  table answers "which add-on version supports the next k8s minor?"
+  inline (the question raised by the row's "blocks next k8s minor"
+  warning chip).
+
+- EKS managed add-ons read-only introspection surface (#122,
+  closing issue #117). New `Add-ons` sidebar entry under EKS opens
+  a table of installed managed add-ons with health (●/▲/✕), installed
+  version, latest available, k8s compatibility window, and status.
+  The `blocks next k8s minor` chip on each row warns when no compatible
+  addon version exists for the cluster's next minor — feeds the
+  upgrade-readiness story alongside #97 / #113. New endpoints
+  `GET /api/clusters/{c}/eks/addons` (list) and
+  `GET /api/clusters/{c}/eks/addons/{name}` (detail) wire
+  `eks:ListAddons` + `eks:DescribeAddon` (addon-scoped resource
+  ARN — see `docs/setup/deploy.md` §4.1 for the policy split) plus
+  `eks:DescribeAddonVersions`. Two-tier server-side cache: per-cluster
+  1h, plus a shared `(addonName, k8sVersion)` 6h sticky-error catalog
+  so a fleet of N 1.31 clusters hits AWS once per cache window.
+  Status-aware refetch in `useAddons` polls every 4s while any addon
+  is in `CREATING` / `UPDATING` / `DELETING`, off otherwise. Read-only
+  in this PR — install / catalog browse / upgrade / delete actions
+  ship in #119.
 
 - EKS add-on upgrade + delete actions (#119, PR-3 of three,
   closing the issue). New `PUT /api/clusters/{c}/eks/addons/{name}`
