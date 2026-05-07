@@ -108,18 +108,18 @@ function FieldRow({ descriptor, values, issues, onChange }: FieldRowProps) {
 
   if (descriptor.type === "unsupported") {
     return (
-      <div className="rounded-sm border border-yellow/40 bg-yellow/5 px-3 py-2">
+      <div className="rounded-sm border border-border bg-surface px-3 py-2">
         <div className="flex items-baseline justify-between gap-3">
           <span className="font-mono text-[12px] text-ink">
             {descriptor.path.join(".")}
-            {descriptor.required ? " *" : ""}
+            {descriptor.required ? <span className="text-red"> *</span> : null}
           </span>
-          <span className="font-mono text-[10.5px] uppercase tracking-[0.12em] text-yellow">
-            yaml only
+          <span className="font-mono text-[10.5px] uppercase tracking-[0.12em] text-ink-faint">
+            edit in yaml mode
           </span>
         </div>
         <p className="mt-1 text-[12px] text-ink-muted">
-          {descriptor.unsupportedReason}
+          {descriptor.unsupportedReason} — toggle to YAML above to set this field.
         </p>
       </div>
     );

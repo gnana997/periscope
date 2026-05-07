@@ -106,6 +106,29 @@ export function buildFieldDescriptors(schema: JSONSchema): FieldDescriptor[] {
   return walkObject(schema, []);
 }
 
+/**
+ * True when the schema contains at least one required field that the
+ * form can't render (array of objects, $ref, allOf/anyOf/oneOf,
+ * patternProperties — anything that ends up as `type: "unsupported"`).
+ *
+ * The editor uses this to pick the initial mode: if there's a
+ * required-but-unrenderable field, defaulting to form mode would
+ * prevent the operator from filling in a value the install will
+ * reject. Default to YAML mode in that case so they can edit
+ * everything in one place.
+ */
+export function hasRequiredUnsupportedField(schema: JSONSchema): boolean {
+  return buildFieldDescriptors(schema).some(walkRequiredUnsupported);
+}
+
+function walkRequiredUnsupported(d: FieldDescriptor): boolean {
+  if (d.type === "unsupported" && d.required) return true;
+  if (d.type === "object" && d.children) {
+    return d.children.some(walkRequiredUnsupported);
+  }
+  return false;
+}
+
 function walkObject(schema: JSONSchema, path: string[]): FieldDescriptor[] {
   const props = schema.properties ?? {};
   const required = new Set(schema.required ?? []);
