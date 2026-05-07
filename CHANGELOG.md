@@ -15,6 +15,34 @@ tag.
 
 ### Added
 
+- Schema-aware form editor for ConfigMap, Secret, Service, and
+  Ingress (#116). Clicking **edit** on one of these four kinds now
+  opens a structured form view by default, with metadata, key/value
+  editors for `data` / `selector` / `labels` / `annotations`, and
+  table editors for `Service.spec.ports`, `Ingress.spec.rules`,
+  and `Ingress.spec.tls`. The Secret form base64-decodes `data` for
+  editing and re-encodes on apply (with a "show raw base64" toggle
+  for audit). A **[form | yaml]** toggle in the header switches to
+  the existing Monaco editor; the choice persists per user via
+  `localStorage["periscope.editor.preferred"]`. The JSON Schema →
+  React form engine introduced in PR #109 was lifted out of
+  `lib/helmSchema.ts` into `lib/schemaForm/` and extended with
+  OpenAPI v3 `$ref` resolution, a key/value-map widget, and an
+  array-of-objects widget so the same renderer drives Helm chart
+  values and K8s native kinds. Per-kind allowlists hide noise like
+  `status`, `managedFields`, `creationTimestamp`, and `uid` from
+  the form; `metadata.name` / `metadata.namespace` /
+  `Service.spec.clusterIP` render read-only in edit mode (immutable
+  after create). Apply still flows through the same SSA pipeline as
+  the YAML editor — SelfSubjectAccessReview pre-flight, audit log,
+  field-manager `periscope-spa`. Form mode uses a thinner submit
+  pipeline than the YAML editor: `409` field-manager conflicts
+  surface as a banner that links operators to YAML mode for the
+  per-field `ConflictResolutionView`. Workloads (Deployment,
+  StatefulSet, DaemonSet, Job, CronJob), Pods, NetworkPolicy, HPA,
+  PDB, PVC, ServiceAccount, Role/RoleBinding, and CRDs remain
+  YAML-only. Operator walkthrough: `docs/usage/form-editor.md`.
+
 - Helm install-ref pre-fill on the upgrade dialog (#76 follow-up). On
   successful install / upgrade actions, Periscope patches the helm
   release storage Secret/ConfigMap with two annotations —

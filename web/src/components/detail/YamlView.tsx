@@ -1,11 +1,12 @@
 // YamlView — dispatcher for the YAML tab body.
 //
-// Two rendering paths, derived from URL params + RBAC:
+// Three rendering paths, derived from URL params + RBAC:
 //
-//   ?edit=1  + canEdit  + identifiable source → <YamlEditor>     (inline editor)
-//   default                                   → <YamlReadView>   (Monaco read)
+//   ?edit=1 + canEdit + ConfigMap/Secret/Service/Ingress → <KindEditRouter>
+//   ?edit=1 + canEdit + other identifiable source        → <YamlEditor>
+//   default                                              → <YamlReadView>
 //
-// Both children consume the same useEditorYaml cache key (segregated
+// All children consume the same useEditorYaml cache key (segregated
 // per source — built-ins keep `["yaml", ...]`, CRs use `["yaml-cr",
 // ...]`), so toggling between modes never re-fetches. `resource` is
 // derived from `gvrkFromSource(source)`. `canEdit` comes from
@@ -19,6 +20,7 @@ import {
   sourceToResourceRef,
   type EditorSource,
 } from "../../lib/customResources";
+import { kindFromYamlKind } from "../edit/kindFromYamlKind";
 import { DetailLoading } from "./states";
 
 const YamlReadView = lazy(() =>
@@ -27,6 +29,10 @@ const YamlReadView = lazy(() =>
 
 const YamlEditor = lazy(() =>
   import("./yaml").then((m) => ({ default: m.YamlEditor })),
+);
+
+const KindEditRouter = lazy(() =>
+  import("../edit/KindEditRouter").then((m) => ({ default: m.KindEditRouter })),
 );
 
 interface YamlViewProps {
@@ -55,6 +61,20 @@ export function YamlView({ cluster, source, ns, name }: YamlViewProps) {
   });
 
   if (wantEdit && canEdit.allowed) {
+    const supportedKind =
+      source.kind === "builtin" ? kindFromYamlKind(source.yamlKind) : undefined;
+    if (supportedKind) {
+      return (
+        <Suspense fallback={<DetailLoading label="loading editor…" />}>
+          <KindEditRouter
+            cluster={cluster}
+            source={source}
+            resource={resource}
+            kind={supportedKind}
+          />
+        </Suspense>
+      );
+    }
     return (
       <Suspense fallback={<DetailLoading label="loading editor…" />}>
         <YamlEditor cluster={cluster} source={source} resource={resource} />
