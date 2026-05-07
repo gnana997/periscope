@@ -22,6 +22,7 @@
 
 import { useMemo, useState } from "react";
 import { useAddon } from "../../hooks/useAddons";
+import { compareAddonVersions } from "../../lib/addonInstall";
 import { cn } from "../../lib/cn";
 import type { AddonVersionEntry } from "../../lib/types";
 
@@ -227,7 +228,7 @@ function VersionHistory({
                 <VersionRow
                   key={v.version}
                   version={v}
-                  isInstalled={v.version === installedVersion}
+                  installedVersion={installedVersion}
                   onUpgradeToVersion={onUpgradeToVersion}
                 />
               ))}
@@ -241,18 +242,26 @@ function VersionHistory({
 
 function VersionRow({
   version,
-  isInstalled,
+  installedVersion,
   onUpgradeToVersion,
 }: {
   version: AddonVersionEntry;
-  isInstalled: boolean;
+  installedVersion: string | null;
   onUpgradeToVersion: ((version: string) => void) | undefined;
 }) {
-  // Clickable when the operator has an upgrade affordance AND this
-  // row isn't the current install. AWS rejects "upgrade to current",
-  // so we hide the affordance rather than letting the operator hit
-  // the wall in the dialog.
-  const clickable = Boolean(onUpgradeToVersion) && !isInstalled;
+  const isInstalled = version.version === installedVersion;
+  // Clickable when (a) the operator has an upgrade affordance,
+  // (b) this row isn't the current install (AWS rejects upgrade
+  // to current), AND (c) this row's version is strictly newer
+  // than installed. We deliberately don't surface a one-click
+  // affordance for downgrades — that path stays available via the
+  // kebab → Upgrade modal, which forces the operator through a
+  // dialog where the deliberate "older eksbuild" choice is visible.
+  // Downgrades carry CRD/IAM/schema risk that one-click obscures.
+  const isNewer =
+    !!installedVersion &&
+    compareAddonVersions(version.version, installedVersion) > 0;
+  const clickable = Boolean(onUpgradeToVersion) && !isInstalled && isNewer;
   const cta = clickable ? (
     <button
       type="button"
