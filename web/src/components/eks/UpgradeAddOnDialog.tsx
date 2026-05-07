@@ -53,6 +53,13 @@ interface UpgradeAddOnDialogProps {
   /** Cluster's current K8s version. Filters version list to
    *  compatible entries. */
   kubernetesVersion?: string;
+  /** When set, the dialog opens with this version pre-selected
+   *  instead of the AWS-recommended default. Wired by the
+   *  detail-pane's clickable version-history rows so an operator
+   *  can pick a specific target without a second pass through the
+   *  dropdown. Falls back to pickUpgradeDefault when the requested
+   *  version isn't actually a valid upgrade target. */
+  initialVersion?: string;
 }
 
 type ResolveConflicts = "NONE" | "OVERWRITE" | "PRESERVE";
@@ -64,6 +71,7 @@ export function UpgradeAddOnDialog({
   catalogAddon,
   detail,
   kubernetesVersion,
+  initialVersion,
 }: UpgradeAddOnDialogProps) {
   const labelId = "upgrade-addon-dialog-title";
 
@@ -87,12 +95,20 @@ export function UpgradeAddOnDialog({
 
   useEffect(() => {
     if (!open || !catalogAddon || !detail) return;
+    // Honor initialVersion if it's actually one of the valid upgrade
+    // targets — otherwise fall back to the AWS-recommended default.
+    // The pane only proposes versions from the same list, so the
+    // fallback path is mostly a guard against stale clicks.
+    const requested =
+      initialVersion && targets.some((t) => t.version === initialVersion)
+        ? initialVersion
+        : pickUpgradeDefault(targets);
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    setVersion(pickUpgradeDefault(targets));
+    setVersion(requested);
     setValuesYaml(detail.configurationValues ?? "");
     setServiceAccountRoleArn(detail.serviceAccountRoleArn ?? "");
     setResolveConflicts("PRESERVE");
-  }, [open, catalogAddon, detail, targets]);
+  }, [open, catalogAddon, detail, targets, initialVersion]);
 
   const schemaQuery = useAddonConfigurationSchema(
     cluster,

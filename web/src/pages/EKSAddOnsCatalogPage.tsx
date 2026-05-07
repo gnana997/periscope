@@ -51,6 +51,12 @@ export function EKSAddOnsCatalogPage({ cluster }: { cluster: string }) {
   // rows. Same dialogs as AddOnsPage so the action UX is identical
   // across both surfaces.
   const [upgradeTarget, setUpgradeTarget] = useState<CatalogAddon | null>(null);
+  // Set when the operator clicks a row in the detail-pane's
+  // version-history table; threads the chosen version to
+  // UpgradeAddOnDialog as the initial selection.
+  const [upgradeInitialVersion, setUpgradeInitialVersion] = useState<
+    string | null
+  >(null);
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
   // Selected row for the detail pane. Stores the addon name; the
   // pane resolves it back to a CatalogAddon at render time so we
@@ -169,7 +175,14 @@ export function EKSAddOnsCatalogPage({ cluster }: { cluster: string }) {
       kubernetesVersion={catalog.data?.kubernetesVersion}
       onClose={() => setSelectedName(null)}
       onInstall={() => setInstallTarget(selectedRow)}
-      onUpgrade={() => setUpgradeTarget(selectedRow)}
+      onUpgrade={() => {
+        setUpgradeInitialVersion(null);
+        setUpgradeTarget(selectedRow);
+      }}
+      onUpgradeToVersion={(v) => {
+        setUpgradeInitialVersion(v);
+        setUpgradeTarget(selectedRow);
+      }}
       onDelete={() => setDeleteTarget(selectedRow.name)}
       actionsDisabled={selectedTransient}
     />
@@ -284,11 +297,15 @@ export function EKSAddOnsCatalogPage({ cluster }: { cluster: string }) {
       />
       <UpgradeAddOnDialog
         open={upgradeTarget !== null}
-        onClose={() => setUpgradeTarget(null)}
+        onClose={() => {
+          setUpgradeTarget(null);
+          setUpgradeInitialVersion(null);
+        }}
         cluster={cluster}
         catalogAddon={upgradeTarget}
         detail={upgradeDetail.data ?? null}
         kubernetesVersion={catalog.data?.kubernetesVersion}
+        initialVersion={upgradeInitialVersion ?? undefined}
       />
       <DeleteAddOnModal
         open={deleteTarget !== null}

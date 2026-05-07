@@ -37,6 +37,13 @@ export function AddOnsPage({ cluster }: { cluster: string }) {
   // null = no dialog open. Upgrade needs (catalogAddon + detail);
   // delete needs only the name.
   const [upgradeTarget, setUpgradeTarget] = useState<string | null>(null);
+  // Optional pre-selected upgrade version, set when the operator
+  // clicks a row in the detail-pane's version-history table.
+  // Cleared when the upgrade dialog closes so subsequent kebab
+  // opens fall back to the AWS-default selection.
+  const [upgradeInitialVersion, setUpgradeInitialVersion] = useState<
+    string | null
+  >(null);
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
   // Selected row for the detail pane. null = pane closed.
   const [selected, setSelected] = useState<string | null>(null);
@@ -130,7 +137,14 @@ export function AddOnsPage({ cluster }: { cluster: string }) {
         catalog.data?.kubernetesVersion ?? data?.clusterKubernetesVersion
       }
       onClose={() => setSelected(null)}
-      onUpgrade={() => setUpgradeTarget(selected)}
+      onUpgrade={() => {
+        setUpgradeInitialVersion(null);
+        setUpgradeTarget(selected);
+      }}
+      onUpgradeToVersion={(v) => {
+        setUpgradeInitialVersion(v);
+        setUpgradeTarget(selected);
+      }}
       onDelete={() => setDeleteTarget(selected)}
       actionsDisabled={selectedTransient}
     />
@@ -208,7 +222,10 @@ export function AddOnsPage({ cluster }: { cluster: string }) {
 
       <UpgradeAddOnDialog
         open={upgradeTarget !== null}
-        onClose={() => setUpgradeTarget(null)}
+        onClose={() => {
+          setUpgradeTarget(null);
+          setUpgradeInitialVersion(null);
+        }}
         cluster={cluster}
         catalogAddon={
           upgradeTarget ? catalogByName.get(upgradeTarget) ?? null : null
@@ -217,6 +234,7 @@ export function AddOnsPage({ cluster }: { cluster: string }) {
         kubernetesVersion={
           catalog.data?.kubernetesVersion ?? data?.clusterKubernetesVersion
         }
+        initialVersion={upgradeInitialVersion ?? undefined}
       />
       <DeleteAddOnModal
         open={deleteTarget !== null}

@@ -31,6 +31,11 @@ interface AddonDetailPaneProps {
   onInstall?: () => void;
   onUpgrade?: () => void;
   onDelete?: () => void;
+  /** Variant of onUpgrade triggered from a clickable version-history
+   *  row — opens the upgrade dialog with the chosen version
+   *  pre-selected. Same modal, just bypasses the AWS-default
+   *  selection. Wired only when onUpgrade is also wired. */
+  onUpgradeToVersion?: (version: string) => void;
   /** True while AWS is mid-transition (CREATING/UPDATING/DELETING).
    *  Disables Upgrade/Delete; matches the kebab-disabled rule. */
   actionsDisabled?: boolean;
@@ -44,6 +49,7 @@ export function AddonDetailPane({
   onInstall,
   onUpgrade,
   onDelete,
+  onUpgradeToVersion,
   actionsDisabled,
 }: AddonDetailPaneProps) {
   const name =
@@ -85,7 +91,14 @@ export function AddonDetailPane({
 
       <div className="flex-1 overflow-y-auto px-4 py-3">
         {selection.kind === "installed" ? (
-          <AddonDetailBody cluster={cluster} name={selection.name} />
+          <AddonDetailBody
+            cluster={cluster}
+            name={selection.name}
+            clusterK8sVersion={kubernetesVersion}
+            onUpgradeToVersion={
+              actionsDisabled ? undefined : onUpgradeToVersion
+            }
+          />
         ) : (
           <AvailableBody
             catalog={selection.catalog}

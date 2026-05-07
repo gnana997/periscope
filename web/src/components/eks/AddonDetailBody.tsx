@@ -1,24 +1,52 @@
-import { useAddon } from "../../hooks/useAddons";
-import { cn } from "../../lib/cn";
-
 // AddonDetailBody — body of the installed-add-on detail surface.
 // Rendered inside AddonDetailPane (right-edge SplitPane). Held in
 // its own file so the next EKS surface that wants the same
 // "Field / Section" atoms can import them from one place rather
 // than re-deriving the layout.
 //
-// The Field / FieldGrid / Section primitives below are also exported
-// because they're the SPA's house style for "row of label+value
-// boxes" and the next EKS detail surface (e.g. addon-policy review)
-// will want them.
+// The version-history block deserves its own note:
+//
+//   - Rows are CLICKABLE — clicking one opens the upgrade dialog
+//     with that version pre-selected, so the operator can pick a
+//     specific target (including a downgrade or pinning to an
+//     older "eksbuild.N" of the same minor) without a second
+//     pass through the dialog's radio list.
+//   - The "compatible with k8s [X ▼]" dropdown above the table
+//     filters rows by which k8s version they support. Default is
+//     the cluster's current k8s. Switching to the next minor lets
+//     the operator answer the question raised by the row's
+//     "blocks next k8s minor" warning chip — IS there a newer
+//     addon version that would unblock the cluster upgrade?
+//   - The currently-installed row never gets the click affordance
+//     (upgrading "to current" is a noop and AWS rejects it).
+
+import { useMemo, useState } from "react";
+import { useAddon } from "../../hooks/useAddons";
+import { cn } from "../../lib/cn";
+import type { AddonVersionEntry } from "../../lib/types";
+
+const ANY_K8S = "__any__";
+
+interface AddonDetailBodyProps {
+  cluster: string;
+  name: string;
+  /** Cluster's current K8s version. Sets the initial dropdown
+   *  selection so "compatible with k8s [today's version]" is the
+   *  default view. */
+  clusterK8sVersion?: string;
+  /** Click handler for version-history rows. Pane wires this to
+   *  open the upgrade dialog with the chosen version. When omitted
+   *  rows render as plain (read-only) — useful for surfaces that
+   *  surface this body without an upgrade affordance. */
+  onUpgradeToVersion?: (version: string) => void;
+}
 
 export function AddonDetailBody({
   cluster,
   name,
-}: {
-  cluster: string;
-  name: string;
-}) {
+  clusterK8sVersion,
+  onUpgradeToVersion,
+}: AddonDetailBodyProps) {
   const { data, isLoading, isError, error } = useAddon(cluster, name);
   if (isLoading) {
     return <p className="text-[12px] italic text-ink-faint">Loading…</p>;
@@ -70,48 +98,12 @@ export function AddonDetailBody({
       )}
 
       {data.availableVersions && data.availableVersions.length > 0 && (
-        <Section label="Version history">
-          <div className="overflow-hidden rounded-sm border border-border">
-            <table className="w-full text-[11.5px]">
-              <thead className="border-b border-border bg-surface text-[10px] uppercase tracking-[0.06em] text-ink-faint">
-                <tr>
-                  <th className="px-2 py-1 text-left">Version</th>
-                  <th className="px-2 py-1 text-left">Compatible k8s</th>
-                  <th className="px-2 py-1 text-left">Default</th>
-                </tr>
-              </thead>
-              <tbody>
-                {data.availableVersions.map((v) => {
-                  const isInstalled = v.version === data.version;
-                  return (
-                    <tr
-                      key={v.version}
-                      className={cn(
-                        "border-b border-border last:border-0",
-                        isInstalled && "bg-accent-soft/30",
-                      )}
-                    >
-                      <td className="px-2 py-1 font-mono">
-                        {v.version}
-                        {isInstalled && (
-                          <span className="ml-2 text-[10px] uppercase tracking-[0.06em] text-accent">
-                            installed
-                          </span>
-                        )}
-                      </td>
-                      <td className="px-2 py-1 font-mono text-ink-muted">
-                        {v.compatibleK8sVersions.join(", ") || "—"}
-                      </td>
-                      <td className="px-2 py-1 text-ink-muted">
-                        {v.defaultVersion ? "yes" : ""}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        </Section>
+        <VersionHistory
+          versions={data.availableVersions}
+          installedVersion={data.version ?? null}
+          clusterK8sVersion={clusterK8sVersion}
+          onUpgradeToVersion={onUpgradeToVersion}
+        />
       )}
 
       {(data.owner || data.publisher) && (
@@ -132,6 +124,188 @@ export function AddonDetailBody({
       )}
     </div>
   );
+}
+
+// ── Version-history block ─────────────────────────────────────────
+
+function VersionHistory({
+  versions,
+  installedVersion,
+  clusterK8sVersion,
+  onUpgradeToVersion,
+}: {
+  versions: AddonVersionEntry[];
+  installedVersion: string | null;
+  clusterK8sVersion: string | undefined;
+  onUpgradeToVersion: ((version: string) => void) | undefined;
+}) {
+  // Build the dropdown options: every k8s version that appears in
+  // any row's compatibleK8sVersions. Sorted descending so the
+  // newest minor is at the top.
+  const k8sOptions = useMemo(() => {
+    const s = new Set<string>();
+    for (const v of versions) {
+      for (const k of v.compatibleK8sVersions) s.add(k);
+    }
+    return Array.from(s).sort(compareK8sDesc);
+  }, [versions]);
+
+  // Default selection: cluster k8s if it's in the option list,
+  // otherwise the newest k8s the addon supports. ANY_K8S is the
+  // explicit "show all" escape hatch.
+  const [selectedK8s, setSelectedK8s] = useState<string>(() => {
+    if (clusterK8sVersion && k8sOptions.includes(clusterK8sVersion)) {
+      return clusterK8sVersion;
+    }
+    return k8sOptions[0] ?? ANY_K8S;
+  });
+
+  const filtered = useMemo(() => {
+    if (selectedK8s === ANY_K8S) return versions;
+    return versions.filter((v) =>
+      v.compatibleK8sVersions.includes(selectedK8s),
+    );
+  }, [versions, selectedK8s]);
+
+  const isClusterK8s = selectedK8s === clusterK8sVersion;
+
+  return (
+    <Section label="Version history">
+      <div className="mb-2 flex flex-wrap items-center gap-2 text-[11.5px]">
+        <label className="font-mono text-[10px] uppercase tracking-[0.08em] text-ink-faint">
+          compatible with k8s
+        </label>
+        <select
+          value={selectedK8s}
+          onChange={(e) => setSelectedK8s(e.target.value)}
+          className="rounded-sm border border-border bg-bg px-1.5 py-0.5 font-mono text-[11.5px]"
+        >
+          {k8sOptions.map((k) => (
+            <option key={k} value={k}>
+              {k}
+              {k === clusterK8sVersion ? "  (current)" : ""}
+            </option>
+          ))}
+          <option value={ANY_K8S}>any</option>
+        </select>
+        {!isClusterK8s && selectedK8s !== ANY_K8S && clusterK8sVersion && (
+          <button
+            type="button"
+            onClick={() => setSelectedK8s(clusterK8sVersion)}
+            className="font-mono text-[10.5px] uppercase tracking-[0.06em] text-accent hover:underline"
+          >
+            reset to {clusterK8sVersion}
+          </button>
+        )}
+      </div>
+
+      {filtered.length === 0 ? (
+        <div className="rounded-sm border border-border bg-surface px-3 py-2.5 text-[11.5px] text-ink-muted">
+          No add-on versions are compatible with k8s {selectedK8s}.
+          {clusterK8sVersion && selectedK8s !== clusterK8sVersion && (
+            <>
+              {" "}
+              This is what the &quot;blocks next k8s minor&quot; warning
+              flags — track AWS release notes for a future eksbuild
+              that adds {selectedK8s} compatibility.
+            </>
+          )}
+        </div>
+      ) : (
+        <div className="overflow-hidden rounded-sm border border-border">
+          <table className="w-full text-[11.5px]">
+            <thead className="border-b border-border bg-surface text-[10px] uppercase tracking-[0.06em] text-ink-faint">
+              <tr>
+                <th className="px-2 py-1 text-left">Version</th>
+                <th className="px-2 py-1 text-left">Compatible k8s</th>
+                <th className="px-2 py-1 text-left">Default</th>
+                <th className="px-2 py-1 text-right" />
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map((v) => (
+                <VersionRow
+                  key={v.version}
+                  version={v}
+                  isInstalled={v.version === installedVersion}
+                  onUpgradeToVersion={onUpgradeToVersion}
+                />
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </Section>
+  );
+}
+
+function VersionRow({
+  version,
+  isInstalled,
+  onUpgradeToVersion,
+}: {
+  version: AddonVersionEntry;
+  isInstalled: boolean;
+  onUpgradeToVersion: ((version: string) => void) | undefined;
+}) {
+  // Clickable when the operator has an upgrade affordance AND this
+  // row isn't the current install. AWS rejects "upgrade to current",
+  // so we hide the affordance rather than letting the operator hit
+  // the wall in the dialog.
+  const clickable = Boolean(onUpgradeToVersion) && !isInstalled;
+  const cta = clickable ? (
+    <button
+      type="button"
+      onClick={() => onUpgradeToVersion?.(version.version)}
+      className="rounded-sm border border-accent bg-accent-soft px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-[0.06em] text-accent hover:bg-accent/10"
+    >
+      upgrade to
+    </button>
+  ) : null;
+
+  const onRowClick = clickable
+    ? () => onUpgradeToVersion?.(version.version)
+    : undefined;
+
+  return (
+    <tr
+      className={cn(
+        "border-b border-border last:border-0",
+        isInstalled && "bg-accent-soft/30",
+        clickable && "cursor-pointer transition-colors hover:bg-surface-2",
+      )}
+      onClick={onRowClick}
+    >
+      <td className="px-2 py-1 font-mono">
+        {version.version}
+        {isInstalled && (
+          <span className="ml-2 text-[10px] uppercase tracking-[0.06em] text-accent">
+            installed
+          </span>
+        )}
+      </td>
+      <td className="px-2 py-1 font-mono text-ink-muted">
+        {version.compatibleK8sVersions.join(", ") || "—"}
+      </td>
+      <td className="px-2 py-1 text-ink-muted">
+        {version.defaultVersion ? "yes" : ""}
+      </td>
+      <td className="px-2 py-1 text-right">{cta}</td>
+    </tr>
+  );
+}
+
+// Sort k8s minor versions in descending order. Strings like "1.31"
+// vs "1.7" need numeric-aware compare.
+function compareK8sDesc(a: string, b: string): number {
+  const pa = a.split(".").map(Number);
+  const pb = b.split(".").map(Number);
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const da = pa[i] ?? 0;
+    const db = pb[i] ?? 0;
+    if (da !== db) return db - da;
+  }
+  return 0;
 }
 
 // ── Layout primitives ──────────────────────────────────────────────
