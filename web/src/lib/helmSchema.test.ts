@@ -92,12 +92,16 @@ describe("buildFieldDescriptors", () => {
     expect(out[0].unsupportedReason).toMatch(/array of objects/i);
   });
 
-  it("flags $ref / allOf / anyOf / oneOf as unsupported", () => {
+  it("flags $ref / anyOf / oneOf as unsupported in the helm path", () => {
+    // Helm path uses default WalkOptions (no resolveRef, no
+    // allowOneOfDiscriminator). With those off, $ref / anyOf /
+    // oneOf still render as unsupported. allOf is now flattened
+    // by the merger inside derefIfNeeded — verified separately
+    // below.
     const schema: JSONSchema = {
       type: "object",
       properties: {
         a: { $ref: "#/definitions/Thing" },
-        b: { allOf: [{ type: "string" }] },
         c: { anyOf: [{ type: "string" }, { type: "number" }] },
         d: { oneOf: [{ type: "string" }] },
       },
@@ -106,6 +110,30 @@ describe("buildFieldDescriptors", () => {
     for (const f of out) {
       expect(f.type).toBe("unsupported");
     }
+  });
+
+  it("merges allOf into a flat shape (helm path benefits too — #132)", () => {
+    const schema: JSONSchema = {
+      type: "object",
+      properties: {
+        merged: { allOf: [{ type: "string", description: "from-allOf" }] },
+      },
+    };
+    const out = buildFieldDescriptors(schema);
+    const merged = out.find((d) => d.path.join(".") === "merged");
+    expect(merged?.type).toBe("string");
+    expect(merged?.description).toBe("from-allOf");
+  });
+
+  it("allOf with conflicting types still surfaces as unsupported", () => {
+    const schema: JSONSchema = {
+      type: "object",
+      properties: {
+        bad: { type: "object", allOf: [{ type: "string" }] },
+      },
+    };
+    const out = buildFieldDescriptors(schema);
+    expect(out[0].type).toBe("unsupported");
   });
 
   it("normalizes ['string', 'null'] nullable types", () => {

@@ -7,7 +7,8 @@
 // behavior so the existing 18 helmSchema vitest cases pass
 // unchanged.
 
-import type { FieldDescriptor, JSONSchema } from "./types";
+import { mergeAllOf } from "./allOfMerger";
+import type { DiscriminatorBranch, FieldDescriptor, JSONSchema } from "./types";
 
 export interface WalkOptions {
   /** Resolve a `$ref` string (e.g. "#/components/schemas/...") to a
@@ -21,6 +22,12 @@ export interface WalkOptions {
   /** Emit `array-of-objects` descriptors instead of the unsupported
    *  fallback. The widget renders a table of fieldsets per row. */
   allowArrayOfObjects?: boolean;
+  /** Emit `discriminator` descriptors for `oneOf` shapes. The
+   *  renderer shows a branch picker that lets the operator choose
+   *  between N sub-schemas. K8s + EKS add-ons + cert-manager-style
+   *  CRDs benefit; Helm chart authors typically don't expect a
+   *  discriminator UI, so the Helm path leaves this off. */
+  allowOneOfDiscriminator?: boolean;
   /** Dotted-path strings (e.g. `metadata.name`) the walker should
    *  flag with `editable: "create-only"`. Surfaced by the renderer
    *  as read-only inputs in edit mode. */
@@ -119,18 +126,49 @@ function walkField(
     ...(createOnly ? { editable: "create-only" as const } : {}),
   };
 
-  // Reject the "we don't render this" cases up front.
+  // oneOf detection — emit a discriminator descriptor instead of
+  // unsupported. Two structural shapes:
+  //
+  //   Case A: property-level oneOf (whole-value picker)
+  //     { oneOf: [Schema1, Schema2, ...] }
+  //   Case B: object-level oneOf with required-key branches
+  //     { type: object, properties: {...}, oneOf: [
+  //         {required: [foo]}, {required: [bar]}, ...
+  //       ] }
+  //
+  // Case B is the cert-manager Issuer style — common in K8s CRDs.
+  // The `discriminatorKey` lets the renderer detect the active
+  // branch via key-presence (fast path; no ajv-validate needed).
   if (
-    schema.allOf !== undefined ||
+    options.allowOneOfDiscriminator &&
+    Array.isArray(schema.oneOf) &&
+    schema.oneOf.length > 0
+  ) {
+    const branches = buildDiscriminatorBranches(schema, options, seen);
+    if (branches && branches.length > 0) {
+      return { ...base, type: "discriminator", branches };
+    }
+    // Fall through to unsupported when branch building fails (mixed
+    // shapes, unresolvable refs, etc.) so the operator gets the
+    // YAML-mode hint rather than a broken picker.
+  }
+
+  // Reject the remaining "we don't render this" cases. allOf is in
+  // this list because the merger leaves allOf in place when it
+  // can't merge cleanly (type conflict across entries) — in that
+  // case we surface as unsupported rather than render an empty
+  // object that hides the failure.
+  if (
     schema.anyOf !== undefined ||
     schema.oneOf !== undefined ||
+    schema.allOf !== undefined ||
     schema.patternProperties !== undefined
   ) {
     return {
       ...base,
       type: "unsupported",
       unsupportedReason:
-        "schema uses allOf / anyOf / oneOf / patternProperties — edit in YAML mode",
+        "schema uses anyOf / oneOf / allOf / patternProperties — edit in YAML mode",
     };
   }
   // A $ref that didn't resolve at the entry above means the resolver
@@ -251,22 +289,32 @@ function derefIfNeeded(
   options: WalkOptions,
   seen: Set<string>,
 ): JSONSchema | undefined {
-  if (!schema || typeof schema !== "object" || schema.$ref === undefined) return schema;
-  if (!options.resolveRef) return undefined;
-  const ref = schema.$ref;
-  if (seen.has(ref)) return undefined;
-  const resolved = options.resolveRef(ref);
-  if (!resolved) return undefined;
-  // Add to seen for the duration of this branch's walk.
-  seen.add(ref);
-  // If the resolved schema is itself a ref (chained), recurse.
-  const final = derefIfNeeded(resolved, options, seen);
-  // Note: we deliberately do NOT remove the ref from `seen` after
+  if (!schema || typeof schema !== "object") return schema;
+  // Resolve $ref first if present.
+  let current: JSONSchema | undefined = schema;
+  if (current.$ref !== undefined) {
+    if (!options.resolveRef) return undefined;
+    const ref = current.$ref;
+    if (seen.has(ref)) return undefined;
+    const resolved = options.resolveRef(ref);
+    if (!resolved) return undefined;
+    seen.add(ref);
+    current = derefIfNeeded(resolved, options, seen);
+    if (!current) return undefined;
+  }
+  // Then merge allOf (if any). The merger flattens layer by layer
+  // — nested allOf inside allOf entries get flattened recursively
+  // via the merger's own resolveEntry call. Result is a single
+  // unified schema the rest of the walker can read flat.
+  if (Array.isArray(current.allOf) && current.allOf.length > 0) {
+    current = mergeAllOf(current, { resolveRef: options.resolveRef, seen });
+  }
+  // Note: we deliberately do NOT remove refs from `seen` after
   // walking. Sibling fields in the same sub-tree never legitimately
   // resolve to the same recursive type without going through a
   // different parent first; allowing re-visits would let huge K8s
   // schemas blow up exponentially for no rendering benefit.
-  return final;
+  return current;
 }
 
 function isPrimitiveAdditionalProperties(ap: unknown): boolean {
@@ -285,4 +333,148 @@ function normalizeType(t: unknown): string {
     }
   }
   return "";
+}
+
+// ── Discriminator branch building ────────────────────────────────
+//
+// `oneOf` shows up in two structurally different shapes; this
+// helper detects which and builds the branches array the
+// renderer's DiscriminatorInput consumes.
+//
+// Shape A — property-level oneOf (whole-value picker):
+//   { oneOf: [SchemaA, SchemaB, SchemaC] }
+// Each entry is a complete sub-schema; the operator picks one and
+// the value of the field IS one of those shapes.
+//
+// Shape B — object-level oneOf with required-key branches:
+//   { type: object, properties: {a:{...}, b:{...}, c:{...}},
+//     oneOf: [{required: [a]}, {required: [b]}, {required: [c]}] }
+// The object has BASE properties + a oneOf saying "exactly one of
+// these property names must be set." Each branch is the property
+// schema corresponding to its single required key.
+
+function buildDiscriminatorBranches(
+  schema: JSONSchema,
+  options: WalkOptions,
+  parentSeen: Set<string>,
+): DiscriminatorBranch[] | undefined {
+  if (!Array.isArray(schema.oneOf) || schema.oneOf.length === 0) return undefined;
+
+  // Shape B: every branch is just `{required: [SINGLE_KEY]}` and
+  // the parent has properties whose names match each branch's key.
+  // Cert-manager Issuer / many CRDs use this style. Detect first
+  // because Shape A's "branch is a full schema" check is more
+  // permissive and would also match Shape B branches structurally
+  // (each branch IS a schema, just a tiny one).
+  if (schema.properties && schema.oneOf.every(isSingleRequiredKeyBranch)) {
+    const branches: DiscriminatorBranch[] = [];
+    for (const branch of schema.oneOf) {
+      const key = (branch.required as string[])[0];
+      const subSchema = schema.properties[key];
+      if (!subSchema) return undefined; // schema author error — bail
+      // Walk the sub-schema with path prefixed by the discriminator
+      // key so descendant setAtPath calls write to value[key][...].
+      const seen = new Set(parentSeen);
+      const descriptors = walkBranchSchema(subSchema, [key], options, seen);
+      branches.push({
+        label: branchLabelFor(subSchema, key),
+        description: subSchema.description,
+        schema: subSchema,
+        discriminatorKey: key,
+        descriptors,
+      });
+    }
+    return branches;
+  }
+
+  // Shape A: each entry is a full sub-schema (not just a required
+  // marker). Resolve any $refs and pre-walk the entry so the
+  // renderer can mount the chosen branch without touching the walker.
+  const branches: DiscriminatorBranch[] = [];
+  for (let i = 0; i < schema.oneOf.length; i++) {
+    const entry = schema.oneOf[i];
+    const seen = new Set(parentSeen);
+    const resolved = derefIfNeeded(entry, options, seen);
+    if (!resolved) {
+      // Unresolvable ref or recursive — bail rather than render a
+      // partial picker that drops branches silently.
+      return undefined;
+    }
+    // Walk with empty base path — Shape A's value IS the branch
+    // value (no extra wrapping key), so descendant paths are
+    // relative to the discriminator's value directly.
+    const descriptors = walkBranchSchema(resolved, [], options, seen);
+    branches.push({
+      label: branchLabelFor(resolved, undefined, i),
+      description: resolved.description,
+      schema: resolved,
+      descriptors,
+    });
+  }
+  return branches;
+}
+
+// Walk a branch schema starting at `basePath`. Object schemas
+// produce a property-list of descriptors (each rooted at
+// basePath + key). Primitive schemas produce a single descriptor
+// at basePath itself — covers cases like Service.spec.ports[].
+// targetPort which is `oneOf: [{type:string},{type:integer}]` and
+// each branch is a primitive.
+function walkBranchSchema(
+  schema: JSONSchema,
+  basePath: string[],
+  options: WalkOptions,
+  seen: Set<string>,
+): FieldDescriptor[] {
+  if (!schema || typeof schema !== "object") return [];
+  if (schema.type === "object" || schema.properties) {
+    const props = schema.properties ?? {};
+    const required = new Set(schema.required ?? []);
+    const out: FieldDescriptor[] = [];
+    for (const key of Object.keys(props)) {
+      out.push(walkField(props[key], [...basePath, key], required.has(key), options, seen));
+    }
+    return out;
+  }
+  // Primitive / array / unsupported branch — emit a single descriptor.
+  return [walkField(schema, basePath, false, options, seen)];
+}
+
+function isSingleRequiredKeyBranch(branch: unknown): branch is JSONSchema {
+  if (!branch || typeof branch !== "object") return false;
+  const b = branch as JSONSchema;
+  // The branch is "just a required marker" if it ONLY has `required`
+  // (not its own properties / type / etc.) AND that required array
+  // has exactly one entry.
+  if (!Array.isArray(b.required) || b.required.length !== 1) return false;
+  const interestingKeys = Object.keys(b).filter(
+    (k) => k !== "required" && k !== "description" && k !== "title",
+  );
+  return interestingKeys.length === 0;
+}
+
+function branchLabelFor(
+  sub: JSONSchema,
+  key?: string,
+  fallbackIdx?: number,
+): string {
+  // Title beats heuristics. CRD authors who set titles get readable
+  // pickers; everyone else falls through.
+  if (typeof sub.title === "string" && sub.title) return sub.title;
+  // Required-key style: the key IS the label (e.g. "selfSigned" /
+  // "ca" / "vault" for cert-manager Issuer.spec).
+  if (key) return key;
+  // Single-required key as a self-discriminator hint inside Shape A.
+  if (Array.isArray(sub.required) && sub.required.length === 1) {
+    return sub.required[0];
+  }
+  // Single-property object — use the property name.
+  if (sub.properties) {
+    const keys = Object.keys(sub.properties);
+    if (keys.length === 1) return keys[0];
+    if (keys.length > 0 && keys.length <= 3) return keys.join(" + ");
+  }
+  // Last resort. Operators editing CRDs with poorly-titled schemas
+  // see "option N" — imperfect but better than yaml-only.
+  return `option ${(fallbackIdx ?? 0) + 1}`;
 }

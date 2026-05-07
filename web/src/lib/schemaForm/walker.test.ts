@@ -308,3 +308,161 @@ describe("filterSchemaForKind", () => {
     );
   });
 });
+
+describe("walker — oneOf discriminator (#132)", () => {
+  // Property-level oneOf: value of the field IS one of these shapes
+  const sourceOneOf = {
+    type: "object",
+    properties: {
+      source: {
+        oneOf: [
+          {
+            type: "object",
+            title: "git",
+            required: ["repoURL"],
+            properties: { repoURL: { type: "string" }, ref: { type: "string" } },
+          },
+          {
+            type: "object",
+            title: "helm",
+            required: ["chart"],
+            properties: { chart: { type: "string" }, version: { type: "string" } },
+          },
+        ],
+      },
+    },
+  };
+
+  it("emits discriminator for property-level oneOf when allowOneOfDiscriminator is set", () => {
+    const ds = buildFieldDescriptors(sourceOneOf, { allowOneOfDiscriminator: true });
+    const source = ds.find((d) => d.path.join(".") === "source");
+    expect(source?.type).toBe("discriminator");
+    expect(source?.branches).toHaveLength(2);
+    expect(source?.branches?.[0].label).toBe("git");
+    expect(source?.branches?.[1].label).toBe("helm");
+    // Each branch carries pre-walked descriptors with paths relative
+    // to the discriminator's value (since Shape A — no discriminatorKey).
+    expect(source?.branches?.[0].descriptors[0].path).toEqual(["repoURL"]);
+    expect(source?.branches?.[1].descriptors[0].path).toEqual(["chart"]);
+  });
+
+  it("falls back to unsupported when allowOneOfDiscriminator is off (Helm path)", () => {
+    const ds = buildFieldDescriptors(sourceOneOf);
+    const source = ds.find((d) => d.path.join(".") === "source");
+    expect(source?.type).toBe("unsupported");
+  });
+
+  // Object-level oneOf with required-key branches (cert-manager style)
+  const issuerStyle = {
+    type: "object",
+    properties: {
+      spec: {
+        type: "object",
+        properties: {
+          selfSigned: { type: "object", properties: {} },
+          ca: {
+            type: "object",
+            properties: { secretName: { type: "string" } },
+            required: ["secretName"],
+          },
+          vault: {
+            type: "object",
+            properties: { server: { type: "string" }, path: { type: "string" } },
+            required: ["server", "path"],
+          },
+        },
+        oneOf: [
+          { required: ["selfSigned"] },
+          { required: ["ca"] },
+          { required: ["vault"] },
+        ],
+      },
+    },
+  };
+
+  it("emits discriminator for object-level oneOf with required-key branches", () => {
+    const ds = buildFieldDescriptors(issuerStyle, { allowOneOfDiscriminator: true });
+    const spec = ds.find((d) => d.path.join(".") === "spec");
+    expect(spec?.type).toBe("discriminator");
+    expect(spec?.branches).toHaveLength(3);
+    expect(spec?.branches?.map((b) => b.label)).toEqual(["selfSigned", "ca", "vault"]);
+    expect(spec?.branches?.map((b) => b.discriminatorKey)).toEqual([
+      "selfSigned",
+      "ca",
+      "vault",
+    ]);
+  });
+
+  it("Shape B branch descriptors have paths prefixed with the discriminator key", () => {
+    const ds = buildFieldDescriptors(issuerStyle, { allowOneOfDiscriminator: true });
+    const spec = ds.find((d) => d.path.join(".") === "spec");
+    const caBranch = spec?.branches?.[1];
+    expect(caBranch?.descriptors[0].path).toEqual(["ca", "secretName"]);
+    const vaultBranch = spec?.branches?.[2];
+    expect(vaultBranch?.descriptors.map((d) => d.path)).toEqual([
+      ["vault", "server"],
+      ["vault", "path"],
+    ]);
+  });
+
+  it("empty oneOf falls back to unsupported", () => {
+    const ds = buildFieldDescriptors(
+      { type: "object", properties: { x: { oneOf: [] } } },
+      { allowOneOfDiscriminator: true },
+    );
+    const x = ds.find((d) => d.path.join(".") === "x");
+    expect(x?.type).toBe("unsupported");
+  });
+});
+
+describe("walker — allOf merging (#132)", () => {
+  it("metadata: allOf:[{$ref: ObjectMeta}] flattens into a regular object", () => {
+    const definitions: Record<string, JSONSchema> = {
+      ObjectMeta: {
+        type: "object",
+        properties: {
+          name: { type: "string" },
+          namespace: { type: "string" },
+          labels: { type: "object", additionalProperties: { type: "string" } },
+        },
+      },
+    };
+    const schema: JSONSchema = {
+      type: "object",
+      properties: {
+        metadata: { allOf: [{ $ref: "#/components/schemas/ObjectMeta" }] },
+      },
+    };
+    const ds = buildFieldDescriptors(schema, {
+      resolveRef: (ref) =>
+        definitions[ref.replace("#/components/schemas/", "")],
+      allowKvMap: true,
+    });
+    const metadata = ds.find((d) => d.path.join(".") === "metadata");
+    // Was unsupported pre-merger; now renders as a regular object.
+    expect(metadata?.type).toBe("object");
+    expect(metadata?.children?.map((c) => c.path.join("."))).toEqual([
+      "metadata.name",
+      "metadata.namespace",
+      "metadata.labels",
+    ]);
+    // labels comes through as kv-map (additionalProperties of primitive type).
+    const labels = metadata?.children?.find((c) => c.path.join(".") === "metadata.labels");
+    expect(labels?.type).toBe("kv-map");
+  });
+
+  it("allOf type conflict still surfaces as unsupported", () => {
+    const schema: JSONSchema = {
+      type: "object",
+      properties: {
+        bad: {
+          type: "object",
+          allOf: [{ type: "string" }],
+        },
+      },
+    };
+    const ds = buildFieldDescriptors(schema);
+    const bad = ds.find((d) => d.path.join(".") === "bad");
+    expect(bad?.type).toBe("unsupported");
+  });
+});

@@ -6,6 +6,7 @@ export type {
   FieldDescriptor,
   FieldType,
   ValidationIssue,
+  DiscriminatorBranch,
 } from "./types";
 export type { WalkOptions } from "./walker";
 export type { SchemaFormMode, SchemaFormProps } from "./SchemaForm";
