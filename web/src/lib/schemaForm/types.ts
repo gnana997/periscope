@@ -85,6 +85,19 @@ export interface FieldDescriptor {
    *  between. The renderer recurses into the chosen branch's
    *  schema to render the sub-form. */
   branches?: DiscriminatorBranch[];
+  /** For type=discriminator (hybrid only): properties that live
+   *  alongside the branch keys in the discriminator's value object
+   *  and stay rendered regardless of which branch is selected.
+   *
+   *  Used by K8s schemas where a polymorphic field is mixed with
+   *  always-on configuration — e.g. `Probe` has handler branches
+   *  (httpGet/tcpSocket/exec/grpc) AND threshold knobs
+   *  (initialDelaySeconds, periodSeconds, etc.) that apply to any
+   *  handler. The renderer renders these as siblings of the branch
+   *  picker; switching branches preserves their values. Paths are
+   *  relative to the discriminator's value root (same convention as
+   *  Shape B branch descriptors). */
+  sharedChildren?: FieldDescriptor[];
   /** Constraints surfaced for inline validation hints. */
   pattern?: string;
   format?: string;

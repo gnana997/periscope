@@ -110,19 +110,29 @@ const KIND_SPECS: Record<SupportedKind, KindSpec> = {
     paths: ["spec.ingressClassName", "spec.rules", "spec.tls", "spec.defaultBackend"],
     createOnly: ["metadata.name", "metadata.namespace"],
   },
-  // Deployment — curated PodSpec subset. Deliberately excludes:
-  //   - volumes / volumeMounts (need K8s discriminator hint table —
-  //     volume types are sibling-encoded, not `oneOf`)
-  //   - probes (httpGet/tcpSocket/exec/grpc are sibling-encoded too)
-  //   - lifecycle hooks (same shape as probes)
-  //   - envFrom (configMapRef vs secretRef sibling-encoded)
-  //   - env[*].valueFrom (4-way sibling-encoded picker)
-  //   - securityContext (large, mostly admin concerns)
-  //   - affinity / topologySpreadConstraints (deeply nested wall)
-  //   - initContainers (would explode the form a second time)
+  // Deployment — curated PodSpec subset.
   //
-  // Operators needing those drop to YAML mode. Future work:
-  // discriminator hint table, then progressively re-enable.
+  // Sibling-encoded oneOfs that appear as PROPERTIES of a parent
+  // object (probes, lifecycle hooks, env.valueFrom) now render as
+  // proper discriminator pickers via the K8s hint table in
+  // `k8sDiscriminatorHints.ts` — re-enabled here.
+  //
+  // Still excluded:
+  //   - volumes[] / envFrom[]: hinted-type ITEMS of an array. The
+  //     walker's array branch deref's items inline and walks their
+  //     properties without re-checking the hint table on the row's
+  //     outer shape, so they'd render as array-of-objects with all
+  //     30 volume-type properties simultaneously editable. Needs an
+  //     `array-of-discriminators` descriptor type — separate
+  //     follow-up.
+  //   - securityContext: no oneOf, but a wide admin-leaning
+  //     surface. Drop to YAML.
+  //   - affinity / topologySpreadConstraints: deeply nested wall.
+  //     Needs a collapse / "advanced" UI affordance first.
+  //   - initContainers: would compound array-of-objects nesting.
+  //   - volumeMounts: works structurally (no hint needed) but is
+  //     paired with volumes — without volume editing, mounting
+  //     paths is half a feature. Re-enable together with volumes.
   //
   // spec.selector is create-only — the apiserver rejects Deployment
   // selector mutations after create.
@@ -152,6 +162,10 @@ const KIND_SPECS: Record<SupportedKind, KindSpec> = {
       "spec.template.spec.containers[*].ports",
       "spec.template.spec.containers[*].env",
       "spec.template.spec.containers[*].resources",
+      "spec.template.spec.containers[*].livenessProbe",
+      "spec.template.spec.containers[*].readinessProbe",
+      "spec.template.spec.containers[*].startupProbe",
+      "spec.template.spec.containers[*].lifecycle",
       "spec.template.spec.containers[*].terminationMessagePath",
       "spec.template.spec.containers[*].terminationMessagePolicy",
       "spec.template.spec.containers[*].tty",

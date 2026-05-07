@@ -582,27 +582,36 @@ function ArrayOfObjectsInput({
   );
 }
 
-// Discriminator picker — segmented branch buttons + a sub-form that
-// renders the chosen branch's descriptors. Branch switching is
-// destructive (operator's data under the previous branch gets wiped
-// because schemas across branches don't share property shapes —
-// trying to merge would produce ambiguous "is this branch fully
-// filled?" states). Confirm-then-wipe mirrors the form↔yaml toggle
-// pattern in KindEditRouter.
+// Discriminator picker — branch picker (segmented buttons or
+// <select> when there are many branches) + a sub-form for the
+// chosen branch + optional always-on shared children.
 //
-// Two shapes the descriptor can carry, set by the walker:
+// Three descriptor shapes the walker can produce:
 //
-//   Shape A (whole-value picker): branch.descriptors are paths
-//     relative to the discriminator's value. The branch's value
-//     IS the discriminator's value. Active-branch detection runs
-//     ajv-validate against each branch's schema (the first match
-//     wins).
+//   Shape A (whole-value picker): no discriminatorKey on branches.
+//     The branch's value IS the discriminator's value. Active-branch
+//     detection runs against each branch's required keys (first
+//     match wins).
 //
 //   Shape B (required-key discriminator): branch.discriminatorKey
 //     is set; the discriminator's value has shape
-//     `{[discriminatorKey]: subValue}`. Active-branch detection
-//     is fast-path: whichever branch's discriminatorKey is present
-//     in the value object is the active one.
+//     `{[discriminatorKey]: subValue}`. Active branch = whichever
+//     discriminatorKey is present in the value object.
+//
+//   Shape B + sharedChildren (hinted hybrid): same as Shape B, but
+//     `descriptor.sharedChildren` carries fields that live alongside
+//     the branch keys and are preserved across branch switches.
+//     K8s Probe (handler branches + threshold knobs) and Volume
+//     (volume-type branches + `name`) use this shape.
+//
+// Branch switching deletes the previous branch's discriminatorKey
+// from the value (so the apiserver gets a single-handler value) but
+// preserves shared keys. Shape A switching wipes the whole value
+// since branch shapes don't overlap.
+//
+// Picker style: ≤5 branches render as segmented buttons; more
+// (Volume has ~30) collapse to a <select> for usability.
+const SELECT_THRESHOLD = 5;
 function DiscriminatorInput({
   descriptor,
   value,
@@ -611,6 +620,7 @@ function DiscriminatorInput({
 }: Omit<InputProps, "id">) {
   const branches = descriptor.branches ?? [];
   if (branches.length === 0) return null;
+  const sharedChildren = descriptor.sharedChildren ?? [];
 
   const isObjectValue =
     value !== null && typeof value === "object" && !Array.isArray(value);
@@ -646,48 +656,85 @@ function DiscriminatorInput({
   }
 
   const activeBranch = active >= 0 ? branches[active] : null;
+  const isShapeB = branches[0]?.discriminatorKey !== undefined;
+  // For confirmation: Shape A wipes the whole value; Shape B/hybrid
+  // only wipes the previous branch's key, so check whether THAT key
+  // has a non-empty sub-value (sharedChildren stay either way).
+  const previousBranchKey = active >= 0 ? branches[active].discriminatorKey : undefined;
+  const previousBranchHasValue =
+    previousBranchKey !== undefined &&
+    valueObj[previousBranchKey] !== undefined &&
+    !isEmptyContainer(valueObj[previousBranchKey]);
   const valueIsEmpty = !value || (isObjectValue && Object.keys(valueObj).length === 0);
 
   const switchBranch = (idx: number) => {
     if (idx === active) return;
-    if (active >= 0 && !valueIsEmpty) {
-      const ok = window.confirm(
-        `Switching to "${branches[idx].label}" will discard the values you set under "${branches[active].label}". Continue?`,
-      );
-      if (!ok) return;
+    if (active >= 0) {
+      const dirty = isShapeB ? previousBranchHasValue : !valueIsEmpty;
+      if (dirty) {
+        const ok = window.confirm(
+          `Switching to "${branches[idx].label}" will discard the values you set under "${branches[active].label}". Continue?`,
+        );
+        if (!ok) return;
+      }
     }
-    // Seed an empty value of the new branch's shape. Shape B needs
-    // {[discriminatorKey]: {}}; Shape A needs whatever shape the
-    // branch schema describes — empty object covers most cases
-    // since branches with primitive value (Service.targetPort etc.)
-    // expect the operator to type the primitive directly.
-    const next: unknown = branches[idx].discriminatorKey
-      ? { [branches[idx].discriminatorKey as string]: {} }
-      : {};
-    onChange(next);
+    if (isShapeB) {
+      // Hybrid Shape B: preserve sharedChildren keys; replace the
+      // previous-branch key with the new branch's empty value.
+      const next: Record<string, unknown> = { ...valueObj };
+      if (previousBranchKey !== undefined) delete next[previousBranchKey];
+      const newKey = branches[idx].discriminatorKey;
+      if (newKey !== undefined) next[newKey] = {};
+      onChange(next);
+    } else {
+      // Shape A: branch IS the value, no shared keys.
+      onChange({});
+    }
   };
+
+  const useSelect = branches.length > SELECT_THRESHOLD;
 
   return (
     <div className="space-y-2">
-      <div className="flex flex-wrap gap-1.5">
-        {branches.map((b, i) => (
-          <Tooltip key={i} content={b.description} side="top" sideOffset={4}>
-            <button
-              type="button"
-              onClick={() => switchBranch(i)}
-              disabled={readOnly}
-              className={cn(
-                "rounded-sm border px-2 py-0.5 font-mono text-[11.5px] transition-colors disabled:opacity-50",
-                active === i
-                  ? "border-accent bg-accent-soft text-accent"
-                  : "border-border text-ink-muted hover:bg-surface-2",
-              )}
-            >
+      {useSelect ? (
+        <select
+          value={active >= 0 ? String(active) : ""}
+          disabled={readOnly}
+          onChange={(e) => switchBranch(parseInt(e.target.value, 10))}
+          className="w-full rounded-sm border border-border bg-bg px-2 py-1 font-mono text-[12px] text-ink focus:border-accent focus:outline-none disabled:opacity-50"
+        >
+          {active < 0 ? (
+            <option value="" disabled>
+              — pick one —
+            </option>
+          ) : null}
+          {branches.map((b, i) => (
+            <option key={i} value={i}>
               {b.label}
-            </button>
-          </Tooltip>
-        ))}
-      </div>
+            </option>
+          ))}
+        </select>
+      ) : (
+        <div className="flex flex-wrap gap-1.5">
+          {branches.map((b, i) => (
+            <Tooltip key={i} content={b.description} side="top" sideOffset={4}>
+              <button
+                type="button"
+                onClick={() => switchBranch(i)}
+                disabled={readOnly}
+                className={cn(
+                  "rounded-sm border px-2 py-0.5 font-mono text-[11.5px] transition-colors disabled:opacity-50",
+                  active === i
+                    ? "border-accent bg-accent-soft text-accent"
+                    : "border-border text-ink-muted hover:bg-surface-2",
+                )}
+              >
+                {b.label}
+              </button>
+            </Tooltip>
+          ))}
+        </div>
+      )}
       {activeBranch ? (
         <BranchSubForm
           branch={activeBranch}
@@ -700,7 +747,61 @@ function DiscriminatorInput({
           Pick an option above to configure.
         </p>
       )}
+      {sharedChildren.length > 0 ? (
+        <SharedChildrenSection
+          descriptors={sharedChildren}
+          value={valueObj}
+          onChange={onChange}
+          readOnly={readOnly ?? false}
+        />
+      ) : null}
     </div>
+  );
+}
+
+function isEmptyContainer(v: unknown): boolean {
+  if (v === undefined || v === null) return true;
+  if (Array.isArray(v)) return v.length === 0;
+  if (typeof v === "object") return Object.keys(v as object).length === 0;
+  return false;
+}
+
+// SharedChildrenSection — renders the always-on properties of a
+// hinted hybrid discriminator (Probe thresholds, Volume `name`,
+// EnvFromSource `prefix`) as siblings of the branch picker. Each
+// child's path is relative to the discriminator's value (same
+// convention as Shape B branch descriptors).
+function SharedChildrenSection({
+  descriptors,
+  value,
+  onChange,
+  readOnly,
+}: {
+  descriptors: FieldDescriptor[];
+  value: Record<string, unknown>;
+  onChange: (next: unknown) => void;
+  readOnly: boolean;
+}) {
+  return (
+    <fieldset className="rounded-sm border border-border px-3 pb-3 pt-2">
+      <legend className="px-1">
+        <span className="font-mono text-[10.5px] uppercase tracking-[0.14em] text-ink-faint">
+          shared
+        </span>
+      </legend>
+      <div className="space-y-3">
+        {descriptors.map((child) => (
+          <FieldRow
+            key={child.path.join(".")}
+            descriptor={child}
+            values={value}
+            issues={[]}
+            mode={readOnly ? "edit" : "edit"}
+            onChange={onChange}
+          />
+        ))}
+      </div>
+    </fieldset>
   );
 }
 

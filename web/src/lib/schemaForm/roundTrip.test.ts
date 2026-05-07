@@ -19,6 +19,7 @@ import { describe, expect, it } from "vitest";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { buildFieldDescriptors } from "./walker";
 import { buildRefResolver, findSchemaByGVK } from "./refResolver";
+import { buildK8sDiscriminatorHints } from "./k8sDiscriminatorHints";
 import {
   filterSchemaForKind,
   getCreateOnlyPaths,
@@ -219,6 +220,69 @@ const synthDoc: OpenAPIDoc = {
           requests: { type: "object", additionalProperties: { type: "string" } },
         },
       },
+      // ── K8s sibling-encoded oneOfs (consumed by the hint table) ──
+      "io.k8s.api.core.v1.HTTPGetAction": {
+        type: "object",
+        properties: {
+          path: { type: "string" },
+          port: { type: "string", format: "int-or-string" },
+          scheme: { type: "string", enum: ["HTTP", "HTTPS"] },
+        },
+      },
+      "io.k8s.api.core.v1.TCPSocketAction": {
+        type: "object",
+        properties: {
+          port: { type: "string", format: "int-or-string" },
+          host: { type: "string" },
+        },
+      },
+      "io.k8s.api.core.v1.ExecAction": {
+        type: "object",
+        properties: {
+          command: { type: "array", items: { type: "string" } },
+        },
+      },
+      "io.k8s.api.core.v1.GRPCAction": {
+        type: "object",
+        properties: {
+          port: { type: "integer" },
+          service: { type: "string" },
+        },
+      },
+      "io.k8s.api.core.v1.SleepAction": {
+        type: "object",
+        properties: { seconds: { type: "integer" } },
+      },
+      "io.k8s.api.core.v1.Probe": {
+        type: "object",
+        properties: {
+          httpGet: { allOf: [{ $ref: "#/components/schemas/io.k8s.api.core.v1.HTTPGetAction" }] },
+          tcpSocket: { allOf: [{ $ref: "#/components/schemas/io.k8s.api.core.v1.TCPSocketAction" }] },
+          exec: { allOf: [{ $ref: "#/components/schemas/io.k8s.api.core.v1.ExecAction" }] },
+          grpc: { allOf: [{ $ref: "#/components/schemas/io.k8s.api.core.v1.GRPCAction" }] },
+          initialDelaySeconds: { type: "integer" },
+          periodSeconds: { type: "integer" },
+          timeoutSeconds: { type: "integer" },
+          successThreshold: { type: "integer" },
+          failureThreshold: { type: "integer" },
+        },
+      },
+      "io.k8s.api.core.v1.LifecycleHandler": {
+        type: "object",
+        properties: {
+          httpGet: { allOf: [{ $ref: "#/components/schemas/io.k8s.api.core.v1.HTTPGetAction" }] },
+          tcpSocket: { allOf: [{ $ref: "#/components/schemas/io.k8s.api.core.v1.TCPSocketAction" }] },
+          exec: { allOf: [{ $ref: "#/components/schemas/io.k8s.api.core.v1.ExecAction" }] },
+          sleep: { allOf: [{ $ref: "#/components/schemas/io.k8s.api.core.v1.SleepAction" }] },
+        },
+      },
+      "io.k8s.api.core.v1.Lifecycle": {
+        type: "object",
+        properties: {
+          preStop: { allOf: [{ $ref: "#/components/schemas/io.k8s.api.core.v1.LifecycleHandler" }] },
+          postStart: { allOf: [{ $ref: "#/components/schemas/io.k8s.api.core.v1.LifecycleHandler" }] },
+        },
+      },
       "io.k8s.api.core.v1.Container": {
         type: "object",
         properties: {
@@ -239,14 +303,15 @@ const synthDoc: OpenAPIDoc = {
           resources: {
             allOf: [{ $ref: "#/components/schemas/io.k8s.api.core.v1.ResourceRequirements" }],
           },
+          livenessProbe: { allOf: [{ $ref: "#/components/schemas/io.k8s.api.core.v1.Probe" }] },
+          readinessProbe: { allOf: [{ $ref: "#/components/schemas/io.k8s.api.core.v1.Probe" }] },
+          startupProbe: { allOf: [{ $ref: "#/components/schemas/io.k8s.api.core.v1.Probe" }] },
+          lifecycle: { allOf: [{ $ref: "#/components/schemas/io.k8s.api.core.v1.Lifecycle" }] },
           terminationMessagePath: { type: "string" },
           terminationMessagePolicy: { type: "string" },
           tty: { type: "boolean" },
           stdin: { type: "boolean" },
           stdinOnce: { type: "boolean" },
-          // Sibling-encoded oneOfs (probes, lifecycle, volumeMounts,
-          // envFrom, securityContext) deliberately omitted — outside
-          // the curated POC scope.
         },
         required: ["name"],
       },
@@ -350,6 +415,10 @@ const walkOptionsFor = (kind: SupportedKind) => ({
   resolveRef: buildRefResolver(synthDoc),
   allowKvMap: true,
   allowArrayOfObjects: true,
+  allowOneOfDiscriminator: true,
+  // Hint table is K8s-wide — same wiring K8sSchemaForm uses. Helm
+  // and CRD callers leave this off.
+  discriminatorHints: buildK8sDiscriminatorHints(),
   createOnlyPaths: getCreateOnlyPaths(kind),
 });
 
@@ -649,14 +718,28 @@ describe("Deployment — round-trip", () => {
     expect(containers?.type).toBe("array-of-objects");
     const childPaths = (containers?.children ?? []).map((c) => c.path.join("."));
     expect(childPaths).toEqual(
-      expect.arrayContaining(["name", "image", "imagePullPolicy", "command", "args", "ports", "env", "resources"]),
+      expect.arrayContaining([
+        "name",
+        "image",
+        "imagePullPolicy",
+        "command",
+        "args",
+        "ports",
+        "env",
+        "resources",
+        // Hinted discriminators — re-enabled now that the K8s
+        // hint table renders them as proper Shape B pickers.
+        "livenessProbe",
+        "readinessProbe",
+        "startupProbe",
+        "lifecycle",
+      ]),
     );
-    // The curated allowlist excludes lifecycle/securityContext/probes
-    // — they should not surface as container children even though the
-    // synthetic schema doesn't model them. (This is a guard against
-    // future synthDoc growth accidentally bypassing the filter.)
-    expect(childPaths).not.toContain("livenessProbe");
+    // securityContext stays out (no hint table entry, wide admin
+    // surface). volumeMounts also out (paired with volumes which
+    // is blocked on array-of-discriminators support).
     expect(childPaths).not.toContain("securityContext");
+    expect(childPaths).not.toContain("volumeMounts");
   });
 
   it("walker emits kv-maps for resources.requests/limits (Quantity values render as strings)", () => {
@@ -699,6 +782,67 @@ describe("Deployment — round-trip", () => {
     expect(after[0].name).toBe("api");
     expect(getAtPath(next, ["spec", "replicas"])).toBe(3);
     expect(getAtPath(next, ["metadata", "name"])).toBe("api");
+  });
+
+  // ── hinted discriminators (K8s sibling-encoded oneOfs) ─────────
+
+  it("livenessProbe / readinessProbe / startupProbe surface as hinted discriminators inside a container", () => {
+    const all = flatten(buildFieldDescriptors(schemaFor("Deployment"), walkOptionsFor("Deployment")));
+    const containers = all.find((d) => d.path.join(".") === "spec.template.spec.containers");
+    const liveness = containers?.children?.find((c) => c.path.join(".") === "livenessProbe");
+    expect(liveness?.type).toBe("discriminator");
+    const branchKeys = (liveness?.branches ?? []).map((b) => b.discriminatorKey).sort();
+    expect(branchKeys).toEqual(["exec", "grpc", "httpGet", "tcpSocket"]);
+
+    // Threshold knobs come through as sharedChildren (rendered
+    // alongside the picker in DiscriminatorInput).
+    const sharedPaths = (liveness?.sharedChildren ?? []).map((d) => d.path.join("."));
+    expect(sharedPaths).toEqual(
+      expect.arrayContaining(["initialDelaySeconds", "periodSeconds", "failureThreshold"]),
+    );
+  });
+
+  it("lifecycle.preStop / postStart each surface as hinted discriminators (LifecycleHandler)", () => {
+    const all = flatten(buildFieldDescriptors(schemaFor("Deployment"), walkOptionsFor("Deployment")));
+    const containers = all.find((d) => d.path.join(".") === "spec.template.spec.containers");
+    const lifecycle = containers?.children?.find((c) => c.path.join(".") === "lifecycle");
+    expect(lifecycle?.type).toBe("object");
+    const preStop = lifecycle?.children?.find((c) => c.path.join(".") === "lifecycle.preStop");
+    const postStart = lifecycle?.children?.find((c) => c.path.join(".") === "lifecycle.postStart");
+    expect(preStop?.type).toBe("discriminator");
+    expect(postStart?.type).toBe("discriminator");
+    const branchKeys = (preStop?.branches ?? []).map((b) => b.discriminatorKey).sort();
+    expect(branchKeys).toEqual(["exec", "httpGet", "sleep", "tcpSocket"]);
+  });
+
+  it("hinted Probe round-trips through YAML preserving handler + threshold values", () => {
+    const probedYaml = [
+      "apiVersion: apps/v1",
+      "kind: Deployment",
+      "metadata:",
+      "  name: api",
+      "spec:",
+      "  selector:",
+      "    matchLabels:",
+      "      app: api",
+      "  template:",
+      "    metadata:",
+      "      labels:",
+      "        app: api",
+      "    spec:",
+      "      containers:",
+      "        - name: api",
+      "          image: ghcr.io/example/api:1.0.0",
+      "          livenessProbe:",
+      "            httpGet:",
+      "              path: /healthz",
+      "              port: 8080",
+      "              scheme: HTTP",
+      "            initialDelaySeconds: 5",
+      "            periodSeconds: 10",
+      "",
+    ].join("\n");
+    expect(yamlRoundTrip(probedYaml)).toEqual(parseYaml(probedYaml));
   });
 });
 

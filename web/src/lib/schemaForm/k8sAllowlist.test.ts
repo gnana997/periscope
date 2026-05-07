@@ -243,9 +243,10 @@ describe("filterSchemaForKind — [*] array-item descent (Deployment)", () => {
     const itemProps = (containers?.items as JSONSchema | undefined)?.properties;
     expect(itemProps).toBeDefined();
     expect(Object.keys(itemProps!)).toEqual(expect.arrayContaining(["name", "image"]));
-    // Excluded by the allowlist — must not surface even though the
-    // synthetic Container schema defines them.
-    expect(Object.keys(itemProps!)).not.toContain("lifecycle");
+    // securityContext is the canonical "still excluded" container
+    // sub-field for this test — it's not in the Deployment allowlist,
+    // so the filter should drop it. (`lifecycle` was previously
+    // excluded too but is now allowlisted via the hint table.)
     expect(Object.keys(itemProps!)).not.toContain("securityContext");
   });
 

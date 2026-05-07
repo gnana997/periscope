@@ -20,6 +20,7 @@ import {
   getKindGVK,
   type SupportedKind,
 } from "../../lib/schemaForm/k8sAllowlist";
+import { buildK8sDiscriminatorHints } from "../../lib/schemaForm/k8sDiscriminatorHints";
 import type { SchemaFormMode } from "../../lib/schemaForm/SchemaForm";
 import type { WalkOptions } from "../../lib/schemaForm/walker";
 
@@ -66,6 +67,12 @@ export function K8sSchemaForm({
       // so the Helm path leaves this off and any chart oneOf still
       // surfaces as the YAML-mode hint.
       allowOneOfDiscriminator: true,
+      // K8s sibling-encoded oneOfs (Probe handler types, Volume
+      // ~30 volume types, EnvVarSource, EnvFromSource,
+      // LifecycleHandler) — see k8sDiscriminatorHints.ts. The
+      // walker uses these to emit Shape B discriminators where the
+      // schema doesn't carry one structurally.
+      discriminatorHints: buildK8sDiscriminatorHints(),
       createOnlyPaths: getCreateOnlyPaths(kind),
     };
     return { rootSchema: filtered, walkOptions: opts };

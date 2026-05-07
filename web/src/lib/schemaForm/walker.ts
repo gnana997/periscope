@@ -32,6 +32,30 @@ export interface WalkOptions {
    *  flag with `editable: "create-only"`. Surfaced by the renderer
    *  as read-only inputs in edit mode. */
   createOnlyPaths?: string[];
+  /** Hint table for schemas that encode polymorphism via sibling
+   *  properties instead of JSON Schema `oneOf`. K8s does this for
+   *  Probe (httpGet/tcpSocket/exec/grpc), Volume (~30 volume
+   *  types), EnvVarSource (fieldRef/configMapKeyRef/secretKeyRef/
+   *  resourceFieldRef), LifecycleHandler, and others — the
+   *  apiserver enforces "exactly one" but the schema doesn't
+   *  declare it.
+   *
+   *  Map key is the schema's `$ref` string (matched against the
+   *  property's primary ref before deref — covers both `{$ref: X}`
+   *  and `{allOf: [{$ref: X}]}` envelopes). When matched, the
+   *  walker emits a Shape B-style discriminator over `branches[]`
+   *  with the remaining properties as `sharedChildren`. */
+  discriminatorHints?: Map<string, DiscriminatorHint>;
+}
+
+/** Sibling-property hint for K8s-style polymorphism. */
+export interface DiscriminatorHint {
+  /** Property keys that are mutually exclusive — exactly one of
+   *  them should be set on the value at a time. The walker emits
+   *  a discriminator branch per key. */
+  branches: string[];
+  /** Optional human label per branch (defaults to the key). */
+  labels?: Record<string, string>;
 }
 
 /** Walk schema, emit a tree of field descriptors. */
@@ -105,6 +129,17 @@ function walkField(
   // other's resolution state, or `Outer { a: Inner, b: Inner }`
   // would emit `b` as recursive even though it isn't.
   const seen = new Set(parentSeen);
+
+  // Hint match is keyed off the PRE-deref shape so we can recognise
+  // K8s envelopes like `{allOf:[{$ref: Probe}]}` before they collapse
+  // into a flat object that's structurally indistinguishable from
+  // any other K8s sub-resource. Look up the hint up front; act on it
+  // after we've deref'd into the resolved schema (we still need the
+  // underlying properties to build the branch sub-forms).
+  const primaryRef = extractPrimaryRef(raw);
+  const hint =
+    primaryRef !== undefined ? options.discriminatorHints?.get(primaryRef) : undefined;
+
   // Resolve a $ref before reading the rest of the fields so the
   // walker can see the underlying type/properties.
   const schema = derefIfNeeded(raw, options, seen);
@@ -125,6 +160,21 @@ function walkField(
     default: schema.default,
     ...(createOnly ? { editable: "create-only" as const } : {}),
   };
+
+  // Hinted discriminator: the host schema told us this type is
+  // really a sibling-encoded oneOf. Build a Shape B-style picker
+  // over `hint.branches`; remaining properties become sharedChildren
+  // (rendered alongside the picker, preserved across branch
+  // switches). This is THE bridge that makes K8s Probe / Volume /
+  // EnvVarSource / LifecycleHandler render as proper discriminators.
+  if (hint && schema.properties) {
+    const built = buildHintedDiscriminator(schema, hint, options, seen);
+    if (built) {
+      return { ...base, type: "discriminator", ...built };
+    }
+    // Fall through to standard logic when hint can't be applied
+    // (e.g. none of the branch keys present in the resolved schema).
+  }
 
   // oneOf detection — emit a discriminator descriptor instead of
   // unsupported. Two structural shapes:
@@ -438,6 +488,81 @@ function walkBranchSchema(
   }
   // Primitive / array / unsupported branch — emit a single descriptor.
   return [walkField(schema, basePath, false, options, seen)];
+}
+
+// ── Hinted discriminator (K8s sibling-encoded polymorphism) ───────
+//
+// K8s schemas like Probe, Volume, EnvVarSource encode "exactly one
+// of these properties is set" as plain sibling properties — no JSON
+// Schema oneOf. The walker can't infer that structurally, so the
+// caller passes a hint table keyed by `$ref` declaring which
+// properties are mutually-exclusive branches. When we see one,
+// we synthesise a Shape B discriminator (per-branch sub-form,
+// `discriminatorKey` set on each) and treat the remaining schema
+// properties as `sharedChildren` (always rendered, preserved across
+// branch switches — Probe's threshold knobs, Volume's `name`, etc.).
+
+/** Pull out the `$ref` string from a property schema, looking
+ *  through a single-element `allOf` envelope. Returns undefined
+ *  when no primary ref is present. */
+function extractPrimaryRef(schema: JSONSchema): string | undefined {
+  if (!schema || typeof schema !== "object") return undefined;
+  if (typeof schema.$ref === "string") return schema.$ref;
+  if (Array.isArray(schema.allOf) && schema.allOf.length === 1) {
+    const entry = schema.allOf[0] as JSONSchema | undefined;
+    if (entry && typeof entry === "object" && typeof entry.$ref === "string") {
+      return entry.$ref;
+    }
+  }
+  return undefined;
+}
+
+function buildHintedDiscriminator(
+  schema: JSONSchema,
+  hint: DiscriminatorHint,
+  options: WalkOptions,
+  parentSeen: Set<string>,
+): { branches: DiscriminatorBranch[]; sharedChildren?: FieldDescriptor[] } | undefined {
+  const props = schema.properties ?? {};
+  const branchKeys = hint.branches.filter((k) => k in props);
+  if (branchKeys.length === 0) return undefined;
+
+  const branches: DiscriminatorBranch[] = [];
+  for (const key of branchKeys) {
+    const sub = props[key];
+    if (!sub) continue;
+    const seen = new Set(parentSeen);
+    const descriptors = walkBranchSchema(sub, [key], options, seen);
+    branches.push({
+      label: hint.labels?.[key] ?? branchLabelFor(sub, key),
+      description: typeof sub.description === "string" ? sub.description : undefined,
+      schema: sub,
+      discriminatorKey: key,
+      descriptors,
+    });
+  }
+  if (branches.length === 0) return undefined;
+
+  // Everything that wasn't called out as a branch becomes a shared
+  // child. Walk each as a normal field rooted relative to the
+  // discriminator value (same convention as Shape B descriptors —
+  // their setAtPath calls write directly to value[key] without an
+  // extra wrapping segment).
+  const branchSet = new Set(branchKeys);
+  const sharedChildren: FieldDescriptor[] = [];
+  const requiredSet = new Set(schema.required ?? []);
+  for (const key of Object.keys(props)) {
+    if (branchSet.has(key)) continue;
+    const childSeen = new Set(parentSeen);
+    sharedChildren.push(
+      walkField(props[key], [key], requiredSet.has(key), options, childSeen),
+    );
+  }
+
+  return {
+    branches,
+    sharedChildren: sharedChildren.length > 0 ? sharedChildren : undefined,
+  };
 }
 
 function isSingleRequiredKeyBranch(branch: unknown): branch is JSONSchema {
