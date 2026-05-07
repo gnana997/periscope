@@ -449,10 +449,10 @@ const synthDoc: OpenAPIDoc = {
             type: "array",
             items: { $ref: "#/components/schemas/io.k8s.api.core.v1.Volume" },
           },
-          // initContainers stays in the synth as a "we should NOT
-          // surface this" canary — the allowlist excludes it
-          // pending per-row collapse.
-          initContainers: { type: "array", items: { type: "object" } },
+          initContainers: {
+            type: "array",
+            items: { $ref: "#/components/schemas/io.k8s.api.core.v1.Container" },
+          },
           // Pod-level admin surfaces — allowlisted as `advanced`.
           securityContext: {
             allOf: [{ $ref: "#/components/schemas/io.k8s.api.core.v1.PodSecurityContext" }],
@@ -830,14 +830,12 @@ describe("Deployment — round-trip", () => {
     );
   });
 
-  it("walker prunes excluded PodSpec fields (initContainers)", () => {
-    // `volumes` was previously here — now allowlisted because
-    // array-of-discriminators handles its sibling-encoded oneOf.
-    // `initContainers` remains out pending per-row collapse in
-    // array-of-objects (multi-container forms are already long).
+  it("walker surfaces initContainers as array-of-objects (now that per-row collapse keeps them scannable)", () => {
     const all = flatten(buildFieldDescriptors(schemaFor("Deployment"), walkOptionsFor("Deployment")));
-    const paths = all.map((d) => d.path.join("."));
-    expect(paths).not.toContain("spec.template.spec.initContainers");
+    const initContainers = all.find((d) => d.path.join(".") === "spec.template.spec.initContainers");
+    expect(initContainers?.type).toBe("array-of-objects");
+    const childPaths = (initContainers?.children ?? []).map((c) => c.path.join("."));
+    expect(childPaths).toEqual(expect.arrayContaining(["name", "image", "command", "args"]));
   });
 
   it("walker prunes ObjectMeta noise (uid, creationTimestamp, managedFields) at metadata and spec.template.metadata", () => {

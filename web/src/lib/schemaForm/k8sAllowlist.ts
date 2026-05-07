@@ -131,10 +131,11 @@ const KIND_SPECS: Record<SupportedKind, KindSpec> = {
   // `advanced` — the renderer collapses these by default and
   // auto-opens when the value is non-empty.
   //
+  // initContainers reuses the same Container shape as containers;
+  // multi-container forms are now manageable thanks to per-row
+  // collapse in array-of-objects.
+  //
   // Still excluded:
-  //   - initContainers: array of full Container shapes; would
-  //     double the form length. Pending per-row collapse in
-  //     array-of-objects.
   //   - container-level securityContext: advancedPaths matching is
   //     currently absolute-only, so paths inside `containers[*]`
   //     don't match. Drop to YAML for now.
@@ -183,6 +184,22 @@ const KIND_SPECS: Record<SupportedKind, KindSpec> = {
       "spec.template.spec.containers[*].tty",
       "spec.template.spec.containers[*].stdin",
       "spec.template.spec.containers[*].stdinOnce",
+      // initContainers reuses the same Container subset above —
+      // duplicating the path list is verbose but keeps the
+      // allowlist explicit (and would let us diverge if we ever
+      // need to, e.g. excluding `lifecycle` for init containers).
+      "spec.template.spec.initContainers[*].name",
+      "spec.template.spec.initContainers[*].image",
+      "spec.template.spec.initContainers[*].imagePullPolicy",
+      "spec.template.spec.initContainers[*].command",
+      "spec.template.spec.initContainers[*].args",
+      "spec.template.spec.initContainers[*].workingDir",
+      "spec.template.spec.initContainers[*].env",
+      "spec.template.spec.initContainers[*].envFrom",
+      "spec.template.spec.initContainers[*].resources",
+      "spec.template.spec.initContainers[*].volumeMounts",
+      "spec.template.spec.initContainers[*].terminationMessagePath",
+      "spec.template.spec.initContainers[*].terminationMessagePolicy",
     ],
     createOnly: ["metadata.name", "metadata.namespace", "spec.selector"],
     advanced: [

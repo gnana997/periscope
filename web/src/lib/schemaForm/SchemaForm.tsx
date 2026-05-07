@@ -16,6 +16,12 @@ import { validateValues } from "./validate";
 import { cn } from "../cn";
 import { getAtPath, setAtPath } from "./pathOps";
 import type { FieldDescriptor, JSONSchema, ValidationIssue } from "./types";
+import {
+  discriminatorRowSummary,
+  initialOpenSet,
+  rowSummary,
+  shiftOpenOnRemove,
+} from "./arrayRowSummary";
 import { Tooltip } from "../../components/Tooltip";
 
 // InfoTip — tiny "(i)" affordance next to a label that opens a
@@ -637,6 +643,26 @@ function toRecord(entries: [string, unknown][]): Record<string, unknown> {
   return out;
 }
 
+// Per-row collapse for arrays. Each row collapses into a one-line
+// header showing a "summary" picked from the row's identifier
+// fields (name / image / key etc.); click the header to expand.
+//
+// Open-state rule (parent-managed Set<number> of open indices):
+//   - Single-row arrays: open by default (operator's clearly
+//     editing the row).
+//   - Multi-row arrays: collapsed by default — the summary line
+//     keeps each row scannable.
+//   - Newly added row (via "+ add"): opens automatically so the
+//     operator can fill it in without an extra click.
+//   - Empty row: opens (it has nothing to summarise).
+//   - Manual toggle wins after first interaction.
+//
+// The Set lives in component state and is shifted on row removal
+// so open-state stays attached to the same row across deletions.
+// Pure helpers (rowSummary / discriminatorRowSummary / initialOpenSet
+// / shiftOpenOnRemove) are extracted to arrayRowSummary.ts so the
+// heuristics are unit-testable without React.
+
 // Table-of-fieldsets editor for arrays of objects. Each row owns a
 // scoped sub-form whose values root is the row item; child
 // descriptors carry RELATIVE paths (walker emits them with []) so
@@ -649,48 +675,82 @@ function ArrayOfObjectsInput({
 }: Omit<InputProps, "id">) {
   const arr = Array.isArray(value) ? (value as Record<string, unknown>[]) : [];
   const childDescriptors = descriptor.children ?? [];
+  const [openSet, setOpenSet] = useState<Set<number>>(() => initialOpenSet(arr.length));
 
+  const toggleRow = (idx: number) =>
+    setOpenSet((prev) => {
+      const next = new Set(prev);
+      if (next.has(idx)) next.delete(idx);
+      else next.add(idx);
+      return next;
+    });
   const updateRow = (idx: number, nextItem: Record<string, unknown>) => {
     const next = [...arr];
     next[idx] = nextItem;
     onChange(next);
   };
-  const removeRow = (idx: number) => onChange(arr.filter((_, i) => i !== idx));
-  const addRow = () => onChange([...arr, {}]);
+  const removeRow = (idx: number) => {
+    setOpenSet((prev) => shiftOpenOnRemove(prev, idx));
+    onChange(arr.filter((_, i) => i !== idx));
+  };
+  const addRow = () => {
+    const newIdx = arr.length;
+    setOpenSet((prev) => new Set([...prev, newIdx]));
+    onChange([...arr, {}]);
+  };
 
   return (
     <div className="space-y-2">
-      {arr.map((row, idx) => (
-        <fieldset key={idx} className="rounded-sm border border-border px-3 pb-3 pt-2">
-          <legend className="flex items-center gap-2 px-1">
-            <span className="font-mono text-[11px] uppercase tracking-[0.14em] text-ink-faint">
-              {descriptor.label} #{idx + 1}
-            </span>
-            {readOnly ? null : (
+      {arr.map((row, idx) => {
+        const open = openSet.has(idx) || isAdvancedValueEmpty(row);
+        const summary = rowSummary(row);
+        return (
+          <fieldset key={idx} className="rounded-sm border border-border">
+            <legend className="ml-2 flex items-center gap-2 px-1">
               <button
                 type="button"
-                onClick={() => removeRow(idx)}
-                className="font-mono text-[10.5px] text-ink-faint hover:text-red"
-                aria-label={`remove ${descriptor.label} ${idx + 1}`}
+                onClick={() => toggleRow(idx)}
+                className="inline-flex items-baseline gap-1.5 hover:text-ink"
+                aria-expanded={open}
               >
-                remove
+                <span aria-hidden="true" className="text-ink-faint">
+                  {open ? "▾" : "▸"}
+                </span>
+                <span className="font-mono text-[11px] uppercase tracking-[0.14em] text-ink-faint">
+                  {descriptor.label} #{idx + 1}
+                </span>
+                {!open && summary ? (
+                  <span className="font-mono text-[11px] text-ink-muted">{summary}</span>
+                ) : null}
               </button>
-            )}
-          </legend>
-          <div className="space-y-3">
-            {childDescriptors.map((child) => (
-              <FieldRow
-                key={child.path.join(".")}
-                descriptor={child}
-                values={row}
-                issues={[]}
-                mode={readOnly ? "edit" : "edit"}
-                onChange={(nextRow) => updateRow(idx, nextRow)}
-              />
-            ))}
-          </div>
-        </fieldset>
-      ))}
+              {readOnly ? null : (
+                <button
+                  type="button"
+                  onClick={() => removeRow(idx)}
+                  className="font-mono text-[10.5px] text-ink-faint hover:text-red"
+                  aria-label={`remove ${descriptor.label} ${idx + 1}`}
+                >
+                  remove
+                </button>
+              )}
+            </legend>
+            {open ? (
+              <div className="space-y-3 px-3 pb-3 pt-2">
+                {childDescriptors.map((child) => (
+                  <FieldRow
+                    key={child.path.join(".")}
+                    descriptor={child}
+                    values={row}
+                    issues={[]}
+                    mode={readOnly ? "edit" : "edit"}
+                    onChange={(nextRow) => updateRow(idx, nextRow)}
+                  />
+                ))}
+              </div>
+            ) : null}
+          </fieldset>
+        );
+      })}
       {readOnly ? null : (
         <button
           type="button"
@@ -722,6 +782,7 @@ function ArrayOfDiscriminatorsInput({
   readOnly,
 }: Omit<InputProps, "id">) {
   const arr = Array.isArray(value) ? (value as unknown[]) : [];
+  const [openSet, setOpenSet] = useState<Set<number>>(() => initialOpenSet(arr.length));
 
   // Synthesise once per render — DiscriminatorInput only reads
   // branches / sharedChildren off the descriptor.
@@ -734,43 +795,76 @@ function ArrayOfDiscriminatorsInput({
     sharedChildren: descriptor.sharedChildren,
   };
 
+  const toggleRow = (idx: number) =>
+    setOpenSet((prev) => {
+      const next = new Set(prev);
+      if (next.has(idx)) next.delete(idx);
+      else next.add(idx);
+      return next;
+    });
   const updateRow = (idx: number, nextRow: unknown) => {
     const next = [...arr];
     next[idx] = nextRow;
     onChange(next);
   };
-  const removeRow = (idx: number) => onChange(arr.filter((_, i) => i !== idx));
-  // New rows start as `{}` — operator picks a branch first; the
-  // discriminator widget seeds the chosen branch's empty value.
-  const addRow = () => onChange([...arr, {}]);
+  const removeRow = (idx: number) => {
+    setOpenSet((prev) => shiftOpenOnRemove(prev, idx));
+    onChange(arr.filter((_, i) => i !== idx));
+  };
+  const addRow = () => {
+    const newIdx = arr.length;
+    setOpenSet((prev) => new Set([...prev, newIdx]));
+    onChange([...arr, {}]);
+  };
 
   return (
     <div className="space-y-2">
-      {arr.map((row, idx) => (
-        <fieldset key={idx} className="rounded-sm border border-border px-3 pb-3 pt-2">
-          <legend className="flex items-center gap-2 px-1">
-            <span className="font-mono text-[11px] uppercase tracking-[0.14em] text-ink-faint">
-              {descriptor.label} #{idx + 1}
-            </span>
-            {readOnly ? null : (
+      {arr.map((row, idx) => {
+        const open = openSet.has(idx) || isAdvancedValueEmpty(row);
+        const summary = discriminatorRowSummary(row, descriptor.branches ?? []);
+        return (
+          <fieldset key={idx} className="rounded-sm border border-border">
+            <legend className="ml-2 flex items-center gap-2 px-1">
               <button
                 type="button"
-                onClick={() => removeRow(idx)}
-                className="font-mono text-[10.5px] text-ink-faint hover:text-red"
-                aria-label={`remove ${descriptor.label} ${idx + 1}`}
+                onClick={() => toggleRow(idx)}
+                className="inline-flex items-baseline gap-1.5 hover:text-ink"
+                aria-expanded={open}
               >
-                remove
+                <span aria-hidden="true" className="text-ink-faint">
+                  {open ? "▾" : "▸"}
+                </span>
+                <span className="font-mono text-[11px] uppercase tracking-[0.14em] text-ink-faint">
+                  {descriptor.label} #{idx + 1}
+                </span>
+                {!open && summary ? (
+                  <span className="font-mono text-[11px] text-ink-muted">{summary}</span>
+                ) : null}
               </button>
-            )}
-          </legend>
-          <DiscriminatorInput
-            descriptor={rowDescriptor}
-            value={row}
-            onChange={(nextRow) => updateRow(idx, nextRow)}
-            readOnly={readOnly}
-          />
-        </fieldset>
-      ))}
+              {readOnly ? null : (
+                <button
+                  type="button"
+                  onClick={() => removeRow(idx)}
+                  className="font-mono text-[10.5px] text-ink-faint hover:text-red"
+                  aria-label={`remove ${descriptor.label} ${idx + 1}`}
+                >
+                  remove
+                </button>
+              )}
+            </legend>
+            {open ? (
+              <div className="px-3 pb-3 pt-2">
+                <DiscriminatorInput
+                  descriptor={rowDescriptor}
+                  value={row}
+                  onChange={(nextRow) => updateRow(idx, nextRow)}
+                  readOnly={readOnly}
+                />
+              </div>
+            ) : null}
+          </fieldset>
+        );
+      })}
       {readOnly ? null : (
         <button
           type="button"
@@ -783,6 +877,7 @@ function ArrayOfDiscriminatorsInput({
     </div>
   );
 }
+
 
 // Discriminator picker — branch picker (segmented buttons or
 // <select> when there are many branches) + a sub-form for the
