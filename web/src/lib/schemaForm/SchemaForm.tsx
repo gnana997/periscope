@@ -97,6 +97,59 @@ export function SchemaForm({
   );
 }
 
+// CollapsibleSection — wraps an "advanced" field. Closed by default
+// when the value is empty (operator hasn't touched it); opens
+// automatically when populated so editing a filled-in
+// securityContext / affinity / tolerations doesn't require a click
+// to discover.
+//
+// State is local — each CollapsibleSection manages its own open
+// flag. We seed from `defaultOpen` once on mount; subsequent value
+// changes don't reopen a manually-closed section.
+function CollapsibleSection({
+  label,
+  description,
+  required,
+  defaultOpen,
+  children,
+}: {
+  label: string;
+  description?: string;
+  required: boolean;
+  defaultOpen: boolean;
+  children: ReactNode;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <div className="rounded-sm border border-border">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="flex w-full items-center justify-between px-3 py-1.5 text-left hover:bg-surface-2"
+        aria-expanded={open}
+      >
+        <span className="inline-flex items-baseline gap-1.5 font-mono text-[11px] uppercase tracking-[0.14em] text-ink-faint">
+          <span aria-hidden="true">{open ? "▾" : "▸"}</span>
+          {label}
+          {required ? " *" : ""}
+          <span className="font-mono text-[10px] tracking-normal text-ink-faint">
+            (advanced)
+          </span>
+          <InfoTip text={description} />
+        </span>
+      </button>
+      {open ? <div className="border-t border-border px-3 py-3">{children}</div> : null}
+    </div>
+  );
+}
+
+function isAdvancedValueEmpty(v: unknown): boolean {
+  if (v === undefined || v === null) return true;
+  if (Array.isArray(v)) return v.length === 0;
+  if (typeof v === "object") return Object.keys(v as object).length === 0;
+  return false;
+}
+
 // ─── one field row ──────────────────────────────────────────────
 
 interface FieldRowProps {
@@ -119,6 +172,66 @@ export function FieldRow({ descriptor, values, issues, mode, onChange }: FieldRo
   const value = getAtPath(values, descriptor.path);
   const update = (next: unknown) => onChange(setAtPath(values, descriptor.path, next));
 
+  // Advanced wrapper: collapse this whole row by default, auto-open
+  // when the value is non-empty so populated fields stay visible.
+  // Wrap once at the row boundary; the inner branches below render
+  // unchanged.
+  if (descriptor.advanced) {
+    return (
+      <CollapsibleSection
+        label={descriptor.label}
+        description={descriptor.description}
+        required={descriptor.required}
+        defaultOpen={!isAdvancedValueEmpty(value)}
+      >
+        <FieldRowInner
+          id={id}
+          descriptor={descriptor}
+          values={values}
+          issues={issues}
+          mode={mode}
+          onChange={onChange}
+          value={value}
+          update={update}
+          fieldIssues={fieldIssues}
+        />
+      </CollapsibleSection>
+    );
+  }
+
+  return (
+    <FieldRowInner
+      id={id}
+      descriptor={descriptor}
+      values={values}
+      issues={issues}
+      mode={mode}
+      onChange={onChange}
+      value={value}
+      update={update}
+      fieldIssues={fieldIssues}
+    />
+  );
+}
+
+interface FieldRowInnerProps extends FieldRowProps {
+  id: string;
+  value: unknown;
+  update: (next: unknown) => void;
+  fieldIssues: ValidationIssue[];
+}
+
+function FieldRowInner({
+  id,
+  descriptor,
+  values,
+  issues,
+  mode,
+  onChange,
+  value,
+  update,
+  fieldIssues,
+}: FieldRowInnerProps) {
   if (descriptor.type === "object") {
     return (
       <fieldset className="rounded-sm border border-border px-3 pb-3 pt-2">

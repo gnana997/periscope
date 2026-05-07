@@ -47,6 +47,13 @@ interface KindSpec {
   /** Paths to mark `editable="create-only"`. Same syntax as `paths`
    *  but consumed by the walker, not the filter. */
   createOnly: string[];
+  /** Paths to mark `advanced: true` (collapsed-by-default in the
+   *  renderer; auto-opens when the value is non-empty). Optional;
+   *  most kinds have no advanced fields. Same path syntax as
+   *  `paths`, but matching is currently against the descriptor's
+   *  absolute path — paths inside array-item rows like
+   *  `containers[*].securityContext` won't match. */
+  advanced?: string[];
 }
 
 export interface KindGVK {
@@ -119,14 +126,18 @@ const KIND_SPECS: Record<SupportedKind, KindSpec> = {
   //   - ARRAY-ITEM (volumes[], envFrom[]): array-of-discriminators
   //     where each row is a per-row picker.
   //
+  // Pod-level admin surface (securityContext, affinity, tolerations,
+  // topologySpreadConstraints) is allowlisted but flagged as
+  // `advanced` — the renderer collapses these by default and
+  // auto-opens when the value is non-empty.
+  //
   // Still excluded:
-  //   - securityContext: no oneOf, but a wide admin-leaning
-  //     surface. Pending the "advanced/collapsed" renderer
-  //     affordance.
-  //   - affinity / topologySpreadConstraints: deeply nested wall.
-  //     Same blocker as securityContext.
-  //   - initContainers: would compound array-of-objects nesting;
-  //     waiting for per-row collapse in array-of-objects.
+  //   - initContainers: array of full Container shapes; would
+  //     double the form length. Pending per-row collapse in
+  //     array-of-objects.
+  //   - container-level securityContext: advancedPaths matching is
+  //     currently absolute-only, so paths inside `containers[*]`
+  //     don't match. Drop to YAML for now.
   //
   // spec.selector is create-only — the apiserver rejects Deployment
   // selector mutations after create.
@@ -148,6 +159,10 @@ const KIND_SPECS: Record<SupportedKind, KindSpec> = {
       "spec.template.spec.nodeSelector",
       "spec.template.spec.terminationGracePeriodSeconds",
       "spec.template.spec.volumes",
+      "spec.template.spec.affinity",
+      "spec.template.spec.tolerations",
+      "spec.template.spec.topologySpreadConstraints",
+      "spec.template.spec.securityContext",
       "spec.template.spec.containers[*].name",
       "spec.template.spec.containers[*].image",
       "spec.template.spec.containers[*].imagePullPolicy",
@@ -170,6 +185,12 @@ const KIND_SPECS: Record<SupportedKind, KindSpec> = {
       "spec.template.spec.containers[*].stdinOnce",
     ],
     createOnly: ["metadata.name", "metadata.namespace", "spec.selector"],
+    advanced: [
+      "spec.template.spec.affinity",
+      "spec.template.spec.tolerations",
+      "spec.template.spec.topologySpreadConstraints",
+      "spec.template.spec.securityContext",
+    ],
   },
 };
 
@@ -179,6 +200,10 @@ export function isSupportedKind(kind: string): kind is SupportedKind {
 
 export function getCreateOnlyPaths(kind: SupportedKind): string[] {
   return KIND_SPECS[kind].createOnly;
+}
+
+export function getAdvancedPaths(kind: SupportedKind): string[] {
+  return KIND_SPECS[kind].advanced ?? [];
 }
 
 export interface FilterOptions {

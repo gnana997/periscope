@@ -16,6 +16,7 @@ import { SchemaFormBridge } from "../../lib/schemaForm/SchemaFormBridge";
 import { buildRefResolver, findSchemaByGVK } from "../../lib/schemaForm/refResolver";
 import {
   filterSchemaForKind,
+  getAdvancedPaths,
   getCreateOnlyPaths,
   getKindGVK,
   type SupportedKind,
@@ -74,6 +75,7 @@ export function K8sSchemaForm({
       // schema doesn't carry one structurally.
       discriminatorHints: buildK8sDiscriminatorHints(),
       createOnlyPaths: getCreateOnlyPaths(kind),
+      advancedPaths: getAdvancedPaths(kind),
     };
     return { rootSchema: filtered, walkOptions: opts };
   }, [schemaQuery.data, gvk.group, gvk.version, gvk.kind, kind]);

@@ -32,6 +32,16 @@ export interface WalkOptions {
    *  flag with `editable: "create-only"`. Surfaced by the renderer
    *  as read-only inputs in edit mode. */
   createOnlyPaths?: string[];
+  /** Dotted-path strings the walker should flag with
+   *  `advanced: true`. The renderer collapses these by default
+   *  (auto-opening when the value is non-empty). Useful for admin-
+   *  leaning structures like `spec.template.spec.affinity` or
+   *  pod-level `securityContext`.
+   *
+   *  Matched against the descriptor's absolute path — same convention
+   *  as `createOnlyPaths`, so paths inside array-item rows (e.g.
+   *  `containers[*].securityContext`) currently won't match. */
+  advancedPaths?: string[];
   /** Hint table for schemas that encode polymorphism via sibling
    *  properties instead of JSON Schema `oneOf`. K8s does this for
    *  Probe (httpGet/tcpSocket/exec/grpc), Volume (~30 volume
@@ -148,10 +158,12 @@ function walkField(
   }
 
   const label = (schema.title as string) || path[path.length - 1] || "";
-  const createOnly = options.createOnlyPaths?.includes(path.join(".")) ?? false;
+  const dottedPath = path.join(".");
+  const createOnly = options.createOnlyPaths?.includes(dottedPath) ?? false;
+  const advanced = options.advancedPaths?.includes(dottedPath) ?? false;
   const base: Pick<
     FieldDescriptor,
-    "path" | "label" | "description" | "required" | "default" | "editable"
+    "path" | "label" | "description" | "required" | "default" | "editable" | "advanced"
   > = {
     path,
     label,
@@ -159,6 +171,7 @@ function walkField(
     required,
     default: schema.default,
     ...(createOnly ? { editable: "create-only" as const } : {}),
+    ...(advanced ? { advanced: true } : {}),
   };
 
   // Hinted discriminator: the host schema told us this type is

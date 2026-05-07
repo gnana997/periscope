@@ -109,6 +109,12 @@ export interface FieldDescriptor {
   /** When set to "create-only" the widget should render the field
    *  read-only on edit forms (e.g. metadata.name on K8s objects). */
   editable?: "create-only";
+  /** When true the renderer wraps the field in a collapsible
+   *  section that defaults closed (and opens automatically when
+   *  the value is non-empty so populated fields stay visible).
+   *  Used for wide / admin-leaning structures the operator rarely
+   *  edits (PodSpec affinity, tolerations, securityContext, etc.). */
+  advanced?: boolean;
   /** For type=unsupported, why we couldn't render this field as a
    *  form. Surfaced as a "edit in YAML mode" hint. */
   unsupportedReason?: string;

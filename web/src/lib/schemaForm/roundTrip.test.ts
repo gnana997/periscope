@@ -22,6 +22,7 @@ import { buildRefResolver, findSchemaByGVK } from "./refResolver";
 import { buildK8sDiscriminatorHints } from "./k8sDiscriminatorHints";
 import {
   filterSchemaForKind,
+  getAdvancedPaths,
   getCreateOnlyPaths,
   getKindGVK,
   type SupportedKind,
@@ -395,6 +396,44 @@ const synthDoc: OpenAPIDoc = {
         },
         required: ["name"],
       },
+      // Pod-level admin shapes used to validate the `advanced` flag.
+      // These are intentionally minimal — we just need the FILTER
+      // to surface them and the WALKER to flag them as advanced.
+      "io.k8s.api.core.v1.PodSecurityContext": {
+        type: "object",
+        properties: {
+          runAsUser: { type: "integer" },
+          runAsGroup: { type: "integer" },
+          fsGroup: { type: "integer" },
+          runAsNonRoot: { type: "boolean" },
+        },
+      },
+      "io.k8s.api.core.v1.Toleration": {
+        type: "object",
+        properties: {
+          key: { type: "string" },
+          operator: { type: "string", enum: ["Exists", "Equal"] },
+          value: { type: "string" },
+          effect: { type: "string", enum: ["NoSchedule", "PreferNoSchedule", "NoExecute"] },
+          tolerationSeconds: { type: "integer" },
+        },
+      },
+      "io.k8s.api.core.v1.TopologySpreadConstraint": {
+        type: "object",
+        properties: {
+          maxSkew: { type: "integer" },
+          topologyKey: { type: "string" },
+          whenUnsatisfiable: { type: "string", enum: ["DoNotSchedule", "ScheduleAnyway"] },
+        },
+      },
+      "io.k8s.api.core.v1.Affinity": {
+        type: "object",
+        properties: {
+          nodeAffinity: { type: "object" },
+          podAffinity: { type: "object" },
+          podAntiAffinity: { type: "object" },
+        },
+      },
       "io.k8s.api.core.v1.PodSpec": {
         type: "object",
         properties: {
@@ -414,6 +453,19 @@ const synthDoc: OpenAPIDoc = {
           // surface this" canary — the allowlist excludes it
           // pending per-row collapse.
           initContainers: { type: "array", items: { type: "object" } },
+          // Pod-level admin surfaces — allowlisted as `advanced`.
+          securityContext: {
+            allOf: [{ $ref: "#/components/schemas/io.k8s.api.core.v1.PodSecurityContext" }],
+          },
+          affinity: { allOf: [{ $ref: "#/components/schemas/io.k8s.api.core.v1.Affinity" }] },
+          tolerations: {
+            type: "array",
+            items: { $ref: "#/components/schemas/io.k8s.api.core.v1.Toleration" },
+          },
+          topologySpreadConstraints: {
+            type: "array",
+            items: { $ref: "#/components/schemas/io.k8s.api.core.v1.TopologySpreadConstraint" },
+          },
         },
         required: ["containers"],
       },
@@ -502,6 +554,7 @@ const walkOptionsFor = (kind: SupportedKind) => ({
   // and CRD callers leave this off.
   discriminatorHints: buildK8sDiscriminatorHints(),
   createOnlyPaths: getCreateOnlyPaths(kind),
+  advancedPaths: getAdvancedPaths(kind),
 });
 
 const schemaFor = (kind: SupportedKind): JSONSchema => {
@@ -970,6 +1023,33 @@ describe("Deployment — round-trip", () => {
       "",
     ].join("\n");
     expect(yamlRoundTrip(volumesYaml)).toEqual(parseYaml(volumesYaml));
+  });
+
+  // ── advanced flag (collapsed-by-default in renderer) ───────────
+
+  it("pod-level securityContext / affinity / tolerations / topologySpreadConstraints surface AND are flagged advanced", () => {
+    const all = flatten(buildFieldDescriptors(schemaFor("Deployment"), walkOptionsFor("Deployment")));
+    const advancedExpected = [
+      "spec.template.spec.securityContext",
+      "spec.template.spec.affinity",
+      "spec.template.spec.tolerations",
+      "spec.template.spec.topologySpreadConstraints",
+    ];
+    for (const dotted of advancedExpected) {
+      const d = all.find((x) => x.path.join(".") === dotted);
+      expect(d, `missing descriptor for ${dotted}`).toBeDefined();
+      expect(d?.advanced, `${dotted} should be flagged advanced`).toBe(true);
+    }
+  });
+
+  it("non-advanced Deployment fields stay un-flagged (replicas, selector, containers)", () => {
+    const all = flatten(buildFieldDescriptors(schemaFor("Deployment"), walkOptionsFor("Deployment")));
+    const replicas = all.find((d) => d.path.join(".") === "spec.replicas");
+    const selector = all.find((d) => d.path.join(".") === "spec.selector");
+    const containers = all.find((d) => d.path.join(".") === "spec.template.spec.containers");
+    expect(replicas?.advanced).toBeUndefined();
+    expect(selector?.advanced).toBeUndefined();
+    expect(containers?.advanced).toBeUndefined();
   });
 
   it("hinted Probe round-trips through YAML preserving handler + threshold values", () => {
