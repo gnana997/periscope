@@ -15,6 +15,41 @@ tag.
 
 ### Added
 
+- Form-mode coverage for `oneOf` discriminators and `allOf`
+  composition (#132, builds on #131). Adds two extensions to the
+  shared `lib/schemaForm/` engine that close the most common
+  "yaml only" gaps in real-world schemas:
+  - **`oneOf` discriminator UI** — the walker now emits a new
+    `discriminator` descriptor type for `oneOf` shapes (gated on
+    `allowOneOfDiscriminator`, opted-in by K8s, off for Helm).
+    Detects two structural shapes: whole-value oneOf (e.g.
+    `Service.spec.ports[].targetPort` string-or-int,
+    `Ingress.spec.rules[].http.paths[].backend` Service-or-Resource)
+    and object-level oneOf with required-key branches (e.g.
+    cert-manager `Issuer.spec` selfSigned/ca/vault/acme,
+    `aws-ebs-csi-driver` IRSA-vs-PodIdentity). The renderer is a
+    segmented branch picker + sub-form for the active branch;
+    switching branches is destructive (confirm-then-wipe, mirroring
+    the form↔yaml toggle pattern). Branch labels come from the
+    sub-schema's `title`, the single required-key name, or the
+    single property name as a fallback heuristic.
+  - **`allOf` merger** — pure schema-merge function that flattens
+    `allOf:[{$ref: Base}, {properties: Override}]` shapes into a
+    single rendered schema before the walker emits descriptors.
+    Runs inside `derefIfNeeded`, so all consumers (Helm + K8s)
+    benefit without opting in. Unblocks the `metadata` field on
+    every K8s kind (was always yaml-only because metadata is
+    `allOf:[{$ref: ObjectMeta}]` everywhere) — operators can now
+    edit labels / annotations through the form. Type conflicts
+    across allOf entries abort the merge cleanly and surface as
+    the existing unsupported badge.
+  - **Description tooltips** — long OpenAPI v3 descriptions
+    (the `host` field on Ingress carries a ~700-char paragraph)
+    no longer render inline. A small `(i)` icon next to each
+    label opens a tooltip with the description on hover/focus.
+    Single-file change benefits every form-mode consumer (K8s
+    edit pane, Helm install/upgrade dialogs, EKS add-on dialogs).
+
 - Schema-aware form editor for ConfigMap, Secret, Service, and
   Ingress (#116, supersedes #130). The detail-pane YAML tab on these
   four kinds now renders a structured form by default, driven by the
