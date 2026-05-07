@@ -541,6 +541,124 @@ const synthDoc: OpenAPIDoc = {
           status: { type: "object" },
         },
       },
+      // ── StatefulSet shapes ────────────────────────────────────
+      // Reuses the Deployment-side PodSpec / Container / Volume /
+      // ObjectMeta etc. wholesale — only the StatefulSet-specific
+      // wrappers are modelled here.
+      "io.k8s.api.apps.v1.RollingUpdateStatefulSetStrategy": {
+        type: "object",
+        properties: {
+          partition: { type: "integer" },
+          maxUnavailable: { type: "string", format: "int-or-string" },
+        },
+      },
+      "io.k8s.api.apps.v1.StatefulSetUpdateStrategy": {
+        type: "object",
+        properties: {
+          type: { type: "string", enum: ["RollingUpdate", "OnDelete"] },
+          rollingUpdate: {
+            allOf: [
+              {
+                $ref:
+                  "#/components/schemas/io.k8s.api.apps.v1.RollingUpdateStatefulSetStrategy",
+              },
+            ],
+          },
+        },
+      },
+      "io.k8s.api.apps.v1.StatefulSetPersistentVolumeClaimRetentionPolicy": {
+        type: "object",
+        properties: {
+          whenDeleted: { type: "string", enum: ["Retain", "Delete"] },
+          whenScaled: { type: "string", enum: ["Retain", "Delete"] },
+        },
+      },
+      "io.k8s.api.apps.v1.StatefulSetOrdinals": {
+        type: "object",
+        properties: { start: { type: "integer" } },
+      },
+      "io.k8s.api.core.v1.PersistentVolumeClaimSpec": {
+        type: "object",
+        properties: {
+          accessModes: { type: "array", items: { type: "string" } },
+          storageClassName: { type: "string" },
+          volumeMode: { type: "string", enum: ["Filesystem", "Block"] },
+          resources: {
+            allOf: [{ $ref: "#/components/schemas/io.k8s.api.core.v1.ResourceRequirements" }],
+          },
+        },
+      },
+      "io.k8s.api.core.v1.PersistentVolumeClaim": {
+        type: "object",
+        properties: {
+          metadata: {
+            allOf: [
+              { $ref: "#/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.ObjectMeta" },
+            ],
+          },
+          spec: {
+            allOf: [
+              { $ref: "#/components/schemas/io.k8s.api.core.v1.PersistentVolumeClaimSpec" },
+            ],
+          },
+        },
+      },
+      "io.k8s.api.apps.v1.StatefulSetSpec": {
+        type: "object",
+        properties: {
+          replicas: { type: "integer" },
+          serviceName: { type: "string" },
+          podManagementPolicy: { type: "string", enum: ["OrderedReady", "Parallel"] },
+          minReadySeconds: { type: "integer" },
+          revisionHistoryLimit: { type: "integer" },
+          selector: {
+            allOf: [
+              { $ref: "#/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.LabelSelector" },
+            ],
+          },
+          template: {
+            allOf: [{ $ref: "#/components/schemas/io.k8s.api.core.v1.PodTemplateSpec" }],
+          },
+          updateStrategy: {
+            allOf: [{ $ref: "#/components/schemas/io.k8s.api.apps.v1.StatefulSetUpdateStrategy" }],
+          },
+          volumeClaimTemplates: {
+            type: "array",
+            items: { $ref: "#/components/schemas/io.k8s.api.core.v1.PersistentVolumeClaim" },
+          },
+          persistentVolumeClaimRetentionPolicy: {
+            allOf: [
+              {
+                $ref:
+                  "#/components/schemas/io.k8s.api.apps.v1.StatefulSetPersistentVolumeClaimRetentionPolicy",
+              },
+            ],
+          },
+          ordinals: {
+            allOf: [{ $ref: "#/components/schemas/io.k8s.api.apps.v1.StatefulSetOrdinals" }],
+          },
+        },
+        required: ["selector", "template", "serviceName"],
+      },
+      "io.k8s.api.apps.v1.StatefulSet": {
+        type: "object",
+        "x-kubernetes-group-version-kind": [
+          { group: "apps", version: "v1", kind: "StatefulSet" },
+        ],
+        properties: {
+          apiVersion: { type: "string" },
+          kind: { type: "string" },
+          metadata: {
+            allOf: [
+              { $ref: "#/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.ObjectMeta" },
+            ],
+          },
+          spec: {
+            allOf: [{ $ref: "#/components/schemas/io.k8s.api.apps.v1.StatefulSetSpec" }],
+          },
+          status: { type: "object" },
+        },
+      },
     },
   },
 } as unknown as OpenAPIDoc;
@@ -1078,6 +1196,148 @@ describe("Deployment — round-trip", () => {
       "",
     ].join("\n");
     expect(yamlRoundTrip(probedYaml)).toEqual(parseYaml(probedYaml));
+  });
+});
+
+describe("StatefulSet — round-trip", () => {
+  const yaml = [
+    "apiVersion: apps/v1",
+    "kind: StatefulSet",
+    "metadata:",
+    "  name: db",
+    "  namespace: default",
+    "spec:",
+    "  replicas: 3",
+    "  serviceName: db-headless",
+    "  podManagementPolicy: OrderedReady",
+    "  selector:",
+    "    matchLabels:",
+    "      app: db",
+    "  updateStrategy:",
+    "    type: RollingUpdate",
+    "    rollingUpdate:",
+    "      partition: 0",
+    "  volumeClaimTemplates:",
+    "    - metadata:",
+    "        name: data",
+    "      spec:",
+    "        accessModes:",
+    "          - ReadWriteOnce",
+    "        storageClassName: standard",
+    "        resources:",
+    "          requests:",
+    "            storage: 10Gi",
+    "  template:",
+    "    metadata:",
+    "      labels:",
+    "        app: db",
+    "    spec:",
+    "      containers:",
+    "        - name: db",
+    "          image: postgres:16",
+    "          ports:",
+    "            - name: pg",
+    "              containerPort: 5432",
+    "          volumeMounts:",
+    "            - name: data",
+    "              mountPath: /var/lib/postgresql/data",
+    "",
+  ].join("\n");
+
+  it("walker covers StatefulSet-specific fields (serviceName, podManagementPolicy, updateStrategy, volumeClaimTemplates)", () => {
+    const all = flatten(buildFieldDescriptors(schemaFor("StatefulSet"), walkOptionsFor("StatefulSet")));
+    const paths = all.map((d) => d.path.join("."));
+    expect(paths).toEqual(
+      expect.arrayContaining([
+        "metadata.name",
+        "spec.replicas",
+        "spec.serviceName",
+        "spec.podManagementPolicy",
+        "spec.selector",
+        "spec.updateStrategy.type",
+        "spec.updateStrategy.rollingUpdate",
+        "spec.volumeClaimTemplates",
+        "spec.template.spec.containers",
+      ]),
+    );
+  });
+
+  it("walker reuses the same PodSpec curated subset as Deployment (containers, initContainers via array-of-objects; volumes via array-of-discriminators)", () => {
+    const all = flatten(buildFieldDescriptors(schemaFor("StatefulSet"), walkOptionsFor("StatefulSet")));
+    const containers = all.find((d) => d.path.join(".") === "spec.template.spec.containers");
+    const volumes = all.find((d) => d.path.join(".") === "spec.template.spec.volumes");
+    const initContainers = all.find((d) => d.path.join(".") === "spec.template.spec.initContainers");
+    expect(containers?.type).toBe("array-of-objects");
+    expect(volumes?.type).toBe("array-of-discriminators");
+    expect(initContainers?.type).toBe("array-of-objects");
+  });
+
+  it("walker flags StatefulSet immutable fields as create-only (selector, serviceName, podManagementPolicy, volumeClaimTemplates)", () => {
+    const all = flatten(buildFieldDescriptors(schemaFor("StatefulSet"), walkOptionsFor("StatefulSet")));
+    for (const dotted of [
+      "spec.selector",
+      "spec.serviceName",
+      "spec.podManagementPolicy",
+      "spec.volumeClaimTemplates",
+    ]) {
+      const d = all.find((x) => x.path.join(".") === dotted);
+      expect(d, `missing descriptor for ${dotted}`).toBeDefined();
+      expect(d?.editable, `${dotted} should be create-only`).toBe("create-only");
+    }
+  });
+
+  it("walker emits updateStrategy.type as a RollingUpdate|OnDelete enum (StatefulSet-specific values)", () => {
+    const all = flatten(buildFieldDescriptors(schemaFor("StatefulSet"), walkOptionsFor("StatefulSet")));
+    const strategyType = all.find((d) => d.path.join(".") === "spec.updateStrategy.type");
+    expect(strategyType?.type).toBe("string");
+    expect(strategyType?.enum).toEqual(expect.arrayContaining(["RollingUpdate", "OnDelete"]));
+  });
+
+  it("walker emits volumeClaimTemplates as array-of-objects with curated PVC subset (metadata.name + spec.{accessModes, storageClassName, resources, volumeMode})", () => {
+    const all = flatten(buildFieldDescriptors(schemaFor("StatefulSet"), walkOptionsFor("StatefulSet")));
+    const vct = all.find((d) => d.path.join(".") === "spec.volumeClaimTemplates");
+    expect(vct?.type).toBe("array-of-objects");
+    const childPaths = (vct?.children ?? []).map((c) => c.path.join("."));
+    expect(childPaths).toEqual(expect.arrayContaining(["metadata", "spec"]));
+    const specChild = vct?.children?.find((c) => c.path.join(".") === "spec");
+    const specChildPaths = (specChild?.children ?? []).map((c) => c.path.join("."));
+    expect(specChildPaths).toEqual(
+      expect.arrayContaining([
+        "spec.accessModes",
+        "spec.storageClassName",
+        "spec.volumeMode",
+        "spec.resources",
+      ]),
+    );
+  });
+
+  it("walker flags PVC retention policy + ordinals as advanced", () => {
+    const all = flatten(buildFieldDescriptors(schemaFor("StatefulSet"), walkOptionsFor("StatefulSet")));
+    const retention = all.find((d) => d.path.join(".") === "spec.persistentVolumeClaimRetentionPolicy");
+    const ordinals = all.find((d) => d.path.join(".") === "spec.ordinals");
+    expect(retention?.advanced).toBe(true);
+    expect(ordinals?.advanced).toBe(true);
+  });
+
+  it("structure preserved through round-trip including updateStrategy + volumeClaimTemplates", () => {
+    const before = parseYaml(yaml) as Record<string, unknown>;
+    const after = yamlRoundTrip(yaml) as Record<string, unknown>;
+    expect(after).toEqual(before);
+    expect(getAtPath(after, ["spec", "serviceName"])).toBe("db-headless");
+    const vct = getAtPath(after, ["spec", "volumeClaimTemplates"]) as unknown[];
+    expect(vct).toHaveLength(1);
+  });
+
+  it("editing replicas via setAtPath preserves siblings (volumeClaimTemplates, template.spec.containers)", () => {
+    const obj = parseYaml(yaml) as Record<string, unknown>;
+    const next = setAtPath(obj, ["spec", "replicas"], 5);
+    expect(getAtPath(next, ["spec", "replicas"])).toBe(5);
+    expect(getAtPath(next, ["spec", "serviceName"])).toBe("db-headless");
+    const containers = getAtPath(next, ["spec", "template", "spec", "containers"]) as Record<
+      string,
+      unknown
+    >[];
+    expect(containers[0].name).toBe("db");
   });
 });
 

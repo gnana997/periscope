@@ -2,7 +2,7 @@
 //
 // Three rendering paths, derived from URL params + RBAC:
 //
-//   ?edit=1 + canEdit + ConfigMap/Secret/Service/Ingress/Deployment → <KindEditRouter>
+//   ?edit=1 + canEdit + ConfigMap/Secret/Service/Ingress/Deployment/StatefulSet → <KindEditRouter>
 //   ?edit=1 + canEdit + other identifiable source        → <YamlEditor>
 //   default                                              → <YamlReadView>
 //

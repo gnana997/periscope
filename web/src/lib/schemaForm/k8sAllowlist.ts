@@ -32,7 +32,8 @@ export type SupportedKind =
   | "Secret"
   | "Service"
   | "Ingress"
-  | "Deployment";
+  | "Deployment"
+  | "StatefulSet";
 
 interface KindSpec {
   /** Sub-fields of `metadata` to surface. Sugar for prefixing each
@@ -70,6 +71,7 @@ const KIND_GVK: Record<SupportedKind, KindGVK> = {
   Service: { group: "", version: "v1", kind: "Service", resource: "services" },
   Ingress: { group: "networking.k8s.io", version: "v1", kind: "Ingress", resource: "ingresses" },
   Deployment: { group: "apps", version: "v1", kind: "Deployment", resource: "deployments" },
+  StatefulSet: { group: "apps", version: "v1", kind: "StatefulSet", resource: "statefulsets" },
 };
 
 export function getKindGVK(kind: SupportedKind): KindGVK {
@@ -207,6 +209,111 @@ const KIND_SPECS: Record<SupportedKind, KindSpec> = {
       "spec.template.spec.tolerations",
       "spec.template.spec.topologySpreadConstraints",
       "spec.template.spec.securityContext",
+    ],
+  },
+  // StatefulSet — same PodSpec subset as Deployment (volumes,
+  // containers[*], initContainers[*], probes, lifecycle, etc.
+  // already covered by the renderer + hint table).
+  //
+  // StatefulSet-specific fields:
+  //   - spec.serviceName: headless Service name. Immutable per the
+  //     apiserver — create-only.
+  //   - spec.podManagementPolicy: OrderedReady vs Parallel.
+  //     Immutable.
+  //   - spec.updateStrategy.{type, rollingUpdate}: same shape as
+  //     Deployment.spec.strategy but type = RollingUpdate | OnDelete.
+  //   - spec.volumeClaimTemplates[]: array of PersistentVolumeClaim
+  //     templates. Immutable per the apiserver. We surface a curated
+  //     PVC subset (metadata.{name,labels,annotations} + spec.
+  //     {accessModes, storageClassName, resources, volumeMode}).
+  //   - spec.persistentVolumeClaimRetentionPolicy: 1.27+ retention
+  //     knobs (whenDeleted / whenScaled, both enums).
+  //   - spec.ordinals.start: 1.27+ ordinal start index.
+  //
+  // Replicas / template / minReadySeconds / revisionHistoryLimit
+  // mirror Deployment.
+  StatefulSet: {
+    metadata: ["name", "namespace", "labels", "annotations"],
+    paths: [
+      "spec.replicas",
+      "spec.serviceName",
+      "spec.podManagementPolicy",
+      "spec.selector",
+      "spec.minReadySeconds",
+      "spec.revisionHistoryLimit",
+      "spec.updateStrategy.type",
+      "spec.updateStrategy.rollingUpdate",
+      "spec.persistentVolumeClaimRetentionPolicy.whenDeleted",
+      "spec.persistentVolumeClaimRetentionPolicy.whenScaled",
+      "spec.ordinals.start",
+      // PVC templates — curated subset.
+      "spec.volumeClaimTemplates[*].metadata.name",
+      "spec.volumeClaimTemplates[*].metadata.labels",
+      "spec.volumeClaimTemplates[*].metadata.annotations",
+      "spec.volumeClaimTemplates[*].spec.accessModes",
+      "spec.volumeClaimTemplates[*].spec.storageClassName",
+      "spec.volumeClaimTemplates[*].spec.volumeMode",
+      "spec.volumeClaimTemplates[*].spec.resources",
+      // Pod template — identical to Deployment.
+      "spec.template.metadata.labels",
+      "spec.template.metadata.annotations",
+      "spec.template.spec.restartPolicy",
+      "spec.template.spec.serviceAccountName",
+      "spec.template.spec.nodeSelector",
+      "spec.template.spec.terminationGracePeriodSeconds",
+      "spec.template.spec.volumes",
+      "spec.template.spec.affinity",
+      "spec.template.spec.tolerations",
+      "spec.template.spec.topologySpreadConstraints",
+      "spec.template.spec.securityContext",
+      "spec.template.spec.containers[*].name",
+      "spec.template.spec.containers[*].image",
+      "spec.template.spec.containers[*].imagePullPolicy",
+      "spec.template.spec.containers[*].command",
+      "spec.template.spec.containers[*].args",
+      "spec.template.spec.containers[*].workingDir",
+      "spec.template.spec.containers[*].ports",
+      "spec.template.spec.containers[*].env",
+      "spec.template.spec.containers[*].envFrom",
+      "spec.template.spec.containers[*].resources",
+      "spec.template.spec.containers[*].volumeMounts",
+      "spec.template.spec.containers[*].livenessProbe",
+      "spec.template.spec.containers[*].readinessProbe",
+      "spec.template.spec.containers[*].startupProbe",
+      "spec.template.spec.containers[*].lifecycle",
+      "spec.template.spec.containers[*].terminationMessagePath",
+      "spec.template.spec.containers[*].terminationMessagePolicy",
+      "spec.template.spec.containers[*].tty",
+      "spec.template.spec.containers[*].stdin",
+      "spec.template.spec.containers[*].stdinOnce",
+      "spec.template.spec.initContainers[*].name",
+      "spec.template.spec.initContainers[*].image",
+      "spec.template.spec.initContainers[*].imagePullPolicy",
+      "spec.template.spec.initContainers[*].command",
+      "spec.template.spec.initContainers[*].args",
+      "spec.template.spec.initContainers[*].workingDir",
+      "spec.template.spec.initContainers[*].env",
+      "spec.template.spec.initContainers[*].envFrom",
+      "spec.template.spec.initContainers[*].resources",
+      "spec.template.spec.initContainers[*].volumeMounts",
+      "spec.template.spec.initContainers[*].terminationMessagePath",
+      "spec.template.spec.initContainers[*].terminationMessagePolicy",
+    ],
+    createOnly: [
+      "metadata.name",
+      "metadata.namespace",
+      "spec.selector",
+      "spec.serviceName",
+      "spec.podManagementPolicy",
+      "spec.volumeClaimTemplates",
+    ],
+    advanced: [
+      "spec.template.spec.affinity",
+      "spec.template.spec.tolerations",
+      "spec.template.spec.topologySpreadConstraints",
+      "spec.template.spec.securityContext",
+      "spec.persistentVolumeClaimRetentionPolicy",
+      "spec.ordinals",
     ],
   },
 };

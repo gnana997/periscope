@@ -35,6 +35,7 @@ import { SecretForm } from "./SecretForm";
 import { ServiceForm } from "./ServiceForm";
 import { IngressForm } from "./IngressForm";
 import { DeploymentForm } from "./DeploymentForm";
+import { StatefulSetForm } from "./StatefulSetForm";
 import { useApplySubmit } from "./useApplySubmit";
 
 const YamlEditor = lazy(() =>
@@ -250,6 +251,14 @@ function BufferedEditor({
             )}
             {kind === "Deployment" && (
               <DeploymentForm
+                cluster={cluster}
+                valuesYaml={draftYaml}
+                onValuesYamlChange={onValuesYamlChange}
+                mode="edit"
+              />
+            )}
+            {kind === "StatefulSet" && (
+              <StatefulSetForm
                 cluster={cluster}
                 valuesYaml={draftYaml}
                 onValuesYamlChange={onValuesYamlChange}
