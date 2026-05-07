@@ -15,6 +15,67 @@ tag.
 
 ### Added
 
+- EKS add-on upgrade + delete actions (#119, PR-3 of three,
+  closing the issue). New `PUT /api/clusters/{c}/eks/addons/{name}`
+  and `DELETE /api/clusters/{c}/eks/addons/{name}?preserve=...`
+  wire `eks:UpdateAddon` and `eks:DeleteAddon`. Same async-by-design
+  contract as install: returns 202 with status `UPDATING` /
+  `DELETING`; the SPA's status-aware polling watches the flip. Both
+  endpoints reuse the install handler's body validation, audit
+  pair (`eks_addon_upgrade_intent` + `eks_addon_upgrade`,
+  `eks_addon_delete_intent` + `eks_addon_delete`), and cache-
+  invalidation paths. New `KebabMenu` UI primitive surfaces
+  Upgrade / Delete on installed-addon rows in both `AddOnsPage`
+  and `EKSAddOnsCatalogPage`. New `UpgradeAddOnDialog` parallels
+  the install dialog (target version radio, schema-aware config
+  editor, `PRESERVE` default for resolveConflicts since upgrades
+  usually keep cluster-side overrides). New `DeleteAddOnModal`
+  wraps `ConfirmActionModal` with a `preserve` checkbox so an
+  operator doesn't accidentally rip out coredns and break DNS.
+  Kebab actions are disabled while AWS is mid-transition
+  (`CREATING`/`UPDATING`/`DELETING`) — sending another mutation
+  during a pending one produces opaque AWS errors. The new IAM
+  actions `eks:UpdateAddon` and `eks:DeleteAddon` join the
+  `EKSAddonScoped` statement (same addon-ARN scoping as
+  `eks:DescribeAddon`).
+  
+- EKS add-on install action (#119, PR-2 of three). New
+  `POST /api/clusters/{c}/eks/addons` wires `eks:CreateAddon`;
+  body whitelist-validates `resolveConflicts ∈ {NONE, OVERWRITE,
+  PRESERVE}` server-side and forwards `configurationValues` /
+  `serviceAccountRoleArn` verbatim. Returns 202 with the addon
+  detail in status `CREATING`; the SPA polls `/eks/addons/{name}`
+  to watch the flip via status-aware refetch in `useAddons` /
+  `useAddon` (4s interval while any addon is in
+  `CREATING`/`UPDATING`/`DELETING`, off otherwise). New
+  `InstallAddOnDialog` component opens from the catalog page's
+  "+ Install" button — schema-aware via the existing
+  `HelmValuesEditor` (form when AWS ships a JSON Schema for the
+  version, Monaco YAML when it doesn't). New
+  `GET /api/clusters/{c}/eks/addons/catalog/{name}/configuration?version=X`
+  fetches the schema lazily; 24 h cache keyed by `(addon, version)`
+  since AWS schemas are immutable per version. Audit pair
+  `eks_addon_install_intent` + `eks_addon_install` mirrors the
+  workload-rollback shape (intent before the SDK call, outcome
+  after — denial / failure / success). The new IAM action
+  `eks:CreateAddon` joins the cluster-scoped statement; optional
+  `iam:PassRole` documented as a conditional add-on for operators
+  who set `serviceAccountRoleArn`.
+  
+- EKS add-on catalog (#119, PR-1 of three). New
+  `GET /api/clusters/{c}/eks/addons/catalog` returns every
+  AWS-published add-on available on the cluster's K8s version, with
+  per-addon ownership / type / publisher / marketplace flag /
+  compatibility matrix and installed-state annotation merged from
+  the existing `/eks/addons` cache. New `Add-ons catalog` sidebar
+  entry under EKS opens the browse page; filter chips narrow by
+  AWS / third-party / type. One unfiltered
+  `eks:DescribeAddonVersions` call per `(k8sVersion)` drives the
+  endpoint; cached server-side for 6 h with sticky errors so a
+  fleet of N 1.30 clusters hits AWS once per cache window.
+  Read-only in this PR; install / upgrade / delete actions ship in
+  follow-up PRs.
+  
 - Helm install-ref pre-fill on the upgrade dialog (#76 follow-up). On
   successful install / upgrade actions, Periscope patches the helm
   release storage Secret/ConfigMap with two annotations —
@@ -107,6 +168,7 @@ tag.
   Identity / IRSA) is a follow-up sub-task. Frontend types + API
   client + TanStack hooks ship alongside the backend; the install-
   dialog UI lands in a sibling issue.
+  
 - Helm install dialog UI (#74, sub-task of #72). New "+ install
   chart" button in the Helm releases page header opens a modal with
   a single-pane top-to-bottom flow: chart-ref input → fetch

@@ -130,6 +130,59 @@ const (
 	// not split those into separate verbs because the caller's
 	// intent is the same operator action.
 	VerbEKSNodegroupsRead Verb = "eks_nodegroups_read"
+	// VerbEKSAddonsRead records a read against the EKS managed add-on
+	// surface (ListAddons / DescribeAddon, plus the shared
+	// DescribeAddonVersions catalog). Same precedent as
+	// VerbEKSInsightsRead and VerbEKSNodegroupsRead: compliance wants
+	// a record of who checked add-on freshness — "is anything blocking
+	// the next minor?" — before an upgrade. The catalog lookup
+	// (DescribeAddonVersions) is rolled into the same row because the
+	// caller's intent is the same operator action; `op` in Extra
+	// distinguishes the read kind so a reviewer can see what was
+	// touched without adding new verbs:
+	//   "list"                  — installed-addons list (#117)
+	//   "list:cache_hit"
+	//   "detail"                — per-addon detail (#117)
+	//   "detail:cache_hit"
+	//   "catalog"               — full add-on catalog (#119)
+	//   "catalog:cache_hit"
+	//   "configuration"         — addon-version JSON Schema (#119)
+	//   "configuration:cache_hit"
+	VerbEKSAddonsRead Verb = "eks_addons_read"
+	// VerbEKSAddonInstallIntent / VerbEKSAddonInstall are the paired
+	// audit rows for an EKS managed add-on install (#119, PR-2).
+	//
+	// AWS-side mutations are async-by-design: CreateAddon returns
+	// immediately with status=CREATING; the actual provisioning
+	// happens server-side over 1-5 minutes. The Intent row captures
+	// the operator's request before the SDK call so a hung / aborted
+	// invocation still leaves a forensic trail; the outcome row
+	// captures the SDK's immediate response (success → addon
+	// resource created with status CREATING; failure → AWS error).
+	// The status flip from CREATING → ACTIVE / CREATE_FAILED is
+	// observable through subsequent eks_addons_read rows once the
+	// SPA polls; we don't emit a separate row when the status flips
+	// because nobody initiated that transition — AWS did.
+	//
+	// Same paired-intent shape as workload rollback (#71). Extra
+	// carries `addonName`, `addonVersion`, and (on outcome rows) the
+	// AWS request ID for AWS-side correlation.
+	VerbEKSAddonInstallIntent Verb = "eks_addon_install_intent"
+	VerbEKSAddonInstall       Verb = "eks_addon_install"
+	// VerbEKSAddonUpgradeIntent / VerbEKSAddonUpgrade pair (#119,
+	// PR-3). Same async-by-design contract and paired-intent shape
+	// as install — UpdateAddon returns status=UPDATING; provisioning
+	// completes AWS-side over 1-5 min. Extra carries `addonName`,
+	// `addonVersion` (the *target* version), and `resolveConflicts`.
+	VerbEKSAddonUpgradeIntent Verb = "eks_addon_upgrade_intent"
+	VerbEKSAddonUpgrade       Verb = "eks_addon_upgrade"
+	// VerbEKSAddonDeleteIntent / VerbEKSAddonDelete pair (#119,
+	// PR-3). DeleteAddon returns status=DELETING. Extra carries
+	// `addonName` and `preserve` — the boolean operator choice for
+	// whether the underlying K8s resources stay (preserve=true) or
+	// are torn down with the addon.
+	VerbEKSAddonDeleteIntent Verb = "eks_addon_delete_intent"
+	VerbEKSAddonDelete       Verb = "eks_addon_delete"
 )
 
 // Outcome is the result classification.
