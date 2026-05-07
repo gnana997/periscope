@@ -10,9 +10,11 @@
 //                    range, version list, marketplace warning). No
 //                    /addons/{name} call (would 404). Footer: Install.
 
+import { useEffect, useState } from "react";
 import { compatRangeOf, pickLatestForK8s } from "../../lib/addonCatalog";
 import { cn } from "../../lib/cn";
 import type { CatalogAddon } from "../../lib/types";
+import { AddonConfigBody } from "./AddonConfigBody";
 import { AddonDetailBody } from "./AddonDetailBody";
 
 export type AddonPaneSelection =
@@ -54,9 +56,20 @@ export function AddonDetailPane({
 }: AddonDetailPaneProps) {
   const name =
     selection.kind === "installed" ? selection.name : selection.catalog.name;
-  const catalog =
-    selection.kind === "installed" ? selection.catalog : selection.catalog;
+  const catalog = selection.catalog;
   const subtitle = subtitleFor(catalog);
+
+  // Tab state — only meaningful for the installed selection (the
+  // available selection has no configurationValues to show, so it
+  // skips the tab strip and renders the catalog body directly).
+  // Reset to "describe" whenever the selected addon changes so the
+  // operator never lands on a stale "config" tab from the previous
+  // row's selection.
+  const [activeTab, setActiveTab] = useState<"describe" | "config">("describe");
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setActiveTab("describe");
+  }, [name, selection.kind]);
 
   return (
     // min-w-0 mirrors DetailPane — the SplitPane right pane is
@@ -89,16 +102,24 @@ export function AddonDetailPane({
         </button>
       </header>
 
+      {selection.kind === "installed" && (
+        <TabStrip activeTab={activeTab} onTabChange={setActiveTab} />
+      )}
+
       <div className="flex-1 overflow-y-auto px-4 py-3">
         {selection.kind === "installed" ? (
-          <AddonDetailBody
-            cluster={cluster}
-            name={selection.name}
-            clusterK8sVersion={kubernetesVersion}
-            onUpgradeToVersion={
-              actionsDisabled ? undefined : onUpgradeToVersion
-            }
-          />
+          activeTab === "describe" ? (
+            <AddonDetailBody
+              cluster={cluster}
+              name={selection.name}
+              clusterK8sVersion={kubernetesVersion}
+              onUpgradeToVersion={
+                actionsDisabled ? undefined : onUpgradeToVersion
+              }
+            />
+          ) : (
+            <AddonConfigBody cluster={cluster} name={selection.name} />
+          )
         ) : (
           <AvailableBody
             catalog={selection.catalog}
@@ -137,6 +158,41 @@ export function AddonDetailPane({
           )
         )}
       </footer>
+    </div>
+  );
+}
+
+// TabStrip mirrors the styling vocabulary of DetailPane.tsx — the
+// shared tab-strip used across pods/deps/etc. We don't import the
+// primitive because it carries a lot more (close button, actions
+// row, title row) — our pane already owns those. Keeping a small
+// in-file component preserves the visual language without entangling
+// us with the primitive's API.
+function TabStrip({
+  activeTab,
+  onTabChange,
+}: {
+  activeTab: "describe" | "config";
+  onTabChange: (tab: "describe" | "config") => void;
+}) {
+  return (
+    <div className="flex h-9 shrink-0 items-center gap-1 border-b border-border bg-surface px-3">
+      {(["describe", "config"] as const).map((id) => (
+        <button
+          key={id}
+          type="button"
+          onClick={() => onTabChange(id)}
+          className={cn(
+            "relative inline-flex items-center px-2 py-1 text-[12px] transition-colors",
+            activeTab === id ? "text-ink" : "text-ink-muted hover:text-ink",
+          )}
+        >
+          {id}
+          {activeTab === id && (
+            <span className="absolute inset-x-2 -bottom-px h-px bg-accent" />
+          )}
+        </button>
+      ))}
     </div>
   );
 }

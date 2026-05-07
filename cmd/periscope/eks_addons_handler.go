@@ -170,6 +170,12 @@ type AddonDetail struct {
 	ConfigurationSchema string              `json:"configurationSchema,omitempty"`
 	HealthIssues        []AddonHealthIssue  `json:"healthIssues,omitempty"`
 	AvailableVersions   []AddonVersionEntry `json:"availableVersions,omitempty"`
+	// PodIdentityAssociations is the list of EKS Pod Identity
+	// association ARNs attached to this addon — the newer alternative
+	// to IRSA via ServiceAccountRoleARN. Both can be present, neither,
+	// or one. Empty/absent means the addon doesn't use AWS-managed
+	// pod identity.
+	PodIdentityAssociations []string `json:"podIdentityAssociations,omitempty"`
 	// Owner / Publisher are surfaced for the SPA's "marketplace vs
 	// AWS-managed" disambiguation.
 	Owner     string `json:"owner,omitempty"`
@@ -345,12 +351,13 @@ func eksAddonsGetHandler(reg *clusters.Registry, cache *eksAddonsCache, versions
 		summary := buildAddonSummary(out.Addon, catalog, clusterVer)
 
 		detail := AddonDetail{
-			AddonSummary:          summary,
-			ARN:                   deref(out.Addon.AddonArn),
-			ServiceAccountRoleARN: deref(out.Addon.ServiceAccountRoleArn),
-			ConfigurationValues:   deref(out.Addon.ConfigurationValues),
-			Owner:                 deref(out.Addon.Owner),
-			Publisher:             deref(out.Addon.Publisher),
+			AddonSummary:            summary,
+			ARN:                     deref(out.Addon.AddonArn),
+			ServiceAccountRoleARN:   deref(out.Addon.ServiceAccountRoleArn),
+			ConfigurationValues:     deref(out.Addon.ConfigurationValues),
+			PodIdentityAssociations: out.Addon.PodIdentityAssociations,
+			Owner:                   deref(out.Addon.Owner),
+			Publisher:               deref(out.Addon.Publisher),
 		}
 		if out.Addon.Health != nil {
 			for _, issue := range out.Addon.Health.Issues {

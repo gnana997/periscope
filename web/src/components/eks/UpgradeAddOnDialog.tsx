@@ -19,7 +19,7 @@
 // status=UPDATING; the status-aware refetchInterval in useAddons /
 // useAddon polls the row until ACTIVE / UPDATE_FAILED.
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   buildUpgradeRequest,
   filterUpgradeTargets,
@@ -81,6 +81,15 @@ export function UpgradeAddOnDialog({
   const [serviceAccountRoleArn, setServiceAccountRoleArn] = useState<string>("");
   const [resolveConflicts, setResolveConflicts] =
     useState<ResolveConflicts>("PRESERVE");
+  // Editor mode owned by the dialog so version change preserves the
+  // operator's explicit Form/YAML toggle. undefined = "let
+  // HelmValuesEditor pick auto-default for current schema."
+  const [editorMode, setEditorMode] = useState<"form" | "yaml" | undefined>(
+    undefined,
+  );
+  // See InstallAddOnDialog for the seed-vs-edits distinction this
+  // ref enables.
+  const seededStubRef = useRef<string>("");
 
   const compatible = useMemo(() => {
     if (!catalogAddon) return [];
@@ -104,11 +113,14 @@ export function UpgradeAddOnDialog({
       initialVersion && targets.some((t) => t.version === initialVersion)
         ? initialVersion
         : pickUpgradeDefault(targets);
-    // eslint-disable-next-line react-hooks/set-state-in-effect
+    /* eslint-disable react-hooks/set-state-in-effect */
     setVersion(requested);
     setValuesYaml(detail.configurationValues ?? "");
     setServiceAccountRoleArn(detail.serviceAccountRoleArn ?? "");
     setResolveConflicts("PRESERVE");
+    setEditorMode(undefined);
+    seededStubRef.current = "";
+    /* eslint-enable react-hooks/set-state-in-effect */
   }, [open, catalogAddon, detail, targets, initialVersion]);
 
   const schemaQuery = useAddonConfigurationSchema(
@@ -128,9 +140,22 @@ export function UpgradeAddOnDialog({
   // discoverable. Skipped when detail.configurationValues is
   // non-empty — that path keeps the operator's prior overrides.
   useEffect(() => {
-    if (!open || !parsedSchema || valuesYaml !== "") return;
+    if (!open || !parsedSchema) return;
+    // Seed and re-seed semantics mirror InstallAddOnDialog. The
+    // upgrade dialog seeds detail.configurationValues from AWS up
+    // front (in the reset effect above), so the typical operator
+    // path lands here with valuesYaml already populated and we
+    // don't seed at all. Only when the addon has no stored config
+    // (operator never customized) AND the buffer is empty do we
+    // seed the discoverability stub.
+    const stub = generateAddonValuesYamlStub(parsedSchema);
+    const operatorHasEdits =
+      valuesYaml !== "" && valuesYaml !== seededStubRef.current;
+    if (operatorHasEdits) return;
+    if (valuesYaml === stub) return;
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    setValuesYaml(generateAddonValuesYamlStub(parsedSchema));
+    setValuesYaml(stub);
+    seededStubRef.current = stub;
   }, [open, parsedSchema, valuesYaml]);
 
   const upgradeMutation = useUpgradeAddon(cluster);
@@ -248,6 +273,8 @@ export function UpgradeAddOnDialog({
                 valuesYaml={valuesYaml}
                 schema={parsedSchema}
                 onValuesYamlChange={setValuesYaml}
+                mode={editorMode}
+                onModeChange={setEditorMode}
               />
             )}
           </Section>
