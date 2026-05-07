@@ -112,9 +112,23 @@ Both signed (cosign keyless) and discoverable on [Artifact Hub](https://artifact
 - Unsaved-changes guards on refresh, sidebar nav, row-click
 
 **Helm**
-- Read-only Helm release browser per cluster (no Helm SDK dep — direct Secret/ConfigMap decoding)
-- Per-release values, manifest, history, and structured dyff-based diff between revisions
-- Auto-probes Secret vs ConfigMap storage drivers per cluster
+- Release browser per cluster: per-release values, manifest, history, NOTES.txt, and structured dyff-based diff between revisions (read paths use direct Secret/ConfigMap decoding, no Helm SDK on the read path)
+- In-browser install / upgrade / uninstall with Atomic-by-default rollback on partial failure
+- Schema-aware values editor: structured form when the chart ships `values.schema.json`, Monaco YAML otherwise, with binary form/YAML toggle for `$ref`-heavy schemas
+- Dry-run preview pane shows the rendered manifests + RBAC pre-flight denials + (upgrade) semantic diff against the live cluster before the operator commits
+- Public HTTP and OCI chart fetch with SSRF protection (IMDS / link-local always blocked, RFC1918 opt-in via env)
+
+**EKS managed add-ons**
+- Browse installed add-ons with health, installed version, latest available, k8s compatibility window, and "blocks next k8s minor" warnings — feeds upgrade readiness
+- Catalog browse of every AWS-published add-on for the cluster's K8s version, filterable by AWS / third-party / type
+- Install / upgrade / delete actions with schema-aware configuration editor and `resolveConflicts` choice
+- Right-edge detail pane with describe / config tabs: see the operator's stored `configurationValues`, IAM service account role, Pod Identity associations, and full version history with one-click "upgrade to" on newer versions
+- Status-aware polling watches `CREATING` / `UPDATING` / `DELETING` flips so the UI stays in sync without manual refresh
+
+**EKS upgrade readiness**
+- Upgrade Insights surface with per-issue severity, kubernetes-version-step, and remediation links
+- Managed node group AMI drift detection so operators see which groups need a rotation before bumping the cluster
+- Works on `in-cluster`, `agent`, `eks`, and `kubeconfig` backends as long as the cluster entry has `arn` + `region`
 
 **Audit & observability**
 - Every privileged action signed by the human user — apply, delete, exec, secret reveal, log open, cronjob trigger
@@ -207,7 +221,7 @@ CI: every push and PR runs `golangci-lint`, `go test`, `npm run lint`, `npm test
 
 ## Roadmap
 
-Planning is tracked in [GitHub Issues](https://github.com/gnana997/periscope/issues). Notable post-v1.0 items: expanded write paths in the Helm release browser (rollback / upgrade) and richer per-cluster RBAC introspection.
+Planning is tracked in [GitHub Issues](https://github.com/gnana997/periscope/issues). Helm install / upgrade / uninstall and the full EKS add-on lifecycle (browse / install / upgrade / delete) shipped in v1.0.4. Areas in active scoping for the next minor: private OCI chart auth (ECR via Pod Identity / IRSA), richer per-cluster RBAC introspection, and EKS add-on detail enrichment (`requiresIamPermissions` / architecture / compute-type signals from `DescribeAddonVersions`).
 
 ## Community & support
 
