@@ -1,8 +1,9 @@
-// KindEditRouter — entry point for editing the four #116 kinds
-// (ConfigMap, Secret, Service, Ingress). Picks between the
-// schema-aware form view (default for these kinds) and the
-// existing Monaco YAML editor based on a localStorage user
-// preference, with a header toggle that flips between them.
+// KindEditRouter — entry point for editing the schema-aware
+// kinds (ConfigMap, Secret, Service, Ingress, plus the Deployment
+// POC). Picks between the schema-aware form view (default for
+// these kinds) and the existing Monaco YAML editor based on a
+// localStorage user preference, with a header toggle that flips
+// between them.
 //
 // **Single-buffer architecture** (after rc-3 follow-up): the
 // `draftYaml` state is hoisted to KindEditRouter so toggling
@@ -33,6 +34,7 @@ import { ConfigMapForm } from "./ConfigMapForm";
 import { SecretForm } from "./SecretForm";
 import { ServiceForm } from "./ServiceForm";
 import { IngressForm } from "./IngressForm";
+import { DeploymentForm } from "./DeploymentForm";
 import { useApplySubmit } from "./useApplySubmit";
 
 const YamlEditor = lazy(() =>
@@ -240,6 +242,14 @@ function BufferedEditor({
             )}
             {kind === "Ingress" && (
               <IngressForm
+                cluster={cluster}
+                valuesYaml={draftYaml}
+                onValuesYamlChange={onValuesYamlChange}
+                mode="edit"
+              />
+            )}
+            {kind === "Deployment" && (
+              <DeploymentForm
                 cluster={cluster}
                 valuesYaml={draftYaml}
                 onValuesYamlChange={onValuesYamlChange}

@@ -10,7 +10,12 @@
 
 import type { JSONSchema } from "./types";
 
-export type SupportedKind = "ConfigMap" | "Secret" | "Service" | "Ingress";
+export type SupportedKind =
+  | "ConfigMap"
+  | "Secret"
+  | "Service"
+  | "Ingress"
+  | "Deployment";
 
 /** Each kind declares the metadata fields and the spec/data subtree
  *  paths it surfaces. Paths are dotted, rooted at the K8s object
@@ -38,6 +43,7 @@ const KIND_GVK: Record<SupportedKind, KindGVK> = {
   Secret: { group: "", version: "v1", kind: "Secret", resource: "secrets" },
   Service: { group: "", version: "v1", kind: "Service", resource: "services" },
   Ingress: { group: "networking.k8s.io", version: "v1", kind: "Ingress", resource: "ingresses" },
+  Deployment: { group: "apps", version: "v1", kind: "Deployment", resource: "deployments" },
 };
 
 export function getKindGVK(kind: SupportedKind): KindGVK {
@@ -84,6 +90,36 @@ const KIND_SPECS: Record<SupportedKind, KindSpec> = {
     metadata: ["name", "namespace", "labels", "annotations"],
     paths: ["spec.ingressClassName", "spec.rules", "spec.tls", "spec.defaultBackend"],
     createOnly: ["metadata.name", "metadata.namespace"],
+  },
+  // Deployment — POC scope (#TBD). The intent of this iteration is
+  // to surface walker/renderer gaps against PodSpec, not to ship
+  // production-ready Deployment editing. We surface the full
+  // `spec.template` here because `filterSchemaForKind` only narrows
+  // one level deep (top-level + `spec.x`); deeper allowlisting like
+  // "containers.image but not containers.lifecycle" requires
+  // extending the filter with wildcard/array-item paths, which is a
+  // follow-up that the gap report will scope.
+  //
+  // Day-1 surface: replicas, selector, strategy (rolling update vs
+  // recreate — useful learning for StatefulSet later), and the full
+  // template (which transitively exposes the entire PodSpec — this
+  // is intentional gap-mining surface).
+  //
+  // spec.selector is create-only because the apiserver rejects
+  // Deployment selector mutations after create.
+  Deployment: {
+    metadata: ["name", "namespace", "labels", "annotations"],
+    paths: [
+      "spec.replicas",
+      "spec.selector",
+      "spec.strategy",
+      "spec.template",
+      "spec.minReadySeconds",
+      "spec.revisionHistoryLimit",
+      "spec.progressDeadlineSeconds",
+      "spec.paused",
+    ],
+    createOnly: ["metadata.name", "metadata.namespace", "spec.selector"],
   },
 };
 
