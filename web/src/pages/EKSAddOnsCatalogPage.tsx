@@ -7,16 +7,19 @@
 // Filter chips narrow by ownership (AWS vs third-party) and by
 // type (networking / storage / observability / security).
 //
-// Install action is wired in PR-2: clicking "+ Install" on a row
-// opens InstallAddOnDialog. Upgrade / Delete from installed rows
-// land in PR-3 (kebab menu); for now installed rows still link
-// over to AddOnsPage for the existing detail surface.
+// Layout: SplitPane with the catalog table on the left and
+// AddonDetailPane on the right. Both installed and available rows
+// open the pane on click; the row's primary action (Install / kebab)
+// stops propagation so the operator can still skip to the modal
+// without going through the pane first.
 
 import { useMemo, useState } from "react";
+import { AddonDetailPane } from "../components/eks/AddonDetailPane";
 import { DeleteAddOnModal } from "../components/eks/DeleteAddOnModal";
 import { InstallAddOnDialog } from "../components/eks/InstallAddOnDialog";
 import { UpgradeAddOnDialog } from "../components/eks/UpgradeAddOnDialog";
 import { KebabMenu } from "../components/ui/KebabMenu";
+import { SplitPane } from "../components/page/SplitPane";
 import { useAddonCatalog } from "../hooks/useAddonCatalog";
 import { useAddon, useAddons } from "../hooks/useAddons";
 import {
@@ -49,6 +52,10 @@ export function EKSAddOnsCatalogPage({ cluster }: { cluster: string }) {
   // across both surfaces.
   const [upgradeTarget, setUpgradeTarget] = useState<CatalogAddon | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
+  // Selected row for the detail pane. Stores the addon name; the
+  // pane resolves it back to a CatalogAddon at render time so we
+  // don't keep a stale snapshot if the catalog refetches.
+  const [selectedName, setSelectedName] = useState<string | null>(null);
   const upgradeDetail = useAddon(cluster, upgradeTarget?.name ?? "");
 
   const rows = useMemo(() => {
@@ -139,9 +146,38 @@ export function EKSAddOnsCatalogPage({ cluster }: { cluster: string }) {
   const totalCount = rows.length;
   const installedCount = rows.filter((r) => r.installed).length;
 
+  const selectedRow = selectedName
+    ? rows.find((r) => r.name === selectedName) ?? null
+    : null;
+  const selectedTransient =
+    selectedRow?.installed?.status === "CREATING" ||
+    selectedRow?.installed?.status === "UPDATING" ||
+    selectedRow?.installed?.status === "DELETING";
+
+  const detail = selectedRow ? (
+    <AddonDetailPane
+      cluster={cluster}
+      selection={
+        selectedRow.installed
+          ? {
+              kind: "installed",
+              name: selectedRow.name,
+              catalog: selectedRow,
+            }
+          : { kind: "available", catalog: selectedRow }
+      }
+      kubernetesVersion={catalog.data?.kubernetesVersion}
+      onClose={() => setSelectedName(null)}
+      onInstall={() => setInstallTarget(selectedRow)}
+      onUpgrade={() => setUpgradeTarget(selectedRow)}
+      onDelete={() => setDeleteTarget(selectedRow.name)}
+      actionsDisabled={selectedTransient}
+    />
+  ) : null;
+
   return (
-    <div className="flex h-full min-h-0 flex-col overflow-y-auto px-6 py-5">
-      <header className="mb-4">
+    <div className="flex h-full min-h-0 flex-col">
+      <header className="shrink-0 px-6 pt-5 pb-3">
         <h1 className="text-[16px] font-medium">
           EKS add-on catalog
           {catalog.data.kubernetesVersion && (
@@ -155,73 +191,89 @@ export function EKSAddOnsCatalogPage({ cluster }: { cluster: string }) {
         </p>
       </header>
 
-      <div className="mb-3 flex flex-wrap items-center gap-2">
-        <FilterChip
-          active={ownerFilter === "all"}
-          onClick={() => setOwnerFilter("all")}
-          label="All"
-        />
-        <FilterChip
-          active={ownerFilter === "aws"}
-          onClick={() => setOwnerFilter("aws")}
-          label="AWS"
-        />
-        <FilterChip
-          active={ownerFilter === "third-party"}
-          onClick={() => setOwnerFilter("third-party")}
-          label="Third-party"
-        />
-        <span className="mx-2 text-ink-faint">·</span>
-        <FilterChip
-          active={typeFilter === "all"}
-          onClick={() => setTypeFilter("all")}
-          label="Any type"
-        />
-        {types.map((t) => (
+      <div className="shrink-0 px-6 pb-3">
+        <div className="flex flex-wrap items-center gap-2">
           <FilterChip
-            key={t}
-            active={typeFilter === t}
-            onClick={() => setTypeFilter(t)}
-            label={t}
+            active={ownerFilter === "all"}
+            onClick={() => setOwnerFilter("all")}
+            label="All"
           />
-        ))}
+          <FilterChip
+            active={ownerFilter === "aws"}
+            onClick={() => setOwnerFilter("aws")}
+            label="AWS"
+          />
+          <FilterChip
+            active={ownerFilter === "third-party"}
+            onClick={() => setOwnerFilter("third-party")}
+            label="Third-party"
+          />
+          <span className="mx-2 text-ink-faint">·</span>
+          <FilterChip
+            active={typeFilter === "all"}
+            onClick={() => setTypeFilter("all")}
+            label="Any type"
+          />
+          {types.map((t) => (
+            <FilterChip
+              key={t}
+              active={typeFilter === t}
+              onClick={() => setTypeFilter(t)}
+              label={t}
+            />
+          ))}
+        </div>
       </div>
 
-      {filtered.length === 0 ? (
-        <p className="text-[13px] text-ink-faint">
-          {totalCount === 0
-            ? "AWS returned no add-on catalog for this k8s version."
-            : "No add-ons match the current filters."}
-        </p>
-      ) : (
-        <div className="overflow-hidden rounded-md border border-border bg-surface">
-          <table className="w-full text-[12.5px]">
-            <thead className="border-b border-border bg-surface-2/40 text-[10px] uppercase tracking-[0.08em] text-ink-faint">
-              <tr>
-                <th className="px-3 py-2 text-left">Name</th>
-                <th className="px-3 py-2 text-left">Owner</th>
-                <th className="px-3 py-2 text-left">Type</th>
-                <th className="px-3 py-2 text-left">Latest</th>
-                <th className="px-3 py-2 text-left">Compatible k8s</th>
-                <th className="px-3 py-2 text-left">Status</th>
-                <th className="px-3 py-2 text-right">Action</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.map((row) => (
-                <CatalogRow
-                  key={row.name}
-                  row={row}
-                  k8sVersion={catalog.data?.kubernetesVersion}
-                  onInstall={() => setInstallTarget(row)}
-                  onUpgrade={() => setUpgradeTarget(row)}
-                  onDelete={() => setDeleteTarget(row.name)}
-                />
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
+      <SplitPane
+        storageKey="periscope.detailWidth.v4"
+        left={
+          filtered.length === 0 ? (
+            <p className="px-6 py-4 text-[13px] text-ink-faint">
+              {totalCount === 0
+                ? "AWS returned no add-on catalog for this k8s version."
+                : "No add-ons match the current filters."}
+            </p>
+          ) : (
+            <div className="flex h-full min-h-0 flex-col px-6 pb-5">
+              <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-md border border-border bg-surface">
+                <div className="min-h-0 flex-1 overflow-y-auto">
+                  <table className="w-full text-[12.5px]">
+                    <thead className="sticky top-0 z-[1] border-b border-border bg-surface-2/90 text-[10px] uppercase tracking-[0.08em] text-ink-faint backdrop-blur-sm">
+                      <tr>
+                        <th className="px-3 py-2 text-left">Name</th>
+                        <th className="px-3 py-2 text-left">Owner</th>
+                        <th className="px-3 py-2 text-left">Type</th>
+                        <th className="px-3 py-2 text-left">Latest</th>
+                        <th className="hidden px-3 py-2 text-left lg:table-cell">
+                          Compatible k8s
+                        </th>
+                        <th className="px-3 py-2 text-left">Status</th>
+                        <th className="px-3 py-2 text-right">Action</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filtered.map((row) => (
+                        <CatalogRow
+                          key={row.name}
+                          row={row}
+                          k8sVersion={catalog.data?.kubernetesVersion}
+                          selected={selectedName === row.name}
+                          onSelect={() => setSelectedName(row.name)}
+                          onInstall={() => setInstallTarget(row)}
+                          onUpgrade={() => setUpgradeTarget(row)}
+                          onDelete={() => setDeleteTarget(row.name)}
+                        />
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          )
+        }
+        right={detail}
+      />
 
       <InstallAddOnDialog
         open={installTarget !== null}
@@ -276,12 +328,16 @@ function FilterChip({
 function CatalogRow({
   row,
   k8sVersion,
+  selected,
+  onSelect,
   onInstall,
   onUpgrade,
   onDelete,
 }: {
   row: CatalogAddon;
   k8sVersion?: string;
+  selected: boolean;
+  onSelect: () => void;
   onInstall: () => void;
   onUpgrade: () => void;
   onDelete: () => void;
@@ -294,7 +350,13 @@ function CatalogRow({
     row.installed?.status === "DELETING";
 
   return (
-    <tr className="border-b border-border last:border-0 transition-colors hover:bg-surface-2">
+    <tr
+      className={cn(
+        "cursor-pointer border-b border-border last:border-0 transition-colors hover:bg-surface-2",
+        selected && "bg-accent-soft/40",
+      )}
+      onClick={onSelect}
+    >
       <td className="px-3 py-2 font-mono">
         {row.name}
         {row.marketplaceProduct && (
@@ -310,7 +372,7 @@ function CatalogRow({
       <td className="px-3 py-2 font-mono text-ink-muted">
         {latest?.version ?? "—"}
       </td>
-      <td className="px-3 py-2 font-mono text-[11.5px] text-ink-muted">
+      <td className="hidden px-3 py-2 font-mono text-[11.5px] text-ink-muted lg:table-cell">
         {compatRange ?? "—"}
       </td>
       <td className="px-3 py-2">
@@ -325,7 +387,10 @@ function CatalogRow({
           </span>
         )}
       </td>
-      <td className="px-3 py-2 text-right">
+      <td
+        className="px-3 py-2 text-right"
+        onClick={(e) => e.stopPropagation()}
+      >
         {row.installed ? (
           <KebabMenu
             label={`actions for ${row.name}`}
@@ -356,4 +421,3 @@ function CatalogRow({
     </tr>
   );
 }
-

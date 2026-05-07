@@ -1,8 +1,9 @@
 import { useMemo, useState } from "react";
-import { AddonDetailBody } from "../components/eks/AddonDetailBody";
+import { AddonDetailPane } from "../components/eks/AddonDetailPane";
 import { DeleteAddOnModal } from "../components/eks/DeleteAddOnModal";
 import { UpgradeAddOnDialog } from "../components/eks/UpgradeAddOnDialog";
 import { KebabMenu } from "../components/ui/KebabMenu";
+import { SplitPane } from "../components/page/SplitPane";
 import { useAddon, useAddons } from "../hooks/useAddons";
 import { useAddonCatalog } from "../hooks/useAddonCatalog";
 import { isAWSForbidden, isAWSThrottled, isBackendNotEKS } from "../lib/api";
@@ -11,12 +12,12 @@ import type { AddonHealthGlyph, AddonSummary, CatalogAddon } from "../lib/types"
 
 // AddOnsPage — dedicated /clusters/{c}/addons view (issue #117).
 //
-// Layout: a table of installed add-ons; click a row to expand the
-// detail panel (version history, compat matrix, IAM service-account
-// ARN, health issues). Three glyphs (●/▲/✕) match the issue mockup.
-// Pairs with Upgrade Insights — the operator can see "what's
-// installed" alongside the AWS-side "what should change before next
-// minor".
+// Layout: SplitPane with the installed-add-ons table on the left and
+// AddonDetailPane on the right. Row click opens the pane (replaces
+// the original inline-row-expand which couldn't scroll independently
+// of the page). Pane width persists under the shared
+// `periscope.detailWidth.v4` storage key, so an operator's chosen
+// pane width travels across every resource page.
 
 export function AddOnsPage({ cluster }: { cluster: string }) {
   const { data, isLoading, isError, error } = useAddons(cluster);
@@ -37,6 +38,8 @@ export function AddOnsPage({ cluster }: { cluster: string }) {
   // delete needs only the name.
   const [upgradeTarget, setUpgradeTarget] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
+  // Selected row for the detail pane. null = pane closed.
+  const [selected, setSelected] = useState<string | null>(null);
   // Detail blob for the upgrade dialog. Lazy fetch — only fires
   // when an upgrade target is set, since useAddon respects the
   // enabled flag inside the hook (Boolean(cluster && name)).
@@ -108,10 +111,34 @@ export function AddOnsPage({ cluster }: { cluster: string }) {
 
   if (!data) return null;
   const rows = data.addons;
+  const selectedRow = selected ? rows.find((r) => r.name === selected) : null;
+  const selectedTransient =
+    selectedRow != null &&
+    (selectedRow.status === "CREATING" ||
+      selectedRow.status === "UPDATING" ||
+      selectedRow.status === "DELETING");
+
+  const detail = selected ? (
+    <AddonDetailPane
+      cluster={cluster}
+      selection={{
+        kind: "installed",
+        name: selected,
+        catalog: catalogByName.get(selected),
+      }}
+      kubernetesVersion={
+        catalog.data?.kubernetesVersion ?? data?.clusterKubernetesVersion
+      }
+      onClose={() => setSelected(null)}
+      onUpgrade={() => setUpgradeTarget(selected)}
+      onDelete={() => setDeleteTarget(selected)}
+      actionsDisabled={selectedTransient}
+    />
+  ) : null;
 
   return (
-    <div className="flex h-full min-h-0 flex-col overflow-y-auto px-6 py-5">
-      <header className="mb-4">
+    <div className="flex h-full min-h-0 flex-col">
+      <header className="shrink-0 px-6 pt-5 pb-3">
         <h1 className="text-[16px] font-medium">
           EKS add-ons{" "}
           {data.clusterKubernetesVersion && (
@@ -131,40 +158,53 @@ export function AddOnsPage({ cluster }: { cluster: string }) {
         </p>
       </header>
 
-      {rows.length === 0 ? (
-        <p className="text-[13px] text-ink-faint">
-          This cluster has no managed add-ons. Self-managed add-ons
-          (operator-deployed coredns/kube-proxy via Helm) are not
-          surfaced here — EKS does not track them.
-        </p>
-      ) : (
-        <div className="overflow-hidden rounded-md border border-border bg-surface">
-          <table className="w-full text-[12.5px]">
-            <thead className="border-b border-border bg-surface-2/40 text-[10px] uppercase tracking-[0.08em] text-ink-faint">
-              <tr>
-                <th className="px-3 py-2 text-left">Health</th>
-                <th className="px-3 py-2 text-left">Name</th>
-                <th className="px-3 py-2 text-left">Installed</th>
-                <th className="px-3 py-2 text-left">Latest</th>
-                <th className="px-3 py-2 text-left">Compat (k8s)</th>
-                <th className="px-3 py-2 text-left">Status</th>
-                <th className="px-3 py-2 text-right">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((row) => (
-                <AddonRow
-                  key={row.name}
-                  cluster={cluster}
-                  addon={row}
-                  onUpgrade={() => setUpgradeTarget(row.name)}
-                  onDelete={() => setDeleteTarget(row.name)}
-                />
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
+      <SplitPane
+        storageKey="periscope.detailWidth.v4"
+        left={
+          rows.length === 0 ? (
+            <p className="px-6 py-4 text-[13px] text-ink-faint">
+              This cluster has no managed add-ons. Self-managed add-ons
+              (operator-deployed coredns/kube-proxy via Helm) are not
+              surfaced here — EKS does not track them.
+            </p>
+          ) : (
+            <div className="flex h-full min-h-0 flex-col px-6 pb-5">
+              <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-md border border-border bg-surface">
+                <div className="min-h-0 flex-1 overflow-y-auto">
+                  <table className="w-full text-[12.5px]">
+                    <thead className="sticky top-0 z-[1] border-b border-border bg-surface-2/90 text-[10px] uppercase tracking-[0.08em] text-ink-faint backdrop-blur-sm">
+                      <tr>
+                        <th className="px-3 py-2 text-left">Health</th>
+                        <th className="px-3 py-2 text-left">Name</th>
+                        <th className="px-3 py-2 text-left">Installed</th>
+                        <th className="px-3 py-2 text-left">Latest</th>
+                        <th className="hidden px-3 py-2 text-left lg:table-cell">
+                          Compat (k8s)
+                        </th>
+                        <th className="px-3 py-2 text-left">Status</th>
+                        <th className="px-3 py-2 text-right">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {rows.map((row) => (
+                        <AddonRow
+                          key={row.name}
+                          addon={row}
+                          selected={selected === row.name}
+                          onSelect={() => setSelected(row.name)}
+                          onUpgrade={() => setUpgradeTarget(row.name)}
+                          onDelete={() => setDeleteTarget(row.name)}
+                        />
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          )
+        }
+        right={detail}
+      />
 
       <UpgradeAddOnDialog
         open={upgradeTarget !== null}
@@ -189,17 +229,18 @@ export function AddOnsPage({ cluster }: { cluster: string }) {
 }
 
 function AddonRow({
-  cluster,
   addon,
+  selected,
+  onSelect,
   onUpgrade,
   onDelete,
 }: {
-  cluster: string;
   addon: AddonSummary;
+  selected: boolean;
+  onSelect: () => void;
   onUpgrade: () => void;
   onDelete: () => void;
 }) {
-  const [open, setOpen] = useState(false);
   // Disable Upgrade / Delete kebab items while AWS is mid-transition —
   // sending another mutation while CREATING/UPDATING/DELETING is in
   // flight produces opaque AWS errors. The status flips back via
@@ -209,75 +250,66 @@ function AddonRow({
     addon.status === "UPDATING" ||
     addon.status === "DELETING";
   return (
-    <>
-      <tr
-        className={cn(
-          "cursor-pointer border-b border-border last:border-0 transition-colors hover:bg-surface-2",
-          open && "bg-surface-2",
-        )}
-        onClick={() => setOpen((v) => !v)}
-      >
-        <td className="px-3 py-2">
-          <Glyph glyph={addon.healthGlyph} />
-        </td>
-        <td className="px-3 py-2 font-mono">
-          {addon.name}
-          {addon.blocksNextMinor && (
-            <div className="text-[10.5px] text-yellow">
-              blocks next k8s minor
-            </div>
-          )}
-        </td>
-        <td className="px-3 py-2 font-mono text-ink-muted">
-          {addon.version || "—"}
-        </td>
-        <td className="px-3 py-2 font-mono text-ink-muted">
-          {addon.updateAvailable ? (
-            <span className="text-yellow">{addon.latestVersion ?? "—"}</span>
-          ) : addon.latestVersion ? (
-            <span>{addon.latestVersion}</span>
-          ) : (
-            "—"
-          )}
-        </td>
-        <td className="px-3 py-2 font-mono text-[11.5px] text-ink-muted">
-          {addon.compatMinK8s && addon.compatMaxK8s
-            ? `${addon.compatMinK8s} – ${addon.compatMaxK8s}`
-            : "—"}
-        </td>
-        <td className="px-3 py-2">
-          <StatusBadge status={addon.status} />
-        </td>
-        <td className="px-3 py-2 text-right">
-          <KebabMenu
-            label={`actions for ${addon.name}`}
-            items={[
-              {
-                label: "Upgrade…",
-                onSelect: onUpgrade,
-                disabled: transient,
-              },
-              {
-                label: "Delete…",
-                onSelect: onDelete,
-                variant: "danger",
-                disabled: transient,
-              },
-            ]}
-          />
-        </td>
-      </tr>
-      {open && (
-        <tr>
-          <td
-            colSpan={7}
-            className="border-b border-border bg-surface-2/40 px-6 py-3"
-          >
-            <AddonDetailBody cluster={cluster} name={addon.name} />
-          </td>
-        </tr>
+    <tr
+      className={cn(
+        "cursor-pointer border-b border-border last:border-0 transition-colors hover:bg-surface-2",
+        selected && "bg-accent-soft/40",
       )}
-    </>
+      onClick={onSelect}
+    >
+      <td className="px-3 py-2">
+        <Glyph glyph={addon.healthGlyph} />
+      </td>
+      <td className="px-3 py-2 font-mono">
+        {addon.name}
+        {addon.blocksNextMinor && (
+          <div className="text-[10.5px] text-yellow">
+            blocks next k8s minor
+          </div>
+        )}
+      </td>
+      <td className="px-3 py-2 font-mono text-ink-muted">
+        {addon.version || "—"}
+      </td>
+      <td className="px-3 py-2 font-mono text-ink-muted">
+        {addon.updateAvailable ? (
+          <span className="text-yellow">{addon.latestVersion ?? "—"}</span>
+        ) : addon.latestVersion ? (
+          <span>{addon.latestVersion}</span>
+        ) : (
+          "—"
+        )}
+      </td>
+      <td className="hidden px-3 py-2 font-mono text-[11.5px] text-ink-muted lg:table-cell">
+        {addon.compatMinK8s && addon.compatMaxK8s
+          ? `${addon.compatMinK8s} – ${addon.compatMaxK8s}`
+          : "—"}
+      </td>
+      <td className="px-3 py-2">
+        <StatusBadge status={addon.status} />
+      </td>
+      <td
+        className="px-3 py-2 text-right"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <KebabMenu
+          label={`actions for ${addon.name}`}
+          items={[
+            {
+              label: "Upgrade…",
+              onSelect: onUpgrade,
+              disabled: transient,
+            },
+            {
+              label: "Delete…",
+              onSelect: onDelete,
+              variant: "danger",
+              disabled: transient,
+            },
+          ]}
+        />
+      </td>
+    </tr>
   );
 }
 
@@ -329,4 +361,3 @@ function StatusBadge({ status }: { status: string }) {
     </span>
   );
 }
-

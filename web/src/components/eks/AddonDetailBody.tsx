@@ -1,9 +1,9 @@
 import { useAddon } from "../../hooks/useAddons";
 import { cn } from "../../lib/cn";
 
-// AddonDetailBody — body rendered when an AddOnsPage row is
-// expanded. Lives outside AddOnsPage.tsx so the row table stays
-// readable, and so the next EKS surface that wants the same
+// AddonDetailBody — body of the installed-add-on detail surface.
+// Rendered inside AddonDetailPane (right-edge SplitPane). Held in
+// its own file so the next EKS surface that wants the same
 // "Field / Section" atoms can import them from one place rather
 // than re-deriving the layout.
 //
