@@ -168,6 +168,180 @@ const synthDoc: OpenAPIDoc = {
           status: { type: "object" },
         },
       },
+      // ── Deployment shapes ─────────────────────────────────────
+      // These mirror the real K8s OpenAPI v3: every field that
+      // references another type is wrapped in `allOf:[{$ref: ...}]`
+      // (the kube-openapi convention). The filter has to expand
+      // those envelopes to narrow inside.
+      "io.k8s.apimachinery.pkg.apis.meta.v1.LabelSelector": {
+        type: "object",
+        properties: {
+          matchLabels: { type: "object", additionalProperties: { type: "string" } },
+          matchExpressions: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                key: { type: "string" },
+                operator: { type: "string" },
+                values: { type: "array", items: { type: "string" } },
+              },
+              required: ["key", "operator"],
+            },
+          },
+        },
+      },
+      "io.k8s.api.core.v1.ContainerPort": {
+        type: "object",
+        properties: {
+          name: { type: "string" },
+          containerPort: { type: "integer" },
+          protocol: { type: "string", enum: ["TCP", "UDP", "SCTP"] },
+          hostPort: { type: "integer" },
+          hostIP: { type: "string" },
+        },
+        required: ["containerPort"],
+      },
+      "io.k8s.api.core.v1.EnvVar": {
+        type: "object",
+        properties: {
+          name: { type: "string" },
+          value: { type: "string" },
+          // `valueFrom` would normally also live here as a sibling-
+          // encoded oneOf — out of scope for the curated allowlist.
+        },
+        required: ["name"],
+      },
+      "io.k8s.api.core.v1.ResourceRequirements": {
+        type: "object",
+        properties: {
+          limits: { type: "object", additionalProperties: { type: "string" } },
+          requests: { type: "object", additionalProperties: { type: "string" } },
+        },
+      },
+      "io.k8s.api.core.v1.Container": {
+        type: "object",
+        properties: {
+          name: { type: "string" },
+          image: { type: "string" },
+          imagePullPolicy: { type: "string", enum: ["Always", "Never", "IfNotPresent"] },
+          command: { type: "array", items: { type: "string" } },
+          args: { type: "array", items: { type: "string" } },
+          workingDir: { type: "string" },
+          ports: {
+            type: "array",
+            items: { $ref: "#/components/schemas/io.k8s.api.core.v1.ContainerPort" },
+          },
+          env: {
+            type: "array",
+            items: { $ref: "#/components/schemas/io.k8s.api.core.v1.EnvVar" },
+          },
+          resources: {
+            allOf: [{ $ref: "#/components/schemas/io.k8s.api.core.v1.ResourceRequirements" }],
+          },
+          terminationMessagePath: { type: "string" },
+          terminationMessagePolicy: { type: "string" },
+          tty: { type: "boolean" },
+          stdin: { type: "boolean" },
+          stdinOnce: { type: "boolean" },
+          // Sibling-encoded oneOfs (probes, lifecycle, volumeMounts,
+          // envFrom, securityContext) deliberately omitted — outside
+          // the curated POC scope.
+        },
+        required: ["name"],
+      },
+      "io.k8s.api.core.v1.PodSpec": {
+        type: "object",
+        properties: {
+          restartPolicy: { type: "string", enum: ["Always", "OnFailure", "Never"] },
+          serviceAccountName: { type: "string" },
+          nodeSelector: { type: "object", additionalProperties: { type: "string" } },
+          terminationGracePeriodSeconds: { type: "integer" },
+          containers: {
+            type: "array",
+            items: { $ref: "#/components/schemas/io.k8s.api.core.v1.Container" },
+          },
+          // Wide PodSpec surface (volumes, initContainers, affinity,
+          // tolerations, securityContext, etc.) deliberately not
+          // modelled here — the allowlist excludes them, so the
+          // filter shouldn't surface them either.
+          volumes: { type: "array", items: { type: "object" } },
+          initContainers: { type: "array", items: { type: "object" } },
+        },
+        required: ["containers"],
+      },
+      "io.k8s.api.core.v1.PodTemplateSpec": {
+        type: "object",
+        properties: {
+          metadata: {
+            allOf: [
+              { $ref: "#/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.ObjectMeta" },
+            ],
+          },
+          spec: {
+            allOf: [{ $ref: "#/components/schemas/io.k8s.api.core.v1.PodSpec" }],
+          },
+        },
+      },
+      "io.k8s.api.apps.v1.RollingUpdateDeployment": {
+        type: "object",
+        properties: {
+          maxUnavailable: { type: "string", format: "int-or-string" },
+          maxSurge: { type: "string", format: "int-or-string" },
+        },
+      },
+      "io.k8s.api.apps.v1.DeploymentStrategy": {
+        type: "object",
+        properties: {
+          type: { type: "string", enum: ["Recreate", "RollingUpdate"] },
+          rollingUpdate: {
+            allOf: [
+              { $ref: "#/components/schemas/io.k8s.api.apps.v1.RollingUpdateDeployment" },
+            ],
+          },
+        },
+      },
+      "io.k8s.api.apps.v1.DeploymentSpec": {
+        type: "object",
+        properties: {
+          replicas: { type: "integer" },
+          minReadySeconds: { type: "integer" },
+          revisionHistoryLimit: { type: "integer" },
+          progressDeadlineSeconds: { type: "integer" },
+          paused: { type: "boolean" },
+          selector: {
+            allOf: [
+              { $ref: "#/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.LabelSelector" },
+            ],
+          },
+          strategy: {
+            allOf: [{ $ref: "#/components/schemas/io.k8s.api.apps.v1.DeploymentStrategy" }],
+          },
+          template: {
+            allOf: [{ $ref: "#/components/schemas/io.k8s.api.core.v1.PodTemplateSpec" }],
+          },
+        },
+        required: ["selector", "template"],
+      },
+      "io.k8s.api.apps.v1.Deployment": {
+        type: "object",
+        "x-kubernetes-group-version-kind": [
+          { group: "apps", version: "v1", kind: "Deployment" },
+        ],
+        properties: {
+          apiVersion: { type: "string" },
+          kind: { type: "string" },
+          metadata: {
+            allOf: [
+              { $ref: "#/components/schemas/io.k8s.apimachinery.pkg.apis.meta.v1.ObjectMeta" },
+            ],
+          },
+          spec: {
+            allOf: [{ $ref: "#/components/schemas/io.k8s.api.apps.v1.DeploymentSpec" }],
+          },
+          status: { type: "object" },
+        },
+      },
     },
   },
 } as unknown as OpenAPIDoc;
@@ -183,7 +357,10 @@ const schemaFor = (kind: SupportedKind): JSONSchema => {
   const gvk = getKindGVK(kind);
   const root = findSchemaByGVK(synthDoc, gvk.group, gvk.version, gvk.kind);
   if (!root) throw new Error(`no schema for ${kind}`);
-  return filterSchemaForKind(root, kind);
+  // Pass the same resolver into the filter so it can narrow inside
+  // K8s `{allOf:[{$ref: ...}]}` envelopes — without it the filter
+  // can't peek at metadata or spec sub-fields.
+  return filterSchemaForKind(root, kind, { resolveRef: buildRefResolver(synthDoc) });
 };
 
 const flatten = (descriptors: FieldDescriptor[]): FieldDescriptor[] => {
@@ -378,6 +555,150 @@ describe("Ingress — round-trip", () => {
 
   it("structure preserved through round-trip", () => {
     expect(yamlRoundTrip(yaml)).toEqual(parseYaml(yaml));
+  });
+});
+
+describe("Deployment — round-trip", () => {
+  const yaml = [
+    "apiVersion: apps/v1",
+    "kind: Deployment",
+    "metadata:",
+    "  name: api",
+    "  namespace: default",
+    "  labels:",
+    "    app: api",
+    "spec:",
+    "  replicas: 3",
+    "  selector:",
+    "    matchLabels:",
+    "      app: api",
+    "  strategy:",
+    "    type: RollingUpdate",
+    "    rollingUpdate:",
+    "      maxUnavailable: 1",
+    "      maxSurge: 25%",
+    "  template:",
+    "    metadata:",
+    "      labels:",
+    "        app: api",
+    "    spec:",
+    "      restartPolicy: Always",
+    "      serviceAccountName: api-sa",
+    "      containers:",
+    "        - name: api",
+    "          image: ghcr.io/example/api:1.0.0",
+    "          imagePullPolicy: IfNotPresent",
+    "          ports:",
+    "            - name: http",
+    "              containerPort: 8080",
+    "              protocol: TCP",
+    "          env:",
+    "            - name: LOG_LEVEL",
+    "              value: info",
+    "          resources:",
+    "            requests:",
+    "              cpu: 100m",
+    "              memory: 128Mi",
+    "            limits:",
+    "              cpu: 500m",
+    "              memory: 512Mi",
+    "",
+  ].join("\n");
+
+  it("walker covers the curated PodSpec subset (replicas, selector, strategy, template basics, containers[*])", () => {
+    const all = flatten(buildFieldDescriptors(schemaFor("Deployment"), walkOptionsFor("Deployment")));
+    const paths = all.map((d) => d.path.join("."));
+    expect(paths).toEqual(
+      expect.arrayContaining([
+        "metadata",
+        "metadata.name",
+        "metadata.namespace",
+        "metadata.labels",
+        "spec.replicas",
+        "spec.selector",
+        "spec.strategy.type",
+        "spec.strategy.rollingUpdate",
+        "spec.template.metadata.labels",
+        "spec.template.spec.restartPolicy",
+        "spec.template.spec.serviceAccountName",
+        "spec.template.spec.containers",
+      ]),
+    );
+  });
+
+  it("walker prunes excluded PodSpec fields (volumes, initContainers)", () => {
+    const all = flatten(buildFieldDescriptors(schemaFor("Deployment"), walkOptionsFor("Deployment")));
+    const paths = all.map((d) => d.path.join("."));
+    expect(paths).not.toContain("spec.template.spec.volumes");
+    expect(paths).not.toContain("spec.template.spec.initContainers");
+  });
+
+  it("walker prunes ObjectMeta noise (uid, creationTimestamp, managedFields) at metadata and spec.template.metadata", () => {
+    const all = flatten(buildFieldDescriptors(schemaFor("Deployment"), walkOptionsFor("Deployment")));
+    const paths = all.map((d) => d.path.join("."));
+    expect(paths).not.toContain("metadata.uid");
+    expect(paths).not.toContain("metadata.creationTimestamp");
+    expect(paths).not.toContain("metadata.managedFields");
+    expect(paths).not.toContain("spec.template.metadata.uid");
+    expect(paths).not.toContain("spec.template.metadata.managedFields");
+  });
+
+  it("walker emits array-of-objects for containers[] with relative-path children narrowed to the curated set", () => {
+    const all = flatten(buildFieldDescriptors(schemaFor("Deployment"), walkOptionsFor("Deployment")));
+    const containers = all.find((d) => d.path.join(".") === "spec.template.spec.containers");
+    expect(containers?.type).toBe("array-of-objects");
+    const childPaths = (containers?.children ?? []).map((c) => c.path.join("."));
+    expect(childPaths).toEqual(
+      expect.arrayContaining(["name", "image", "imagePullPolicy", "command", "args", "ports", "env", "resources"]),
+    );
+    // The curated allowlist excludes lifecycle/securityContext/probes
+    // — they should not surface as container children even though the
+    // synthetic schema doesn't model them. (This is a guard against
+    // future synthDoc growth accidentally bypassing the filter.)
+    expect(childPaths).not.toContain("livenessProbe");
+    expect(childPaths).not.toContain("securityContext");
+  });
+
+  it("walker emits kv-maps for resources.requests/limits (Quantity values render as strings)", () => {
+    const all = flatten(buildFieldDescriptors(schemaFor("Deployment"), walkOptionsFor("Deployment")));
+    const containers = all.find((d) => d.path.join(".") === "spec.template.spec.containers");
+    const resources = containers?.children?.find((c) => c.path.join(".") === "resources");
+    const requests = resources?.children?.find((c) => c.path.join(".") === "resources.requests");
+    expect(requests?.type).toBe("kv-map");
+    expect(requests?.kvValueType).toBe("string");
+  });
+
+  it("walker flags spec.selector as create-only (immutable on Deployment)", () => {
+    const all = flatten(buildFieldDescriptors(schemaFor("Deployment"), walkOptionsFor("Deployment")));
+    const selector = all.find((d) => d.path.join(".") === "spec.selector");
+    expect(selector?.editable).toBe("create-only");
+  });
+
+  it("structure preserved through round-trip including containers[]", () => {
+    const before = parseYaml(yaml) as Record<string, unknown>;
+    const after = yamlRoundTrip(yaml) as Record<string, unknown>;
+    expect(after).toEqual(before);
+    const containers = getAtPath(after, ["spec", "template", "spec", "containers"]) as unknown[];
+    expect(containers).toHaveLength(1);
+  });
+
+  it("editing containers[0].image via setAtPath preserves siblings", () => {
+    const obj = parseYaml(yaml) as Record<string, unknown>;
+    const containers = getAtPath(obj, ["spec", "template", "spec", "containers"]) as Record<
+      string,
+      unknown
+    >[];
+    const updated = [...containers];
+    updated[0] = { ...updated[0], image: "ghcr.io/example/api:2.0.0" };
+    const next = setAtPath(obj, ["spec", "template", "spec", "containers"], updated);
+    const after = getAtPath(next, ["spec", "template", "spec", "containers"]) as Record<
+      string,
+      unknown
+    >[];
+    expect(after[0].image).toBe("ghcr.io/example/api:2.0.0");
+    expect(after[0].name).toBe("api");
+    expect(getAtPath(next, ["spec", "replicas"])).toBe(3);
+    expect(getAtPath(next, ["metadata", "name"])).toBe("api");
   });
 });
 

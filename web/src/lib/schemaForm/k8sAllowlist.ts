@@ -7,7 +7,24 @@
 // Allowlist (not deny-list) per design call-out — predictable and
 // auditable; if K8s adds a new noise field, it stays hidden by
 // default until we explicitly allowlist it.
+//
+// Path syntax (used by `KindSpec.paths` and `KindSpec.createOnly`):
+//
+//   - Dotted segments rooted at the K8s object:
+//       `metadata.name`, `data`, `spec.type`
+//   - `[*]` segment for "descend into array items":
+//       `spec.template.spec.containers[*].image`
+//   - A path is the leaf of a subtree: when the filter walks down
+//     to that node, the schema below it is surfaced unchanged.
+//
+// To narrow inside K8s `{allOf:[{$ref:...}]}` envelopes (which is
+// how every K8s resource wraps `metadata` and `spec`), the filter
+// needs the same `resolveRef` the walker uses. Pass it via
+// `filterSchemaForKind(schema, kind, { resolveRef })`. When omitted
+// the filter degrades gracefully — refs/allOfs aren't peeked into,
+// so paths underneath them surface their parent envelope as-is.
 
+import { mergeAllOf } from "./allOfMerger";
 import type { JSONSchema } from "./types";
 
 export type SupportedKind =
@@ -17,16 +34,18 @@ export type SupportedKind =
   | "Ingress"
   | "Deployment";
 
-/** Each kind declares the metadata fields and the spec/data subtree
- *  paths it surfaces. Paths are dotted, rooted at the K8s object
- *  (so e.g. `metadata.name`, `data`, `spec.type`). */
 interface KindSpec {
+  /** Sub-fields of `metadata` to surface. Sugar for prefixing each
+   *  with `metadata.` and adding to `paths`. Kept separate because
+   *  every kind shares the same metadata allowlist shape. */
   metadata: string[];
-  /** Top-level fields outside of `metadata` we surface (e.g. `data`,
-   *  `type`, `spec.type`). Each entry is a dotted path. */
+  /** Allowlisted paths into the K8s object root. Each is a dotted
+   *  path; segments may include `[*]` to descend into array items.
+   *  Paths terminate at the surfaced subtree — anything below the
+   *  terminal segment is rendered in full. */
   paths: string[];
-  /** Fields that should be marked editable="create-only" — name and
-   *  namespace are immutable after create. */
+  /** Paths to mark `editable="create-only"`. Same syntax as `paths`
+   *  but consumed by the walker, not the filter. */
   createOnly: string[];
 }
 
@@ -91,33 +110,53 @@ const KIND_SPECS: Record<SupportedKind, KindSpec> = {
     paths: ["spec.ingressClassName", "spec.rules", "spec.tls", "spec.defaultBackend"],
     createOnly: ["metadata.name", "metadata.namespace"],
   },
-  // Deployment — POC scope (#TBD). The intent of this iteration is
-  // to surface walker/renderer gaps against PodSpec, not to ship
-  // production-ready Deployment editing. We surface the full
-  // `spec.template` here because `filterSchemaForKind` only narrows
-  // one level deep (top-level + `spec.x`); deeper allowlisting like
-  // "containers.image but not containers.lifecycle" requires
-  // extending the filter with wildcard/array-item paths, which is a
-  // follow-up that the gap report will scope.
+  // Deployment — curated PodSpec subset. Deliberately excludes:
+  //   - volumes / volumeMounts (need K8s discriminator hint table —
+  //     volume types are sibling-encoded, not `oneOf`)
+  //   - probes (httpGet/tcpSocket/exec/grpc are sibling-encoded too)
+  //   - lifecycle hooks (same shape as probes)
+  //   - envFrom (configMapRef vs secretRef sibling-encoded)
+  //   - env[*].valueFrom (4-way sibling-encoded picker)
+  //   - securityContext (large, mostly admin concerns)
+  //   - affinity / topologySpreadConstraints (deeply nested wall)
+  //   - initContainers (would explode the form a second time)
   //
-  // Day-1 surface: replicas, selector, strategy (rolling update vs
-  // recreate — useful learning for StatefulSet later), and the full
-  // template (which transitively exposes the entire PodSpec — this
-  // is intentional gap-mining surface).
+  // Operators needing those drop to YAML mode. Future work:
+  // discriminator hint table, then progressively re-enable.
   //
-  // spec.selector is create-only because the apiserver rejects
-  // Deployment selector mutations after create.
+  // spec.selector is create-only — the apiserver rejects Deployment
+  // selector mutations after create.
   Deployment: {
     metadata: ["name", "namespace", "labels", "annotations"],
     paths: [
       "spec.replicas",
       "spec.selector",
-      "spec.strategy",
-      "spec.template",
       "spec.minReadySeconds",
       "spec.revisionHistoryLimit",
       "spec.progressDeadlineSeconds",
       "spec.paused",
+      "spec.strategy.type",
+      "spec.strategy.rollingUpdate",
+      "spec.template.metadata.labels",
+      "spec.template.metadata.annotations",
+      "spec.template.spec.restartPolicy",
+      "spec.template.spec.serviceAccountName",
+      "spec.template.spec.nodeSelector",
+      "spec.template.spec.terminationGracePeriodSeconds",
+      "spec.template.spec.containers[*].name",
+      "spec.template.spec.containers[*].image",
+      "spec.template.spec.containers[*].imagePullPolicy",
+      "spec.template.spec.containers[*].command",
+      "spec.template.spec.containers[*].args",
+      "spec.template.spec.containers[*].workingDir",
+      "spec.template.spec.containers[*].ports",
+      "spec.template.spec.containers[*].env",
+      "spec.template.spec.containers[*].resources",
+      "spec.template.spec.containers[*].terminationMessagePath",
+      "spec.template.spec.containers[*].terminationMessagePolicy",
+      "spec.template.spec.containers[*].tty",
+      "spec.template.spec.containers[*].stdin",
+      "spec.template.spec.containers[*].stdinOnce",
     ],
     createOnly: ["metadata.name", "metadata.namespace", "spec.selector"],
   },
@@ -131,73 +170,204 @@ export function getCreateOnlyPaths(kind: SupportedKind): string[] {
   return KIND_SPECS[kind].createOnly;
 }
 
-/** Return a narrowed schema whose `properties` only contain the
- *  metadata + spec subtrees the form should expose. Operates on the
- *  result of `derefIfNeeded` against the GVK root, so the input is
- *  expected to have a `properties` map (apiVersion/kind/metadata/
- *  spec/data/etc.). Falls back to the input untouched when the
- *  shape is unexpected (e.g. a CRD piped in by accident). */
-export function filterSchemaForKind(schema: JSONSchema, kind: SupportedKind): JSONSchema {
-  const spec = KIND_SPECS[kind];
+export interface FilterOptions {
+  /** Resolve `$ref` strings the same way the walker does. Required
+   *  to narrow inside K8s `{allOf:[{$ref:...}]}` envelopes. Without
+   *  it the filter degrades — anything wrapped in a ref is surfaced
+   *  whole and the walker handles it.
+   *
+   *  Concretely: K8s spells `metadata` as `{allOf:[{$ref: ObjectMeta}]}`
+   *  in OpenAPI v3. To narrow it down to `{name, namespace, labels,
+   *  annotations}` we have to resolve the ref and merge the allOf
+   *  before pruning properties. */
+  resolveRef?: (ref: string) => JSONSchema | undefined;
+}
+
+/** Return a narrowed schema whose `properties` (recursively) only
+ *  contain the subtrees declared by the kind's allowlist. */
+export function filterSchemaForKind(
+  schema: JSONSchema,
+  kind: SupportedKind,
+  options: FilterOptions = {},
+): JSONSchema {
   if (!schema || typeof schema !== "object") return schema;
-  if (!schema.properties) return schema;
+  const spec = KIND_SPECS[kind];
+  const allPaths = [
+    ...spec.metadata.map((m) => `metadata.${m}`),
+    ...spec.paths,
+  ];
+  const trie = buildTrie(allPaths);
+  return filterBySchemaTrie(schema, trie, options);
+}
 
-  const next: JSONSchema = { ...schema, properties: {}, required: [] };
-  const props = schema.properties;
+// ── Path trie ────────────────────────────────────────────────────
+//
+// Each node carries a Map of child-segment → child-trie plus a
+// `terminal` flag. A `terminal` node means "the operator wants this
+// whole subtree surfaced unchanged" — descendants below it are not
+// pruned. A non-terminal node with children means "narrow to these
+// children only."
+//
+// Paths can include `[*]` segments which the filter consumes when it
+// reaches an `array` schema, descending into `items`.
+//
+// Example: `["metadata.name", "spec.template.spec.containers[*].image"]`
+//   metadata
+//     name (terminal)
+//   spec
+//     template
+//       spec
+//         containers
+//           [*]
+//             image (terminal)
 
-  // metadata: narrow to the allowlisted sub-fields.
-  if (props.metadata) {
-    next.properties!.metadata = filterMetadata(props.metadata, spec.metadata);
+interface PathTrie {
+  children: Map<string, PathTrie>;
+  /** True when a path terminated here. Subtree below this node is
+   *  surfaced unchanged. */
+  terminal: boolean;
+}
+
+function newTrieNode(): PathTrie {
+  return { children: new Map(), terminal: false };
+}
+
+function buildTrie(paths: string[]): PathTrie {
+  const root = newTrieNode();
+  for (const p of paths) {
+    let node = root;
+    for (const seg of splitPath(p)) {
+      let next = node.children.get(seg);
+      if (!next) {
+        next = newTrieNode();
+        node.children.set(seg, next);
+      }
+      node = next;
+    }
+    node.terminal = true;
+  }
+  return root;
+}
+
+/** Split a dotted path into segments, treating a `[*]` suffix on a
+ *  segment as its own segment. So `containers[*].image` →
+ *  `["containers", "[*]", "image"]`. */
+function splitPath(path: string): string[] {
+  const out: string[] = [];
+  for (const part of path.split(".")) {
+    let rest = part;
+    while (rest.length > 0) {
+      const open = rest.indexOf("[");
+      if (open < 0) {
+        out.push(rest);
+        break;
+      }
+      if (open > 0) out.push(rest.slice(0, open));
+      const close = rest.indexOf("]", open);
+      if (close < 0) {
+        // Malformed — push the rest as-is and stop.
+        out.push(rest);
+        break;
+      }
+      out.push(rest.slice(open, close + 1)); // includes the brackets
+      rest = rest.slice(close + 1);
+    }
+  }
+  return out;
+}
+
+// ── Schema filtering ─────────────────────────────────────────────
+
+function filterBySchemaTrie(
+  schema: JSONSchema,
+  trie: PathTrie,
+  options: FilterOptions,
+): JSONSchema {
+  if (!schema || typeof schema !== "object") return schema;
+  // Terminal node: surface the subtree as-is. Descendants stay
+  // intact, including any noise the underlying type happens to carry
+  // (rare — most allowlist leaves point at narrowly-typed K8s fields).
+  if (trie.terminal) return schema;
+  // Nothing to narrow further; leaf without children means "no
+  // matching path under this node, drop everything."
+  if (trie.children.size === 0) return emptyObject(schema);
+
+  // Expand `{$ref}` and `{allOf:[{$ref}, ...]}` envelopes so we can
+  // peek at the underlying `properties` / `items`. Without a
+  // resolveRef this no-ops and the schema below stays as a ref the
+  // walker will deref later — but then we can't narrow inside it,
+  // so the parent surfaces whole.
+  const expanded = expandSchema(schema, options);
+
+  // Array-item descent: if the schema is `type: array` and the trie
+  // has a `[*]` child, recurse into `items` and discard non-`[*]`
+  // children at this level.
+  const wildcardTrie = trie.children.get("[*]");
+  if (wildcardTrie && expanded.items && typeof expanded.items === "object") {
+    const filteredItems = filterBySchemaTrie(expanded.items, wildcardTrie, options);
+    return inlinedCopy(expanded, { items: filteredItems });
   }
 
-  // Top-level allowlisted paths. Each path may be top-level
-  // (`data`) or nested (`spec.type`); group nested-under-spec paths
-  // and emit one filtered `spec` object covering them.
-  const topLevel = new Set<string>();
-  const specSubFields = new Set<string>();
-  for (const p of spec.paths) {
-    if (p.startsWith("spec.")) specSubFields.add(p.slice("spec.".length));
-    else topLevel.add(p);
+  // Property-level descent: keep only the properties the trie names.
+  if (expanded.properties) {
+    const next: Record<string, JSONSchema> = {};
+    for (const [seg, childTrie] of trie.children) {
+      if (seg === "[*]") continue; // not at array level
+      const childSchema = expanded.properties[seg];
+      if (!childSchema) continue;
+      next[seg] = filterBySchemaTrie(childSchema, childTrie, options);
+    }
+    const surfaced = new Set(Object.keys(next));
+    const required = Array.isArray(expanded.required)
+      ? expanded.required.filter((r) => surfaced.has(r))
+      : undefined;
+    return inlinedCopy(expanded, { properties: next, required });
   }
 
-  for (const key of topLevel) {
-    if (props[key]) next.properties![key] = props[key];
+  // Trie said "narrow further" but the schema isn't object-shaped.
+  // Best effort — surface as-is so the walker can decide what to do.
+  return schema;
+}
+
+/** Resolve `$ref` and merge `allOf` so the caller sees a flat
+ *  schema with `properties` / `items`. Returns the input untouched
+ *  when expansion isn't possible (no resolver, unresolvable ref,
+ *  type-conflicting allOf). */
+function expandSchema(schema: JSONSchema, options: FilterOptions): JSONSchema {
+  let s = schema;
+  if (typeof s.$ref === "string" && options.resolveRef) {
+    const resolved = options.resolveRef(s.$ref);
+    if (resolved) s = resolved;
   }
-
-  if (specSubFields.size > 0 && props.spec) {
-    next.properties!.spec = filterByKeys(props.spec, specSubFields);
+  if (Array.isArray(s.allOf) && s.allOf.length > 0 && options.resolveRef) {
+    s = mergeAllOf(s, { resolveRef: options.resolveRef, seen: new Set() });
   }
+  return s;
+}
 
-  // Preserve `required` only for fields we still surface — the
-  // renderer reads required[] off the parent.
-  const surfaced = new Set(Object.keys(next.properties!));
-  next.required = (schema.required ?? []).filter((r) => surfaced.has(r));
-
+/** Build a copy of `schema` with the supplied overrides applied,
+ *  stripping `$ref` and `allOf` since we've inlined them. The result
+ *  is what the walker reads — it must not re-resolve and re-expose
+ *  the fields we just pruned. */
+function inlinedCopy(
+  schema: JSONSchema,
+  overrides: { properties?: Record<string, JSONSchema>; items?: JSONSchema; required?: string[] },
+): JSONSchema {
+  const next: JSONSchema = { ...schema };
+  delete next.$ref;
+  delete next.allOf;
+  if (overrides.properties) next.properties = overrides.properties;
+  if (overrides.items) next.items = overrides.items;
+  if (overrides.required !== undefined) {
+    if (overrides.required.length > 0) next.required = overrides.required;
+    else delete next.required;
+  }
   return next;
 }
 
-function filterMetadata(metadata: JSONSchema, allowed: string[]): JSONSchema {
-  if (!metadata || typeof metadata !== "object" || !metadata.properties) return metadata;
-  const next: JSONSchema = { ...metadata, properties: {} };
-  for (const key of allowed) {
-    if (metadata.properties[key]) next.properties![key] = metadata.properties[key];
-  }
-  // Required gets pruned to the surfaced set; metadata typically
-  // doesn't list required for these fields anyway.
-  if (Array.isArray(metadata.required)) {
-    next.required = metadata.required.filter((r) => allowed.includes(r));
-  }
-  return next;
-}
-
-function filterByKeys(schema: JSONSchema, allowed: Set<string>): JSONSchema {
-  if (!schema || typeof schema !== "object" || !schema.properties) return schema;
-  const next: JSONSchema = { ...schema, properties: {} };
-  for (const key of allowed) {
-    if (schema.properties[key]) next.properties![key] = schema.properties[key];
-  }
-  if (Array.isArray(schema.required)) {
-    next.required = schema.required.filter((r) => allowed.has(r));
-  }
-  return next;
+/** Replace the schema with an empty-properties object. Used when the
+ *  trie has children but none match — better to render an empty
+ *  object than to surface noise the operator didn't ask for. */
+function emptyObject(schema: JSONSchema): JSONSchema {
+  return { ...schema, $ref: undefined, allOf: undefined, properties: {}, required: [] };
 }

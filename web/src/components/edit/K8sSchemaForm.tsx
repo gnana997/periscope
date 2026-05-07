@@ -52,9 +52,10 @@ export function K8sSchemaForm({
     if (!doc) return { rootSchema: undefined, walkOptions: undefined };
     const root = findSchemaByGVK(doc, gvk.group, gvk.version, gvk.kind);
     if (!root) return { rootSchema: undefined, walkOptions: undefined };
-    const filtered = filterSchemaForKind(root, kind);
+    const resolveRef = buildRefResolver(doc);
+    const filtered = filterSchemaForKind(root, kind, { resolveRef });
     const opts: WalkOptions = {
-      resolveRef: buildRefResolver(doc),
+      resolveRef,
       allowKvMap: true,
       allowArrayOfObjects: true,
       // K8s opts in to oneOf discriminator rendering. The allOf
