@@ -24,6 +24,7 @@ import { useEffect, useMemo, useState } from "react";
 import {
   buildInstallRequest,
   filterCompatibleVersions,
+  generateAddonValuesYamlStub,
   parseSchemaSafe,
   pickDefaultVersion,
 } from "../../lib/addonInstall";
@@ -97,6 +98,20 @@ export function InstallAddOnDialog({
     () => parseSchemaSafe(schemaQuery.data?.configurationSchema),
     [schemaQuery.data?.configurationSchema],
   );
+
+  // Seed the YAML editor with a commented schema reference the
+  // first time the schema arrives for an empty buffer. Without
+  // this, the YAML mode renders as a blank textarea — particularly
+  // jarring for addons whose schema forces YAML as the default
+  // (aws-ebs-csi-driver and other $ref / allOf-heavy schemas) and
+  // the operator never sees the form view to learn what fields
+  // exist. The empty-buffer guard preserves operator edits across
+  // version-change re-renders.
+  useEffect(() => {
+    if (!open || !parsedSchema || valuesYaml !== "") return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setValuesYaml(generateAddonValuesYamlStub(parsedSchema));
+  }, [open, parsedSchema, valuesYaml]);
 
   const installMutation = useInstallAddon(cluster);
 

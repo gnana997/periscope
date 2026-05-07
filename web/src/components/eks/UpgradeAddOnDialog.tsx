@@ -27,6 +27,7 @@ import {
 } from "../../lib/addonUpgrade";
 import {
   filterCompatibleVersions,
+  generateAddonValuesYamlStub,
   parseSchemaSafe,
 } from "../../lib/addonInstall";
 import { ApiError } from "../../lib/api";
@@ -119,6 +120,18 @@ export function UpgradeAddOnDialog({
     () => parseSchemaSafe(schemaQuery.data?.configurationSchema),
     [schemaQuery.data?.configurationSchema],
   );
+
+  // Same seed-on-empty pattern as InstallAddOnDialog: when the
+  // operator never set configurationValues for this addon, the
+  // editor would open as a blank textarea even with a fully-formed
+  // schema. Seed a commented schema reference so YAML mode is
+  // discoverable. Skipped when detail.configurationValues is
+  // non-empty — that path keeps the operator's prior overrides.
+  useEffect(() => {
+    if (!open || !parsedSchema || valuesYaml !== "") return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setValuesYaml(generateAddonValuesYamlStub(parsedSchema));
+  }, [open, parsedSchema, valuesYaml]);
 
   const upgradeMutation = useUpgradeAddon(cluster);
 

@@ -1,10 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
   buildInstallRequest,
+  compareAddonVersions,
   filterCompatibleVersions,
+  generateAddonValuesYamlStub,
   parseSchemaSafe,
   pickDefaultVersion,
 } from "./addonInstall";
+import type { JSONSchema } from "./helmSchema";
 import type { CatalogAddon } from "./types";
 
 const vpcCNI: CatalogAddon = {
@@ -113,5 +116,115 @@ describe("buildInstallRequest", () => {
     });
     expect(req.serviceAccountRoleArn).toBe("arn:aws:iam::111:role/x");
     expect(req.resolveConflicts).toBe("NONE");
+  });
+});
+
+describe("compareAddonVersions", () => {
+  it("returns positive when a is newer than b on patch", () => {
+    expect(
+      compareAddonVersions("v1.12.2-eksbuild.2", "v1.12.2-eksbuild.1"),
+    ).toBeGreaterThan(0);
+  });
+
+  it("returns negative when a is older than b on minor", () => {
+    expect(
+      compareAddonVersions("v1.12.1-eksbuild.4", "v1.12.2-eksbuild.2"),
+    ).toBeLessThan(0);
+  });
+
+  it("compares numerically — v1.10.0 is newer than v1.7.1", () => {
+    expect(
+      compareAddonVersions("v1.10.0-eksbuild.1", "v1.7.1-eksbuild.2"),
+    ).toBeGreaterThan(0);
+  });
+
+  it("returns 0 for identical versions", () => {
+    expect(
+      compareAddonVersions("v1.12.2-eksbuild.2", "v1.12.2-eksbuild.2"),
+    ).toBe(0);
+  });
+
+  it("treats absent eksbuild suffix as 0 (older than any eksbuild)", () => {
+    expect(
+      compareAddonVersions("v1.12.2", "v1.12.2-eksbuild.1"),
+    ).toBeLessThan(0);
+  });
+
+  it("returns 0 for unparseable versions (defensive — caller hides affordance)", () => {
+    expect(compareAddonVersions("garbage", "also-garbage")).toBe(0);
+  });
+});
+
+describe("generateAddonValuesYamlStub", () => {
+  const schema: JSONSchema = {
+    type: "object",
+    properties: {
+      enableMetrics: {
+        type: "boolean",
+        description: "Enable metrics collection for the controller pod",
+        default: false,
+      },
+      logLevel: {
+        type: "integer",
+        description: "Set the level of verbosity of the logs",
+        default: 2,
+      },
+      loggingFormat: {
+        type: "string",
+        description: "Log format for the driver container",
+        enum: ["text", "json"],
+      },
+      controller: {
+        type: "object",
+        properties: {
+          replicas: {
+            type: "integer",
+            description: "Number of controller replicas",
+            default: 2,
+          },
+          env: {
+            type: "array",
+            description: "Extra env vars",
+          },
+        },
+      },
+    },
+  };
+
+  it("emits a header explaining the commented-stub convention", () => {
+    const stub = generateAddonValuesYamlStub(schema);
+    expect(stub).toMatch(/^# All fields below are commented for reference/);
+    expect(stub).toContain("Empty config = AWS uses all defaults");
+  });
+
+  it("emits each field as a description comment + key:default line", () => {
+    const stub = generateAddonValuesYamlStub(schema);
+    expect(stub).toContain("# Enable metrics collection for the controller pod");
+    expect(stub).toContain("# enableMetrics: false");
+    expect(stub).toContain("# Set the level of verbosity of the logs");
+    expect(stub).toContain("# logLevel: 2");
+  });
+
+  it("emits enum values as a hint comment", () => {
+    const stub = generateAddonValuesYamlStub(schema);
+    expect(stub).toMatch(/# loggingFormat: "" {2}# one of: "text", "json"/);
+  });
+
+  it("emits nested objects with indented children", () => {
+    const stub = generateAddonValuesYamlStub(schema);
+    // Parent and child both at the # convention; child indented one level
+    expect(stub).toContain("# controller:");
+    expect(stub).toMatch(/ {2}# Number of controller replicas/);
+    expect(stub).toMatch(/ {2}# replicas: 2/);
+  });
+
+  it("emits unsupported leaves with the reason inline", () => {
+    const stub = generateAddonValuesYamlStub(schema);
+    // env is an array without items — descriptor type "unsupported"
+    expect(stub).toMatch(/# env:.*array without items schema/);
+  });
+
+  it("returns empty string for an empty schema", () => {
+    expect(generateAddonValuesYamlStub({ type: "object" })).toBe("");
   });
 });
