@@ -80,6 +80,32 @@ export function AddonDetailBody({
         </Section>
       )}
 
+      {data.podIdentityAssociations && data.podIdentityAssociations.length > 0 && (
+        <Section label="Pod Identity associations">
+          <ul className="space-y-1">
+            {data.podIdentityAssociations.map((arn) => (
+              <li
+                key={arn}
+                className="break-all font-mono text-[11px] text-ink-muted"
+              >
+                {arn}
+              </li>
+            ))}
+          </ul>
+        </Section>
+      )}
+
+      {!data.serviceAccountRoleArn &&
+        (!data.podIdentityAssociations ||
+          data.podIdentityAssociations.length === 0) && (
+          <Section label="IAM identity">
+            <p className="text-[11.5px] italic text-ink-faint">
+              No IAM identity attached — addon runs with the cluster's
+              node-instance role.
+            </p>
+          </Section>
+        )}
+
       {data.healthIssues && data.healthIssues.length > 0 && (
         <Section label="Health issues">
           <ul className="space-y-1.5 text-[12px]">

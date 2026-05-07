@@ -13,7 +13,7 @@
 // stops propagation so the operator can still skip to the modal
 // without going through the pane first.
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { AddonDetailPane } from "../components/eks/AddonDetailPane";
 import { DeleteAddOnModal } from "../components/eks/DeleteAddOnModal";
 import { InstallAddOnDialog } from "../components/eks/InstallAddOnDialog";
@@ -63,6 +63,25 @@ export function EKSAddOnsCatalogPage({ cluster }: { cluster: string }) {
   // don't keep a stale snapshot if the catalog refetches.
   const [selectedName, setSelectedName] = useState<string | null>(null);
   const upgradeDetail = useAddon(cluster, upgradeTarget?.name ?? "");
+
+  // Clear the pane when the selected row vanishes from the catalog —
+  // happens when a delete settles (row removed from the layered
+  // installed mirror), or when AWS catalog refetches return a
+  // different shape. Without this the pane sticks open referencing
+  // a name no longer in `rows`, dialog handlers close over a stale
+  // selectedRow snapshot, and the pane drifts out of sync with the
+  // table. Hook MUST live above the early returns below; guards on
+  // catalog.data?.available defensively for the pre-load state.
+  useEffect(() => {
+    const currentNames = catalog.data?.available ?? [];
+    if (
+      selectedName != null &&
+      !currentNames.find((r) => r.name === selectedName)
+    ) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setSelectedName(null);
+    }
+  }, [catalog.data?.available, selectedName]);
 
   const rows = useMemo(() => {
     if (!catalog.data) return [] as CatalogAddon[];

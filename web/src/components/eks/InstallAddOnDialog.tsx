@@ -20,7 +20,7 @@
 // "+ Install" to "installed" without a page reload, and the
 // addons-list status-aware polling picks up the CREATING state.
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   buildInstallRequest,
   filterCompatibleVersions,
@@ -67,6 +67,18 @@ export function InstallAddOnDialog({
   const [serviceAccountRoleArn, setServiceAccountRoleArn] = useState<string>("");
   const [resolveConflicts, setResolveConflicts] =
     useState<ResolveConflicts>("OVERWRITE");
+  // Editor mode is owned by the dialog (not HelmValuesEditor) so
+  // changing addon version doesn't reset the operator's explicit
+  // Form/YAML toggle. undefined means "let the editor pick the
+  // auto-default for the current schema."
+  const [editorMode, setEditorMode] = useState<"form" | "yaml" | undefined>(
+    undefined,
+  );
+  // Tracks the last stub we wrote into valuesYaml. Lets the version-
+  // change re-seed effect distinguish "operator hasn't touched it"
+  // (current buffer == seededStub) from "operator has edits"
+  // (current buffer != seededStub). The latter wins — preserve edits.
+  const seededStubRef = useRef<string>("");
 
   // Compatible-versions list filtered by cluster k8sVer.
   const compatibleVersions = useMemo(
@@ -82,11 +94,14 @@ export function InstallAddOnDialog({
   // the lint rule legitimately allows it but flags anyway.
   useEffect(() => {
     if (!open || !addon) return;
-    // eslint-disable-next-line react-hooks/set-state-in-effect
+    /* eslint-disable react-hooks/set-state-in-effect */
     setVersion(pickDefaultVersion(compatibleVersions));
     setValuesYaml("");
     setServiceAccountRoleArn("");
     setResolveConflicts("OVERWRITE");
+    setEditorMode(undefined);
+    seededStubRef.current = "";
+    /* eslint-enable react-hooks/set-state-in-effect */
   }, [open, addon, compatibleVersions]);
 
   const schemaQuery = useAddonConfigurationSchema(
@@ -108,9 +123,20 @@ export function InstallAddOnDialog({
   // exist. The empty-buffer guard preserves operator edits across
   // version-change re-renders.
   useEffect(() => {
-    if (!open || !parsedSchema || valuesYaml !== "") return;
+    if (!open || !parsedSchema) return;
+    // Initial seed: empty buffer → stub. Re-seed on schema change:
+    // if the buffer matches the previously-seeded stub (operator
+    // hasn't edited), regenerate for the new schema. If the buffer
+    // diverges from the previous stub (operator has edits), leave
+    // it alone — version change must not clobber operator's work.
+    const stub = generateAddonValuesYamlStub(parsedSchema);
+    const operatorHasEdits =
+      valuesYaml !== "" && valuesYaml !== seededStubRef.current;
+    if (operatorHasEdits) return;
+    if (valuesYaml === stub) return;
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    setValuesYaml(generateAddonValuesYamlStub(parsedSchema));
+    setValuesYaml(stub);
+    seededStubRef.current = stub;
   }, [open, parsedSchema, valuesYaml]);
 
   const installMutation = useInstallAddon(cluster);
@@ -219,6 +245,8 @@ export function InstallAddOnDialog({
                 valuesYaml={valuesYaml}
                 schema={parsedSchema}
                 onValuesYamlChange={setValuesYaml}
+                mode={editorMode}
+                onModeChange={setEditorMode}
               />
             )}
           </Section>

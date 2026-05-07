@@ -1860,6 +1860,11 @@ export interface AddonVersionEntry {
 export interface AddonDetail extends AddonSummary {
   arn?: string;
   serviceAccountRoleArn?: string;
+  /** EKS Pod Identity association ARNs attached to the addon — the
+   *  newer alternative to IRSA via `serviceAccountRoleArn`. Both can
+   *  be present, neither, or one. Empty/absent means the addon
+   *  doesn't use AWS-managed pod identity. */
+  podIdentityAssociations?: string[];
   configurationValues?: string;
   /** AWS-published JSON schema for the addon's config. May be empty
    *  if DescribeAddonConfiguration soft-failed. */

@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { AddonDetailPane } from "../components/eks/AddonDetailPane";
 import { DeleteAddOnModal } from "../components/eks/DeleteAddOnModal";
 import { UpgradeAddOnDialog } from "../components/eks/UpgradeAddOnDialog";
@@ -51,6 +51,23 @@ export function AddOnsPage({ cluster }: { cluster: string }) {
   // when an upgrade target is set, since useAddon respects the
   // enabled flag inside the hook (Boolean(cluster && name)).
   const upgradeDetail = useAddon(cluster, upgradeTarget ?? "");
+
+  // Clear the pane when the underlying row vanishes from the list —
+  // happens after a delete settles (row removed from the response),
+  // after a mid-pane status flip filters it out, or after a refetch
+  // returns a smaller set. Without this, the pane stays open
+  // pointing at a name that no longer exists, the useAddon detail
+  // query 404s, and the pane is stuck on "Failed to load detail".
+  // Hook MUST live above the early returns below so it runs every
+  // render — guard on data?.addons defensively to handle the
+  // pre-load state.
+  useEffect(() => {
+    const currentRows = data?.addons ?? [];
+    if (selected != null && !currentRows.find((r) => r.name === selected)) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setSelected(null);
+    }
+  }, [data?.addons, selected]);
 
   if (isError && isBackendNotEKS(error)) {
     return (

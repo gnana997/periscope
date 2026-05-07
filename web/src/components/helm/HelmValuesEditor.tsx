@@ -43,16 +43,32 @@ interface HelmValuesEditorProps {
    *  the editor renders the Monaco YAML fallback with no toggle. */
   schema?: JSONSchema;
   onValuesYamlChange: (next: string) => void;
+  /** Optionally controlled toggle mode. When omitted (uncontrolled)
+   *  the editor manages its own mode and re-defaults on schema
+   *  change. When set, the parent owns the value — useful for
+   *  dialogs that swap schemas (e.g. addon version change) without
+   *  wanting to clobber the operator's explicit Form/YAML choice. */
+  mode?: Mode;
+  onModeChange?: (next: Mode) => void;
 }
 
 export function HelmValuesEditor({
   valuesYaml,
   schema,
   onValuesYamlChange,
+  mode,
+  onModeChange,
 }: HelmValuesEditorProps) {
   if (!schema) {
+    // Fixed h-[460px] (NOT min-h-) is load-bearing: Monaco's
+    // container uses h-full which only resolves when the parent has
+    // a *definite* height. The dialog body is `overflow-y-auto`,
+    // not a flex column, so flex-1 doesn't propagate down — and
+    // min-height alone is "indefinite" for percentage resolution.
+    // With min-h-, Monaco computes a 0px container and renders
+    // nothing (just empty grey space the size of the wrapper).
     return (
-      <div className="flex min-h-[460px] flex-1 flex-col overflow-hidden rounded-sm border border-border bg-bg">
+      <div className="flex h-[460px] flex-col overflow-hidden rounded-sm border border-border bg-bg">
         <HelmValuesYaml value={valuesYaml} onChange={onValuesYamlChange} />
       </div>
     );
@@ -62,6 +78,8 @@ export function HelmValuesEditor({
       valuesYaml={valuesYaml}
       schema={schema}
       onValuesYamlChange={onValuesYamlChange}
+      controlledMode={mode}
+      onControlledModeChange={onModeChange}
     />
   );
 }
@@ -70,26 +88,37 @@ function SchemaEditor({
   valuesYaml,
   schema,
   onValuesYamlChange,
+  controlledMode,
+  onControlledModeChange,
 }: {
   valuesYaml: string;
   schema: JSONSchema;
   onValuesYamlChange: (next: string) => void;
+  controlledMode?: Mode;
+  onControlledModeChange?: (next: Mode) => void;
 }) {
   // Auto-default to YAML if any required field is unrenderable in
-  // form mode — otherwise the operator hits a wall.
-  const [mode, setMode] = useState<Mode>(() =>
+  // form mode — otherwise the operator hits a wall. Only used when
+  // the parent doesn't supply a controlled mode.
+  const [localMode, setLocalMode] = useState<Mode>(() =>
     hasRequiredUnsupportedField(schema) ? "yaml" : "form",
   );
+  const mode = controlledMode ?? localMode;
+  const setMode = onControlledModeChange ?? setLocalMode;
+
   // Recompute the suggested default when the chart version (and so
   // the schema) changes. Only override the current mode when the new
   // schema would force a different default; preserve an explicit user
-  // toggle within the same schema.
+  // toggle within the same schema. Skipped entirely in controlled
+  // mode — the parent owns the choice and we don't override it on
+  // schema change.
   const lastSchemaRef = useRef<JSONSchema>(schema);
   useEffect(() => {
+    if (controlledMode !== undefined) return;
     if (lastSchemaRef.current === schema) return;
     lastSchemaRef.current = schema;
-    setMode(hasRequiredUnsupportedField(schema) ? "yaml" : "form");
-  }, [schema]);
+    setLocalMode(hasRequiredUnsupportedField(schema) ? "yaml" : "form");
+  }, [schema, controlledMode]);
 
   // Track whether we've ever round-tripped through the form. If so,
   // comments in the original YAML have already been dropped on the
@@ -97,10 +126,12 @@ function SchemaEditor({
   const [commentsLost, setCommentsLost] = useState(false);
 
   return (
-    <div className="flex min-h-[460px] flex-1 flex-col gap-2">
+    <div className="flex flex-col gap-2">
       <ModeToggle mode={mode} onChange={setMode} />
       {mode === "yaml" ? (
-        <div className="flex min-h-[420px] flex-1 flex-col overflow-hidden rounded-sm border border-border bg-bg">
+        // Fixed h-[420px] — see no-schema branch above for why
+        // min-height + flex-1 leaves Monaco with a 0px container.
+        <div className="flex h-[420px] flex-col overflow-hidden rounded-sm border border-border bg-bg">
           <HelmValuesYaml value={valuesYaml} onChange={onValuesYamlChange} />
         </div>
       ) : (

@@ -678,6 +678,49 @@ func TestEKSAddonsDetail_HappyPath(t *testing.T) {
 	}
 }
 
+func TestEKSAddonsDetail_PodIdentityAssociationsExposed(t *testing.T) {
+	// Regression: AWS DescribeAddon returns the addon's Pod Identity
+	// associations in PodIdentityAssociations []string. The detail
+	// handler used to drop these on the floor — frontend had no way
+	// to surface "this addon uses Pod Identity instead of IRSA."
+	reg := eksRegistry(t, "prod-eu-west-1", clusters.BackendEKS)
+	now := time.Now().UTC()
+	piARNs := []string{
+		"arn:aws:eks:eu-west-1:111111111111:podidentityassociation/prod/a-abc123",
+		"arn:aws:eks:eu-west-1:111111111111:podidentityassociation/prod/a-def456",
+	}
+	fake := &fakeEKSAddonsClient{
+		descFn: func(_ context.Context, _ *eks.DescribeAddonInput) (*eks.DescribeAddonOutput, error) {
+			return &eks.DescribeAddonOutput{Addon: &ekstypes.Addon{
+				AddonName:               strPtrAddons("aws-ebs-csi-driver"),
+				AddonVersion:            strPtrAddons("v1.59.0-eksbuild.1"),
+				Status:                  ekstypes.AddonStatusActive,
+				CreatedAt:               &now,
+				ModifiedAt:              &now,
+				PodIdentityAssociations: piARNs,
+			}}, nil
+		},
+	}
+	withFakeEKSAddonsClient(t, fake)
+	rec := invokeAddons(t, reg, newEKSAddonsCache(time.Hour), newAddonVersionsCache(time.Hour),
+		&recordingSink{}, http.MethodGet,
+		"/api/clusters/prod-eu-west-1/eks/addons/aws-ebs-csi-driver",
+		map[string]string{"cluster": "prod-eu-west-1", "name": "aws-ebs-csi-driver"}, true)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d; body = %s", rec.Code, rec.Body.String())
+	}
+	var got AddonDetail
+	if err := json.NewDecoder(rec.Body).Decode(&got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(got.PodIdentityAssociations) != 2 {
+		t.Fatalf("PodIdentityAssociations len = %d, want 2", len(got.PodIdentityAssociations))
+	}
+	if got.PodIdentityAssociations[0] != piARNs[0] || got.PodIdentityAssociations[1] != piARNs[1] {
+		t.Errorf("PodIdentityAssociations = %+v, want %+v", got.PodIdentityAssociations, piARNs)
+	}
+}
+
 func TestEKSAddonsDetail_MissingNameReturns400(t *testing.T) {
 	reg := eksRegistry(t, "prod-eu-west-1", clusters.BackendEKS)
 	rec := invokeAddons(t, reg, newEKSAddonsCache(time.Hour), newAddonVersionsCache(time.Hour),
