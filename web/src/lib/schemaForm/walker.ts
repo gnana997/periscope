@@ -283,12 +283,29 @@ function walkField(
       if (!items || typeof items !== "object") {
         return { ...base, type: "unsupported", unsupportedReason: "array without items schema" };
       }
+      // Hint check on the items' PRE-deref shape — same convention
+      // as walkField. K8s `volumes[]` and `envFrom[]` items are
+      // sibling-encoded oneOfs; without this branch the row would
+      // render as a fieldset of all sibling props simultaneously
+      // editable. With it, each row becomes a discriminator value.
+      const itemPrimaryRef = extractPrimaryRef(items);
+      const itemHint =
+        itemPrimaryRef !== undefined
+          ? options.discriminatorHints?.get(itemPrimaryRef)
+          : undefined;
       const resolvedItems = derefIfNeeded(items, options, seen) ?? items;
       const itemType = normalizeType(resolvedItems.type);
       if (itemType === "string" || itemType === "number" || itemType === "integer" || itemType === "boolean") {
         return { ...base, type: "array-of-primitives", itemType };
       }
       if (options.allowArrayOfObjects && itemType === "object") {
+        if (itemHint && resolvedItems.properties) {
+          const built = buildHintedDiscriminator(resolvedItems, itemHint, options, seen);
+          if (built) {
+            return { ...base, type: "array-of-discriminators", ...built };
+          }
+          // Fall through to standard array-of-objects on hint failure.
+        }
         // Children paths are RELATIVE to the row item, not absolute
         // from the form root. The array-of-objects widget composes
         // the absolute path at render time.

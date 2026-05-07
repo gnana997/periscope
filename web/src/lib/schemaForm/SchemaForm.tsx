@@ -291,6 +291,15 @@ function FieldInput({ id, descriptor, value, onChange, readOnly }: InputProps) {
           readOnly={readOnly}
         />
       );
+    case "array-of-discriminators":
+      return (
+        <ArrayOfDiscriminatorsInput
+          descriptor={descriptor}
+          value={value}
+          onChange={onChange}
+          readOnly={readOnly}
+        />
+      );
     case "discriminator":
       return (
         <DiscriminatorInput
@@ -567,6 +576,86 @@ function ArrayOfObjectsInput({
               />
             ))}
           </div>
+        </fieldset>
+      ))}
+      {readOnly ? null : (
+        <button
+          type="button"
+          onClick={addRow}
+          className="font-mono text-[11.5px] text-accent hover:underline"
+        >
+          + add {descriptor.label || "item"}
+        </button>
+      )}
+    </div>
+  );
+}
+
+// Per-row discriminator picker. Used for arrays whose item type is
+// a K8s sibling-encoded oneOf — each row IS a discriminator value
+// (`volumes[]` rows are Volume objects, picker = volume type;
+// `envFrom[]` rows are EnvFromSource objects, picker = configMap
+// vs secret).
+//
+// Each row delegates to DiscriminatorInput with a synthesized
+// "row descriptor" carrying the same `branches` + `sharedChildren`
+// the walker emitted on the array descriptor — so branch-switching,
+// shared-child rendering, and select-vs-buttons behaviour all
+// inherit unchanged.
+function ArrayOfDiscriminatorsInput({
+  descriptor,
+  value,
+  onChange,
+  readOnly,
+}: Omit<InputProps, "id">) {
+  const arr = Array.isArray(value) ? (value as unknown[]) : [];
+
+  // Synthesise once per render — DiscriminatorInput only reads
+  // branches / sharedChildren off the descriptor.
+  const rowDescriptor: FieldDescriptor = {
+    path: [],
+    label: descriptor.label,
+    type: "discriminator",
+    required: false,
+    branches: descriptor.branches,
+    sharedChildren: descriptor.sharedChildren,
+  };
+
+  const updateRow = (idx: number, nextRow: unknown) => {
+    const next = [...arr];
+    next[idx] = nextRow;
+    onChange(next);
+  };
+  const removeRow = (idx: number) => onChange(arr.filter((_, i) => i !== idx));
+  // New rows start as `{}` — operator picks a branch first; the
+  // discriminator widget seeds the chosen branch's empty value.
+  const addRow = () => onChange([...arr, {}]);
+
+  return (
+    <div className="space-y-2">
+      {arr.map((row, idx) => (
+        <fieldset key={idx} className="rounded-sm border border-border px-3 pb-3 pt-2">
+          <legend className="flex items-center gap-2 px-1">
+            <span className="font-mono text-[11px] uppercase tracking-[0.14em] text-ink-faint">
+              {descriptor.label} #{idx + 1}
+            </span>
+            {readOnly ? null : (
+              <button
+                type="button"
+                onClick={() => removeRow(idx)}
+                className="font-mono text-[10.5px] text-ink-faint hover:text-red"
+                aria-label={`remove ${descriptor.label} ${idx + 1}`}
+              >
+                remove
+              </button>
+            )}
+          </legend>
+          <DiscriminatorInput
+            descriptor={rowDescriptor}
+            value={row}
+            onChange={(nextRow) => updateRow(idx, nextRow)}
+            readOnly={readOnly}
+          />
         </fieldset>
       ))}
       {readOnly ? null : (

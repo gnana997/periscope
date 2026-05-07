@@ -283,6 +283,78 @@ const synthDoc: OpenAPIDoc = {
           postStart: { allOf: [{ $ref: "#/components/schemas/io.k8s.api.core.v1.LifecycleHandler" }] },
         },
       },
+      // Volume + sources (subset: configMap, secret, emptyDir) —
+      // hint table covers the full ~30-volume canon; we model just
+      // enough here to validate the array-of-discriminators path.
+      "io.k8s.api.core.v1.ConfigMapVolumeSource": {
+        type: "object",
+        properties: {
+          name: { type: "string" },
+          optional: { type: "boolean" },
+          defaultMode: { type: "integer" },
+        },
+      },
+      "io.k8s.api.core.v1.SecretVolumeSource": {
+        type: "object",
+        properties: {
+          secretName: { type: "string" },
+          optional: { type: "boolean" },
+          defaultMode: { type: "integer" },
+        },
+      },
+      "io.k8s.api.core.v1.EmptyDirVolumeSource": {
+        type: "object",
+        properties: {
+          medium: { type: "string" },
+          sizeLimit: { type: "string" },
+        },
+      },
+      "io.k8s.api.core.v1.Volume": {
+        type: "object",
+        properties: {
+          name: { type: "string" },
+          configMap: {
+            allOf: [{ $ref: "#/components/schemas/io.k8s.api.core.v1.ConfigMapVolumeSource" }],
+          },
+          secret: {
+            allOf: [{ $ref: "#/components/schemas/io.k8s.api.core.v1.SecretVolumeSource" }],
+          },
+          emptyDir: {
+            allOf: [{ $ref: "#/components/schemas/io.k8s.api.core.v1.EmptyDirVolumeSource" }],
+          },
+        },
+        required: ["name"],
+      },
+      "io.k8s.api.core.v1.VolumeMount": {
+        type: "object",
+        properties: {
+          name: { type: "string" },
+          mountPath: { type: "string" },
+          readOnly: { type: "boolean" },
+          subPath: { type: "string" },
+        },
+        required: ["name", "mountPath"],
+      },
+      "io.k8s.api.core.v1.ConfigMapEnvSource": {
+        type: "object",
+        properties: { name: { type: "string" }, optional: { type: "boolean" } },
+      },
+      "io.k8s.api.core.v1.SecretEnvSource": {
+        type: "object",
+        properties: { name: { type: "string" }, optional: { type: "boolean" } },
+      },
+      "io.k8s.api.core.v1.EnvFromSource": {
+        type: "object",
+        properties: {
+          prefix: { type: "string" },
+          configMapRef: {
+            allOf: [{ $ref: "#/components/schemas/io.k8s.api.core.v1.ConfigMapEnvSource" }],
+          },
+          secretRef: {
+            allOf: [{ $ref: "#/components/schemas/io.k8s.api.core.v1.SecretEnvSource" }],
+          },
+        },
+      },
       "io.k8s.api.core.v1.Container": {
         type: "object",
         properties: {
@@ -300,8 +372,16 @@ const synthDoc: OpenAPIDoc = {
             type: "array",
             items: { $ref: "#/components/schemas/io.k8s.api.core.v1.EnvVar" },
           },
+          envFrom: {
+            type: "array",
+            items: { $ref: "#/components/schemas/io.k8s.api.core.v1.EnvFromSource" },
+          },
           resources: {
             allOf: [{ $ref: "#/components/schemas/io.k8s.api.core.v1.ResourceRequirements" }],
+          },
+          volumeMounts: {
+            type: "array",
+            items: { $ref: "#/components/schemas/io.k8s.api.core.v1.VolumeMount" },
           },
           livenessProbe: { allOf: [{ $ref: "#/components/schemas/io.k8s.api.core.v1.Probe" }] },
           readinessProbe: { allOf: [{ $ref: "#/components/schemas/io.k8s.api.core.v1.Probe" }] },
@@ -326,11 +406,13 @@ const synthDoc: OpenAPIDoc = {
             type: "array",
             items: { $ref: "#/components/schemas/io.k8s.api.core.v1.Container" },
           },
-          // Wide PodSpec surface (volumes, initContainers, affinity,
-          // tolerations, securityContext, etc.) deliberately not
-          // modelled here — the allowlist excludes them, so the
-          // filter shouldn't surface them either.
-          volumes: { type: "array", items: { type: "object" } },
+          volumes: {
+            type: "array",
+            items: { $ref: "#/components/schemas/io.k8s.api.core.v1.Volume" },
+          },
+          // initContainers stays in the synth as a "we should NOT
+          // surface this" canary — the allowlist excludes it
+          // pending per-row collapse.
           initContainers: { type: "array", items: { type: "object" } },
         },
         required: ["containers"],
@@ -695,10 +777,13 @@ describe("Deployment — round-trip", () => {
     );
   });
 
-  it("walker prunes excluded PodSpec fields (volumes, initContainers)", () => {
+  it("walker prunes excluded PodSpec fields (initContainers)", () => {
+    // `volumes` was previously here — now allowlisted because
+    // array-of-discriminators handles its sibling-encoded oneOf.
+    // `initContainers` remains out pending per-row collapse in
+    // array-of-objects (multi-container forms are already long).
     const all = flatten(buildFieldDescriptors(schemaFor("Deployment"), walkOptionsFor("Deployment")));
     const paths = all.map((d) => d.path.join("."));
-    expect(paths).not.toContain("spec.template.spec.volumes");
     expect(paths).not.toContain("spec.template.spec.initContainers");
   });
 
@@ -735,11 +820,12 @@ describe("Deployment — round-trip", () => {
         "lifecycle",
       ]),
     );
-    // securityContext stays out (no hint table entry, wide admin
-    // surface). volumeMounts also out (paired with volumes which
-    // is blocked on array-of-discriminators support).
+    // volumeMounts joined the curated set alongside volumes (now
+    // that array-of-discriminators handles volumes). securityContext
+    // stays out — wide admin-leaning surface, pending the
+    // collapsible "advanced" affordance.
+    expect(childPaths).toContain("volumeMounts");
     expect(childPaths).not.toContain("securityContext");
-    expect(childPaths).not.toContain("volumeMounts");
   });
 
   it("walker emits kv-maps for resources.requests/limits (Quantity values render as strings)", () => {
@@ -813,6 +899,77 @@ describe("Deployment — round-trip", () => {
     expect(postStart?.type).toBe("discriminator");
     const branchKeys = (preStop?.branches ?? []).map((b) => b.discriminatorKey).sort();
     expect(branchKeys).toEqual(["exec", "httpGet", "sleep", "tcpSocket"]);
+  });
+
+  it("spec.template.spec.volumes surfaces as array-of-discriminators (per-row volume-type picker)", () => {
+    const all = flatten(buildFieldDescriptors(schemaFor("Deployment"), walkOptionsFor("Deployment")));
+    const volumes = all.find((d) => d.path.join(".") === "spec.template.spec.volumes");
+    expect(volumes?.type).toBe("array-of-discriminators");
+    const branchKeys = (volumes?.branches ?? []).map((b) => b.discriminatorKey);
+    expect(branchKeys).toEqual(
+      expect.arrayContaining(["configMap", "secret", "emptyDir"]),
+    );
+    // `name` is shared across all volume types — it's the volume's
+    // identifier, not a branch.
+    const sharedPaths = (volumes?.sharedChildren ?? []).map((d) => d.path.join("."));
+    expect(sharedPaths).toContain("name");
+  });
+
+  it("container envFrom surfaces as array-of-discriminators (per-row configMap-or-secret)", () => {
+    const all = flatten(buildFieldDescriptors(schemaFor("Deployment"), walkOptionsFor("Deployment")));
+    const containers = all.find((d) => d.path.join(".") === "spec.template.spec.containers");
+    const envFrom = containers?.children?.find((c) => c.path.join(".") === "envFrom");
+    expect(envFrom?.type).toBe("array-of-discriminators");
+    const branchKeys = (envFrom?.branches ?? []).map((b) => b.discriminatorKey).sort();
+    expect(branchKeys).toEqual(["configMapRef", "secretRef"]);
+    const sharedPaths = (envFrom?.sharedChildren ?? []).map((d) => d.path.join("."));
+    expect(sharedPaths).toContain("prefix");
+  });
+
+  it("container volumeMounts surfaces as plain array-of-objects (no hint, no polymorphism)", () => {
+    const all = flatten(buildFieldDescriptors(schemaFor("Deployment"), walkOptionsFor("Deployment")));
+    const containers = all.find((d) => d.path.join(".") === "spec.template.spec.containers");
+    const volumeMounts = containers?.children?.find((c) => c.path.join(".") === "volumeMounts");
+    expect(volumeMounts?.type).toBe("array-of-objects");
+    const childPaths = (volumeMounts?.children ?? []).map((d) => d.path.join("."));
+    expect(childPaths).toEqual(
+      expect.arrayContaining(["name", "mountPath", "readOnly", "subPath"]),
+    );
+  });
+
+  it("volumes round-trip through YAML preserving the chosen branch + name", () => {
+    const volumesYaml = [
+      "apiVersion: apps/v1",
+      "kind: Deployment",
+      "metadata:",
+      "  name: api",
+      "spec:",
+      "  selector:",
+      "    matchLabels:",
+      "      app: api",
+      "  template:",
+      "    metadata:",
+      "      labels:",
+      "        app: api",
+      "    spec:",
+      "      volumes:",
+      "        - name: config",
+      "          configMap:",
+      "            name: app-config",
+      "        - name: scratch",
+      "          emptyDir: {}",
+      "      containers:",
+      "        - name: api",
+      "          image: ghcr.io/example/api:1.0.0",
+      "          volumeMounts:",
+      "            - name: config",
+      "              mountPath: /etc/app",
+      "              readOnly: true",
+      "            - name: scratch",
+      "              mountPath: /tmp",
+      "",
+    ].join("\n");
+    expect(yamlRoundTrip(volumesYaml)).toEqual(parseYaml(volumesYaml));
   });
 
   it("hinted Probe round-trips through YAML preserving handler + threshold values", () => {

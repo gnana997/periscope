@@ -250,12 +250,17 @@ describe("filterSchemaForKind — [*] array-item descent (Deployment)", () => {
     expect(Object.keys(itemProps!)).not.toContain("securityContext");
   });
 
-  it("prunes sibling PodSpec fields (volumes) outside the allowlist", () => {
+  it("prunes sibling PodSpec fields (initContainers) outside the allowlist", () => {
+    // `volumes` was previously listed here as the canonical
+    // "excluded sibling," but is now allowlisted now that
+    // array-of-discriminators handles it. `initContainers` takes
+    // its place — same shape (array of complex objects), but
+    // deliberately deferred until per-row collapse lands.
     const podSpec = filtered.properties?.spec?.properties?.template?.properties?.spec as
       | JSONSchema
       | undefined;
     expect(podSpec?.properties).toBeDefined();
-    expect(Object.keys(podSpec!.properties!)).not.toContain("volumes");
+    expect(Object.keys(podSpec!.properties!)).not.toContain("initContainers");
     expect(Object.keys(podSpec!.properties!)).toEqual(
       expect.arrayContaining(["restartPolicy", "containers"]),
     );

@@ -37,6 +37,7 @@ export type FieldType =
   | "object"
   | "array-of-primitives"
   | "array-of-objects"
+  | "array-of-discriminators"
   | "kv-map"
   | "discriminator"
   | "unsupported";

@@ -226,20 +226,13 @@ describe("walker — hint table fallback when no branch keys match", () => {
   });
 });
 
-describe("walker — KNOWN LIMITATION: hinted-type as array items (envFrom, volumes)", () => {
+describe("walker — hinted-type as array items (envFrom, volumes)", () => {
   // EnvFromSource and Volume are sibling-encoded oneOfs that appear
-  // as ITEMS of an array (`envFrom[]`, `volumes[]`), not properties
-  // of an object. The walker's array case derefs items inline and
-  // walks them as plain object children — `walkField` (where the
-  // hint check lives) never sees the row's outer shape, so the
-  // hint table is bypassed and the row renders as a fieldset of all
-  // sibling properties.
-  //
-  // Fixing this means a new descriptor type (`array-of-discriminators`)
-  // and a renderer change. Tracked as the next follow-up. For now
-  // the Deployment allowlist excludes volumes/envFrom — this test
-  // pins the current behaviour so the regression is visible if /
-  // when we do fix it.
+  // as ITEMS of an array (`envFrom[]`, `volumes[]`). The walker's
+  // array branch consults the hint table on the items' pre-deref
+  // shape and emits an `array-of-discriminators` descriptor — each
+  // row IS a discriminator value (configMap-or-secret + prefix for
+  // envFrom; volume-type + name for volumes).
   const doc: OpenAPIDoc = {
     components: {
       schemas: {
@@ -272,15 +265,19 @@ describe("walker — KNOWN LIMITATION: hinted-type as array items (envFrom, volu
     },
   } as unknown as OpenAPIDoc;
 
-  it("[known limitation] array items render as array-of-objects, NOT as per-row discriminator", () => {
+  it("emits array-of-discriminators with branches lifted from the items' hint", () => {
     const all = flatten(buildFieldDescriptors(rootOf(doc, "test.Container"), walkOptionsForDoc(doc)));
     const envFrom = all.find((d) => d.path.join(".") === "envFrom");
-    expect(envFrom?.type).toBe("array-of-objects");
-    // Current behaviour: row item's outer shape bypasses the hint
-    // — sibling props show as columns. Want to flip this when we
-    // add array-of-discriminators support.
-    const rowChildPaths = (envFrom?.children ?? []).map((d) => d.path.join("."));
-    expect(rowChildPaths).toEqual(expect.arrayContaining(["prefix", "configMapRef", "secretRef"]));
+    expect(envFrom?.type).toBe("array-of-discriminators");
+    const branchKeys = (envFrom?.branches ?? []).map((b) => b.discriminatorKey).sort();
+    expect(branchKeys).toEqual(["configMapRef", "secretRef"]);
+  });
+
+  it("collects non-branch row properties as sharedChildren (envFrom prefix)", () => {
+    const all = flatten(buildFieldDescriptors(rootOf(doc, "test.Container"), walkOptionsForDoc(doc)));
+    const envFrom = all.find((d) => d.path.join(".") === "envFrom");
+    const sharedPaths = (envFrom?.sharedChildren ?? []).map((d) => d.path.join("."));
+    expect(sharedPaths).toContain("prefix");
   });
 });
 
