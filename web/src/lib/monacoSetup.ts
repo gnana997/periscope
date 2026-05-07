@@ -40,6 +40,17 @@ import { useEffect } from "react";
   },
 };
 
+/**
+ * Font stack for every Monaco editor instance app-wide. Mirrors the
+ * `--font-mono` CSS variable defined in `src/index.css` — Monaco
+ * doesn't read CSS variables directly (it owns its own canvas-style
+ * rendering pipeline), so we maintain a small parallel constant here
+ * that callers import. Update both sites together when the mono font
+ * changes (e.g. Geist Mono → JetBrains Mono in #N).
+ */
+export const MONACO_FONT_FAMILY =
+  '"JetBrains Mono Variable", ui-monospace, "SF Mono", Menlo, monospace';
+
 let configured = false;
 
 export function ensureMonacoConfigured(): void {
