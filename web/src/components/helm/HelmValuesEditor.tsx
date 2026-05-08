@@ -3,12 +3,12 @@
 //
 // State contract:
 //   - The CALLER owns `valuesYaml` (raw YAML string).
-//   - When schema is present and the operator chose form mode, this
-//     component parses the YAML once into a JS object, hands it to
-//     HelmValuesForm, and on every form mutation re-serializes to
-//     YAML and bubbles back through `onValuesYamlChange`.
-//   - When schema is absent OR the operator toggled to YAML mode,
-//     it bypasses parse/serialize and hands the string straight to
+//   - When schema is present and the operator chose form mode, the
+//     lib's SchemaFormBridge parses the YAML once into a JS object,
+//     hands it to SchemaForm, and on every form mutation re-serializes
+//     to YAML and bubbles back through `onValuesYamlChange`.
+//   - When schema is absent OR the operator toggled to YAML mode, it
+//     bypasses parse/serialize and hands the string straight to
 //     HelmValuesYaml.
 //
 // Form↔YAML toggle:
@@ -22,15 +22,19 @@
 //     "which child to render."
 //   - YAML→Form may lose comments (yaml.parse → yaml.stringify drops
 //     them); the warning above the form fires once after such a flip.
+//
+// Refactor note: the bridge that translates YAML↔object lives in
+// `lib/schemaForm/SchemaFormBridge` and is shared with the K8s form
+// editors (#116). The helm-specific comment-loss banner is rendered
+// via the bridge's `banner` slot prop.
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
-import { HelmValuesForm } from "./HelmValuesForm";
 import { HelmValuesYaml } from "./HelmValuesYaml";
 import {
   hasRequiredUnsupportedField,
   type JSONSchema,
 } from "../../lib/helmSchema";
+import { SchemaFormBridge } from "../../lib/schemaForm";
 import { cn } from "../../lib/cn";
 
 type Mode = "form" | "yaml";
@@ -124,6 +128,8 @@ function SchemaEditor({
   // comments in the original YAML have already been dropped on the
   // first stringify; flag it so the operator knows.
   const [commentsLost, setCommentsLost] = useState(false);
+  const sourceHasComments = useMemo(() => yamlHasComments(valuesYaml), [valuesYaml]);
+  const showCommentBanner = commentsLost || sourceHasComments;
 
   return (
     <div className="flex flex-col gap-2">
@@ -138,11 +144,26 @@ function SchemaEditor({
         <SchemaFormBridge
           valuesYaml={valuesYaml}
           schema={schema}
+          // walkOptions intentionally omitted — Helm v1.1 default
+          // behavior. K8s consumers (K8sSchemaForm) thread their own
+          // resolveRef / allowKvMap / allowArrayOfObjects options.
           onValuesYamlChange={(next) => {
             setCommentsLost(true);
             onValuesYamlChange(next);
           }}
-          commentsLost={commentsLost}
+          banner={
+            showCommentBanner ? (
+              <div className="rounded-sm border border-yellow/40 bg-yellow/5 px-3 py-2 text-[12px] text-ink-muted">
+                <span className="font-mono text-[10.5px] uppercase tracking-[0.14em] text-yellow">
+                  form mode
+                </span>
+                <span className="ml-2">
+                  comments in values.yaml are stripped on save — switch to
+                  YAML mode to preserve them.
+                </span>
+              </div>
+            ) : undefined
+          }
         />
       )}
     </div>
@@ -194,92 +215,6 @@ function ModeButton({
       {children}
     </button>
   );
-}
-
-// SchemaFormBridge translates between the YAML string the parent
-// owns and the JS-object world HelmValuesForm operates in. One
-// parse on mount + one parse on external valuesYaml change; one
-// stringify per form mutation. yaml-package preserves key order
-// across the round-trip but DOES NOT preserve comments.
-function SchemaFormBridge({
-  valuesYaml,
-  schema,
-  onValuesYamlChange,
-  commentsLost,
-}: {
-  valuesYaml: string;
-  schema: JSONSchema;
-  onValuesYamlChange: (next: string) => void;
-  commentsLost: boolean;
-}) {
-  const [obj, setObj] = useState<Record<string, unknown>>(() => parseSafe(valuesYaml));
-
-  // External reset (parent supplied new YAML — e.g. operator picked
-  // a different chart version, or flipped from YAML mode back to
-  // Form mode after editing) — re-parse. The setState-in-effect is
-  // the "external state changed, sync our mirror" pattern; the
-  // structural-equality guard makes it a no-op when the parent
-  // re-renders without changing valuesYaml.
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setObj((prev) => {
-      const reparsed = parseSafe(valuesYaml);
-      try {
-        if (JSON.stringify(prev) === JSON.stringify(reparsed)) return prev;
-      } catch {
-        /* fall through */
-      }
-      return reparsed;
-    });
-  }, [valuesYaml]);
-
-  const sourceHasComments = useMemo(() => yamlHasComments(valuesYaml), [valuesYaml]);
-
-  return (
-    <div className="space-y-3">
-      {(commentsLost || sourceHasComments) && (
-        <div className="rounded-sm border border-yellow/40 bg-yellow/5 px-3 py-2 text-[12px] text-ink-muted">
-          <span className="font-mono text-[10.5px] uppercase tracking-[0.14em] text-yellow">
-            form mode
-          </span>
-          <span className="ml-2">
-            comments in values.yaml are stripped on save — switch to
-            YAML mode to preserve them.
-          </span>
-        </div>
-      )}
-      <HelmValuesForm
-        schema={schema}
-        values={obj}
-        onChange={(next) => {
-          setObj(next);
-          // Re-serialize and bubble. yaml.stringify with sortKeys
-          // would be operator-friendly but breaks helm convention
-          // (sections matter); leave default order.
-          try {
-            onValuesYamlChange(stringifyYaml(next, { lineWidth: 0 }));
-          } catch {
-            /* serialization shouldn't fail for objects we just
-             * received via setState; if it does, we keep the local
-             * state but skip propagation rather than crashing. */
-          }
-        }}
-      />
-    </div>
-  );
-}
-
-function parseSafe(yaml: string): Record<string, unknown> {
-  if (!yaml.trim()) return {};
-  try {
-    const parsed = parseYaml(yaml);
-    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-      return parsed as Record<string, unknown>;
-    }
-    return {};
-  } catch {
-    return {};
-  }
 }
 
 function yamlHasComments(yaml: string): boolean {

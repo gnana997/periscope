@@ -88,9 +88,39 @@ interface YamlEditorProps {
   cluster: string;
   source: EditorSource;
   resource: ResourceRef;
+  /** Optional Monaco seed value. When set, overrides the fetched
+   *  pristine YAML on first mount — used by KindEditRouter to carry
+   *  form-mode edits forward when toggling form→yaml. After mount,
+   *  Monaco's internal state takes over (this prop is honored once,
+   *  not re-applied on subsequent renders). */
+  initialValue?: string;
+  /** Optional pristine override for dirty / diff / drift calculation.
+   *  When set, replaces `stripForEdit(fetched)` as the anchor. Lets
+   *  KindEditRouter keep "dirty since the original server YAML"
+   *  semantics even when the editor opens with a form-edited
+   *  intermediate value via initialValue. */
+  pristineOverride?: string;
+  /** Optional callback fired on every Monaco edit. Lets a parent
+   *  mirror the buffer (e.g. KindEditRouter capturing yaml edits so
+   *  they survive a yaml→form toggle). The editor remains internally
+   *  stateful — this is a one-way "tell me what changed" hook, not
+   *  a fully controlled value pattern. */
+  onValueChange?: (next: string) => void;
+  /** Whether to publish dirty state via usePublishEditorDirty.
+   *  Defaults true. KindEditRouter passes false because it owns the
+   *  publish itself, suppressing this duplicate producer. */
+  publishDirty?: boolean;
 }
 
-export function YamlEditor({ cluster, source, resource }: YamlEditorProps) {
+export function YamlEditor({
+  cluster,
+  source,
+  resource,
+  initialValue,
+  pristineOverride,
+  onValueChange,
+  publishDirty,
+}: YamlEditorProps) {
   const yamlQuery = useEditorYaml(
     source,
     cluster,
@@ -106,12 +136,16 @@ export function YamlEditor({ cluster, source, resource }: YamlEditorProps) {
   }
   if (!yamlQuery.data) return null;
 
+  const fetchedPristine = stripForEdit(yamlQuery.data);
   return (
     <Editor
       cluster={cluster}
       source={source}
       resource={resource}
-      pristine={stripForEdit(yamlQuery.data)}
+      pristine={pristineOverride ?? fetchedPristine}
+      initialValue={initialValue ?? pristineOverride ?? fetchedPristine}
+      onValueChange={onValueChange}
+      publishDirty={publishDirty}
     />
   );
 }
@@ -121,16 +155,42 @@ interface EditorProps {
   source: EditorSource;
   resource: ResourceRef;
   pristine: string;
+  /** Initial Monaco value. When equal to `pristine` the editor opens
+   *  clean; when different (caller supplied a draft from another
+   *  mode) the editor opens dirty against the pristine baseline. */
+  initialValue: string;
+  onValueChange?: (next: string) => void;
+  publishDirty?: boolean;
 }
 
-function Editor({ cluster, source, resource, pristine }: EditorProps) {
+function Editor({
+  cluster,
+  source,
+  resource,
+  pristine,
+  initialValue,
+  onValueChange,
+  publishDirty = true,
+}: EditorProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const editorRef = useRef<monaco.editor.IStandaloneCodeEditor | null>(null);
   const [pristineLocked, setPristineLocked] = useState(pristine);
   const abortRef = useRef<AbortController | null>(null);
   const [, setParams] = useSearchParams();
 
-  const [currentYaml, setCurrentYaml] = useState(pristine);
+  // Initial Monaco value is `initialValue` (which defaults to
+  // `pristine` upstream when the parent doesn't override). This
+  // lets KindEditRouter open YAML mode pre-seeded with form-mode
+  // edits while keeping `pristineLocked` anchored on the original
+  // server YAML for dirty / diff calculations.
+  const [currentYaml, setCurrentYaml] = useState(initialValue);
+  // Latest onValueChange callback — kept in a ref so the Monaco
+  // mount effect (which has empty deps) can call the most recent
+  // version without remounting the editor on prop change.
+  const onValueChangeRef = useRef(onValueChange);
+  useEffect(() => {
+    onValueChangeRef.current = onValueChange;
+  }, [onValueChange]);
   const [mode, setMode] = useState<"edit" | "diff" | "conflict">("edit");
   const [applyState, setApplyState] = useState<ApplyState>({ kind: "idle" });
   const [errorCount, setErrorCount] = useState(0);
@@ -209,8 +269,18 @@ function Editor({ cluster, source, resource, pristine }: EditorProps) {
     return opsForCurrentBuffer();
   }, [dirty, opsForCurrentBuffer]);
 
-  // Publish dirty bit so the Tab strip can show `yaml*`.
-  usePublishEditorDirty(cluster, dirtyChannelKey(source), resource.namespace, resource.name, dirty);
+  // Publish dirty bit so the Tab strip can show `yaml*`. Suppressed
+  // when the parent owns the publish (KindEditRouter) — passing the
+  // empty-kind sentinel makes the hook bail without touching the
+  // cache, keeping the call unconditional (rules-of-hooks) without
+  // clobbering the parent's writes.
+  usePublishEditorDirty(
+    cluster,
+    publishDirty ? dirtyChannelKey(source) : "",
+    resource.namespace,
+    resource.name,
+    dirty,
+  );
 
   useMonacoTheme();
 
@@ -440,7 +510,12 @@ function Editor({ cluster, source, resource, pristine }: EditorProps) {
     // dispose runs. Monaco rejects createModel on duplicate URIs.
     const existing = monaco.editor.getModel(uri);
     if (existing) existing.dispose();
-    const model = monaco.editor.createModel(pristine, "yaml", uri);
+    // Seed the model with `initialValue` (which equals `pristine`
+    // unless the parent overrode it — KindEditRouter passes the
+    // form-edited draft so Monaco shows it directly, not just in
+    // the diff view). `pristine` stays separate as the dirty/diff
+    // anchor.
+    const model = monaco.editor.createModel(initialValue, "yaml", uri);
 
     const editor = monaco.editor.create(containerRef.current, {
       model,
@@ -482,7 +557,11 @@ function Editor({ cluster, source, resource, pristine }: EditorProps) {
     editor.focus();
 
     const contentSub = editor.onDidChangeModelContent(() => {
-      setCurrentYaml(editor.getValue());
+      const next = editor.getValue();
+      setCurrentYaml(next);
+      // Mirror to controlled parent (KindEditRouter) so yaml→form
+      // toggles preserve the in-progress YAML edits.
+      onValueChangeRef.current?.(next);
     });
 
     // Fire once if the *pristine* (unedited) buffer has validation

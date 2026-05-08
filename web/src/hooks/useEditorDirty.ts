@@ -57,11 +57,18 @@ export function usePublishEditorDirty(
 ): void {
   const qc = useQueryClient();
   const key = dirtyKey(cluster, kind, ns, name);
+  // Empty `kind` is the suppression sentinel — used by callers that
+  // want to keep the hook call unconditional (rules-of-hooks) but
+  // delegate publishing to a parent (e.g. KindEditRouter wraps
+  // YamlEditor and owns the dirty publish itself). Bail without
+  // touching the cache so the parent's writes aren't clobbered.
+  const suppressed = kind === "";
   useEffect(() => {
+    if (suppressed) return;
     qc.setQueryData<DirtyState>(key, { dirty });
     return () => {
       qc.setQueryData<DirtyState>(key, DEFAULT);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cluster, kind, ns, name, dirty]);
+  }, [cluster, kind, ns, name, dirty, suppressed]);
 }
