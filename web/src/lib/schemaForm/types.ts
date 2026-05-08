@@ -38,7 +38,31 @@ export type FieldType =
   | "array-of-primitives"
   | "array-of-objects"
   | "kv-map"
+  | "discriminator"
   | "unsupported";
+
+/** One option in a `discriminator`-typed field. The renderer shows a
+ *  branch picker (segmented buttons) and recurses into the chosen
+ *  branch's `schema` to render the sub-form. `discriminatorKey` is
+ *  set when the parent shape was an object-level oneOf with each
+ *  branch having `required: [singleKey]` (cert-manager Issuer style)
+ *  — the renderer uses key-presence to detect the active branch
+ *  without needing a full ajv-validate pass. */
+export interface DiscriminatorBranch {
+  label: string;
+  description?: string;
+  schema: JSONSchema;
+  /** When set (object-level oneOf with required-key branches), the
+   *  discriminator's value has shape `{[discriminatorKey]: subValue}`
+   *  and the renderer detects the active branch via key-presence
+   *  rather than ajv validation. Cert-manager Issuer style. */
+  discriminatorKey?: string;
+  /** Pre-walked child descriptors. Paths are relative to the
+   *  discriminator's value (which is what `setAtPath` operates on),
+   *  so the renderer iterates these and dispatches the standard
+   *  FieldRow recursion without needing access to WalkOptions. */
+  descriptors: FieldDescriptor[];
+}
 
 export interface FieldDescriptor {
   /** JSON-pointer-style path from root, e.g. ["resources", "limits", "cpu"]. */
@@ -57,6 +81,10 @@ export interface FieldDescriptor {
   children?: FieldDescriptor[];
   /** For type=kv-map: the schema of the values (always primitive). */
   kvValueType?: "string" | "number" | "integer" | "boolean";
+  /** For type=discriminator: the N options the operator picks
+   *  between. The renderer recurses into the chosen branch's
+   *  schema to render the sub-form. */
+  branches?: DiscriminatorBranch[];
   /** Constraints surfaced for inline validation hints. */
   pattern?: string;
   format?: string;

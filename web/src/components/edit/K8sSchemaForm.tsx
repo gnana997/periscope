@@ -57,6 +57,14 @@ export function K8sSchemaForm({
       resolveRef: buildRefResolver(doc),
       allowKvMap: true,
       allowArrayOfObjects: true,
+      // K8s opts in to oneOf discriminator rendering. The allOf
+      // merger always runs (it's invisible to consumers — just
+      // flattens metadata.ObjectMeta and similar inheritance shapes
+      // before the walker emits descriptors). Helm chart authors
+      // typically don't use oneOf for discriminator-style choices,
+      // so the Helm path leaves this off and any chart oneOf still
+      // surfaces as the YAML-mode hint.
+      allowOneOfDiscriminator: true,
       createOnlyPaths: getCreateOnlyPaths(kind),
     };
     return { rootSchema: filtered, walkOptions: opts };

@@ -32,7 +32,7 @@ prompting you to switch to YAML.
 |---|---|
 | **ConfigMap** | `metadata.{name, namespace, labels, annotations}`, `data` (key/value editor), `binaryData`, `immutable` |
 | **Secret** | metadata, `type`, `data` (plaintext editor with base64 round-trip), `stringData`, `immutable` |
-| **Service** | metadata, `spec.{type, selector, ports[], clusterIP, externalTrafficPolicy, sessionAffinity, ipFamilies, ipFamilyPolicy}` |
+| **Service** | metadata, `spec.{type, selector, ports[], clusterIP, externalTrafficPolicy, internalTrafficPolicy, sessionAffinity, loadBalancerSourceRanges, loadBalancerClass, ipFamilies, ipFamilyPolicy}` |
 | **Ingress** | metadata, `spec.{ingressClassName, rules[], tls[], defaultBackend}` |
 
 Fields that aren't on the per-kind allowlist (e.g. `status`,
@@ -40,8 +40,9 @@ Fields that aren't on the per-kind allowlist (e.g. `status`,
 `metadata.resourceVersion`) are filtered out before the form renders so
 operators never see them.
 
-`metadata.name`, `metadata.namespace`, and Service `spec.clusterIP` are
-immutable after create — they render as read-only inputs in edit mode.
+`metadata.name`, `metadata.namespace`, Service `spec.clusterIP`, and
+Service `spec.loadBalancerClass` are immutable after create — they
+render as read-only inputs in edit mode.
 
 Controller-specific Ingress annotations (`alb.ingress.kubernetes.io/*`,
 `nginx.ingress.kubernetes.io/*`, etc.) pass through verbatim in the
@@ -69,10 +70,58 @@ Every form view ships a **[form | yaml]** toggle in the header.
 - The toggle persists per-user via `localStorage["periscope.editor.preferred"]`
   (`"form"` or `"yaml"`).  Power users who prefer YAML can flip the
   default once.
-- Switching mode while there are unsaved form edits pops a confirm
-  dialog — switching discards the in-flight draft.
-- Switching to YAML hands the live cluster object to the existing
-  Monaco editor; switching back re-fetches the live state.
+- **Toggling preserves your edits in both directions.** The draft
+  YAML buffer is shared between the two modes — flipping form→yaml
+  carries your form edits straight into Monaco; flipping yaml→form
+  re-parses your YAML edits back into the form.  Only **Cancel**
+  prompts to discard.
+- The dirty-tracking anchor stays the original server YAML, so the
+  tab strip's `yaml*` indicator reflects "edited since fetch"
+  consistently across both modes.
+
+---
+
+## Composition-keyword coverage (`oneOf`, `allOf`)
+
+JSON Schema's composition keywords used to all surface as a yellow
+"yaml only" badge.  Two of them now render properly in the form:
+
+- **`allOf` flattens.**  `allOf:[{$ref: Base}, {properties: Override}]`
+  is the standard `kubebuilder` shape for embedding `metav1.ObjectMeta`
+  and similar inheritance — the form merges the entries into a single
+  rendered shape before the walker emits descriptors.  This is why
+  `metadata` renders as a regular nested object on every kind (was
+  previously yaml-only).  Type conflicts across `allOf` entries
+  (rare schema authoring bug) abort the merge and surface as the
+  unsupported badge.
+- **`oneOf` renders as a discriminator picker.**  Two structural
+  shapes are detected:
+  - **Whole-value oneOf** — e.g. `Service.spec.ports[].targetPort`
+    (string-or-int), `Ingress.spec.rules[].http.paths[].backend`
+    (Service backend or Resource backend).  Picker switches between
+    the branch shapes.
+  - **Object-level oneOf with required-key branches** — e.g.
+    cert-manager `Issuer.spec` (`selfSigned` / `ca` / `vault` /
+    `acme`), `aws-ebs-csi-driver` IAM identity (IRSA vs Pod Identity
+    vs none).  Picker uses the required key as the branch label.
+  - Branch switching is destructive: the values you set under the
+    previous branch are wiped (different shapes, no clean merge).
+    Periscope confirms before wiping.
+
+`anyOf` and `patternProperties` still surface as the unsupported
+badge.  They're rare in K8s/Helm/CRD schemas — most authors who want
+disambiguation reach for `oneOf` instead.
+
+---
+
+## Field descriptions
+
+Every field carries a small **(i)** icon next to its label.  Hover or
+focus the icon to see the schema's description (sourced from the
+apiserver's OpenAPI v3 doc for K8s kinds, or the chart's
+`values.schema.json` for Helm).  Some K8s fields have lengthy
+multi-paragraph descriptions — these stay tucked behind the tooltip
+to keep the form scannable.
 
 ---
 
@@ -110,8 +159,15 @@ form mode doesn't try to handle 409s itself.
 - **Controller secret picker for `tls[].secretName`** — currently a
   plain text input.  Selecting from existing Secrets in the namespace
   is a polish follow-up.
-- **CRDs.**  Form mode is intentionally limited to the four
-  v1.1-supported kinds; CRDs and workloads stay YAML-only.
+- **CRDs.**  Form-mode *routing* is intentionally limited to the
+  four v1.1-supported kinds (the schema engine itself can render
+  most kubebuilder-generated CRDs now that `oneOf` and `allOf` are
+  handled, but CRDs aren't wired through `KindEditRouter`).  CRDs
+  and workloads stay YAML-only as a deliberate scope choice.
+- **`anyOf` and `patternProperties` schemas.**  Used much less than
+  `oneOf` in real K8s/Helm/CRD schemas, so still surface as the
+  unsupported badge.  Switch to YAML for fields that use these
+  keywords.
 
 For any of the above, switch to YAML mode — it remains the full-power
 editing path.
