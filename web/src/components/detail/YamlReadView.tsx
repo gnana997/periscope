@@ -17,6 +17,7 @@ import { useEditorYaml } from "../../hooks/useResource";
 import type { EditorSource } from "../../lib/customResources";
 import { cn } from "../../lib/cn";
 import {
+  MONACO_FONT_FAMILY,
   ensureMonacoConfigured,
   useMonacoTheme,
   currentMonacoTheme,
@@ -75,7 +76,7 @@ function MonacoReadEditor({ value }: MonacoReadEditorProps) {
       // for copy still works.
       cursorStyle: "line-thin",
       cursorBlinking: "solid",
-      fontFamily: '"Geist Mono Variable", ui-monospace, "SF Mono", Menlo, monospace',
+      fontFamily: MONACO_FONT_FAMILY,
       fontSize: 12.5,
       fontLigatures: true,
       lineHeight: 19,
