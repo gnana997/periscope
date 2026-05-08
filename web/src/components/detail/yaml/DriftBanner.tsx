@@ -60,7 +60,7 @@ export function DriftBanner({
         <div
           className={cn(
             "font-mono text-[11px] font-medium",
-            isUrgent ? "text-red" : "text-yellow-700 dark:text-yellow-300",
+            isUrgent ? "text-red" : "text-yellow",
           )}
         >
           {isUrgent ? "cluster modified by another operator" : "cluster modified by a controller"}

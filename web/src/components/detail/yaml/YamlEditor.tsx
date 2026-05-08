@@ -55,6 +55,7 @@ import {
 } from "../../../lib/managedFields";
 import { pathForLine } from "../../../lib/yamlPath";
 import {
+  MONACO_FONT_FAMILY,
   currentMonacoTheme,
   ensureMonacoConfigured,
   ensureMonacoYamlConfigured,
@@ -446,7 +447,7 @@ function Editor({ cluster, source, resource, pristine }: EditorProps) {
       theme: currentMonacoTheme(),
       readOnly: false,
       automaticLayout: true,
-      fontFamily: '"Geist Mono Variable", ui-monospace, "SF Mono", Menlo, monospace',
+      fontFamily: MONACO_FONT_FAMILY,
       fontSize: 12.5,
       fontLigatures: true,
       lineHeight: 19,

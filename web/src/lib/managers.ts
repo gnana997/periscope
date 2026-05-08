@@ -339,11 +339,11 @@ export function managerColorClass(category: ManagerCategory): {
     case "GITOPS":
       return { text: "text-violet", bg: "bg-violet/10", border: "border-violet/40", glyph: "bg-violet" };
     case "CONTROLLER":
-      return { text: "text-blue-500", bg: "bg-blue-500/10", border: "border-blue-500/40", glyph: "bg-blue-500" };
+      return { text: "text-blue", bg: "bg-blue/10", border: "border-blue/40", glyph: "bg-blue" };
     case "HUMAN":
       return { text: "text-green", bg: "bg-green-soft", border: "border-green/40", glyph: "bg-green" };
     case "HELM":
-      return { text: "text-teal-500", bg: "bg-teal-500/10", border: "border-teal-500/40", glyph: "bg-teal-500" };
+      return { text: "text-teal", bg: "bg-teal/10", border: "border-teal/40", glyph: "bg-teal" };
     case "PERISCOPE":
       return { text: "text-accent", bg: "bg-accent-soft", border: "border-accent/40", glyph: "bg-accent" };
     case "UNKNOWN":

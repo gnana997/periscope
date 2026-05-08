@@ -11,6 +11,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import * as monaco from "monaco-editor";
 import { cn } from "../../lib/cn";
 import {
+  MONACO_FONT_FAMILY,
   ensureMonacoConfigured,
   useMonacoTheme,
   currentMonacoTheme,
@@ -41,8 +42,7 @@ export function ApplyYamlInput({ value, onChange }: ApplyYamlInputProps) {
       theme: currentMonacoTheme(),
       readOnly: false,
       automaticLayout: true,
-      fontFamily:
-        '"Geist Mono Variable", ui-monospace, "SF Mono", Menlo, monospace',
+      fontFamily: MONACO_FONT_FAMILY,
       fontSize: 12.5,
       lineHeight: 19,
       minimap: { enabled: false },

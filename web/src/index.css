@@ -1,7 +1,7 @@
 @import "tailwindcss";
 
 @import "@fontsource-variable/geist";
-@import "@fontsource-variable/geist-mono";
+@import "@fontsource-variable/jetbrains-mono";
 @import "@fontsource/instrument-serif/400.css";
 @import "@fontsource/instrument-serif/400-italic.css";
 
@@ -11,7 +11,7 @@
   --font-sans: "Geist Variable", ui-sans-serif, system-ui, -apple-system,
     "Segoe UI", sans-serif;
   --font-display: "Instrument Serif", Georgia, "Times New Roman", serif;
-  --font-mono: "Geist Mono Variable", ui-monospace, "SF Mono", Menlo, monospace;
+  --font-mono: "JetBrains Mono Variable", ui-monospace, "SF Mono", Menlo, monospace;
 
   --color-bg: var(--bg);
   --color-surface: var(--surface);
@@ -29,6 +29,13 @@
   --color-yellow-soft: var(--yellow-soft);
   --color-red: var(--red);
   --color-red-soft: var(--red-soft);
+  /* Categorical tokens used by lib/managers.ts to badge SSA field
+   * managers in the conflict view. These don't carry a semantic
+   * meaning beyond "differentiate the N categories visually" so
+   * they live alongside the named semantic colors above. */
+  --color-blue: var(--blue);
+  --color-violet: var(--violet);
+  --color-teal: var(--teal);
 }
 
 :root {
@@ -37,7 +44,12 @@
   --surface-2: #ebe6db;
   --ink: #1a1815;
   --ink-muted: #6b665c;
-  --ink-faint: #a39d8f;
+  /* Lifted from #a39d8f (2.65:1 against --surface — failed even
+   * AA large/UI 3.0 minimum) to #777267 (4.50:1 — passes AA body
+   * 4.5 threshold). Affects every faint-tier label site app-wide
+   * (breadcrumbs, hint text, "ago" timestamps, path fragments
+   * next to form labels). */
+  --ink-faint: #777267;
   --border: rgba(26, 24, 21, 0.1);
   --border-strong: rgba(26, 24, 21, 0.2);
   --accent: #c2410c;
@@ -48,17 +60,32 @@
   --yellow-soft: rgba(161, 98, 7, 0.14);
   --red: #b91c1c;
   --red-soft: rgba(185, 28, 28, 0.1);
+  /* Categorical (manager-class) colors. Picked from Tailwind's
+   * 600 stops for solid AA contrast against --surface light. */
+  --blue: #2563eb;
+  --violet: #7c3aed;
+  --teal: #0d9488;
 
   color-scheme: light;
 }
 
 .dark {
-  --bg: #16140f;
-  --surface: #1f1c16;
-  --surface-2: #100e0a;
+  /* Backgrounds darkened a notch (was #16140f / #1f1c16 / #100e0a)
+   * for two reasons: operators reported the previous shade felt
+   * "washed out" against monospace UI density, AND the deeper bg
+   * lifts existing text contrast a touch without changing token
+   * values. Still warm-tone (preserves Periscope's aesthetic vs
+   * the cold black of generic devtools). */
+  --bg: #0d0c08;
+  --surface: #15130e;
+  --surface-2: #080704;
   --ink: #ece7d9;
   --ink-muted: #9b948a;
-  --ink-faint: #615b50;
+  /* Lifted from #615b50 (2.52:1 against --surface — failed even
+   * AA large/UI 3.0 minimum) to #8a8378 (~4.95:1 against the new
+   * --surface — passes AA body). Same root-cause fix as light
+   * mode above: faint-tier text was silently below WCAG. */
+  --ink-faint: #8a8378;
   --border: rgba(255, 250, 235, 0.08);
   --border-strong: rgba(255, 250, 235, 0.16);
   --accent: #fb923c;
@@ -69,6 +96,11 @@
   --yellow-soft: rgba(251, 191, 36, 0.14);
   --red: #f87171;
   --red-soft: rgba(248, 113, 113, 0.14);
+  /* Categorical (manager-class) colors. Tailwind 400 stops for
+   * AA contrast against --surface dark. */
+  --blue: #60a5fa;
+  --violet: #a78bfa;
+  --teal: #2dd4bf;
 
   color-scheme: dark;
 }
