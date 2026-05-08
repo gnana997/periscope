@@ -3,6 +3,7 @@ import { Terminal as XTerm, type ITheme } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
 import { bindTerminal } from "./term-bus";
+import { MONACO_FONT_FAMILY } from "../lib/monacoSetup";
 import type { ExecClient } from "./ExecClient";
 
 /**
@@ -20,8 +21,9 @@ interface TerminalProps {
   active: boolean;
 }
 
-const FONT_FAMILY =
-  '"Geist Mono Variable", ui-monospace, "SF Mono", Menlo, monospace';
+// Reuse the Monaco font stack for xterm so the in-browser shell looks
+// consistent with the YAML editor + every other code surface.
+const FONT_FAMILY = MONACO_FONT_FAMILY;
 
 /**
  * Read the live CSS custom properties so the xterm theme tracks Periscope's
