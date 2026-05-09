@@ -37,7 +37,7 @@ Custom-AMI node groups (`AmiType=CUSTOM`) are sorted first and explicitly badged
 
 ## IAM permissions
 
-The periscope role (whether assumed via Pod Identity or IRSA — see [deploy.md §4](./deploy.md#4-aws-auth-pod-identity-vs-irsa)) needs the following actions for these surfaces:
+The periscope role (whether assumed via Pod Identity or IRSA — see [deploy.md 4](./deploy.md#4-aws-auth-pod-identity-vs-irsa)) needs the following actions for these surfaces:
 
 | Action | Surface |
 |---|---|
@@ -49,7 +49,7 @@ The periscope role (whether assumed via Pod Identity or IRSA — see [deploy.md 
 
 The Insights and node group actions are read-only; nothing in this surface can mutate AWS state. The `ssm:GetParameter` resource scope intentionally matches only the public-parameter trees AWS publishes for EKS / Bottlerocket — it does **not** grant access to your own Parameter Store secrets.
 
-Minimum policy snippet to add to the existing periscope role (extends the snippet in [deploy.md §4.1](./deploy.md#41-aws-api-permissions-on-the-role)):
+Minimum policy snippet to add to the existing periscope role (extends the snippet in [deploy.md 4.1](./deploy.md#41-aws-api-permissions-on-the-role)):
 
 ```json
 {

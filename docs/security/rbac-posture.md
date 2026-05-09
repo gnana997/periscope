@@ -290,5 +290,5 @@ helm template my-periscope-agent deploy/helm/periscope-agent \
 - [`docs/architecture/agent-tunnel.md`](../architecture/agent-tunnel.md) — agent backend architecture
 - [`SECURITY.md`](../../SECURITY.md) — vulnerability disclosure policy
 - [Issue #84 — opt-in cluster-admin binding (v1.1)](https://github.com/gnana997/periscope/issues/84)
-- CIS Kubernetes Benchmark v1.10 §5.1.1, §5.1.3
+- CIS Kubernetes Benchmark v1.10 5.1.1, 5.1.3
 - AWS Guardrails — *EKSClusterAdminRoleCheck*, *EKSWildcardRBACCheck*

@@ -74,7 +74,7 @@ trade-offs.
 | `auth.session.idleTimeout` | duration | `30m` | Idle timeout before the session is invalidated. |
 | `auth.session.absoluteTimeout` | duration | `8h` | Hard cap on session lifetime. |
 | `auth.session.cookieDomain` | string | unset | Optional explicit `Domain=` attribute on the cookie. |
-| `auth.authorization.mode` | enum | `shared` | `shared` \| `tier` \| `raw`. See RFC 0002 §4 and [`cluster-rbac.md`](./cluster-rbac.md). |
+| `auth.authorization.mode` | enum | `shared` | `shared` \| `tier` \| `raw`. See RFC 0002 4 and [`cluster-rbac.md`](./cluster-rbac.md). |
 | `auth.authorization.groupTiers` | map | `{}` | tier-mode only: IdP group → tier (`read`\|`triage`\|`write`\|`maintain`\|`admin`). |
 | `auth.authorization.defaultTier` | string | `""` | tier-mode only: tier applied when no group matches. `""` = deny. |
 | `auth.authorization.groupPrefix` | string | `periscope:` | raw-mode only: prefix prepended to each impersonated group. |

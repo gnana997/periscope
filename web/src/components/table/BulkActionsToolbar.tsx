@@ -115,7 +115,7 @@ export function BulkActionsToolbar<T>({
         // Emit one structured audit row per download — fire-and-forget
         // so a failed audit POST never blocks the operator. Both the
         // success and the all-failed paths emit; both are auditable
-        // operator intent. See RFC 0003 §4 (`bulk_download` verb).
+        // operator intent. See RFC 0003 4 (`bulk_download` verb).
         const auditOutcome = result.successCount === 0 ? "failure" : "success";
         void recordBulkDownload(cluster, {
           kind: kindLabel,

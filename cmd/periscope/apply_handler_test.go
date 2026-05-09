@@ -289,7 +289,7 @@ func TestApplyHandler_Force_PassedThrough(t *testing.T) {
 }
 
 // TestApplyHandler_GroupCoreNormalized checks the URL contract from
-// docs/api.md §"apply": URL segment `core` is rewritten to the empty
+// docs/api.md "apply": URL segment `core` is rewritten to the empty
 // API group server-side, both in the apply args and in the audit row.
 func TestApplyHandler_GroupCoreNormalized(t *testing.T) {
 	reg := testRegistry(t)
@@ -331,7 +331,7 @@ func TestApplyHandler_BadYAML_400(t *testing.T) {
 }
 
 // TestApplyHandler_Conflict_409 covers the SSA conflict path the SPA's
-// per-field conflict resolver depends on (docs/api.md §"apply").
+// per-field conflict resolver depends on (docs/api.md "apply").
 // The handler must surface 409 with a structured metav1.Status JSON
 // body whose causes[] array drives the resolver; failing to do so
 // breaks the second-attempt force flow tested above.
