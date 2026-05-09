@@ -21,9 +21,9 @@ and the security model around tamper resistance — see
 
 ### Audit log list
 
-![Audit log filtered to peri-server, last hour](../assets/audit/list.png)
+![Audit log on peri-server, last hour — two-persona feed showing alice@test.local + gnana997@test.local across EKS reads and a HELM_UPGRADE](../assets/audit/list.png)
 
-Each row carries the **timestamp**, **actor** (email + OIDC subject on hover), **cluster · namespace · resource path**, the **verb** in monospace (`HELM_CHART_FETCH`, `SECRET_REVEAL`, `APPLY`, `EXEC_OPEN`, `EXEC_CLASS`, ...), and the request ID for cross-referencing with server logs. Filter strip on top: **time range** (15m / 1h / 6h / 24h / 7d), **outcome** (all / success / failure / denied), **verb** quick-filters (`apply`, `delete`, `trigger`, `exec_open`, `exec_class`, `secret_reveal`, `log_open`, `bulk_download` + more), and a **filter by actor** search.
+Each row carries the **timestamp**, **actor** (email + OIDC subject on hover), **cluster · namespace · resource path**, the **verb** in monospace (`HELM_CHART_FETCH`, `SECRET_REVEAL`, `APPLY`, `EXEC_OPEN`, `EXEC_CLOSE`, ...), and the request ID for cross-referencing with server logs. Filter strip on top: **time range** (15m / 1h / 6h / 24h / 7d), **outcome** (all / success / failure / denied), **verb** quick-filters (`apply`, `delete`, `trigger`, `exec_open`, `exec_close`, `secret_reveal`, `log_open`, `bulk_download` + more), and a **filter by actor** search.
 
 The **density sparkline** above the row list shows event count per bucket so an operator can spot bursts at a glance. Clicking a row opens the event detail.
 
