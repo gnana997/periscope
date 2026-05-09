@@ -41,6 +41,288 @@ tag.
   
 ### Added
 
+- Form-mode coverage for `oneOf` discriminators and `allOf`
+  composition (#132, builds on #131). Adds two extensions to the
+  shared `lib/schemaForm/` engine that close the most common
+  "yaml only" gaps in real-world schemas:
+  - **`oneOf` discriminator UI** — the walker now emits a new
+    `discriminator` descriptor type for `oneOf` shapes (gated on
+    `allowOneOfDiscriminator`, opted-in by K8s, off for Helm).
+    Detects two structural shapes: whole-value oneOf (e.g.
+    `Service.spec.ports[].targetPort` string-or-int,
+    `Ingress.spec.rules[].http.paths[].backend` Service-or-Resource)
+    and object-level oneOf with required-key branches (e.g.
+    cert-manager `Issuer.spec` selfSigned/ca/vault/acme,
+    `aws-ebs-csi-driver` IRSA-vs-PodIdentity). The renderer is a
+    segmented branch picker + sub-form for the active branch;
+    switching branches is destructive (confirm-then-wipe, mirroring
+    the form↔yaml toggle pattern). Branch labels come from the
+    sub-schema's `title`, the single required-key name, or the
+    single property name as a fallback heuristic.
+  - **`allOf` merger** — pure schema-merge function that flattens
+    `allOf:[{$ref: Base}, {properties: Override}]` shapes into a
+    single rendered schema before the walker emits descriptors.
+    Runs inside `derefIfNeeded`, so all consumers (Helm + K8s)
+    benefit without opting in. Unblocks the `metadata` field on
+    every K8s kind (was always yaml-only because metadata is
+    `allOf:[{$ref: ObjectMeta}]` everywhere) — operators can now
+    edit labels / annotations through the form. Type conflicts
+    across allOf entries abort the merge cleanly and surface as
+    the existing unsupported badge.
+  - **Description tooltips** — long OpenAPI v3 descriptions
+    (the `host` field on Ingress carries a ~700-char paragraph)
+    no longer render inline. A small `(i)` icon next to each
+    label opens a tooltip with the description on hover/focus.
+    Single-file change benefits every form-mode consumer (K8s
+    edit pane, Helm install/upgrade dialogs, EKS add-on dialogs).
+
+- Schema-aware form editor for ConfigMap, Secret, Service, and
+  Ingress (#116, supersedes #130). The detail-pane YAML tab on these
+  four kinds now renders a structured form by default, driven by the
+  apiserver's OpenAPI v3 schema filtered through per-kind allowlists
+  that hide noise (status, managedFields, creationTimestamp, etc.).
+  Operators toggle to a Monaco YAML view via a header switch that
+  persists per-user in localStorage; switching modes with unsaved
+  edits prompts a confirm-discard. metadata.name, metadata.namespace,
+  and Service spec.clusterIP render read-only in edit mode (immutable
+  on update). Secret data values are decoded to plaintext for editing
+  with a "show raw base64" toggle, and the apply payload re-encodes
+  to base64 so AWS / apiserver receives the canonical wire shape.
+  Apply flows through the same SSA pipeline as the YAML editor; on
+  409 conflict the form-mode banner directs the operator to YAML for
+  the per-field conflict-resolution view.
+  
+  Internal: extracts the JSON Schema → React form engine (originally
+  built for Helm in #109) into a reusable `web/src/lib/schemaForm/`
+  library with K8s-specific extensions (`resolveRef`, `allowKvMap`,
+  `allowArrayOfObjects`, `createOnlyPaths`). The Helm install /
+  upgrade dialogs and the EKS add-on install / upgrade dialogs now
+  share the same renderer; their existing form/YAML toggle (#126),
+  controlled `mode` / `onModeChange` props (#128), comment-loss
+  banner, and YAML-stub auto-default behavior all consume the
+  shared `SchemaFormBridge` via the bridge's optional `banner`
+  slot. Soft-deprecates `web/src/lib/helmSchema.ts` to a re-export
+  shim — drop in v1.2.
+
+## [1.0.4] - 2026-05-07
+
+### Added
+
+- EKS add-on detail pane: configurationValues + Pod Identity, plus
+  state-stickiness fixes (#128). New `describe` / `config` tab strip
+  on the right-edge `AddonDetailPane` in installed mode. The `config`
+  tab renders the addon's stored `configurationValues` (the operator's
+  own overrides) in a read-only Monaco YAML viewer — the data was
+  already in the `AddonDetail` blob from AWS, but the pane never
+  rendered it, so operators had to open the Upgrade dialog just to
+  see what they previously set. Backend now exposes
+  `podIdentityAssociations` from the `DescribeAddon` response (was
+  being dropped on the floor in the SDK mapper); the describe tab
+  surfaces Pod Identity ARNs under a dedicated section, with a
+  "No IAM identity attached — addon runs with the cluster's
+  node-instance role" fallback when both IRSA and Pod Identity are
+  absent. State-stickiness fixes from rc-2 testing: stale-selection
+  guard clears the pane when the underlying row vanishes from the
+  addons / catalog list (delete settled, refetch returned a smaller
+  set — was sticking on "Failed to load detail" before); YAML stub
+  re-seeds on schema change only when the buffer matches the
+  previously-seeded stub (preserves operator edits across version
+  pick); explicit Form/YAML mode is preserved across version change
+  via lifted dialog-level state. No new IAM action — Pod Identity
+  is part of the existing `eks:DescribeAddon` response.
+
+- EKS add-on dialog polish (#127). `Upgrade to` button on the pane's
+  version-history rows now only renders for versions strictly newer
+  than installed — the original implementation offered downgrades by
+  reflex, which carry CRD / IAM / schema risk that one-click obscures
+  (downgrade path stays available via the kebab → Upgrade modal,
+  where the deliberate older-eksbuild pick is visible). Generated
+  commented YAML stub seeds the install / upgrade dialog editor
+  when an addon has no `configurationValues` yet, so YAML mode is
+  discoverable for `$ref` / `allOf`-heavy schemas — `aws-ebs-csi-driver`
+  no longer opens to a blank textarea. Monaco container height fix:
+  YAML wrappers now use fixed `h-[420px]` / `h-[460px]` instead of
+  `min-h-` + `flex-1`, since `min-height` alone is indefinite for
+  percentage resolution and Monaco's `h-full` container needs a
+  definite-height parent — without this the editor rendered as a
+  silent grey rectangle.
+
+- Right-edge detail pane + form/yaml toggle for EKS add-ons (#126).
+  Replaces the original inline-row-expand on `AddOnsPage` and
+  `EKSAddOnsCatalogPage` with a `SplitPane` + new `AddonDetailPane`,
+  matching the pattern every other resource page (pods / deps /
+  configmaps / secrets / RBAC) already uses. The pane scrolls
+  independently of the page (so the version-history table no longer
+  pushes the ARN below the fold) and width persists under the shared
+  `periscope.detailWidth.v4` storage key — operator's chosen pane
+  width travels across every resource page in the app. Both installed
+  rows (Upgrade / Delete) and available catalog rows (Install) open
+  the pane on click; the row's primary action button stops
+  propagation so the modal-direct path still works. New form/yaml
+  toggle on `HelmValuesEditor` lets operators escape to raw YAML
+  when a chart's `values.schema.json` contains `$ref` / `allOf` /
+  `anyOf` / arrays-of-objects (auto-defaults to YAML when the schema
+  has any required-but-unrenderable field). Version-history rows in
+  the pane are clickable to open the upgrade dialog with that version
+  pre-selected; new `compatible with k8s [X ▼]` dropdown above the
+  table answers "which add-on version supports the next k8s minor?"
+  inline (the question raised by the row's "blocks next k8s minor"
+  warning chip).
+
+- EKS managed add-ons read-only introspection surface (#122,
+  closing issue #117). New `Add-ons` sidebar entry under EKS opens
+  a table of installed managed add-ons with health (●/▲/✕), installed
+  version, latest available, k8s compatibility window, and status.
+  The `blocks next k8s minor` chip on each row warns when no compatible
+  addon version exists for the cluster's next minor — feeds the
+  upgrade-readiness story alongside #97 / #113. New endpoints
+  `GET /api/clusters/{c}/eks/addons` (list) and
+  `GET /api/clusters/{c}/eks/addons/{name}` (detail) wire
+  `eks:ListAddons` + `eks:DescribeAddon` (addon-scoped resource
+  ARN — see `docs/setup/deploy.md` §4.1 for the policy split) plus
+  `eks:DescribeAddonVersions`. Two-tier server-side cache: per-cluster
+  1h, plus a shared `(addonName, k8sVersion)` 6h sticky-error catalog
+  so a fleet of N 1.31 clusters hits AWS once per cache window.
+  Status-aware refetch in `useAddons` polls every 4s while any addon
+  is in `CREATING` / `UPDATING` / `DELETING`, off otherwise. Read-only
+  in this PR — install / catalog browse / upgrade / delete actions
+  ship in #119.
+
+- EKS add-on upgrade + delete actions (#119, PR-3 of three,
+  closing the issue). New `PUT /api/clusters/{c}/eks/addons/{name}`
+  and `DELETE /api/clusters/{c}/eks/addons/{name}?preserve=...`
+  wire `eks:UpdateAddon` and `eks:DeleteAddon`. Same async-by-design
+  contract as install: returns 202 with status `UPDATING` /
+  `DELETING`; the SPA's status-aware polling watches the flip. Both
+  endpoints reuse the install handler's body validation, audit
+  pair (`eks_addon_upgrade_intent` + `eks_addon_upgrade`,
+  `eks_addon_delete_intent` + `eks_addon_delete`), and cache-
+  invalidation paths. New `KebabMenu` UI primitive surfaces
+  Upgrade / Delete on installed-addon rows in both `AddOnsPage`
+  and `EKSAddOnsCatalogPage`. New `UpgradeAddOnDialog` parallels
+  the install dialog (target version radio, schema-aware config
+  editor, `PRESERVE` default for resolveConflicts since upgrades
+  usually keep cluster-side overrides). New `DeleteAddOnModal`
+  wraps `ConfirmActionModal` with a `preserve` checkbox so an
+  operator doesn't accidentally rip out coredns and break DNS.
+  Kebab actions are disabled while AWS is mid-transition
+  (`CREATING`/`UPDATING`/`DELETING`) — sending another mutation
+  during a pending one produces opaque AWS errors. The new IAM
+  actions `eks:UpdateAddon` and `eks:DeleteAddon` join the
+  `EKSAddonScoped` statement (same addon-ARN scoping as
+  `eks:DescribeAddon`).
+  
+- EKS add-on install action (#119, PR-2 of three). New
+  `POST /api/clusters/{c}/eks/addons` wires `eks:CreateAddon`;
+  body whitelist-validates `resolveConflicts ∈ {NONE, OVERWRITE,
+  PRESERVE}` server-side and forwards `configurationValues` /
+  `serviceAccountRoleArn` verbatim. Returns 202 with the addon
+  detail in status `CREATING`; the SPA polls `/eks/addons/{name}`
+  to watch the flip via status-aware refetch in `useAddons` /
+  `useAddon` (4s interval while any addon is in
+  `CREATING`/`UPDATING`/`DELETING`, off otherwise). New
+  `InstallAddOnDialog` component opens from the catalog page's
+  "+ Install" button — schema-aware via the existing
+  `HelmValuesEditor` (form when AWS ships a JSON Schema for the
+  version, Monaco YAML when it doesn't). New
+  `GET /api/clusters/{c}/eks/addons/catalog/{name}/configuration?version=X`
+  fetches the schema lazily; 24 h cache keyed by `(addon, version)`
+  since AWS schemas are immutable per version. Audit pair
+  `eks_addon_install_intent` + `eks_addon_install` mirrors the
+  workload-rollback shape (intent before the SDK call, outcome
+  after — denial / failure / success). The new IAM action
+  `eks:CreateAddon` joins the cluster-scoped statement; optional
+  `iam:PassRole` documented as a conditional add-on for operators
+  who set `serviceAccountRoleArn`.
+  
+- EKS add-on catalog (#119, PR-1 of three). New
+  `GET /api/clusters/{c}/eks/addons/catalog` returns every
+  AWS-published add-on available on the cluster's K8s version, with
+  per-addon ownership / type / publisher / marketplace flag /
+  compatibility matrix and installed-state annotation merged from
+  the existing `/eks/addons` cache. New `Add-ons catalog` sidebar
+  entry under EKS opens the browse page; filter chips narrow by
+  AWS / third-party / type. One unfiltered
+  `eks:DescribeAddonVersions` call per `(k8sVersion)` drives the
+  endpoint; cached server-side for 6 h with sticky errors so a
+  fleet of N 1.30 clusters hits AWS once per cache window.
+  Read-only in this PR; install / upgrade / delete actions ship in
+  follow-up PRs.
+  
+- Helm install-ref pre-fill on the upgrade dialog (#76 follow-up). On
+  successful install / upgrade actions, Periscope patches the helm
+  release storage Secret/ConfigMap with two annotations —
+  `periscope.io/install-ref` and `periscope.io/install-chart-name` —
+  capturing the chart ref + chart name the operator originally used.
+  The release detail endpoint reads them back and exposes
+  `installRef` / `installChartName` on `HelmReleaseDetail`. The
+  upgrade dialog uses these to pre-fill, closing the "why doesn't
+  this remember anything" UX gap (helm itself doesn't persist the
+  install ref). Best-effort writes on the action path —
+  annotation-write failure does not fail the install/upgrade. Read
+  failures fall back to empty fields. **Limitation**: only releases
+  installed or upgraded via Periscope carry the annotations —
+  releases installed via the helm CLI directly still require
+  pasting the ref on first Periscope upgrade; subsequent upgrades
+  pre-fill once the annotation is on the new revision.
+
+- Helm release uninstall, end-to-end (#123, sub-task of #72). New
+  `DELETE /api/clusters/{c}/helm/releases/{ns}/{name}` endpoint with
+  `?keepHistory=true|false` and `?disableHooks=true|false` query
+  flags (both default false). Sync, with the same pre-flight SAR
+  pattern from #76 — verb=`delete` against each kind in the
+  current release's manifest list, denials short-circuit with
+  403 + inline list. Audit emits a `helm_uninstall_intent` +
+  `helm_uninstall` pre/post pair; outcome row carries the
+  `revisionsRemoved` count. SPA gains a red `[uninstall]` button
+  next to `[upgrade]` on the release detail page header, opening
+  a type-the-name confirmation modal (mirrors `DeleteResourceModal`'s
+  destructive-action friction pattern) with checkboxes for the two
+  flags. On success the SPA toasts the revision count and
+  navigates back to the release list.
+
+- Helm install + upgrade actions, end-to-end (#76, sub-task of #72). Two
+  new endpoints — `POST /api/clusters/{c}/helm/install` and
+  `POST /api/clusters/{c}/helm/releases/{ns}/{name}/upgrade` — and the
+  full SPA UI to drive them. Both are sync (handler blocks until the
+  helm SDK call returns; default 5min timeout, capped at 10min server-
+  side) with `Atomic=true` by default — failed installs / upgrades
+  auto-rollback so no half-deployed state lingers. Pre-flight SAR runs
+  before the SDK call; pre-flight denial returns 403 with the denied
+  list inline (`E_HELM_PREFLIGHT_DENIED`). Audit emits an intent +
+  outcome pair per call (`helm_install_intent` + `helm_install`,
+  `helm_upgrade_intent` + `helm_upgrade`) so hung / partitioned
+  operations still leave a forensic trail. Outcome rows carry the new
+  revision number and the `rolledBack` flag when Atomic caught a
+  partial failure. The SPA wires both flows into a unified
+  `ChartActionDialog` with a `mode` prop (replaces the earlier
+  install-only `HelmInstallDialog` from #74) — install via the
+  releases-list page, upgrade via a new `[Upgrade]` button on the
+  release detail page header. The dialog gains a collapsible Preview
+  pane that calls the #75 preview endpoints and surfaces the rendered
+  manifests + RBAC denial list + (upgrade) diff inline before commit.
+  Release detail pages gain a `notes` tab alongside values / manifest /
+  history that renders the chart's NOTES.txt.
+
+- Helm dry-run + diff preview backend (#75, sub-task of #72). Two new
+  endpoints — `POST /api/clusters/{c}/helm/install-preview` and
+  `POST /api/clusters/{c}/helm/releases/{ns}/{name}/upgrade-preview` —
+  return the rendered manifest list helm would apply, plus (for upgrade
+  mode) a semantic diff against the live cluster state via the existing
+  dyff helper. Both endpoints run a per-manifest RBAC pre-flight (verb
+  `create` for install, `patch` for upgrade) and surface the denied
+  list inline so the install dialog can show the operator exactly what
+  the apiserver would reject before they hit Apply. Audit emits one
+  `verb=helm_preview` row per call with `op` distinguishing install
+  vs upgrade in `Extra`; pre-flight denials mark the row
+  `OutcomeDenied`. **This PR introduces `helm.sh/helm/v3` to the
+  project** as the foundation for write-path features (preview now,
+  rollback / install / upgrade later). The boundary is documented in
+  ``internal/k8s/helm.go``'s preamble: read paths use minimal
+  kubectl-free decoders; write paths use `pkg/action` directly because
+  the helm internals it wraps (templating, hook ordering, capabilities
+  resolution, post-rendering) are non-trivial to reimplement.
+
 - Helm chart fetch backend (#73, sub-task of #72). Two new endpoints
   `GET /api/clusters/{c}/helm/chart/versions` and
   `POST /api/clusters/{c}/helm/chart/values` for the Helm install
@@ -59,6 +341,7 @@ tag.
   Identity / IRSA) is a follow-up sub-task. Frontend types + API
   client + TanStack hooks ship alongside the backend; the install-
   dialog UI lands in a sibling issue.
+  
 - Helm install dialog UI (#74, sub-task of #72). New "+ install
   chart" button in the Helm releases page header opens a modal with
   a single-pane top-to-bottom flow: chart-ref input → fetch

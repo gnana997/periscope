@@ -83,7 +83,7 @@ export function DriftDiffOverlay({
       <>
         {/* Header */}
         <header className="shrink-0 border-b border-border bg-surface px-5 py-3">
-          <div className="font-mono text-[10px] uppercase tracking-[0.10em] text-yellow-700 dark:text-yellow-300">
+          <div className="font-mono text-[10px] uppercase tracking-[0.10em] text-yellow">
             cluster diff · viewing
           </div>
           <h2

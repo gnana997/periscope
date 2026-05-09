@@ -10,6 +10,7 @@ import { useEffect, useRef } from "react";
 import * as monaco from "monaco-editor";
 
 import {
+  MONACO_FONT_FAMILY,
   currentMonacoTheme,
   ensureMonacoConfigured,
   useMonacoTheme,
@@ -35,7 +36,7 @@ export function InlineDiff({ original, proposed }: InlineDiffProps) {
       readOnly: true,
       automaticLayout: true,
       renderSideBySide: false,
-      fontFamily: '"Geist Mono Variable", ui-monospace, "SF Mono", Menlo, monospace',
+      fontFamily: MONACO_FONT_FAMILY,
       fontSize: 12.5,
       lineHeight: 19,
       minimap: { enabled: false },
@@ -45,6 +46,11 @@ export function InlineDiff({ original, proposed }: InlineDiffProps) {
       ignoreTrimWhitespace: false,
       padding: { top: 10, bottom: 10 },
     });
+    // Inline mode renders TWO line-number gutters by default — the original
+    // file's numbers and the modified file's numbers. For the operator's
+    // mental model ("what will the file look like after upgrade?") only the
+    // modified numbers matter; suppress the original gutter.
+    editor.getOriginalEditor().updateOptions({ lineNumbers: "off" });
     editorRef.current = editor;
 
     return () => {

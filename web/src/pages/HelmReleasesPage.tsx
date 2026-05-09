@@ -20,7 +20,7 @@ import {
 } from "../components/table/states";
 import { isForbidden } from "../components/table/isForbidden";
 import { cn } from "../lib/cn";
-import { HelmInstallDialog } from "../components/helm/HelmInstallDialog";
+import { ChartActionDialog } from "../components/helm/ChartActionDialog";
 
 export function HelmReleasesPage({ cluster }: { cluster: string }) {
   const navigate = useNavigate();
@@ -132,7 +132,8 @@ export function HelmReleasesPage({ cluster }: { cluster: string }) {
           </button>
         }
       />
-      <HelmInstallDialog
+      <ChartActionDialog
+        mode="install"
         open={installOpen}
         onClose={() => setInstallOpen(false)}
         cluster={cluster}

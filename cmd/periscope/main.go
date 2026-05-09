@@ -272,6 +272,31 @@ func main() {
 		credentials.Wrap(factory, chartVersionsHandler(registry, chartVerC)))
 	router.Post("/api/clusters/{cluster}/helm/chart/values",
 		credentials.Wrap(factory, chartValuesHandler(registry, chartValC, auditEmitter)))
+
+	// Helm dry-run + diff preview (#75). Two endpoints — install
+	// preview has no existing release in its URL (release name is
+	// in the body), upgrade preview follows the established sibling
+	// route shape `/helm/releases/{ns}/{name}/{verb}`. Both run a
+	// helm SDK dry-run, parse the rendered manifests, run a per-
+	// manifest RBAC pre-flight, and emit a single audit row with
+	// VerbHelmPreview + op="install"|"upgrade" in Extra.
+	router.Post("/api/clusters/{cluster}/helm/install-preview",
+		credentials.Wrap(factory, helmInstallPreviewHandler(registry, auditEmitter)))
+	router.Post("/api/clusters/{cluster}/helm/releases/{ns}/{name}/upgrade-preview",
+		credentials.Wrap(factory, helmUpgradePreviewHandler(registry, auditEmitter)))
+
+	// Helm install + upgrade actions (#76). Sync — handler blocks
+	// until the helm SDK call returns. Atomic=true by default so
+	// failed installs auto-rollback. Pre-flight SARs run before the
+	// SDK call; pre-flight denial returns 403 with the denied list
+	// inline. Audit emits an intent + outcome pair (4 verbs) so
+	// hung / partitioned operations still leave a forensic trail.
+	router.Post("/api/clusters/{cluster}/helm/install",
+		credentials.Wrap(factory, helmInstallHandler(registry, auditEmitter)))
+	router.Post("/api/clusters/{cluster}/helm/releases/{ns}/{name}/upgrade",
+		credentials.Wrap(factory, helmUpgradeHandler(registry, auditEmitter)))
+	router.Delete("/api/clusters/{cluster}/helm/releases/{ns}/{name}",
+		credentials.Wrap(factory, helmUninstallHandler(registry, auditEmitter)))
 	// --- EKS Upgrade Insights (read-only) ---
 	//
 	// EKS scans every cluster's audit log daily and produces a list
@@ -304,6 +329,55 @@ func main() {
 		eksNodegroupsListHandler(registry, eksNodegroupsC, amiCatalogC, auditEmitter)))
 	router.Get("/api/clusters/{cluster}/eks/nodegroups/{name}", credentials.Wrap(factory,
 		eksNodegroupsGetHandler(registry, eksNodegroupsC, amiCatalogC, auditEmitter)))
+
+	// --- EKS managed add-ons (read-only, issue #117) ---
+	//
+	// List + per-addon detail. Pairs with Upgrade Insights ("vpc-cni
+	// must be ≥1.18 before 1.30") by surfacing what's *actually*
+	// installed plus whether it blocks the upcoming K8s minor.
+	// Two caches: the addons cache is per-cluster (1h TTL — same
+	// cadence as Upgrade Insights since AWS doesn't surface fast-
+	// moving "addon installed at" timestamps); the addon-versions
+	// catalog cache is per-(addonName, k8sVersion) at 6h TTL (AWS
+	// publishes new add-on versions roughly weekly), shared across
+	// clusters so a fleet view of N clusters running coredns hits
+	// AWS once per (addon, k8s) per 6h, not N times.
+	eksAddonsCacheTTL := 1 * time.Hour
+	eksAddonsC := newEKSAddonsCache(eksAddonsCacheTTL)
+	addonVersionsCacheTTL := 6 * time.Hour
+	addonVersionsC := newAddonVersionsCache(addonVersionsCacheTTL)
+	// addonCatalogCache (issue #119, PR-1) is keyed by k8sVer alone —
+	// the unfiltered DescribeAddonVersions response doesn't depend on
+	// which cluster asked, so a fleet of N 1.30 clusters hits AWS
+	// once per 6h. Distinct from addonVersionsCache (per-(addon,
+	// k8sVer) — answers "what versions for vpc-cni on 1.29?") so the
+	// existing #117 hot path is untouched.
+	addonCatalogCacheTTL := 6 * time.Hour
+	addonCatalogC := newAddonCatalogCache(addonCatalogCacheTTL)
+	// addonConfigSchemaCache (issue #119, PR-2) is keyed by
+	// (addonName, version). Schemas are immutable per version so a
+	// 24h TTL is safe — any change ships as a new version with its
+	// own cache entry.
+	addonConfigSchemaCacheTTL := 24 * time.Hour
+	addonConfigSchemaC := newAddonConfigSchemaCache(addonConfigSchemaCacheTTL)
+	// Catalog + configuration routes register BEFORE /eks/addons/{name}
+	// so the static "catalog" segment wins. chi prefers static over
+	// wildcard, but the explicit ordering removes any doubt for
+	// future readers.
+	router.Get("/api/clusters/{cluster}/eks/addons/catalog", credentials.Wrap(factory,
+		eksAddonCatalogHandler(registry, addonCatalogC, eksAddonsC, auditEmitter)))
+	router.Get("/api/clusters/{cluster}/eks/addons/catalog/{name}/configuration", credentials.Wrap(factory,
+		eksAddonConfigurationHandler(registry, addonConfigSchemaC, auditEmitter)))
+	router.Get("/api/clusters/{cluster}/eks/addons", credentials.Wrap(factory,
+		eksAddonsListHandler(registry, eksAddonsC, addonVersionsC, auditEmitter)))
+	router.Post("/api/clusters/{cluster}/eks/addons", credentials.Wrap(factory,
+		eksAddonInstallHandler(registry, eksAddonsC, auditEmitter)))
+	router.Get("/api/clusters/{cluster}/eks/addons/{name}", credentials.Wrap(factory,
+		eksAddonsGetHandler(registry, eksAddonsC, addonVersionsC, auditEmitter)))
+	router.Put("/api/clusters/{cluster}/eks/addons/{name}", credentials.Wrap(factory,
+		eksAddonUpgradeHandler(registry, eksAddonsC, auditEmitter)))
+	router.Delete("/api/clusters/{cluster}/eks/addons/{name}", credentials.Wrap(factory,
+		eksAddonDeleteHandler(registry, eksAddonsC, auditEmitter)))
 
 	// --- Overview / dashboard ---
 

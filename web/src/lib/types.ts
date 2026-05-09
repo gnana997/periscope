@@ -1402,6 +1402,15 @@ export interface HelmReleaseDetail {
   valuesYaml: string;
   manifestYaml: string;
   resources: HelmManifestObject[];
+  /** Install ref (oci|http|https://...) the operator used to install
+   *  or last-upgrade this release via Periscope. Pre-fills the upgrade
+   *  dialog. Empty for releases installed via the helm CLI or any
+   *  non-Periscope tooling — Periscope only writes this annotation
+   *  on its own install/upgrade actions. */
+  installRef?: string;
+  /** Chart-name component for HTTP repos. Empty for OCI refs (the
+   *  chart name is implicit in the ref's last segment). */
+  installChartName?: string;
 }
 
 export interface HelmHistoryEntry {
@@ -1497,6 +1506,100 @@ export interface ChartFetchRequest {
    *  OCI refs (chart name is implicit in the ref's last segment). */
   chart?: string;
   version: string;
+}
+
+// ─── Helm preview + install + upgrade (#75 / #76) ─────────────────────
+
+/** Pre-flight RBAC denial entry on a PreviewResponse. The SPA renders
+ *  these inline as a "the apiserver would reject these" list. */
+export interface PreviewDenial {
+  group?: string;
+  resource: string;
+  namespace?: string;
+  name?: string;
+  verb: "create" | "patch" | "update";
+  reason: string;
+}
+
+/** Preview response shape (#75). Diff is null for install mode (no
+ *  current state to compare against); populated for upgrade. Denied
+ *  is null when every kind passes the SAR pre-flight. */
+export interface PreviewResponse {
+  manifests: HelmManifestObject[];
+  manifestYaml: string;
+  diff: HelmDiffResponse | null;
+  denied: PreviewDenial[] | null;
+}
+
+/** Install preview request body. */
+export interface HelmInstallPreviewRequest {
+  ref: string;
+  chartName?: string;
+  version: string;
+  namespace: string;
+  releaseName: string;
+  values: string;
+}
+
+/** Upgrade preview request body — ns + releaseName are URL path. */
+export interface HelmUpgradePreviewRequest {
+  ref: string;
+  chartName?: string;
+  version: string;
+  values: string;
+}
+
+/** Install action request body (#76). All knobs optional — handler
+ *  defaults Atomic=true / Wait=true / IncludeCRDs=true. */
+export interface HelmInstallRequest {
+  ref: string;
+  chartName?: string;
+  version: string;
+  namespace: string;
+  releaseName: string;
+  values: string;
+  atomic?: boolean;
+  wait?: boolean;
+  waitForJobs?: boolean;
+  includeCRDs?: boolean;
+  timeoutSeconds?: number;
+}
+
+/** Upgrade action request body (#76). */
+export interface HelmUpgradeRequest {
+  ref: string;
+  chartName?: string;
+  version: string;
+  values: string;
+  atomic?: boolean;
+  wait?: boolean;
+  waitForJobs?: boolean;
+  timeoutSeconds?: number;
+  cleanupOnFail?: boolean;
+  maxHistory?: number;
+}
+
+/** Result shape returned by both install + upgrade actions. */
+/** Uninstall response shape (#123). RevisionsRemoved is the count of
+ *  revisions helm pruned from storage — useful for the SPA's success
+ *  toast and forensic audit. */
+export interface HelmUninstallResult {
+  release: HelmActionResult["release"];
+  revisionsRemoved: number;
+}
+
+export interface HelmActionResult {
+  release: {
+    name: string;
+    namespace: string;
+    revision: number;
+    status: string;
+    chart: { name: string; version: string };
+    deployedAt: string;
+    notes?: string;
+  };
+  rolledBack?: boolean;
+  rollbackError?: string;
 }
 
 // ─── Workload rollback (#71) ─────────────────────────────────────────
@@ -1696,4 +1799,160 @@ export interface NodegroupDetail extends NodegroupSummary {
   launchTemplate?: LaunchTemplateRef;
   modifiedAt?: string;
   autoScalingGroups?: string[];
+}
+
+// --- EKS managed add-ons (issue #117) -------------------------------
+
+export type AddonHealthGlyph = "ok" | "update" | "fail";
+
+export interface AddonHealthIssue {
+  code?: string;
+  message?: string;
+  resourceIds?: string[];
+}
+
+export interface AddonSummary {
+  name: string;
+  status: string;
+  version?: string;
+  kubernetesVersion?: string;
+  healthIssueCount: number;
+  /** Three-state symbol the SPA renders:
+   *   "ok"     → ●  healthy & current
+   *   "update" → ▲  newer version exists or blocks next minor
+   *   "fail"   → ✕  health issues present */
+  healthGlyph: AddonHealthGlyph;
+  updateAvailable: boolean;
+  latestVersion?: string;
+  /** Min/max K8s minors the *installed* add-on version supports. Empty
+   *  when the catalog had nothing to say (custom builds or soft-fail). */
+  compatMinK8s?: string;
+  compatMaxK8s?: string;
+  /** True when the installed version's compat list does NOT include
+   *  (cluster.k8s + 1). Surfaces as the "blocks 1.30" subtitle. */
+  blocksNextMinor: boolean;
+  createdAt?: string;
+  modifiedAt?: string;
+}
+
+export interface AddonsCounts {
+  total: number;
+  healthy: number;
+  updateAvailable: number;
+  unhealthy: number;
+  blocksNextMinor: number;
+}
+
+export interface AddonsListResponse {
+  addons: AddonSummary[];
+  counts: AddonsCounts;
+  /** Cluster's K8s version as AWS reports it. Drives the table
+   *  header — "EKS add-ons · prod-eu-west-1 (k8s 1.29)". */
+  clusterKubernetesVersion?: string;
+}
+
+export interface AddonVersionEntry {
+  version: string;
+  compatibleK8sVersions: string[];
+  defaultVersion: boolean;
+}
+
+export interface AddonDetail extends AddonSummary {
+  arn?: string;
+  serviceAccountRoleArn?: string;
+  /** EKS Pod Identity association ARNs attached to the addon — the
+   *  newer alternative to IRSA via `serviceAccountRoleArn`. Both can
+   *  be present, neither, or one. Empty/absent means the addon
+   *  doesn't use AWS-managed pod identity. */
+  podIdentityAssociations?: string[];
+  configurationValues?: string;
+  /** AWS-published JSON schema for the addon's config. May be empty
+   *  if DescribeAddonConfiguration soft-failed. */
+  configurationSchema?: string;
+  healthIssues?: AddonHealthIssue[];
+  availableVersions?: AddonVersionEntry[];
+  owner?: string;
+  publisher?: string;
+}
+
+// --- EKS add-on catalog (issue #119, PR-1) --------------------------
+//
+// "What could I install?" — the unfiltered DescribeAddonVersions
+// catalog scoped to the cluster's K8s version, with installed-state
+// annotation layered in server-side from #117's per-cluster cache.
+// Pairs with AddonsListResponse ("what's installed?").
+
+export interface CatalogAddonVersion {
+  version: string;
+  kubernetesVersions: string[];
+  default?: boolean;
+}
+
+export interface CatalogInstalled {
+  version: string;
+  status?: string;
+}
+
+export interface CatalogAddon {
+  name: string;
+  type?: string;
+  /** AWS-reported ownership: "aws" / "amazon-web-services" mark
+   *  AWS-authored add-ons; anything else is third-party. */
+  owner?: string;
+  publisher?: string;
+  /** True when AWS reports the addon as a marketplace listing.
+   *  Operators must accept the marketplace EULA outside Periscope
+   *  before install will succeed; the catalog flags these rows. */
+  marketplaceProduct?: boolean;
+  compatibleVersions: CatalogAddonVersion[];
+  /** Non-null when the addon is installed on this cluster.
+   *  Best-effort: only populated when the per-cluster addons-list
+   *  cache is warm; the SPA falls back to layering from useAddons()
+   *  if the field is absent. */
+  installed?: CatalogInstalled | null;
+}
+
+export interface AddonCatalogResponse {
+  available: CatalogAddon[];
+  /** Cluster's K8s version as AWS reports it. Drives the catalog
+   *  filter and the table header. */
+  kubernetesVersion?: string;
+}
+
+// --- EKS add-on writes (issue #119, PR-2/3) ------------------------
+
+/** AWS-accepted resolveConflicts values. NONE preserves operator-set
+ *  fields and fails on conflict; OVERWRITE replaces them; PRESERVE
+ *  keeps existing values. Empty string lets AWS default (NONE). */
+export type AddonResolveConflicts = "" | "NONE" | "OVERWRITE" | "PRESERVE";
+
+export interface AddonInstallRequest {
+  addonName: string;
+  addonVersion: string;
+  /** JSON or YAML string. AWS infers from content; the SPA emits
+   *  whichever the editor produced (form mode → JSON, YAML mode →
+   *  YAML). */
+  configurationValues?: string;
+  /** Optional IAM role ARN for the addon's service account. Requires
+   *  iam:PassRole on the operator's IAM policy if set. */
+  serviceAccountRoleArn?: string;
+  resolveConflicts?: AddonResolveConflicts;
+}
+
+/** Body shape for PUT /api/clusters/{c}/eks/addons/{name} (#119, PR-3).
+ *  Same fields as AddonInstallRequest minus addonName (URL param). */
+export interface AddonUpgradeRequest {
+  /** The *target* version. Required — the SPA must explicitly choose. */
+  addonVersion: string;
+  configurationValues?: string;
+  serviceAccountRoleArn?: string;
+  resolveConflicts?: AddonResolveConflicts;
+}
+
+export interface AddonConfigurationResponse {
+  /** AWS-published JSON Schema for the (addon, version) pair as a
+   *  raw string. Empty when AWS returned no schema for the version
+   *  (older addon versions ship without one); the SPA falls back to
+   *  the YAML editor in that case. */
+  configurationSchema: string;
 }

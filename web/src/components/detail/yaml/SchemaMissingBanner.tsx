@@ -28,7 +28,7 @@ export function SchemaMissingBanner({ kindLabel }: SchemaMissingBannerProps) {
     >
       <span aria-hidden className="mt-1 size-2 shrink-0 rounded-sm bg-yellow" />
       <div className="min-w-0 flex-1">
-        <div className="font-mono text-[11px] font-medium text-yellow-700 dark:text-yellow-300">
+        <div className="font-mono text-[11px] font-medium text-yellow">
           schema unavailable — validation off
         </div>
         <div className="mt-0.5 font-mono text-[11.5px] text-ink-muted">
