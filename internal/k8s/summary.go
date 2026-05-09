@@ -97,6 +97,20 @@ func GetClusterSummary(ctx context.Context, p credentials.Provider, args GetClus
 	summary.KubernetesVersion = serverVersion.GitVersion
 	summary.Provider = providerLabel(args.Cluster.Backend)
 
+	// --- EKS lifecycle window (EoSS / extended support) ----------------
+	// Soft-fail: missing IAM perm on eks:DescribeClusterVersions or a
+	// non-EKS-capable cluster leaves the fields nil; the SPA renders an
+	// em-dash chip. Other summary panels are unaffected.
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		eksMeta, _ := FetchEKSClusterMetadata(ctx, p, args.Cluster, summary.KubernetesVersion)
+		mu.Lock()
+		summary.EndOfStandardSupportDate = eksMeta.EndOfStandardSupportDate
+		summary.EndOfExtendedSupportDate = eksMeta.EndOfExtendedSupportDate
+		mu.Unlock()
+	}()
+
 	// --- Nodes (required-ish — drives the capacity card) ---------------
 	wg.Add(1)
 	go func() {

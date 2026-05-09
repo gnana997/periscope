@@ -7,6 +7,7 @@ import { PageHeader } from "../components/page/PageHeader";
 import { FilterStrip } from "../components/page/FilterStrip";
 import { SplitPane } from "../components/page/SplitPane";
 import { type Column } from "../components/table/DataTable";
+import { TLSExpiryChip } from "../components/ui/TLSExpiryChip";
 import { SelectableDataTable } from "../components/table/SelectableDataTable";
 import { api } from "../lib/api";
 import {
@@ -79,6 +80,13 @@ export function SecretsPage({ cluster }: { cluster: string }) {
       accessor: (s) => <span title={s.type}>{shortType(s.type)}</span>,
     },
     { key: "keys", header: "keys", weight: 0.5, align: "right", cellClassName: "font-mono text-ink-muted", accessor: (s) => s.keyCount },
+    {
+      key: "expires",
+      header: "expires",
+      weight: 0.9,
+      align: "right",
+      accessor: (s) => <TLSExpiryChip expiresAt={s.tlsExpiresAt} />,
+    },
     { key: "age", header: "age", weight: 0.5, align: "right", cellClassName: "font-mono text-ink-muted", accessor: (s) => ageFrom(s.createdAt) },
   ];
 

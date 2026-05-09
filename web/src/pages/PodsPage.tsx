@@ -100,6 +100,23 @@ export function PodsPage({ cluster }: { cluster: string }) {
     { key: "namespace", header: "namespace", weight: 1.4, cellClassName: "font-mono text-ink-muted", accessor: (p) => p.namespace },
     { key: "phase", header: "phase", weight: 1.2, accessor: (p) => <PhaseTag phase={p.phase} /> },
     {
+      key: "image",
+      header: "image",
+      weight: 2.2,
+      cellClassName: "font-mono text-ink-muted",
+      accessor: (p) => {
+        if (!p.image) return "—";
+        return (
+          <span className="block truncate" title={p.image}>
+            {p.image}
+            {p.imageCount && p.imageCount > 1 && (
+              <span className="ml-1 text-ink-faint">+{p.imageCount - 1}</span>
+            )}
+          </span>
+        );
+      },
+    },
+    {
       key: "ready",
       header: "ready",
       weight: 0.6,
@@ -123,6 +140,22 @@ export function PodsPage({ cluster }: { cluster: string }) {
           {p.restarts}
         </span>
       ),
+    },
+    {
+      key: "qos",
+      header: "qos",
+      weight: 0.8,
+      cellClassName: "font-mono text-[10.5px]",
+      accessor: (p) => {
+        if (!p.qos) return "—";
+        const tone =
+          p.qos === "BestEffort"
+            ? "text-yellow"
+            : p.qos === "Guaranteed"
+              ? "text-green"
+              : "text-ink-muted";
+        return <span className={tone}>{p.qos.toLowerCase()}</span>;
+      },
     },
     { key: "node", header: "node", weight: 1.6, cellClassName: "font-mono text-ink-muted", accessor: (p) => p.nodeName ?? "—" },
     { key: "ip", header: "pod ip", weight: 1.1, cellClassName: "font-mono text-ink-muted", accessor: (p) => p.podIP ?? "—" },

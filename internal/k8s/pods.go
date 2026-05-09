@@ -201,6 +201,7 @@ func podSummary(pod *corev1.Pod) Pod {
 		}
 		restarts += cstat.RestartCount
 	}
+	podFirstImage, podImageCount := firstContainerImage(pod.Spec)
 	return Pod{
 		Name:      pod.Name,
 		Namespace: pod.Namespace,
@@ -209,6 +210,9 @@ func podSummary(pod *corev1.Pod) Pod {
 		PodIP:     pod.Status.PodIP,
 		Ready:     strconv.Itoa(readyContainers) + "/" + strconv.Itoa(totalContainers),
 		Restarts:  restarts,
+		Image:      podFirstImage,
+		ImageCount: podImageCount,
+		QoS:        string(pod.Status.QOSClass),
 		CreatedAt: pod.CreationTimestamp.Time,
 	}
 }

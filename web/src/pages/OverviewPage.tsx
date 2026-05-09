@@ -8,6 +8,7 @@ import { NodeGroupsCard } from "../components/eks/NodeGroupsCard";
 import { AddOnsCard } from "../components/eks/AddOnsCard";
 import { ageFrom } from "../lib/format";
 import { cn } from "../lib/cn";
+import { supportWindowState } from "../lib/eosChip";
 import type {
   ClusterEvent,
   ClusterSummary,
@@ -237,6 +238,39 @@ function ClusterIdentityBanner({
         </h1>
         <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 font-mono text-[12px] text-ink-faint">
           <span>{data.kubernetesVersion}</span>
+          {(() => {
+            const state = supportWindowState(data.endOfStandardSupportDate, data.endOfExtendedSupportDate);
+            if (!state) return null;
+            const cssClass =
+              state.tone === "comfortable"
+                ? "border-border bg-surface-2 text-ink-muted"
+                : state.tone === "warning"
+                  ? "border-yellow/40 bg-yellow-soft text-yellow"
+                  : "border-red/40 bg-red-soft text-red";
+            const label =
+              state.tone === "past"
+                ? "extended support"
+                : state.tone === "eol"
+                  ? "end of life"
+                  : `EoSS in ${state.daysRemaining}d`;
+            const title =
+              state.tone === "past"
+                ? `Standard support ended ${state.eosDate} — $0.60/hr surcharge active`
+                : state.tone === "eol"
+                  ? `Extended support ended ${state.eoExtendedDate ?? state.eosDate} — no AWS support`
+                  : `End of standard support: ${state.eosDate}`;
+            return (
+              <span
+                className={cn(
+                  "ml-1 inline-block rounded border px-1.5 py-px text-[10px] uppercase tracking-wide",
+                  cssClass,
+                )}
+                title={title}
+              >
+                {label}
+              </span>
+            );
+          })()}
           <span>·</span>
           <span>{data.provider}</span>
           <span>·</span>

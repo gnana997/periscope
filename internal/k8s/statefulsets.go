@@ -105,6 +105,7 @@ func statefulSetSummary(s *appsv1.StatefulSet) StatefulSet {
 	if s.Spec.Replicas != nil {
 		replicas = *s.Spec.Replicas
 	}
+	firstImage, imageCount := firstContainerImage(s.Spec.Template.Spec)
 	return StatefulSet{
 		Name:            s.Name,
 		Namespace:       s.Namespace,
@@ -112,6 +113,8 @@ func statefulSetSummary(s *appsv1.StatefulSet) StatefulSet {
 		ReadyReplicas:   s.Status.ReadyReplicas,
 		UpdatedReplicas: s.Status.UpdatedReplicas,
 		CurrentReplicas: s.Status.CurrentReplicas,
+		Image:           firstImage,
+		ImageCount:      imageCount,
 		CreatedAt:       s.CreationTimestamp.Time,
 	}
 }

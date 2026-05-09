@@ -70,6 +70,30 @@ export function ServicesPage({ cluster }: { cluster: string }) {
     { key: "clusterip", header: "cluster-ip", weight: 1.1, cellClassName: "font-mono text-ink-muted", accessor: (s) => s.clusterIP || "—" },
     { key: "external", header: "external", weight: 1.4, cellClassName: "font-mono text-ink-muted", accessor: (s) => s.externalIP || "—" },
     { key: "ports", header: "ports", weight: 2, cellClassName: "font-mono text-ink-muted", accessor: (s) => formatPorts(s.ports) },
+    {
+      key: "endpoints",
+      header: "endpoints",
+      weight: 0.9,
+      align: "right",
+      cellClassName: "font-mono",
+      accessor: (s) => {
+        if (s.endpointCount === 0) {
+          return (
+            <span className="text-yellow" title="No backing endpoints — selector matches no pods">
+              0
+            </span>
+          );
+        }
+        if (s.readyEndpointCount < s.endpointCount) {
+          return (
+            <span className="text-yellow" title={`${s.endpointCount - s.readyEndpointCount} not ready`}>
+              {s.readyEndpointCount}/{s.endpointCount}
+            </span>
+          );
+        }
+        return <span className="text-ink-muted">{s.endpointCount}</span>;
+      },
+    },
     { key: "age", header: "age", weight: 0.5, align: "right", cellClassName: "font-mono text-ink-muted", accessor: (s) => ageFrom(s.createdAt) },
   ];
 

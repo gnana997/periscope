@@ -72,6 +72,23 @@ export function DaemonSetsPage({ cluster }: { cluster: string }) {
     { key: "name", header: "name", weight: 3, cellClassName: "font-mono text-ink", accessor: (d) => d.name },
     { key: "namespace", header: "namespace", weight: 1.4, cellClassName: "font-mono text-ink-muted", accessor: (d) => d.namespace },
     {
+      key: "image",
+      header: "image",
+      weight: 2.4,
+      cellClassName: "font-mono text-ink-muted",
+      accessor: (d) => {
+        if (!d.image) return "—";
+        return (
+          <span className="block truncate" title={d.image}>
+            {d.image}
+            {d.imageCount && d.imageCount > 1 && (
+              <span className="ml-1 text-ink-faint">+{d.imageCount - 1}</span>
+            )}
+          </span>
+        );
+      },
+    },
+    {
       key: "ready",
       header: "ready",
       weight: 0.8,
