@@ -12,6 +12,14 @@ works, and what to do when things misbehave. The design is in
 
 ---
 
+## What you see
+
+![Open Shell session into a podinfo container](../assets/pod-exec/terminal.png)
+
+Click **Open Shell** on any pod's detail page. Periscope opens a slide-up terminal panel at the bottom of the SPA with an attached xterm.js shell — the rest of the SPA stays visible above so you can keep navigating the workload list while a session is open. The panel header shows the **cluster name**, the **pod and container** the session is attached to, a **connection state pill** (`connected · MM:SS` while live, `disconnected` after timeout or close), and **info** + **disconnect** actions. The shell streams stdin / stdout / stderr through a WebSocket to the kube-apiserver under your impersonated identity, and reconnects automatically on transient drops.
+
+---
+
 ## 1. Default behavior
 
 Pod exec is **on by default for every cluster** in the registry. The

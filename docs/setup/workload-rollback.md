@@ -13,6 +13,20 @@ pod template. The controller picks up the change and rolls forward
 using the workload's configured strategy
 (`RollingUpdate` / `OnDelete` / partition).
 
+## What you see
+
+![Rollback dialog — periscope deployment with 7 revisions](../assets/rollback/dialog.png)
+
+The dialog shows every ReplicaSet revision Kubernetes has retained for the Deployment, newest first. Each entry carries the **revision number**, **age**, and **container image** (or first container'\''s image for multi-container pods). The currently-running revision is badged `CURRENT`; click any other to preview the diff in the right pane.
+
+**Diff pane** shows the spec.template change between the picked revision and `CURRENT`. The screencap above is rolling Periscope itself from `v1.0.5` → `v1.0.4` — annotations + labels + image tag visible in the diff.
+
+**Pre-flight banner** at the top calls out cases where a rollback would be reconciled away or otherwise unsafe — `MANAGED BY HELM`, `MANAGED BY ARGOCD / FLUX`, `paused Deployment`, `HPA-managed replicas` (see the per-warning sections below for what each one means and how to handle it).
+
+**Reason capture** at the bottom is optional but recorded in the revision history annotations and the audit trail when filled. Strongly recommended for compliance-tracked clusters.
+
+---
+
 ## Where to find it
 
 Open a Deployment / StatefulSet / DaemonSet in the detail pane.

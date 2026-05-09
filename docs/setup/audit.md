@@ -17,6 +17,24 @@ event schema, the SQLite schema, retention semantics, semver coverage,
 and the security model around tamper resistance — see
 [RFC 0003](../rfcs/0003-audit-log.md).
 
+## What you see
+
+### Audit log list
+
+![Audit log filtered to peri-server, last hour](../assets/audit/list.png)
+
+Each row carries the **timestamp**, **actor** (email + OIDC subject on hover), **cluster · namespace · resource path**, the **verb** in monospace (`HELM_CHART_FETCH`, `SECRET_REVEAL`, `APPLY`, `EXEC_OPEN`, `EXEC_CLASS`, ...), and the request ID for cross-referencing with server logs. Filter strip on top: **time range** (15m / 1h / 6h / 24h / 7d), **outcome** (all / success / failure / denied), **verb** quick-filters (`apply`, `delete`, `trigger`, `exec_open`, `exec_class`, `secret_reveal`, `log_open`, `bulk_download` + more), and a **filter by actor** search.
+
+The **density sparkline** above the row list shows event count per bucket so an operator can spot bursts at a glance. Clicking a row opens the event detail.
+
+### Event detail
+
+![Single audit event — exec_open success on a podinfo pod](../assets/audit/event-detail.png)
+
+Each event carries an **ACTOR** block (sub, email, groups), a **TARGET** block (cluster, namespace, kind, name), the **REQUEST** ID for log correlation, and an **EXTRA (verb-specific)** JSON blob with verb-specific context (e.g. for `exec_open`: container, k8s_identity, session_id, started_at, tty). Footer actions let the operator **filter to this actor / verb / outcome** in one click, **permalink** the event, or **copy as JSON** for export to an external SIEM.
+
+---
+
 ## Quick decision tree
 
 ```

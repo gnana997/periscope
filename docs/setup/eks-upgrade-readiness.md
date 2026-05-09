@@ -15,28 +15,21 @@ Both surfaces ship as part of issue #103 and are paired in the UI on the cluster
 
 ### Upgrade readiness card / page
 
-```
-Upgrade readiness · prod-eu-west-1 → 1.32
-  ●  4 PASSING        cluster health / iam / network
-  ▲  2 WARNING        2 admin Roles use deprecated apiGroups
-  ✕  1 ERROR          12 resources use APIs removed in v1.32
-```
 
-Click an `ERROR` insight to expand the affected resources. Each resource is a deep link into Periscope's existing YAML editor — one click from "EKS flagged this" to editing the object.
+![Upgrade Insights — peri-agent showing 5 readiness checks](../assets/eks-insights/upgrade-readiness.png)
+
+The page surfaces every `UPGRADE_READINESS` insight EKS publishes for the cluster — **add-on version compatibility**, **kube-proxy / kubelet version skew**, **AL2 compatibility**, **cluster health**. Each row shows a status pill (`PASSING`, `WARNING`, `ERROR`) and the count of affected resources.
+
+Each insight expands to show its **description**, **recommendation**, the list of **affected resources** (when AWS flagged any), and **further reading** links to the relevant AWS docs. Affected-resource entries are deep links into Periscope's existing YAML editor — one click from "EKS flagged this" to editing the object.
 
 **Caveat — deprecated apiVersions**: when AWS flags a resource at a deprecated apiVersion (e.g. `policy/v1beta1` for a PodDisruptionBudget), the editor opens the resource at its currently-served version. This is generally what you want — you see live state. For CRDs at no-longer-served versions, the editor will surface a load error from the apiserver.
 
 ### Node groups card / page
 
-```
-Node groups · prod-eu-west-1
-  ●  3 healthy   ▲ 1 behind   — 1 custom
 
-  Name        AMI                          Release             Drift
-  ng-spot     custom                       —                   not tracked
-  ng-system   AL2023_x86_64_STANDARD       1.30.0-20240819     14d behind
-  ng-gpu      AL2_x86_64_GPU               1.30.0-20240901     current
-```
+![Node groups — peri-agent showing 52d behind drift](../assets/eks-insights/node-groups-drift.png)
+
+Each row carries the **AMI type**, **current release version**, and a **drift cell** — yellow `Nd behind` when the node group is older than the latest AWS-published EKS-optimized AMI for that K8s minor, green `current` when up to date, italic `not tracked` for `AmiType=CUSTOM`.
 
 Custom-AMI node groups (`AmiType=CUSTOM`) are sorted first and explicitly badged "not tracked" — AWS does not publish a "latest" for custom images, so drift detection cannot apply.
 
