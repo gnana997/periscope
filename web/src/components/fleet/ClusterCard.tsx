@@ -1,6 +1,7 @@
 import { useNavigate } from "react-router-dom";
 import { cn } from "../../lib/cn";
 import type { FleetClusterEntry, FleetStatus } from "../../lib/types";
+import { stripGitVersion, supportWindowState } from "../../lib/eosChip";
 
 /**
  * Status glyph + treatment table. Status is encoded dual-channel
@@ -132,6 +133,7 @@ export function ClusterCard({
         {[
           entry.region,
           entry.backend?.toUpperCase(),
+          entry.kubernetesVersion && `k8s ${stripGitVersion(entry.kubernetesVersion)}`,
           entry.accountID && `acct …${entry.accountID.slice(-4)}`,
           entry.context && `ctx ${entry.context}`,
         ]
@@ -145,6 +147,37 @@ export function ClusterCard({
             {entry.environment}
           </span>
         )}
+        {(() => {
+          const state = supportWindowState(entry.endOfStandardSupportDate, entry.endOfExtendedSupportDate);
+          if (state === null || state.tone === "comfortable") return null;
+          const cssClass =
+            state.tone === "warning"
+              ? "border-yellow/40 bg-yellow-soft text-yellow"
+              : "border-red/40 bg-red-soft text-red";
+          const label =
+            state.tone === "warning"
+              ? `EoSS ${state.daysRemaining}d`
+              : state.tone === "past"
+                ? "ext support"
+                : "EoL";
+          const title =
+            state.tone === "warning"
+              ? `End of standard support: ${state.eosDate}`
+              : state.tone === "past"
+                ? `Standard support ended ${state.eosDate} — $0.60/hr surcharge active`
+                : `Extended support ended ${state.eoExtendedDate ?? state.eosDate} — no AWS support`;
+          return (
+            <span
+              className={cn(
+                "ml-2 inline-block rounded border px-1 font-mono text-[10px] uppercase tracking-wide",
+                cssClass,
+              )}
+              title={title}
+            >
+              {label}
+            </span>
+          );
+        })()}
       </div>
 
       {/* body — branches by status */}
@@ -284,3 +317,4 @@ function relativeFromNow(ts: string): string {
   const hr = Math.round(min / 60);
   return `checked ${hr}h ago`;
 }
+

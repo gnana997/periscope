@@ -108,6 +108,7 @@ export function NodeGroupsPage({ cluster }: { cluster: string }) {
               <tr>
                 <th className="px-3 py-2 text-left">Name</th>
                 <th className="px-3 py-2 text-left">AMI</th>
+                <th className="px-3 py-2 text-left">Capacity</th>
                 <th className="px-3 py-2 text-left">Release</th>
                 <th className="px-3 py-2 text-left">Status</th>
                 <th className="px-3 py-2 text-left">Scale</th>
@@ -157,6 +158,9 @@ function NodegroupRow({
             <span className="font-mono text-ink-muted">{ng.amiType || "—"}</span>
           )}
         </td>
+        <td className="px-3 py-2">
+          <CapacityCell capacityType={ng.capacityType} />
+        </td>
         <td className="px-3 py-2 font-mono text-ink-muted">
           {ng.releaseVersion || (ng.customAmi ? "—" : "")}
         </td>
@@ -175,7 +179,7 @@ function NodegroupRow({
       </tr>
       {open && (
         <tr>
-          <td colSpan={6} className="border-b border-border bg-surface-2/40 px-6 py-3">
+          <td colSpan={7} className="border-b border-border bg-surface-2/40 px-6 py-3">
             <NodegroupDetailBody cluster={cluster} name={ng.name} />
           </td>
         </tr>
@@ -194,6 +198,26 @@ function StatusBadge({ status }: { status: string }) {
   return (
     <span className={cn("font-mono text-[11px] uppercase tracking-[0.06em]", tone)}>
       {status || "unknown"}
+    </span>
+  );
+}
+
+function CapacityCell({ capacityType }: { capacityType?: string }) {
+  if (!capacityType) {
+    return <span className="text-[11px] text-ink-faint">—</span>;
+  }
+  // SPOT nodes can be reclaimed by AWS at 2-min notice — call out
+  // distinctly from the boring on-demand case so an operator's
+  // "why did my pod die overnight" answer is visible at scroll glance.
+  const isSpot = capacityType === "SPOT";
+  return (
+    <span
+      className={cn(
+        "font-mono text-[11px] uppercase tracking-[0.06em]",
+        isSpot ? "text-yellow" : "text-ink-muted",
+      )}
+    >
+      {capacityType.toLowerCase().replace("_", "-")}
     </span>
   );
 }

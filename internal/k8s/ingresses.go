@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strconv"
+	"time"
 
 	networkingv1 "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -28,8 +29,41 @@ func ListIngresses(ctx context.Context, p credentials.Provider, args ListIngress
 	}
 
 	out := IngressList{Ingresses: make([]Ingress, 0, len(raw.Items))}
+
+	// Build a per-namespace TLS-expiry map by listing secrets once
+	// and parsing tls.crt for each kubernetes.io/tls secret. Soft-
+	// fail: when secret.list is denied to the actor, the map stays
+	// empty and ingress rows render with TLSExpiresAt=nil (em-dash
+	// chip in the SPA). The cost is one extra Secret list call
+	// per Ingress list request, scoped to the same namespace.
+	tlsExpiry := map[string]map[string]*time.Time{}
+	if secrets, secErr := cs.CoreV1().Secrets(args.Namespace).List(ctx, metav1.ListOptions{}); secErr == nil {
+		for i := range secrets.Items {
+			s := &secrets.Items[i]
+			exp := secretTLSExpiry(s)
+			if exp == nil {
+				continue
+			}
+			ns := tlsExpiry[s.Namespace]
+			if ns == nil {
+				ns = map[string]*time.Time{}
+				tlsExpiry[s.Namespace] = ns
+			}
+			ns[s.Name] = exp
+		}
+	}
 	for _, ing := range raw.Items {
-		out.Ingresses = append(out.Ingresses, ingressSummary(&ing))
+		summary := ingressSummary(&ing)
+		// Fold soonest TLS expiry across the ingress'\''s spec.tls[].
+		if nsMap, ok := tlsExpiry[ing.Namespace]; ok {
+			for _, t := range ing.Spec.TLS {
+				if t.SecretName == "" {
+					continue
+				}
+				summary.TLSExpiresAt = soonestExpiry(summary.TLSExpiresAt, nsMap[t.SecretName])
+			}
+		}
+		out.Ingresses = append(out.Ingresses, summary)
 	}
 	return out, nil
 }

@@ -10,18 +10,17 @@ package main
 // gating + audit pattern as eks_insights_handler.go: 422 +
 // E_BACKEND_NOT_EKS for non-EKS, 502 for AWS failures, audit row on
 // every call regardless of outcome.
+// Returns nodegroup list with current AMI release version + custom-AMI flag.
+// Drift computation (latest AMI vs current release_version, days behind)
+// is wired into applyDrift — it fans out per-nodegroup to the SSM AMI
+// catalog (eks_ami_catalog.go) when the request reaches us with a
+// non-nil amiCache (always non-nil in production main.go wiring).
 //
-// PR-2 scope (this commit): nodegroup list with current AMI release
-// version + custom-AMI flag. NO drift computation — the
-// DriftComputed flag is always false on responses produced here.
-// PR-3 wires the SSM-based "latest AMI" lookup and fills the drift
-// fields onto the response.
-//
-// Custom AMIs (AmiType == "CUSTOM"): we surface the launch template
-// reference and a `customAmi: true` flag so the SPA can render a
-// "drift not tracked" badge. PR-3 explicitly skips the drift hop
-// for these — when an operator ships a custom image, freshness is
-// the operator's responsibility.
+// Custom AMIs (AmiType == "CUSTOM"): the launch template reference is
+// surfaced and `customAmi: true` is set so the SPA can render a "drift
+// not tracked" badge. applyDrift skips the drift hop for these — when
+// an operator ships a custom image, freshness is the operator's
+// responsibility.
 
 import (
 	"context"
@@ -79,8 +78,8 @@ func defaultNewEKSNodegroupsClient(p credentials.Provider, c clusters.Cluster) e
 // ── Wire types ───────────────────────────────────────────────────────
 
 // NodegroupSummary is one row in the list response. The drift fields
-// are present on the wire so the SPA can pre-allocate columns; in
-// PR-2 they always come back zero/false (DriftComputed=false).
+// are present on the wire so the SPA can pre-allocate columns and
+// applyDrift fills them on the success path (false on cache miss + SSM error).
 type NodegroupSummary struct {
 	Name              string `json:"name"`
 	Status            string `json:"status"`
@@ -101,7 +100,7 @@ type NodegroupSummary struct {
 	HealthIssueCount     int    `json:"healthIssueCount"`
 	CreatedAt            *time.Time `json:"createdAt,omitempty"`
 
-	// Drift fields. Populated by PR-3; always zero in PR-2.
+	// Drift fields. Populated by applyDrift; zero when the AMI catalog
 	DriftComputed       bool   `json:"driftComputed"`
 	LatestReleaseVersion string `json:"latestReleaseVersion,omitempty"`
 	DaysBehind          int    `json:"daysBehind,omitempty"`

@@ -123,3 +123,16 @@ func totalRestarts(pod *corev1.Pod) int32 {
 	}
 	return n
 }
+
+// firstContainerImage extracts the image of the first container in a
+// PodSpec, plus the total container count. Used by the workload-list
+// row constructors (Pod, Deployment, StatefulSet, DaemonSet,
+// ReplicaSet) so the operator can scan "what version is running"
+// without click-through to the detail. Returns ("", 0) for the
+// (briefly accepted) case where the spec has no containers.
+func firstContainerImage(spec corev1.PodSpec) (image string, count int) {
+	if len(spec.Containers) == 0 {
+		return "", 0
+	}
+	return spec.Containers[0].Image, len(spec.Containers)
+}

@@ -87,12 +87,30 @@ func GetNode(ctx context.Context, p credentials.Provider, args GetNodeArgs) (Nod
 }
 
 func nodeSummary(n *corev1.Node) Node {
+	instanceType := n.Labels["node.kubernetes.io/instance-type"]
+	if instanceType == "" {
+		instanceType = n.Labels["beta.kubernetes.io/instance-type"]
+	}
+	zone := n.Labels["topology.kubernetes.io/zone"]
+	if zone == "" {
+		zone = n.Labels["failure-domain.beta.kubernetes.io/zone"]
+	}
+	// EKS managed nodegroups + Karpenter both expose capacity type
+	// but with different label keys. Try EKS first; fall back to
+	// Karpenter (lowercased values: "on-demand" / "spot").
+	capacityType := n.Labels["eks.amazonaws.com/capacityType"]
+	if capacityType == "" {
+		capacityType = n.Labels["karpenter.sh/capacity-type"]
+	}
 	return Node{
 		Name:           n.Name,
 		Status:         nodeStatus(n.Status.Conditions),
 		Roles:          nodeRoles(n.Labels),
 		KubeletVersion: n.Status.NodeInfo.KubeletVersion,
 		InternalIP:     nodeInternalIP(n.Status.Addresses),
+		InstanceType:   instanceType,
+		Zone:           zone,
+		CapacityType:   capacityType,
 		CPUCapacity:    formatCPU(n.Status.Capacity.Cpu().MilliValue()),
 		MemoryCapacity: formatMemory(n.Status.Capacity.Memory().Value()),
 		CreatedAt:      n.CreationTimestamp.Time,

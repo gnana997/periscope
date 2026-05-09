@@ -50,7 +50,22 @@ export function StorageClassesPage({ cluster }: { cluster: string }) {
   );
 
   const columns: Column<StorageClass>[] = [
-    { key: "name", header: "name", weight: 2.5, cellClassName: "font-mono text-ink", accessor: (s) => s.name },
+    {
+      key: "name",
+      header: "name",
+      weight: 2.5,
+      cellClassName: "font-mono text-ink",
+      accessor: (s) => (
+        <span>
+          {s.name}
+          {s.isDefault && (
+            <span className="ml-2 rounded border border-border bg-surface-2 px-1 py-px font-mono text-[9.5px] uppercase tracking-wide text-ink-muted">
+              default
+            </span>
+          )}
+        </span>
+      ),
+    },
     { key: "provisioner", header: "provisioner", weight: 2, cellClassName: "font-mono text-ink-muted", accessor: (s) => s.provisioner },
     { key: "reclaim", header: "reclaim", weight: 0.8, cellClassName: "font-mono text-ink-muted", accessor: (s) => s.reclaimPolicy ?? "—" },
     { key: "binding", header: "binding mode", weight: 1.2, cellClassName: "font-mono text-ink-muted", accessor: (s) => s.volumeBindingMode ?? "—" },

@@ -116,6 +116,29 @@ export function NodesPage({ cluster }: { cluster: string }) {
       accessor: (n) => n.kubeletVersion,
     },
     {
+      key: "instance",
+      header: "instance",
+      weight: 1.8,
+      cellClassName: "font-mono text-ink-muted",
+      accessor: (n) => {
+        if (!n.instanceType && !n.zone) return "—";
+        const isSpot = n.capacityType === "SPOT" || n.capacityType === "spot";
+        return (
+          <span className="flex items-baseline gap-1.5">
+            <span>{n.instanceType || "—"}</span>
+            {n.zone && (
+              <span className="text-ink-faint">·&nbsp;{n.zone}</span>
+            )}
+            {isSpot && (
+              <span className="rounded border border-yellow/40 bg-yellow-soft px-1 py-px text-[9.5px] uppercase tracking-wide text-yellow">
+                spot
+              </span>
+            )}
+          </span>
+        );
+      },
+    },
+    {
       key: "ip",
       header: "ip",
       weight: 1.2,

@@ -27,8 +27,38 @@ func ListServices(ctx context.Context, p credentials.Provider, args ListServices
 	}
 
 	out := ServiceList{Services: make([]Service, 0, len(raw.Items))}
+
+	// Endpoint counts: list EndpointSlices once and key by
+	// kubernetes.io/service-name. Soft-fail — empty maps just
+	// leave the counts at zero, which the SPA renders as a
+	// "0 endpoints" warning chip (the operationally-relevant
+	// state we are trying to surface).
+	type sliceCounts struct{ total, ready int }
+	endpointMap := map[string]sliceCounts{}
+	if eps, err := cs.DiscoveryV1().EndpointSlices(args.Namespace).List(ctx, metav1.ListOptions{}); err == nil {
+		for _, slice := range eps.Items {
+			svcName := slice.Labels["kubernetes.io/service-name"]
+			if svcName == "" {
+				continue
+			}
+			key := slice.Namespace + "/" + svcName
+			c := endpointMap[key]
+			for _, ep := range slice.Endpoints {
+				c.total++
+				if ep.Conditions.Ready == nil || *ep.Conditions.Ready {
+					c.ready++
+				}
+			}
+			endpointMap[key] = c
+		}
+	}
 	for _, svc := range raw.Items {
-		out.Services = append(out.Services, serviceSummary(&svc))
+		s := serviceSummary(&svc)
+		if c, ok := endpointMap[svc.Namespace+"/"+svc.Name]; ok {
+			s.EndpointCount = c.total
+			s.ReadyEndpointCount = c.ready
+		}
+		out.Services = append(out.Services, s)
 	}
 	return out, nil
 }

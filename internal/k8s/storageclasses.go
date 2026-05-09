@@ -78,12 +78,14 @@ func storageClassSummary(sc *storagev1.StorageClass) StorageClass {
 		vbm = string(*sc.VolumeBindingMode)
 	}
 	allowExpansion := sc.AllowVolumeExpansion != nil && *sc.AllowVolumeExpansion
+	isDefault := sc.Annotations["storageclass.kubernetes.io/is-default-class"] == "true"
 	return StorageClass{
 		Name:                 sc.Name,
 		Provisioner:          sc.Provisioner,
 		ReclaimPolicy:        rp,
 		VolumeBindingMode:    vbm,
 		AllowVolumeExpansion: allowExpansion,
+		IsDefault:            isDefault,
 		CreatedAt:            sc.CreationTimestamp.Time,
 	}
 }

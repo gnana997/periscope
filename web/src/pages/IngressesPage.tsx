@@ -7,6 +7,7 @@ import { PageHeader } from "../components/page/PageHeader";
 import { FilterStrip } from "../components/page/FilterStrip";
 import { SplitPane } from "../components/page/SplitPane";
 import { type Column } from "../components/table/DataTable";
+import { TLSExpiryChip } from "../components/ui/TLSExpiryChip";
 import { SelectableDataTable } from "../components/table/SelectableDataTable";
 import { api } from "../lib/api";
 import {
@@ -94,6 +95,13 @@ export function IngressesPage({ cluster }: { cluster: string }) {
       weight: 1.4,
       cellClassName: "font-mono text-ink-muted",
       accessor: (i) => i.address || "—",
+    },
+    {
+      key: "tls",
+      header: "tls",
+      weight: 0.9,
+      align: "right",
+      accessor: (i) => <TLSExpiryChip expiresAt={i.tlsExpiresAt} />,
     },
     { key: "age", header: "age", weight: 0.5, align: "right", cellClassName: "font-mono text-ink-muted", accessor: (i) => ageFrom(i.createdAt) },
   ];

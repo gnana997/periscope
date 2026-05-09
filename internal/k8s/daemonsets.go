@@ -101,6 +101,7 @@ func GetDaemonSetYAML(ctx context.Context, p credentials.Provider, args GetDaemo
 }
 
 func daemonSetSummary(d *appsv1.DaemonSet) DaemonSet {
+	firstImage, imageCount := firstContainerImage(d.Spec.Template.Spec)
 	return DaemonSet{
 		Name:                   d.Name,
 		Namespace:              d.Namespace,
@@ -109,6 +110,8 @@ func daemonSetSummary(d *appsv1.DaemonSet) DaemonSet {
 		UpdatedNumberScheduled: d.Status.UpdatedNumberScheduled,
 		NumberAvailable:        d.Status.NumberAvailable,
 		NumberMisscheduled:     d.Status.NumberMisscheduled,
+		Image:                  firstImage,
+		ImageCount:             imageCount,
 		CreatedAt:              d.CreationTimestamp.Time,
 	}
 }

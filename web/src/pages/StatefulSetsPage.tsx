@@ -72,6 +72,23 @@ export function StatefulSetsPage({ cluster }: { cluster: string }) {
     { key: "name", header: "name", weight: 3, cellClassName: "font-mono text-ink", accessor: (s) => s.name },
     { key: "namespace", header: "namespace", weight: 1.4, cellClassName: "font-mono text-ink-muted", accessor: (s) => s.namespace },
     {
+      key: "image",
+      header: "image",
+      weight: 2.4,
+      cellClassName: "font-mono text-ink-muted",
+      accessor: (s) => {
+        if (!s.image) return "—";
+        return (
+          <span className="block truncate" title={s.image}>
+            {s.image}
+            {s.imageCount && s.imageCount > 1 && (
+              <span className="ml-1 text-ink-faint">+{s.imageCount - 1}</span>
+            )}
+          </span>
+        );
+      },
+    },
+    {
       key: "ready",
       header: "ready",
       weight: 0.7,

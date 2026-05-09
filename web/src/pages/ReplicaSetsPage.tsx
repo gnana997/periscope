@@ -487,6 +487,20 @@ function RSRow({
         </span>
       )}
 
+      {/* Image — truncated; full path in tooltip. Most operationally
+          relevant for ReplicaSets specifically: comparing active vs
+          dormant RS images is the rollback story. */}
+      {rs.image && (
+        <span
+          className="hidden min-w-0 max-w-[260px] shrink truncate font-mono text-[10.5px] text-ink-faint md:block"
+          title={rs.image}
+        >
+          {rs.image}
+          {rs.imageCount && rs.imageCount > 1 && (
+            <span className="ml-1">+{rs.imageCount - 1}</span>
+          )}
+        </span>
+      )}
       {/* Replicas */}
       <div className="w-12 shrink-0 text-right font-mono text-[11.5px] text-ink-muted">
         {isActive ? `${rs.ready}/${rs.desired}` : <span className="text-ink-faint">0/0</span>}
