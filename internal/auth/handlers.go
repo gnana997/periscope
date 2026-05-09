@@ -2,6 +2,7 @@ package auth
 
 import (
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 	"net/url"
@@ -109,6 +110,18 @@ func CallbackHandler(client *OIDCClient, store SessionStore, cfg Config) http.Ha
 		}
 		s, err := client.Exchange(r.Context(), code, verifier, sessID, cfg.Session.AbsoluteTimeout)
 		if err != nil {
+			if errors.Is(err, ErrGroupsClaimMissing) {
+				// 401 (not 502): the upstream OIDC dance succeeded —
+				// tokens minted, signature verified — but the
+				// configured groupsClaim is absent. That's an
+				// auth-policy refusal on our end, not an upstream
+				// failure. 502 would mislead operators reading logs
+				// into hunting an IdP outage that doesn't exist.
+				slog.ErrorContext(r.Context(), "auth.login_failed",
+					"reason", "groups_claim_missing", "err", err)
+				http.Error(w, "your IdP did not return a groups claim — contact your admin (groupsClaim configured in periscope auth.yaml is absent from the OIDC tokens).", http.StatusUnauthorized)
+				return
+			}
 			slog.ErrorContext(r.Context(), "auth.login_failed",
 				"reason", "code_exchange_failed", "err", err)
 			http.Error(w, "couldn't complete login", http.StatusBadGateway)
@@ -152,7 +165,13 @@ func LogoutHandler(store SessionStore, cfg Config) http.HandlerFunc {
 			}
 		}
 		clearSessionCookie(w, r, cfg.Session)
-		http.Redirect(w, r, "/", http.StatusFound)
+		// ?signedOut=1 tells the SPA's AuthProvider to NOT auto-trigger
+		// silent SSO on this load — without the flag, the SPA would
+		// kick off /api/auth/login on every unauthenticated mount, and
+		// Auth0's still-valid SSO session would re-issue a fresh
+		// Periscope session, undoing the logout. The SPA strips the
+		// query param after reading it.
+		http.Redirect(w, r, "/?signedOut=1", http.StatusFound)
 	}
 }
 
@@ -173,12 +192,12 @@ func LogoutEverywhereHandler(client *OIDCClient, store SessionStore, cfg Config)
 		clearSessionCookie(w, r, cfg.Session)
 
 		if client == nil {
-			http.Redirect(w, r, "/", http.StatusFound)
+			http.Redirect(w, r, "/?signedOut=1", http.StatusFound)
 			return
 		}
 		logoutURL := client.LogoutURL(url.QueryEscape(idTokenHint))
 		if logoutURL == "" {
-			http.Redirect(w, r, "/", http.StatusFound)
+			http.Redirect(w, r, "/?signedOut=1", http.StatusFound)
 			return
 		}
 		http.Redirect(w, r, logoutURL, http.StatusFound)
@@ -227,6 +246,15 @@ func WhoamiHandler(store SessionStore, cfg Config, resolver *authz.Resolver, aud
 				auditScope = "all"
 			}
 		}
+		// Always emit groups as a JSON array (never null). Go marshals a
+		// nil []string as null, which the SPA's UserMenu treats as a
+		// programming error and crashes on. A user with zero groups is
+		// a legitimate state (defaultTier in tier mode covers it), so
+		// the wire shape must be a stable [].
+		groups := s.Groups
+		if groups == nil {
+			groups = []string{}
+		}
 		body := struct {
 			Subject    string   `json:"subject"`
 			Email      string   `json:"email"`
@@ -240,7 +268,7 @@ func WhoamiHandler(store SessionStore, cfg Config, resolver *authz.Resolver, aud
 		}{
 			Subject:    s.Subject,
 			Email:      s.Email,
-			Groups:     s.Groups,
+			Groups:     groups,
 			Mode:       string(cfg.Mode),
 			AuthzMode:  authzMode,
 			Tier:       tier,

@@ -166,30 +166,60 @@ func (c *OIDCClient) LogoutURL(idTokenHint string) string {
 	return u
 }
 
+// ErrGroupsClaimMissing means the configured groupsClaim was absent
+// from BOTH the ID token and the access token. This is distinct from
+// "claim present but empty" — an absent claim almost always indicates
+// an IdP misconfiguration (Action not attached, claim name typo,
+// connection not enriching the token). Treating it as "user has no
+// groups" silently funnels users to defaultTier, masking the real
+// problem; treating it as a hard failure surfaces it.
+var ErrGroupsClaimMissing = errors.New("groups claim missing from id_token and access_token")
+
 // extractGroups reads the configured groups claim from the access
 // token first (OIDC best practice for backend authorization), falling
 // back to the ID token, then to /userinfo as a last resort.
 func (c *OIDCClient) extractGroups(tok *oauth2.Token, idTok *oidc.IDToken) ([]string, error) {
-	// Try ID token first — simpler and synchronous.
 	var idClaims map[string]any
-	_ = idTok.Claims(&idClaims)
-	if g, ok := stringSliceClaim(idClaims, c.groupsClaim); ok {
+	if idTok != nil {
+		_ = idTok.Claims(&idClaims)
+	}
+	var accessToken string
+	if tok != nil {
+		accessToken = tok.AccessToken
+	}
+	return resolveGroups(idClaims, accessToken, c.groupsClaim)
+}
+
+// resolveGroups is the pure-data core of extractGroups, separated so
+// the present-vs-absent semantics can be exercised by table tests
+// without standing up a real OIDC IDToken.
+func resolveGroups(idClaims map[string]any, accessToken, groupsClaim string) ([]string, error) {
+	// If no claim is configured, group-based authorization is disabled
+	// — return empty without complaint.
+	if groupsClaim == "" {
+		return []string{}, nil
+	}
+
+	// Try ID token first — simpler and synchronous. Note: present-
+	// but-empty is a real signal (user has zero roles) and must not
+	// fall through to the access-token branch.
+	if g, present := stringSliceClaim(idClaims, groupsClaim); present {
 		return g, nil
 	}
 
 	// Try access token. We won't validate the access-token JWT
 	// signature here (it's OIDC's, not ours) — we just decode it.
-	if tok.AccessToken != "" {
-		if claims, ok := decodeJWTPayload(tok.AccessToken); ok {
-			if g, ok := stringSliceClaim(claims, c.groupsClaim); ok {
+	if accessToken != "" {
+		if claims, ok := decodeJWTPayload(accessToken); ok {
+			if g, present := stringSliceClaim(claims, groupsClaim); present {
 				return g, nil
 			}
 		}
 	}
 
-	// Fall through: no groups in either token. Authorization will
-	// reject if the deployment requires groups.
-	return nil, nil
+	// Claim absent from both tokens. Refuse the login — see
+	// ErrGroupsClaimMissing for rationale.
+	return nil, ErrGroupsClaimMissing
 }
 
 // pkceChallenge computes the S256 PKCE challenge for a verifier.

@@ -1197,8 +1197,29 @@ func main() {
 		go probeClustersOnBoot(ctx, factory, registry, execPolicy)
 	}
 
+	// Top-level dispatcher splits the SPA from the auth-gated API.
+	//
+	// The chi router carries authMW (router.Use(authMW) above), which
+	// includes a redirect-to-/api/auth/login fallback for HTML browser
+	// navigations without a session. If SPA paths went through chi, a
+	// freshly logged-out browser hitting "/" would be 302'd straight
+	// into Auth0, and a still-valid Auth0 SSO session would silently
+	// re-authenticate — undoing the logout. We avoid that by serving
+	// the SPA bundle outside chi entirely. The SPA's own <LoginScreen>
+	// is the unauthenticated UI; AuthProvider decides whether to
+	// auto-trigger silent SSO based on a ?signedOut flag.
+	//
+	// chi keeps every existing /api/*, /healthz, and /debug/* route
+	// (including auth.RegisterRoutes' /api/auth/* handlers, which are
+	// public via isPublic and bypass the cookie check inside authMW).
+	var topHandler http.Handler = router
 	if h := spa.Handler(); h != nil {
-		router.NotFound(h.ServeHTTP)
+		mux := http.NewServeMux()
+		mux.Handle("/api/", router)
+		mux.Handle("/healthz", router)
+		mux.Handle("/debug/", router)
+		mux.Handle("/", h)
+		topHandler = mux
 		slog.Info("spa", "embedded", true)
 	} else {
 		slog.Info("spa", "embedded", false)
@@ -1210,7 +1231,7 @@ func main() {
 	}
 	addr := ":" + port
 	slog.Info("periscope starting", "addr", addr, "clusters", len(registry.List()))
-	srv := &http.Server{Addr: addr, Handler: router}
+	srv := &http.Server{Addr: addr, Handler: topHandler}
 
 	// SIGTERM/SIGINT trigger a drain: stop accepting new conns, let in-flight
 	// requests finish for up to 25s. Pair with chart-side terminationGracePeriodSeconds=30

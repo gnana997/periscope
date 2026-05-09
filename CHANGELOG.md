@@ -13,6 +13,32 @@ tag.
 
 ## [Unreleased]
 
+### Fixed
+
+- Auth: explicit logout no longer loops back through silent SSO when
+  the IdP session is still valid. The SPA bundle is now served outside
+  the chi router so the auth middleware's "redirect HTML browser
+  navigations to `/api/auth/login`" fallback can't run on the
+  post-logout `/` load. Logout handlers redirect to `/?signedOut=1`;
+  the SPA's AuthProvider strips the flag after reading and stays on
+  the login screen instead of re-authenticating against Auth0's still-
+  valid session (#98).
+
+### Changed
+
+- Auth: when `auth.groupsClaim` is configured but absent from BOTH the
+  ID token and the access token at callback time, login now hard-fails
+  with `401 Unauthorized` and a "your IdP did not return a groups
+  claim" message. Previously the user was silently funneled to
+  `defaultTier`, masking IdP misconfiguration. Operators upgrading from
+  v1.0 with conditional / per-app group enrichment must verify the
+  configured claim is present on every login path before this lands.
+  Claim **present-but-empty** (`"groups": []`) still resolves cleanly
+  to zero groups — only an absent claim is refused (#98).
+- Auth: `/api/auth/whoami` now always emits `"groups": []` for users
+  with zero groups, never `null`. The wire shape is now stable across
+  all session states — the SPA's UserMenu can drop its null-guard.
+  
 ### Added
 
 - Form-mode coverage for `oneOf` discriminators and `allOf`
