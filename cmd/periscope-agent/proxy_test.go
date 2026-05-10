@@ -1,14 +1,19 @@
 package main
 
 import (
+	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/json"
 	"encoding/pem"
+	"errors"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/http/httputil"
 	"net/url"
+	"syscall"
 	"testing"
 
 	"k8s.io/client-go/rest"
@@ -174,7 +179,7 @@ func TestStartAPIProxy_RejectsHTTPApiserver(t *testing.T) {
 		Host:        "http://insecure-apiserver:8080",
 		BearerToken: "x",
 	}
-	err := startAPIProxy(cfg, "127.0.0.1:0")
+	err := startAPIProxy(cfg, "test-cluster", "127.0.0.1:0")
 	if err == nil {
 		t.Fatal("startAPIProxy accepted plain-http apiserver URL")
 	}
@@ -189,9 +194,134 @@ func TestStartAPIProxy_RejectsEmptyBearerToken(t *testing.T) {
 		// BearerToken deliberately empty
 		TLSClientConfig: rest.TLSClientConfig{CAData: []byte("dummy")},
 	}
-	err := startAPIProxy(cfg, "127.0.0.1:0")
+	err := startAPIProxy(cfg, "test-cluster", "127.0.0.1:0")
 	if err == nil {
 		t.Fatal("startAPIProxy accepted config without BearerToken")
+	}
+}
+
+// TestClassifyUpstreamError covers each category branch with a
+// representative input. Asserting on category + status (not the
+// human message) keeps the test stable when copy is tweaked.
+func TestClassifyUpstreamError(t *testing.T) {
+	cases := []struct {
+		name       string
+		err        error
+		wantCat    string
+		wantStatus int
+	}{
+		{"nil err", nil, "unknown", http.StatusBadGateway},
+		{"deadline exceeded", context.DeadlineExceeded, "timeout", http.StatusGatewayTimeout},
+		{"i/o timeout via OpError",
+			&net.OpError{Op: "dial", Err: &timeoutErr{}},
+			"timeout", http.StatusGatewayTimeout},
+		{"econnrefused",
+			&net.OpError{Op: "dial", Err: syscall.ECONNREFUSED},
+			"network", http.StatusBadGateway},
+		{"econnreset",
+			&net.OpError{Op: "read", Err: syscall.ECONNRESET},
+			"network", http.StatusBadGateway},
+		{"dns error",
+			&net.DNSError{Err: "no such host", Name: "kubernetes.default"},
+			"network", http.StatusBadGateway},
+		{"net.ErrClosed", net.ErrClosed, "network", http.StatusBadGateway},
+		{"x509 unknown authority",
+			x509.UnknownAuthorityError{},
+			"tls", http.StatusBadGateway},
+		{"tls hostname error",
+			x509.HostnameError{Host: "kubernetes.default"},
+			"tls", http.StatusBadGateway},
+		{"tls cert verification",
+			&tls.CertificateVerificationError{},
+			"tls", http.StatusBadGateway},
+		{"unknown",
+			errors.New("something exotic"),
+			"unknown", http.StatusBadGateway},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cat, _, status := classifyUpstreamError(tc.err)
+			if cat != tc.wantCat {
+				t.Errorf("category = %q, want %q", cat, tc.wantCat)
+			}
+			if status != tc.wantStatus {
+				t.Errorf("status = %d, want %d", status, tc.wantStatus)
+			}
+		})
+	}
+}
+
+// timeoutErr is a minimal net.Error stand-in that reports Timeout()=true.
+// Used by classifier tests to exercise the net.Error path without
+// dialing a real socket.
+type timeoutErr struct{}
+
+func (timeoutErr) Error() string   { return "i/o timeout" }
+func (timeoutErr) Timeout() bool   { return true }
+func (timeoutErr) Temporary() bool { return true }
+
+// TestWriteUpstreamErrorJSON_FullEnvelope covers the wire shape — the
+// wire contract the central server's transport interceptor and the SPA
+// banner depend on. Includes the X-Request-Id pass-through.
+func TestWriteUpstreamErrorJSON_FullEnvelope(t *testing.T) {
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/pods", nil)
+	req.Header.Set("X-Request-Id", "req-abc-123")
+
+	writeUpstreamErrorJSON(rec, req, "pre-prod", &net.OpError{
+		Op: "dial", Err: syscall.ECONNREFUSED,
+	})
+
+	if got := rec.Code; got != http.StatusBadGateway {
+		t.Fatalf("status = %d, want 502", got)
+	}
+	if ct := rec.Header().Get("Content-Type"); ct != "application/json" {
+		t.Errorf("Content-Type = %q, want application/json", ct)
+	}
+
+	var body upstreamErrorBody
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal body: %v", err)
+	}
+	if body.Code != AgentUpstreamErrorCode {
+		t.Errorf("code = %q, want %q", body.Code, AgentUpstreamErrorCode)
+	}
+	if body.Category != "network" {
+		t.Errorf("category = %q, want network", body.Category)
+	}
+	if body.Cluster != "pre-prod" {
+		t.Errorf("cluster = %q, want pre-prod", body.Cluster)
+	}
+	if body.TraceID != "req-abc-123" {
+		t.Errorf("trace_id = %q, want req-abc-123 (X-Request-Id pass-through)", body.TraceID)
+	}
+	if body.Detail == "" {
+		t.Error("detail empty — expected the underlying error message")
+	}
+	if body.Message == "" {
+		t.Error("message empty — expected a friendly category-specific message")
+	}
+}
+
+// TestWriteUpstreamErrorJSON_FallbackTraceID exercises the fallback
+// trace id path when the inbound request doesn't carry X-Request-Id.
+// We don't assert the exact value (it's random), only that it's
+// non-empty and has reasonable length.
+func TestWriteUpstreamErrorJSON_FallbackTraceID(t *testing.T) {
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/", nil) // no X-Request-Id
+
+	writeUpstreamErrorJSON(rec, req, "test-cluster", errors.New("boom"))
+
+	var body upstreamErrorBody
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if body.TraceID == "" {
+		t.Fatal("trace_id empty even though fallback should have generated one")
+	}
+	if len(body.TraceID) < 8 {
+		t.Errorf("trace_id %q implausibly short for the fallback path", body.TraceID)
 	}
 }
 

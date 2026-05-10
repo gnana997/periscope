@@ -108,12 +108,18 @@ func buildAgentRestConfig(_ context.Context, p credentials.Provider, c clusters.
 		// TLS itself: the outer hop (server → tunnel) is plain bytes
 		// inside this process; the inner hop (agent → apiserver) is
 		// HTTPS with the kubelet's CA bundle, terminated at the agent.
-		Transport: tunnel.NewRoundTripper(
+		//
+		// wrapAgentUpstream layers on top so that a structured error
+		// envelope from the agent's reverse proxy surfaces as a typed
+		// *AgentUpstreamError instead of an opaque 502 to the caller.
+		// Happy-path traffic pays no extra cost — the wrapper only
+		// inspects non-2xx responses.
+		Transport: wrapAgentUpstream(tunnel.NewRoundTripper(
 			func(ctx context.Context, network, addr string) (net.Conn, error) {
 				return dial(ctx, network, addr)
 			},
 			tunnel.RoundTripperOptions{},
-		),
+		)),
 	}
 	applyImpersonation(cfg, p)
 
@@ -134,7 +140,37 @@ func buildAgentRestConfig(_ context.Context, p credentials.Provider, c clusters.
 			return &proxyURL, nil
 		}
 	}
+
+	// WrapTransport applies to transports that client-go *builds* from
+	// cfg (vs cfg.Transport, which it uses verbatim). Both
+	// remotecommand.NewWebSocketExecutor and NewSPDYExecutor go through
+	// transport.HTTPWrappersForConfig / transport.New, which honour
+	// WrapTransport. So this is the hook that lets the WS / SPDY
+	// upgrade RESPONSE be inspected for the agent's structured error
+	// envelope — without it the executor would surface only an opaque
+	// "upgrade failed" error and the SPA would have nothing to render.
+	cfg.WrapTransport = chainWrapTransport(cfg.WrapTransport, func(rt http.RoundTripper) http.RoundTripper {
+		return wrapAgentUpstream(rt)
+	})
 	return cfg, nil
+}
+
+// chainWrapTransport composes two rest.Config.WrapTransport hooks
+// without losing the previously-installed one. Important because
+// applyImpersonation may also set WrapTransport and we don't want
+// the agent-upstream wrapper to clobber it.
+func chainWrapTransport(prev, next func(http.RoundTripper) http.RoundTripper) func(http.RoundTripper) http.RoundTripper {
+	switch {
+	case prev == nil && next == nil:
+		return nil
+	case prev == nil:
+		return next
+	case next == nil:
+		return prev
+	}
+	return func(rt http.RoundTripper) http.RoundTripper {
+		return next(prev(rt))
+	}
 }
 
 // agentHostSentinel produces the placeholder Host the rest.Config

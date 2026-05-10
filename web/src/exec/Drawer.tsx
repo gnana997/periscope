@@ -442,6 +442,14 @@ function SessionBanner({ session }: { session: ExecSessionMeta }) {
   const showForbidden =
     session.status === "error" && session.errorCode === "E_FORBIDDEN";
 
+  // Agent-upstream error: the periscope-agent's reverse proxy (or the
+  // central server's CONNECT proxy) reported a transport failure
+  // between the central server and the cluster's apiserver. The agent
+  // stamped the category — render category-specific copy and surface
+  // the trace id so operators can pivot to logs.
+  const showAgentUpstream =
+    session.status === "error" && session.errorCode === "E_AGENT_UPSTREAM";
+
   // Reconnect-failed (gave up after MAX_RECONNECT_ATTEMPTS).
   const showGivenUp =
     session.status === "error" &&
@@ -450,7 +458,7 @@ function SessionBanner({ session }: { session: ExecSessionMeta }) {
 
   const showReconnecting = session.status === "reconnecting";
 
-  if (!showIdleWarn && !showNoShell && !showForbidden && !showGivenUp && !showReconnecting) {
+  if (!showIdleWarn && !showNoShell && !showForbidden && !showAgentUpstream && !showGivenUp && !showReconnecting) {
     return null;
   }
 
@@ -490,6 +498,24 @@ function SessionBanner({ session }: { session: ExecSessionMeta }) {
         <span>
           {session.errorMessage ??
             "your role does not allow exec into this pod. contact your cluster admin."}
+        </span>
+        <BannerButton onClick={() => closeSession(session.id)}>close</BannerButton>
+      </BannerShell>
+    );
+  }
+
+  if (showAgentUpstream) {
+    const cluster = session.errorCluster || session.cluster;
+    const headline = agentUpstreamHeadline(session.errorCategory, cluster);
+    return (
+      <BannerShell tone="red" instant>
+        <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+          <span>{session.errorMessage || headline}</span>
+          {session.errorTraceId && (
+            <span className="text-ink-faint">
+              trace id: <span className="tabular-nums">{session.errorTraceId}</span>
+            </span>
+          )}
         </span>
         <BannerButton onClick={() => closeSession(session.id)}>close</BannerButton>
       </BannerShell>
@@ -589,6 +615,29 @@ function BannerButton({
       {children}
     </button>
   );
+}
+
+// agentUpstreamHeadline returns category-specific copy for the
+// E_AGENT_UPSTREAM banner. The wire fields the agent emits already
+// include a friendly `message`; this is the fallback when the SPA
+// is talking to an older central server that hasn't yet plumbed the
+// message through (or wants to render slightly different per-category
+// copy than the agent's default).
+function agentUpstreamHeadline(
+  category: string | undefined,
+  cluster: string,
+): string {
+  const c = cluster || "this cluster";
+  switch (category) {
+    case "network":
+      return `cluster '${c}' apiserver is unreachable. the agent cannot connect to the kubernetes api.`;
+    case "tls":
+      return `tls handshake with cluster '${c}' apiserver failed. check the agent's mounted ca bundle.`;
+    case "timeout":
+      return `request to cluster '${c}' apiserver timed out.`;
+    default:
+      return `agent could not reach cluster '${c}' apiserver.`;
+  }
 }
 
 function RetryGlyph() {

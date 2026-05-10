@@ -13,6 +13,7 @@ import (
 
 	"github.com/gnana997/periscope/internal/audit"
 	"github.com/gnana997/periscope/internal/credentials"
+	"github.com/gnana997/periscope/internal/k8s"
 )
 
 // httpStatusFor maps a k8s client-go error to the appropriate HTTP
@@ -22,6 +23,13 @@ import (
 //
 // Anything not classified is 500.
 func httpStatusFor(err error) int {
+	// Agent-upstream errors carry their own status (502 / 504 from
+	// the agent ErrorHandler). Pivot on the typed value instead of
+	// remapping so the kubectl-style 502/504 distinction the agent
+	// already made survives the trip to the SPA.
+	if aue, ok := k8s.AsAgentUpstreamError(err); ok && aue.HTTPStatus != 0 {
+		return aue.HTTPStatus
+	}
 	switch {
 	case kerrors.IsForbidden(err):
 		return http.StatusForbidden
@@ -94,6 +102,15 @@ func writeAPIError(w http.ResponseWriter, err error, status int) {
 func ErrorCodeFor(err error) string {
 	if err == nil {
 		return ""
+	}
+	// Agent-upstream errors carry their own stable code so per-cluster
+	// fleet collectors render "agent_upstream/<category>" instead of
+	// the generic "apiserver_unreachable" bucket.
+	if aue, ok := k8s.AsAgentUpstreamError(err); ok {
+		if aue.Category != "" {
+			return "agent_upstream/" + aue.Category
+		}
+		return "agent_upstream"
 	}
 	switch httpStatusFor(err) {
 	case http.StatusForbidden:

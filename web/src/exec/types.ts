@@ -33,6 +33,20 @@ export interface ErrorFrame {
   code: string;
   message: string;
   retryable?: boolean;
+  /** Agent-upstream error category. Populated only on
+   *  code === "E_AGENT_UPSTREAM" frames; the drawer banner switches
+   *  on this to render network/tls/timeout-specific copy. */
+  category?: "network" | "tls" | "timeout" | "unknown";
+  /** Cluster the agent reported the failure for. Populated alongside
+   *  category on E_AGENT_UPSTREAM frames. */
+  cluster?: string;
+  /** End-to-end trace id matching the agent's slog line. Surfaced in
+   *  the banner so operators can grep the exact failure across server
+   *  audit DB, server stdout, and agent stdout. */
+  traceId?: string;
+  /** Raw underlying error string from the agent's reverse proxy. Shown
+   *  in the info expander, not the banner headline. */
+  detail?: string;
 }
 
 export interface IdleWarnFrame {
@@ -80,6 +94,14 @@ export interface ExecSessionMeta {
   exitCode?: number;
   errorCode?: string;
   errorMessage?: string;
+  /** Mirrors ErrorFrame.category for E_AGENT_UPSTREAM frames. */
+  errorCategory?: "network" | "tls" | "timeout" | "unknown";
+  /** Cluster name carried on the error frame (agent-stamped). */
+  errorCluster?: string;
+  /** End-to-end trace id from the agent's slog line. */
+  errorTraceId?: string;
+  /** Raw underlying error string for the info expander. */
+  errorDetail?: string;
   /** Last time stdout was received — used for tab activity pulse. */
   lastActivityAt: number;
   /** Unix-ms timestamp the most recent idle_warn arrived. The Drawer

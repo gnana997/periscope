@@ -257,6 +257,33 @@ func Run(ctx context.Context, ws *websocket.Conn, p credentials.Provider, params
 	elapsed := time.Since(startedAt)
 	override := closeOverride.Load()
 
+	// E_AGENT_UPSTREAM: the agent's reverse proxy (or the central
+	// server's loopback CONNECT proxy) reported a transport-level
+	// failure between the central server and the cluster's apiserver.
+	// Surface the typed fields so the SPA's drawer can render a
+	// category-specific banner with the trace id. Per ground rules
+	// the frame is non-retryable: an unreachable apiserver isn't
+	// something the SPA's reconnect loop can paper over, and a quiet
+	// reconnect spinner is worse UX than the friendly diagnostic.
+	if override == nil && execErr != nil {
+		if aue, ok := k8s.AsAgentUpstreamError(execErr); ok {
+			_ = writeControl(sessionCtx, ws, controlFrame{
+				Type:      "error",
+				Code:      aue.Code,
+				Message:   aue.Message,
+				Category:  aue.Category,
+				Cluster:   aue.Cluster,
+				TraceID:   aue.TraceID,
+				Detail:    aue.Detail,
+				Retryable: false,
+			})
+			setOverride("agent_upstream")
+			override = closeOverride.Load()
+			result.Reason = "agent_upstream"
+			return result, stats, execErr
+		}
+	}
+
 	// E_NO_SHELL heuristic: a 127-exit with zero traffic in under 1.5s
 	// almost certainly means the container has no shell on PATH. Surface
 	// it as a friendlier error frame so the UI can render a helpful
@@ -323,6 +350,15 @@ type controlFrame struct {
 	SecondsRemaining int    `json:"secondsRemaining,omitempty"`
 	Cols             int    `json:"cols,omitempty"`
 	Rows             int    `json:"rows,omitempty"`
+
+	// Agent-upstream error fields. Populated only on
+	// {type:"error", code:"E_AGENT_UPSTREAM"} frames so the SPA's
+	// drawer banner can render category-specific copy and surface a
+	// trace id for log correlation.
+	Category string `json:"category,omitempty"`
+	Cluster  string `json:"cluster,omitempty"`
+	TraceID  string `json:"traceId,omitempty"`
+	Detail   string `json:"detail,omitempty"`
 }
 
 // inboundControl mirrors controlFrame but is parsed by the reader goroutine.
