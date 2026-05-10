@@ -8,17 +8,17 @@
 // the single most-asked-for "how much is Karpenter costing me?"
 // answer.
 
-import { Link } from "react-router-dom";
 import type { NodePoolView } from "../../lib/types";
 import { cn } from "../../lib/cn";
 
 interface Props {
-  cluster: string;
   pools: NodePoolView[];
   metricsAvailable: boolean;
+  onSelect: (name: string) => void;
+  selectedName: string | null;
 }
 
-export function NodePoolTable({ cluster, pools, metricsAvailable }: Props) {
+export function NodePoolTable({ pools, metricsAvailable, onSelect, selectedName }: Props) {
   if (pools.length === 0) {
     return (
       <p className="px-1 py-4 font-mono text-[12px] text-ink-faint">
@@ -61,18 +61,18 @@ export function NodePoolTable({ cluster, pools, metricsAvailable }: Props) {
         ) : null}
       </div>
 
-      <div className="overflow-hidden rounded-sm border border-border">
-        <table className="w-full table-fixed text-left font-mono text-[11.5px]">
+      <div className="overflow-x-auto rounded-sm border border-border">
+        <table className="w-full min-w-[760px] table-fixed text-left font-mono text-[11.5px]">
           <thead className="bg-surface text-[10.5px] uppercase tracking-[0.08em] text-ink-faint">
             <tr>
-              <th className="w-1/4 px-3 py-1.5">name</th>
+              <th className="w-44 px-3 py-1.5">name</th>
               <th className="w-16 px-3 py-1.5">weight</th>
-              <th className="w-32 px-3 py-1.5">disruption</th>
+              <th className="w-48 px-3 py-1.5">disruption</th>
               <th className="px-3 py-1.5">limits / usage</th>
               <th className="w-16 px-3 py-1.5 text-right">nodes</th>
               {metricsAvailable ? (
                 <>
-                  <th className="w-20 px-3 py-1.5 text-right">$/hr</th>
+                  <th className="w-24 px-3 py-1.5 text-right">$/hr</th>
                   <th className="w-16 px-3 py-1.5 text-right">spot</th>
                 </>
               ) : null}
@@ -82,9 +82,11 @@ export function NodePoolTable({ cluster, pools, metricsAvailable }: Props) {
             {pools.map((p) => (
               <NodePoolRow
                 key={p.name}
-                cluster={cluster}
+
                 pool={p}
                 metricsAvailable={metricsAvailable}
+                onSelect={onSelect}
+                isSelected={p.name === selectedName}
               />
             ))}
           </tbody>
@@ -93,33 +95,31 @@ export function NodePoolTable({ cluster, pools, metricsAvailable }: Props) {
     </div>
   );
 }
-
 function NodePoolRow({
-  cluster,
   pool,
   metricsAvailable,
+  onSelect,
+  isSelected,
 }: {
-  cluster: string;
   pool: NodePoolView;
   metricsAvailable: boolean;
+  onSelect: (name: string) => void;
+  isSelected: boolean;
 }) {
   const limits = pool.limits ?? {};
   const usage = pool.usage ?? {};
   const limitKeys = Object.keys(limits);
 
   return (
-    <tr className="border-t border-border first:border-t-0 hover:bg-surface-2">
+    <tr
+      className={cn(
+        "border-t border-border first:border-t-0 cursor-pointer hover:bg-surface-2",
+        isSelected && "bg-accent-soft/40",
+      )}
+      onClick={() => onSelect(pool.name)}
+    >
       <td className="px-3 py-1.5">
-        <Link
-          to={`/clusters/${encodeURIComponent(
-            cluster,
-          )}/customresources/karpenter.sh/v1/nodepools/${encodeURIComponent(
-            pool.name,
-          )}`}
-          className="text-ink hover:text-accent"
-        >
-          {pool.name}
-        </Link>
+        <span className="text-ink">{pool.name}</span>
       </td>
       <td className="px-3 py-1.5 text-ink-muted tabular">
         {pool.weight ?? "—"}
@@ -135,8 +135,8 @@ function NodePoolRow({
             {limitKeys.map((k) => (
               <li key={k} className="text-[11px]">
                 <span className="text-ink-faint">{k}:</span>{" "}
-                <span className="text-ink">{usage[k] ?? "—"}</span>
-                <span className="text-ink-faint">{" / "}{limits[k]}</span>
+                <span className="text-ink">{usage[k] ? formatResourceValue(k, usage[k]) : "—"}</span>
+                <span className="text-ink-faint">{" / "}{formatResourceValue(k, limits[k])}</span>
               </li>
             ))}
           </ul>
@@ -168,13 +168,46 @@ function NodePoolRow({
 
 function DisruptionSummary({ p }: { p: NodePoolView }) {
   const d = p.disruption;
-  const parts: string[] = [];
-  if (d.consolidationPolicy) parts.push(d.consolidationPolicy);
-  if (d.consolidateAfter) parts.push(`after ${d.consolidateAfter}`);
-  if (d.expireAfter) parts.push(`expire ${d.expireAfter}`);
-  if (d.budgets && d.budgets.length > 0) {
-    parts.push(`${d.budgets.length} budget${d.budgets.length === 1 ? "" : "s"}`);
+  // Compact 2-line display: line 1 = consolidation policy + when,
+  // line 2 = expire / budgets summary. Keeps the column readable
+  // at the form's ~640px width without wrapping mid-word.
+  const policy = (() => {
+    if (!d.consolidationPolicy) return "—";
+    if (d.consolidationPolicy === "WhenEmptyOrUnderutilized") return "empty/underutilized";
+    if (d.consolidationPolicy === "WhenEmpty") return "empty only";
+    return d.consolidationPolicy;
+  })();
+  const after = d.consolidateAfter ? `after ${d.consolidateAfter}` : "";
+  const expire = d.expireAfter ? `expire ${d.expireAfter}` : "";
+  const budgets = d.budgets && d.budgets.length > 0
+    ? `${d.budgets.length} budget${d.budgets.length === 1 ? "" : "s"}`
+    : "";
+  return (
+    <div className="space-y-0.5 text-[10.5px]">
+      <div>{[policy, after].filter(Boolean).join(" · ")}</div>
+      {(expire || budgets) && (
+        <div className="text-ink-faint">
+          {[expire, budgets].filter(Boolean).join(" · ")}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// formatResourceValue renders a Karpenter NodePool resource value
+// (string from the metrics scrape; bytes for memory, raw count for
+// cpu / pods / nodes). Memory rendering matches kubectl's Mi/Gi style.
+function formatResourceValue(resourceType: string, raw: string): string {
+  if (!raw) return "—";
+  const n = Number(raw);
+  if (!Number.isFinite(n)) return raw;
+  if (resourceType === "memory" || resourceType.startsWith("hugepages_") || resourceType === "ephemeral_storage") {
+    if (n >= 1024 ** 4) return `${(n / 1024 ** 4).toFixed(1)}Ti`;
+    if (n >= 1024 ** 3) return `${(n / 1024 ** 3).toFixed(1)}Gi`;
+    if (n >= 1024 ** 2) return `${(n / 1024 ** 2).toFixed(1)}Mi`;
+    if (n >= 1024) return `${(n / 1024).toFixed(1)}Ki`;
+    return `${n}`;
   }
-  if (parts.length === 0) return <span className="text-ink-faint">—</span>;
-  return <>{parts.join(" · ")}</>;
+  // CPU + pod + node counts: render as integer when whole, else 1 decimal.
+  return Number.isInteger(n) ? `${n}` : n.toFixed(1);
 }

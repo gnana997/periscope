@@ -289,9 +289,9 @@ export function ResourceNav() {
                   )}
                 </NavLink>
               </li>
+              <KarpenterSidebarEntry cluster={cluster} />
             </CollapsibleSection>
           )}
-          {group === "Cluster" && cluster ? <KarpenterSidebarEntry cluster={cluster} /> : null}
           {group === "Workloads" && cluster && (
             <CollapsibleSection
               id="Packages"
@@ -450,7 +450,7 @@ function KarpenterSidebarEntry({ cluster }: { cluster: string }) {
   if (isPending) return null;
   if (!data?.available) return null;
   return (
-    <li className="px-2 pb-1 pt-2">
+    <li>
       <NavLink
         to={`/clusters/${encodeURIComponent(cluster)}/karpenter`}
         className={({ isActive }) =>

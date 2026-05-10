@@ -30,6 +30,13 @@ export function useKarpenter(cluster: string) {
       ? ({ signal }) => api.karpenter(cluster, signal)
       : skipToken,
     staleTime: STALE_MS,
+    // Periodic refetch (12s) so a cold-start `metricsAvailable: false`
+    // — the apiserver-proxy `/metrics` call can exceed the backend's
+    // 15s budget on the very first call due to TLS handshake + cold
+    // connection — automatically resolves on the next poll without
+    // forcing the operator to refresh. 12s < staleTime so the cache
+    // is consulted first; refetchInterval kicks in for active queries.
+    refetchInterval: 12_000,
     // 502 → backend reached the cluster but Karpenter list call
     // failed (apiserver returned an error). Worth retrying once;
     // not pointless like a 4xx.

@@ -8,17 +8,18 @@
 // /clusters/{c}/customresources/karpenter.sh/v1/nodeclaims/{name} —
 // so this panel is purely a join + summary, no new detail page.
 
-import { Link } from "react-router-dom";
 import { useState } from "react";
 import type { NodeClaimView } from "../../lib/types";
 import { cn } from "../../lib/cn";
 
 interface Props {
-  cluster: string;
+
   claims: NodeClaimView[];
+  onSelect: (name: string) => void;
+  selectedName: string | null;
 }
 
-export function NodeClaimsByPool({ cluster, claims }: Props) {
+export function NodeClaimsByPool({ claims, onSelect, selectedName }: Props) {
   if (claims.length === 0) {
     return (
       <p className="px-1 py-4 font-mono text-[12px] text-ink-faint">
@@ -52,7 +53,7 @@ export function NodeClaimsByPool({ cluster, claims }: Props) {
       </div>
       <div className="space-y-2">
         {pools.map((p) => (
-          <PoolGroup key={p} cluster={cluster} pool={p} claims={byPool.get(p)!} />
+          <PoolGroup key={p} pool={p} claims={byPool.get(p)!} onSelect={onSelect} selectedName={selectedName} />
         ))}
       </div>
     </div>
@@ -60,13 +61,17 @@ export function NodeClaimsByPool({ cluster, claims }: Props) {
 }
 
 function PoolGroup({
-  cluster,
+
   pool,
   claims,
+  onSelect,
+  selectedName,
 }: {
-  cluster: string;
+
   pool: string;
   claims: NodeClaimView[];
+  onSelect: (name: string) => void;
+  selectedName: string | null;
 }) {
   // Default open when the pool has any drifted claim — operators
   // landing on the page should see the drift signal without a click.
@@ -96,7 +101,7 @@ function PoolGroup({
       </summary>
       <div className="space-y-1 px-3 pb-3 pt-1">
         {claims.map((c) => (
-          <ClaimRow key={c.name} cluster={cluster} claim={c} />
+          <ClaimRow key={c.name} claim={c} onSelect={onSelect} isSelected={c.name === selectedName} />
         ))}
       </div>
     </details>
@@ -104,11 +109,15 @@ function PoolGroup({
 }
 
 function ClaimRow({
-  cluster,
+
   claim,
+  onSelect,
+  isSelected,
 }: {
-  cluster: string;
+
   claim: NodeClaimView;
+  onSelect: (name: string) => void;
+  isSelected: boolean;
 }) {
   const drifted = (claim.conditions ?? []).some(
     (c) => c.type === "Drifted" && c.status === "True",
@@ -117,39 +126,64 @@ function ClaimRow({
     (c) => c.type === "Initialized",
   );
   return (
-    <Link
-      to={`/clusters/${encodeURIComponent(
-        cluster,
-      )}/customresources/karpenter.sh/v1/nodeclaims/${encodeURIComponent(
-        claim.name,
-      )}`}
-      className="flex items-baseline gap-3 rounded-sm px-2 py-1 font-mono text-[11px] text-ink-muted transition-colors hover:bg-surface-2 hover:text-ink"
+    <button
+      type="button"
+      onClick={() => onSelect(claim.name)}
+      className={cn(
+        "flex w-full items-baseline gap-3 rounded-sm px-2 py-1 text-left font-mono text-[11px] text-ink-muted transition-colors hover:bg-surface-2 hover:text-ink",
+        isSelected && "bg-accent-soft/40 text-ink",
+      )}
     >
       <span className="w-44 shrink-0 truncate text-ink">{claim.name}</span>
-      <span className="w-24 shrink-0 text-ink-faint">
-        {claim.instanceType ?? "—"}
-      </span>
-      <span
-        className={cn(
-          "w-16 shrink-0 text-[10.5px] uppercase tracking-[0.08em]",
-          claim.capacityType === "spot" ? "text-green" : "text-ink-faint",
-        )}
-      >
-        {claim.capacityType ?? ""}
-      </span>
-      <span className="w-24 shrink-0 text-ink-faint">{claim.zone ?? "—"}</span>
-      <span className="flex-1 text-ink-faint">
-        {initialized && initialized.status === "True"
-          ? "initialized"
-          : initialized
-            ? `init: ${initialized.reason ?? "false"}`
-            : "—"}
-      </span>
+      {claim.instanceType ? (
+        <>
+          <span className="w-24 shrink-0 text-ink-faint">
+            {claim.instanceType}
+          </span>
+          <span
+            className={cn(
+              "w-16 shrink-0 text-[10.5px] uppercase tracking-[0.08em]",
+              claim.capacityType === "spot" ? "text-green" : "text-ink-faint",
+            )}
+          >
+            {claim.capacityType ?? ""}
+          </span>
+          <span className="w-24 shrink-0 text-ink-faint">{claim.zone ?? "—"}</span>
+          <span className="flex-1 text-ink-faint">
+            {initialized && initialized.status === "True"
+              ? "initialized"
+              : initialized
+                ? `init: ${initialized.reason ?? "false"}`
+                : "—"}
+          </span>
+        </>
+      ) : (
+        <span className="flex-1 truncate italic text-ink-faint">
+          provisioning… {provisioningHint(claim)}
+        </span>
+      )}
       {drifted ? (
         <span className="rounded-sm border border-yellow/40 bg-yellow/5 px-1.5 py-0 text-[10px] text-yellow">
           drifted
         </span>
       ) : null}
-    </Link>
+    </button>
   );
+}
+
+// provisioningHint pulls the most informative text from a NodeClaim's
+// status when it hasn't yet been bound to an EC2 instance. Surfaces
+// the Launched/Registered/Ready condition reason or message so the
+// operator sees "permission denied creating SLR" instead of an opaque
+// "AwaitingReconciliation".
+function provisioningHint(claim: NodeClaimView): string {
+  const conds = claim.conditions ?? [];
+  // Priority order: Launched (most informative when failing) > Registered > Ready.
+  for (const t of ["Launched", "Registered", "Ready"]) {
+    const c = conds.find((x) => x.type === t);
+    if (c && c.status !== "True") {
+      return c.message ?? c.reason ?? "";
+    }
+  }
+  return "";
 }

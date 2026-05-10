@@ -5,22 +5,50 @@
 //   2. NodeClaimsByPool — per-pool node grouping with Drift badges
 //   3. PendingPodsPanel — pending pods with per-NodePool reject reasons
 //
-// All three render from one query result (useKarpenter). Sidebar
-// entry uses the same query so loading the page is one network call,
-// not two.
+// Selection model: clicking a NodePool name or NodeClaim row sets a
+// `?sel=NodePool/<name>` (or `NodeClaim/<name>`) URL param. When set,
+// a slide-in DetailPane shows on the right with describe / yaml /
+// events tabs for that resource. Operators stay on the Karpenter
+// page — no jump to the generic CR catalog. Closing the pane drops
+// the URL param.
 
-import { useParams } from "react-router-dom";
+import { useParams, useSearchParams } from "react-router-dom";
 import { useKarpenter } from "../hooks/useKarpenter";
 import { PageHeader } from "../components/page/PageHeader";
+import { SplitPane } from "../components/page/SplitPane";
 import { ErrorState, LoadingState } from "../components/table/states";
 import { NodePoolTable } from "../components/karpenter/NodePoolTable";
 import { NodeClaimsByPool } from "../components/karpenter/NodeClaimsByPool";
 import { PendingPodsPanel } from "../components/karpenter/PendingPodsPanel";
+import { KarpenterDetailPane } from "../components/karpenter/KarpenterDetailPane";
 
 export function KarpenterPage() {
   const { cluster } = useParams<{ cluster: string }>();
   const cl = cluster ?? "";
   const query = useKarpenter(cl);
+  const [params, setParams] = useSearchParams();
+
+  // Parse `?sel=Kind/Name` into the pane's two args.
+  const sel = params.get("sel") ?? "";
+  const slash = sel.indexOf("/");
+  const selKind = slash > 0 ? (sel.slice(0, slash) as "NodePool" | "NodeClaim") : null;
+  const selName = slash > 0 ? sel.slice(slash + 1) : "";
+  const validKind = selKind === "NodePool" || selKind === "NodeClaim";
+
+  const select = (kind: "NodePool" | "NodeClaim", name: string) => {
+    setParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.set("sel", `${kind}/${name}`);
+      return next;
+    });
+  };
+  const clear = () => {
+    setParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.delete("sel");
+      return next;
+    });
+  };
 
   if (query.isPending) return <LoadingState resource="karpenter" />;
   if (query.isError) {
@@ -64,20 +92,49 @@ export function KarpenterPage() {
     );
   }
 
+  const detailOpen = Boolean(validKind && selName);
+
+  // List panels — share rendering whether or not the detail pane is
+  // open. SplitPane handles the narrowing itself; we just always feed
+  // the same ReactNode into its `left` slot.
+  const listPanels = (
+    <div className="h-full space-y-6 overflow-y-auto px-6 py-4">
+      <NodePoolTable
+        pools={data.nodepools ?? []}
+        metricsAvailable={data.metricsAvailable}
+        onSelect={(name) => select("NodePool", name)}
+        selectedName={selKind === "NodePool" ? selName : null}
+      />
+      <NodeClaimsByPool
+        claims={data.nodeclaims ?? []}
+        onSelect={(name) => select("NodeClaim", name)}
+        selectedName={selKind === "NodeClaim" ? selName : null}
+      />
+      <PendingPodsPanel
+        pods={data.pendingPods ?? []}
+        truncated={data.truncated ?? false}
+        onSelectPool={(name) => select("NodePool", name)}
+      />
+    </div>
+  );
+
   return (
     <div className="flex h-full min-h-0 flex-col">
       <PageHeader title="Karpenter" subtitle={cl} />
-      <div className="flex-1 space-y-6 overflow-y-auto px-6 py-4">
-        <NodePoolTable
-          cluster={cl}
-          pools={data.nodepools ?? []}
-          metricsAvailable={data.metricsAvailable}
-        />
-        <NodeClaimsByPool cluster={cl} claims={data.nodeclaims ?? []} />
-        <PendingPodsPanel
-          cluster={cl}
-          pods={data.pendingPods ?? []}
-          truncated={data.truncated ?? false}
+      <div className="flex min-h-0 flex-1">
+        <SplitPane
+          storageKey="periscope.detailWidth.karpenter"
+          left={listPanels}
+          right={
+            detailOpen ? (
+              <KarpenterDetailPane
+                cluster={cl}
+                kind={selKind as "NodePool" | "NodeClaim"}
+                name={selName}
+                onClose={clear}
+              />
+            ) : null
+          }
         />
       </div>
     </div>

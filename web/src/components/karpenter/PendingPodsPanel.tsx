@@ -14,17 +14,17 @@
 // a "no breakdown available" hint — still useful, just not as deep.
 
 import { useState } from "react";
-import { Link } from "react-router-dom";
 import type { PendingPodView } from "../../lib/types";
 import { cn } from "../../lib/cn";
 
 interface Props {
-  cluster: string;
+  onSelectPool: (name: string) => void;
+  /* removed: cluster (no longer needed since pool click is handled via onSelectPool) */
   pods: PendingPodView[];
   truncated: boolean;
 }
 
-export function PendingPodsPanel({ cluster, pods, truncated }: Props) {
+export function PendingPodsPanel({ pods, truncated, onSelectPool }: Props) {
   if (pods.length === 0) {
     return (
       <div className="space-y-2">
@@ -56,7 +56,7 @@ export function PendingPodsPanel({ cluster, pods, truncated }: Props) {
         {pods.map((pod) => (
           <PendingPodRow
             key={`${pod.namespace}/${pod.name}`}
-            cluster={cluster}
+            onSelectPool={onSelectPool}
             pod={pod}
           />
         ))}
@@ -66,11 +66,11 @@ export function PendingPodsPanel({ cluster, pods, truncated }: Props) {
 }
 
 function PendingPodRow({
-  cluster,
   pod,
+  onSelectPool,
 }: {
-  cluster: string;
   pod: PendingPodView;
+  onSelectPool: (name: string) => void;
 }) {
   const hasBreakdown = (pod.incompatibilityReasons ?? []).length > 0;
   // Auto-expand when there's a breakdown to show — the operator's
@@ -84,7 +84,7 @@ function PendingPodRow({
       onToggle={(e) => setOpen(e.currentTarget.open)}
     >
       <summary className="flex cursor-pointer select-none items-baseline gap-3 px-3 py-1.5 font-mono text-[11.5px] tracking-[0.04em] text-ink-muted transition-colors hover:text-ink">
-        <span className="w-48 shrink-0 truncate text-ink">
+        <span className="w-56 shrink-0 truncate text-ink">
           {pod.namespace}/{pod.name}
         </span>
         <span className="w-16 shrink-0 text-ink-faint">
@@ -96,7 +96,7 @@ function PendingPodRow({
                 pod.incompatibilityReasons!.length === 1 ? "" : "s"
               } rejected`
             : pod.reason
-              ? pod.reason
+              ? "kube-scheduler reason — expand for detail"
               : "no scheduling event found yet"}
         </span>
       </summary>
@@ -109,16 +109,12 @@ function PendingPodRow({
                 className="flex items-baseline gap-2 font-mono text-[11px]"
               >
                 <span className={cn("text-red shrink-0")}>×</span>
-                <Link
-                  to={`/clusters/${encodeURIComponent(
-                    cluster,
-                  )}/customresources/karpenter.sh/v1/nodepools/${encodeURIComponent(
-                    r.nodepool,
-                  )}`}
-                  className="w-32 shrink-0 truncate text-ink hover:text-accent"
+                <button
+                  type="button"
+                  onClick={() => onSelectPool(r.nodepool)}
+                  className="w-32 shrink-0 truncate text-left text-ink hover:text-accent"
                 >
-                  {r.nodepool}
-                </Link>
+                </button>
                 <span className="flex-1 text-ink-muted">{r.reason}</span>
               </li>
             ))}

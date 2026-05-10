@@ -49,7 +49,7 @@ import (
 // response shape's truncation flag handles cap-at-50; this timeout
 // handles the long-tail "apiserver pod list takes 30 seconds on a
 // 50k-pod cluster" case.
-const karpenterRequestTimeout = 8 * time.Second
+const karpenterRequestTimeout = 15 * time.Second
 
 // Test seams. Production wires these to the real k8s.* entry points;
 // tests substitute fakes that return canned data so the handler-level
@@ -160,7 +160,8 @@ func karpenterHandler(reg *clusters.Registry, emitter *audit.Emitter) credential
 		}
 		if metricsErr != nil {
 			slog.InfoContext(ctx, "karpenter metrics unavailable; cost summary omitted",
-				"cluster", c.Name, "err", metricsErr)
+				"cluster", c.Name, "err", metricsErr,
+				"timed_out", errors.Is(metricsErr, context.DeadlineExceeded))
 		}
 
 		// Cost compute attaches NodePoolCost in place AND fills NodeCount
