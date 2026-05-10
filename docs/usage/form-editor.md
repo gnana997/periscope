@@ -11,6 +11,65 @@ other kind continue to open in YAML mode unchanged.
 
 ---
 
+## What you see
+
+### Secret form (kv-map + base64 round-trip)
+
+![Secret detail pane on the monitoring namespace — schema-aware form mode showing the data kv-map editor](../assets/form-editor/secret.png)
+
+The detail pane's edit view shows:
+
+- **`form` / `yaml`** tabs in the header, with a small **SCHEMA-AWARE EDITOR** badge to the right when the form has a real OpenAPI v3 schema backing it.
+- **`uid`** rendered as a read-only metadata input (immutable post-create).
+- **`type`** as a free-text input (`Opaque` here; for `kubernetes.io/dockerconfigjson` etc. the type is whatever the apiserver accepts).
+- **`data`** as a key/value map editor — each key is a row with key + value text inputs. The screencap shows three keys (`admin-password`, `admin-user`, `ldap-toml`); the **+ add key** button below the list adds a new pair.
+- **`stringData`** as a parallel kv-map editor (plaintext, no base64 round-trip — see [`Secret base-64 layer`](#secret-base-64-layer) for the data path).
+- **`immutable`** as a checkbox (false here).
+- Footer: **cancel** / **apply changes**. Apply runs the same `SelfSubjectAccessReview` pre-flight + server-side dry-run + audit row that the YAML editor uses.
+
+### Service form (array-of-objects)
+
+![Service detail pane in form mode — spec.ports[] array editor with named entry, port 80, protocol TCP](../assets/form-editor/service.png)
+
+Service exercises the **array-of-objects** path of the form engine. `spec.ports[]` renders as a list of expandable cards; each card carries the schema-defined fields (`appProtocol`, `name`, `nodePort`, `port`, `protocol`, `targetPort`) with the (i) tooltips on every label.
+
+- **PORTS #1** header + per-row **remove** button — array entries can be deleted independently.
+- **`add item, press Enter`** input below — type a label name to push a new entry onto the array. Required-field validation runs per entry, so the new card lights up missing required fields immediately.
+- `port` is required (asterisk shown); `protocol` defaults to `TCP` via the schema's default.
+- `targetPort` is the canonical **`oneOf` (string-or-int) discriminator picker** — flip the picker to switch between an int (e.g. `9898`) and a string port name (e.g. `http`); branch switching wipes the previous-branch value with a confirm prompt as described under [`Composition-keyword coverage`](#composition-keyword-coverage-oneof-allof).
+
+### ConfigMap form (kv-map for `data`)
+
+![ConfigMap detail pane in form mode — demo-app-config showing the data kv-map with feature-flags, log-level, message keys](../assets/form-editor/configmap.png)
+
+ConfigMap exercises the same **kv-map** path as Secret, minus the base64 layer (ConfigMap stores plaintext on the wire). The screencap is the `demo-app-config` ConfigMap from the [Apply YAML demo](../setup/apply-yaml.md#demo-5-doc-mini-app), in the `demo-apply` namespace:
+
+- **`selfLink`** + **`uid`** render as read-only metadata inputs at the top — populated from the existing object, immutable on update.
+- **`data`** as a kv-map. Each row is a key + value pair. Multi-line values (the `feature-flags` entry: `rate-limiter=true\nnew-checkout=false`) are preserved verbatim; the value editor wraps without re-flowing.
+- **`+ add key`** appends a fresh row at the bottom.
+- **`binaryData`** (collapsed) for binary-only contents (base64-encoded on the wire). `binaryData` keys cannot collide with `data` keys; the form enforces this client-side before apply.
+- **`immutable`** as a checkbox. Setting `immutable: true` is a one-way door (the apiserver rejects mutations after); the form surfaces a confirmation step before applying.
+
+### Ingress form (deeply-nested objects + enum picker)
+
+![Ingress detail pane in form mode — periscope ingress with backend.service.name + path + pathType=Prefix](../assets/form-editor/ingress.png)
+
+Ingress exercises the **deeply-nested object** path. The screencap is peri-server's `periscope` Ingress, with the rule's backend service expanded:
+
+- **SERVICE** → `name` — the backing Service name (`periscope`).
+- **PORT** → `name` / `number` — the canonical `oneOf` (string-or-int) port reference. Either field is sufficient; supplying both is rejected by the apiserver.
+- **path** — the request path (`/`). The form does no validation beyond the schema's `pattern`; controller-specific quirks (nginx regex paths, ALB wildcards) pass through.
+- **pathType** — enum dropdown surfacing the schema's three values: `Prefix` (default in the screencap), `Exact`, `ImplementationSpecific`. Schema enums always render as dropdowns; free-text isn't allowed.
+
+Above the rule (off-screen in the screencap), `spec.tls[]` and `spec.ingressClassName` follow the same patterns — `tls[]` is array-of-objects (one card per TLS host group with `hosts[]` + `secretName`), `ingressClassName` is a free-text input (no enum because IngressClasses are discovered runtime, not schema-defined).
+
+Controller-specific annotations (`alb.ingress.kubernetes.io/*`, `nginx.ingress.kubernetes.io/*`, `cert-manager.io/*`) pass through the metadata annotations editor verbatim — the form does not validate them, since they vary by ingress controller.
+
+
+
+---
+
+
 ## When the form shows up
 
 | Kind | Default mode |
@@ -159,7 +218,7 @@ form mode doesn't try to handle 409s itself.
 - **Controller secret picker for `tls[].secretName`** — currently a
   plain text input.  Selecting from existing Secrets in the namespace
   is a polish follow-up.
-- **CRDs.**  Form-mode *routing* is intentionally limited to the
+- **CRDs.**  See [`custom-resources.md`](./custom-resources.md) — form-mode *routing* is intentionally limited to the
   four v1.1-supported kinds (the schema engine itself can render
   most kubebuilder-generated CRDs now that `oneOf` and `allOf` are
   handled, but CRDs aren't wired through `KindEditRouter`).  CRDs

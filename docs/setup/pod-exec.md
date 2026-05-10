@@ -12,6 +12,14 @@ works, and what to do when things misbehave. The design is in
 
 ---
 
+## What you see
+
+![Open Shell session into a podinfo container](../assets/pod-exec/terminal.png)
+
+Click **Open Shell** on any pod's detail page. Periscope opens a slide-up terminal panel at the bottom of the SPA with an attached xterm.js shell — the rest of the SPA stays visible above so you can keep navigating the workload list while a session is open. The panel header shows the **cluster name**, the **pod and container** the session is attached to, a **connection state pill** (`connected · MM:SS` while live, `disconnected` after timeout or close), and **info** + **disconnect** actions. The shell streams stdin / stdout / stderr through a WebSocket to the kube-apiserver under your impersonated identity, and reconnects automatically on transient drops.
+
+---
+
 ## 1. Default behavior
 
 Pod exec is **on by default for every cluster** in the registry. The
@@ -36,7 +44,7 @@ values, RBAC, audit, and SPA flow as any other backend — but the
 transport path is longer, so a few operator-facing implications are
 worth knowing.
 
-**The same toggles apply.** All settings under §2 and §3 — global
+**The same toggles apply.** All settings under 2 and 3 — global
 defaults, per-cluster overrides, `exec.enabled: false`,
 `maxSessionsPerUser`, `serverIdleSeconds` — work identically on
 agent-backed clusters. There is no separate `agent.exec.*` block.
@@ -49,7 +57,7 @@ per-cluster CONNECT into a tunnel dial → `rancher/remotedialer`
 multiplexes it onto the agent's long-lived WebSocket → the agent's
 `httputil.ReverseProxy` (with a `Hijack()` shim for upgrade traffic)
 re-issues the request to the local apiserver with the agent SA
-bearer token. WS v5 vs SPDY transport selection (§4) and circuit-
+bearer token. WS v5 vs SPDY transport selection (4) and circuit-
 breaker behavior happen on the *server* end; the agent is unaware.
 
 **Why the loopback CONNECT proxy.** client-go's WS / SPDY exec
@@ -64,11 +72,11 @@ loopback listener at startup.
 in the *target* cluster's namespace, evaluated under the human's
 impersonated identity. The agent's SA needs only its standard
 `impersonate` lever (see [`docs/setup/cluster-rbac.md`](./cluster-rbac.md)
-§ "Agent backend"). No additional RBAC for exec specifically.
+ "Agent backend"). No additional RBAC for exec specifically.
 
 **Audit is unchanged.** `pod.exec.session_start` /
 `pod.exec.session_end` records emit on the central server, with
-the same fields described in §7. The `cluster:` field carries the
+the same fields described in 7. The `cluster:` field carries the
 agent-backed cluster's registry name.
 
 **Latency.** First-exec latency on an agent-backed cluster is
@@ -352,7 +360,7 @@ causes, in order:
    impersonated user's RBAC. Default agent ClusterRole grants
    this; verify if you tightened it.
 4. **Tunnel WS path strips upgrade headers.** Same root cause as
-   the §8 "WebSocket upgrade fails" bullet, but on the central-
+   the 8 "WebSocket upgrade fails" bullet, but on the central-
    server-to-agent leg. Check `agent.tunnelSANs` and any
    intermediate LB.
 

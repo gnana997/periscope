@@ -1403,7 +1403,7 @@ export async function mintAgentToken(cluster: string, signal?: AbortSignal): Pro
  * download. The actual /yaml fetches are unchanged; this endpoint
  * only records "alice bulk-downloaded N {kind} from cluster X" so
  * audit reviewers can answer that question without joining
- * individual /yaml read events. See RFC 0003 §4 (`bulk_download`
+ * individual /yaml read events. See RFC 0003 4 (`bulk_download`
  * verb) for the schema.
  *
  * Outcome semantics:

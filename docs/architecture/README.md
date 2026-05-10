@@ -144,7 +144,7 @@ grows.
   `*.failed` after. So a denied / errored action still leaves a
   row.
 - **Stability tiers on the API.** Not every endpoint is semver-
-  stable. See [`../api.md`](../api.md) §2 for the three-tier
+  stable. See [`../api.md`](../api.md) 2 for the three-tier
   classification.
 
 ## Where things deliberately aren't

@@ -20,6 +20,16 @@ This guide walks each mode end-to-end.
 
 ---
 
+## What you see
+
+![ClusterRoles list on peri-server](../assets/rbac/cluster-roles-list.png)
+
+The **Access** group in the sidebar carries the cluster'\''s RBAC inventory: **Roles**, **ClusterRoles**, **RoleBindings**, **ClusterRoleBindings**, **ServiceAccounts**. Each list page shows name, rule count (or subjects/roleref), and age. Detail panes expand the rules / bindings into kubectl-describe-equivalent views.
+
+Periscope ships every binding required for the impersonation chain to work — the screencap above shows the `cluster-admin`, `admin`, `edit`, `view` standard ClusterRoles plus the chart-rendered tier ClusterRoles (`periscope-triage`, `periscope-write`, `periscope-maintain`) that map your IdP groups to K8s permissions.
+
+---
+
 ## Background: how impersonation works
 
 In `tier` and `raw` modes, Periscope's pod authenticates to each cluster
@@ -421,6 +431,15 @@ subjects:
     name: periscope-tier:read
     apiGroup: rbac.authorization.k8s.io
 ```
+
+**What this looks like for a read-tier user**:
+
+![Helm page on peri-server rendered as a forbidden state — gnana997@test.local with OIDC + READ tier badges, lock icon, "needs list permission on the helm storage Secrets" copy](../assets/helm/access-denied.png)
+
+Same `gnana997@test.local` account from the [auth0 verify step](./auth0.md#10-verify), but in this Auth0 tenant the user is mapped to the `read` tier (popover shows `OIDC` + `READ` badges instead of `ADMIN`). The Helm page renders the standard forbidden state with kind-specific copy: `Your role doesn't allow listing helm releases here. needs list permission on the helm storage Secrets (or ConfigMaps) in at least one namespace.` Page-level (not row-level) — the list never even loads.
+
+This is the **`view`-tier excludes Secret reads** row of the table above, surfaced visually. To unblock this user, apply the `periscope-helm-browser-read` binding below.
+
 
 This is **opt-in** because granting `secrets: list` cluster-wide is a
 significant escalation from `view`'s defaults — `view` deliberately

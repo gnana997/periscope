@@ -463,6 +463,14 @@ aws cloudtrail lookup-events \
 
 ---
 
+Once you sign in, the landing page is the **fleet view** — every cluster registered in the [`clusters[]`](#3-minimum-values-file) array, one card per cluster:
+
+![Fleet view after a fresh deploy](../assets/fleet/hero.png)
+
+Each card carries the cluster's **status glyph** (●  ◐  ✕  ○  ⌀), **region**, **backend** (`IN-CLUSTER`, `EKS`, `KUBECONFIG`, `AGENT`), **K8s version**, **EoSS countdown chip** when standard support ends within 180 days, **node / pod / namespace counts**, and **workload-health hot signals** (crashloop / failed / image-pull). Click a card to drill into the cluster overview. The **+ onboard cluster** action in the top-right registers an additional cluster without restart — see [`agent-onboarding.md`](./agent-onboarding.md) for the agent-backed flow.
+
+---
+
 ## 8. Upgrades
 
 ```sh

@@ -152,6 +152,7 @@ Both signed (cosign keyless) and discoverable on [Artifact Hub](https://artifact
 - [Helm release browser](docs/setup/helm-releases.md)
 - [Pod exec setup](docs/setup/pod-exec.md)
 - [NetworkPolicy](docs/setup/networkpolicy.md)
+- [Apply YAML dialog](docs/setup/apply-yaml.md) — paste/drop multi-doc YAML with per-doc RBAC pre-flight
 - [Multi-cluster onboarding (agent)](docs/setup/agent-onboarding.md) — register a managed cluster via the periscope-agent tunnel
 - [EKS upgrade readiness](docs/setup/eks-upgrade-readiness.md) — Upgrade Insights + managed node group AMI drift
 

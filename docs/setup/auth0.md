@@ -174,16 +174,21 @@ values — see `docs/setup/deploy.md`.)
 ## 10. Verify
 
 1. Open `http://localhost:5173/`. You should land on Periscope's
-   `<LoginScreen>` with a "sign in with okta" button (the label is
+   `<LoginScreen>` with a "sign in with auth0" button (the label is
    generic — works for any IdP).
+
+   ![Periscope login landing — orange P logo, italic display wordmark, single sign-in button](../assets/auth/landing.png)
 2. Click it. You're 302'd through `/api/auth/login` to Auth0's
    `/authorize`.
+
+   ![Auth0 universal login — email/password modal on the dev tenant, Continue with Google](../assets/auth/auth0-login.png)
 3. Sign in. Auth0 sends you back to `/api/auth/callback`.
 4. Periscope verifies the ID token, applies the `allowedGroups`
    gate, sets the session cookie, 302s you to `/`.
 5. The dashboard loads. Click your avatar in the cluster rail —
-   the popover shows your email, an `oidc` badge (was `dev` in dev
-   mode), and your groups.
+   the popover shows your email, an `oidc` badge (was `dev` in dev mode), an `admin` badge if your groups grant write / apply, and your groups.
+
+   ![Avatar popover — alice@test.local with OIDC + ADMIN badges and periscope-users group](../assets/auth/avatar-popover.png)
 
 If you get **403 "your account is not in any group that has Periscope
 access"** — go back to 6 and confirm the user's `app_metadata.groups`
