@@ -41,6 +41,31 @@ tag.
   
 ### Added
 
+- Karpenter dashboard (#118). Curated read-only view at
+  `/clusters/{c}/karpenter` that auto-detects via the
+  `karpenter.sh/v1` CRD probe and joins three data sources kubectl
+  cant: NodePools (with weight + disruption budgets + per-pool
+  $/hr from the controllers `/metrics` exposition), NodeClaims
+  grouped by NodePool with the `Drifted` condition surfaced as a
+  badge, and pending pods waiting on Karpenter with the per-NodePool
+  rejection reasons extracted from the `FailedScheduling` apiserver
+  Event. The pending-pods join is the differentiator: operators no
+  longer have to grep karpenter-controller logs to find out why a
+  pod isnt being scheduled — each rejected NodePool renders inline
+  next to the pod with the wrapped reason ("incompatible
+  requirements", "insufficient capacity", etc.). Cost summary uses
+  the apiserver service-proxy verb to scrape
+  `karpenter_cloudprovider_instance_type_offering_price_estimate`
+  and joins it to live NodeClaim labels (instance type / capacity
+  type / zone). Graceful degradation: missing /metrics or events
+  list failures degrade individual panels (`metricsAvailable: false`,
+  empty incompatibility breakdown) without failing the whole
+  response. Sidebar entry auto-hides on clusters without
+  Karpenter installed. New `karpenter_read` audit verb mirrors the
+  existing `eks_insights_read` pattern (read-style, emit-on-every-call).
+  Phase 2 follow-ups (disruption-blocked badge, AMI drift rollout,
+  ICE blacklist panel) tracked in #148.
+
 - Schema form: form sections start collapsed; users open what they
   need to edit. Replaces the prior "primary section open by default"
   layout — for Deployment / StatefulSet (7+ sections) the always-

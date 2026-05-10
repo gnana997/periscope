@@ -109,6 +109,11 @@ export const queryKeys = {
         ["cluster", c, "upgradeInsights", "detail", id] as const,
     },
 
+    // Karpenter dashboard (issue #118). Single response covers
+    // NodePools / NodeClaims / pending pods / metrics — invalidating
+    // any of those means re-fetching the whole shape, so one key.
+    karpenter: () => ["cluster", c, "karpenter"] as const,
+
     // EKS managed node groups (issue #103). Drift fields share the
     // same query subtree because the data is computed on the same
     // backend handler — no point invalidating drift independently.

@@ -124,6 +124,7 @@ are not allowed — every emission site uses a `audit.Verb*` constant.
 | `helm_uninstall` | `helmUninstallHandler`, AFTER | `success` / `failure` / `denied` | `keepHistory: bool`, `disableHooks: bool`. On `success`: `revisionsRemoved: int` |
 | `helm_rollback_intent` | `helmRollbackHandler`, BEFORE | `success` only | `targetRevision: int`, `wait: bool`, `cleanupOnFail: bool`, `disableHooks: bool` |
 | `helm_rollback` | `helmRollbackHandler`, AFTER | `success` / `failure` / `denied` | `targetRevision: int`, `wait: bool`, `cleanupOnFail: bool`, `disableHooks: bool`. On `success`: `fromRevision: int`, `toRevision: int`, `newRevision: int` |
+| `karpenter_read` | `karpenterHandler` (GET `/api/clusters/{c}/karpenter`) | `success` / `failure` | `op: string`. Values: `available_false` (CRDs absent), `list` (full read), `list:nodepools_failed` / `list:nodeclaims_failed` (apiserver list call failed), `detect_failed` / `client_build_failed` (transport error). |
 | `log_open` | _reserved_ | _reserved_ | _reserved_ |
 
 `bulk_download` is **SPA-emitted**, not server-derived. The endpoint
@@ -172,6 +173,21 @@ every action — operators whose role can't apply / patch / delete the
 release's manifests get a 403 with the failing (verb, GVR) tuples
 in the response body and a `denied` audit row before any helm SDK
 state mutation. Mirrors the `apply` verb's pre-flight pattern.
+
+`karpenter_read` is a read-style verb (no mutation), modeled on
+`eks_insights_read` / `eks_addons_read` / `eks_nodegroups_read`.
+Compliance reviewers asked specifically for a record that an
+operator viewed the autoscaler dashboard before suspicious node
+churn at 3am — the read itself is the auditable signal. Each call
+to `GET /api/clusters/{c}/karpenter` emits exactly one row with
+the `op` extra carrying which code path executed: `available_false`
+when the cluster has no `karpenter.sh/v1` CRDs (the dashboard
+short-circuits before any further reads), `list` for a successful
+full read, or one of the listed failure ops when the apiserver
+call or transport setup fails. Best-effort sub-calls (events list
+for the pending-pod join, `/metrics` scrape for the cost summary)
+do NOT emit their own audit rows — they degrade silently into the
+single outcome row.
 
 ---
 
