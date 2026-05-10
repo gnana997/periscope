@@ -10,13 +10,32 @@
 //   - Validation runs on every change; issues are passed down by
 //     path so each field can render its inline error.
 
-import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
+import {
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { buildFieldDescriptors, type WalkOptions } from "./walker";
 import { validateValues } from "./validate";
-import { collectSectioned, descendantHasSection } from "./sections";
+import { FormOpenContext, useFormOpen, useFormOpenContext, type FormOpenApi } from "./useFormOpen";
+import { rowSummary } from "./arrayRowSummary";
+import {
+  collectRowSubSections,
+  collectSectioned,
+  descendantHasSection,
+} from "./sections";
 import { cn } from "../cn";
 import { getAtPath, setAtPath } from "./pathOps";
-import type { FieldDescriptor, JSONSchema, ValidationIssue } from "./types";
+import type {
+  FieldDescriptor,
+  FieldSection,
+  JSONSchema,
+  RowSubSectionConfig,
+  ValidationIssue,
+} from "./types";
 import { Tooltip } from "../../components/Tooltip";
 
 // InfoTip — tiny "(i)" affordance next to a label that opens a
@@ -44,16 +63,20 @@ function InfoTip({ text }: { text: string | undefined }) {
 
 export type SchemaFormMode = "create" | "edit";
 
-export interface SchemaFormSectionLabels {
-  /** Required header for the always-open primary section. Kind-specific
-   *  to give the operator clear intent ("Data" for ConfigMap, "Networking"
-   *  for Service, etc.). */
-  primary: string;
-  /** Header for the collapsed metadata section. Defaults to "Metadata". */
-  metadata?: string;
-  /** Header for the collapsed advanced section. Defaults to "Advanced".
-   *  The renderer appends a `(N)` field count automatically. */
-  advanced?: string;
+/** One section in the form's L1 layout. The renderer draws sections
+ *  in declared order; the first one with `defaultOpen=true` renders
+ *  as a `<section>` with a heading; the rest render as `<details>`
+ *  with a clickable summary. */
+export interface SchemaFormSectionConfig {
+  id: FieldSection;
+  label: string;
+  defaultOpen?: boolean;
+  /** Override defaultOpen=false when the section's bucket has any
+   *  populated descriptor — useful for Volumes where editing
+   *  volumeMounts without seeing volumes is a footgun. */
+  openWhenPopulated?: boolean;
+  /** Append "(N)" field count in the summary. Used for Advanced. */
+  showCount?: boolean;
 }
 
 export interface SchemaFormProps {
@@ -70,12 +93,16 @@ export interface SchemaFormProps {
   mode?: SchemaFormMode;
   /** Rendered when the schema produces zero descriptors. */
   emptyMessage?: ReactNode;
-  /** When set, descriptors are grouped into primary / metadata /
-   *  advanced sections according to `descriptor.section` stamped by the
-   *  walker. K8sSchemaForm passes this; Helm leaves it undefined to
-   *  keep the legacy flat layout. */
-  sectionLabels?: SchemaFormSectionLabels;
+  /** When set, descriptors are grouped into the declared sections in
+   *  order. K8sSchemaForm passes `getSections(kind)`; Helm leaves it
+   *  undefined to keep the legacy flat layout. */
+  sections?: SchemaFormSectionConfig[];
+  /** Stable string identifier for localStorage-backed open-state
+   *  memory. K8sSchemaForm passes the kind name; Helm leaves it
+   *  undefined (no persistence). */
+  formKey?: string;
 }
+
 export function SchemaForm({
   schema,
   values,
@@ -83,7 +110,8 @@ export function SchemaForm({
   walkOptions,
   mode = "edit",
   emptyMessage,
-  sectionLabels,
+  sections,
+  formKey,
 }: SchemaFormProps) {
   const descriptors = useMemo(
     () => buildFieldDescriptors(schema, walkOptions),
@@ -91,6 +119,7 @@ export function SchemaForm({
   );
   const issues = useMemo(() => validateValues(schema, values), [schema, values]);
   const sectioned = useMemo(() => collectSectioned(descriptors), [descriptors]);
+  const openApi = useFormOpen(formKey);
 
   if (descriptors.length === 0) {
     return (
@@ -113,8 +142,10 @@ export function SchemaForm({
 
   // Back-compat fallback: when the caller hasn't asked for sections,
   // OR no descriptor has a section stamp (Helm path), render the flat
-  // ordered list exactly like the pre-#142 layout.
-  if (!sectionLabels || sectioned.total === 0) {
+  // ordered list exactly like the pre-#142 layout. No FormOpenContext
+  // provider — array-of-objects rows fall back to always-open
+  // fieldsets the way they always did for Helm.
+  if (!sections || sections.length === 0 || sectioned.total === 0) {
     return (
       <form className="space-y-3" onSubmit={(e) => e.preventDefault()}>
         {descriptors.map(renderRow)}
@@ -132,45 +163,128 @@ export function SchemaForm({
   );
 
   return (
-    <form className="space-y-3" onSubmit={(e) => e.preventDefault()}>
-      <section className="space-y-3">
-        <h3 className="font-mono text-[11px] uppercase tracking-[0.14em] text-ink-faint">
-          {sectionLabels.primary}
-        </h3>
-        <div className="space-y-3">{sectioned.primary.map(renderRow)}</div>
-      </section>
+    <FormOpenContext.Provider value={openApi}>
+      <form className="space-y-3" onSubmit={(e) => e.preventDefault()}>
+        <ExpandCollapseToolbar openApi={openApi} />
+        {sections.map((section) => {
+          const bucket = sectioned.byId.get(section.id) ?? [];
+          if (bucket.length === 0) return null;
+          const id = `section.${section.id}`;
+          const summaryText = section.showCount
+            ? `${section.label} (${bucket.length})`
+            : section.label;
+          return (
+            <DetailsBlock
+              key={section.id}
+              id={id}
+              summary={summaryText}
+              level="l1"
+            >
+              {bucket.map(renderRow)}
+            </DetailsBlock>
+          );
+        })}
 
-      {sectioned.metadata.length > 0 && (
-        <details className="group rounded-sm border border-border">
-          <summary className="cursor-pointer select-none px-3 py-2 font-mono text-[11px] uppercase tracking-[0.14em] text-ink-faint transition-colors hover:text-ink">
-            {sectionLabels.metadata ?? "Metadata"}
-          </summary>
-          <div className="space-y-3 px-3 pb-3 pt-1">
-            {sectioned.metadata.map(renderRow)}
-          </div>
-        </details>
-      )}
+        {others.length > 0 && (
+          <DetailsBlock id="section.__other__" summary={`Other (${others.length})`} level="l1">
+            {others.map(renderRow)}
+          </DetailsBlock>
+        )}
+      </form>
+    </FormOpenContext.Provider>
+  );
+}
 
-      {sectioned.advanced.length > 0 && (
-        <details className="group rounded-sm border border-border">
-          <summary className="cursor-pointer select-none px-3 py-2 font-mono text-[11px] uppercase tracking-[0.14em] text-ink-faint transition-colors hover:text-ink">
-            {sectionLabels.advanced ?? "Advanced"} ({sectioned.advanced.length})
-          </summary>
-          <div className="space-y-3 px-3 pb-3 pt-1">
-            {sectioned.advanced.map(renderRow)}
-          </div>
-        </details>
-      )}
+// DetailsBlock — controlled <details> tied to FormOpenContext. The
+// `level` prop drives visual weight: L1 (top sections) get the full
+// border; L2 (row sub-sections) and L3 (rows themselves) drop to a
+// lighter border with smaller padding so the nesting reads as a
+// hierarchy rather than competing equal-weight boxes.
+function DetailsBlock({
+  id,
+  summary,
+  level,
+  children,
+}: {
+  id: string;
+  summary: ReactNode;
+  level: "l1" | "l2" | "row";
+  children: ReactNode;
+}) {
+  const openApi = useFormOpenContext();
+  const open = openApi ? openApi.isOpen(id) : true;
+  const styles = (() => {
+    switch (level) {
+      case "l1":
+        return {
+          container: "group rounded-sm border border-border",
+          summary:
+            "cursor-pointer select-none px-3 py-2 font-mono text-[11px] uppercase tracking-[0.14em] text-ink-faint transition-colors hover:text-ink",
+          body: "space-y-3 px-3 pb-3 pt-1",
+        };
+      case "l2":
+        return {
+          container: "rounded-sm border border-border/60",
+          summary:
+            "cursor-pointer select-none px-2.5 py-1.5 font-mono text-[10.5px] tracking-[0.08em] text-ink-faint transition-colors hover:text-ink",
+          body: "space-y-2 px-2.5 pb-2.5 pt-1",
+        };
+      case "row":
+        return {
+          container: "rounded-sm border border-border/80 bg-bg/40",
+          summary:
+            "cursor-pointer select-none px-3 py-1.5 font-mono text-[11px] tracking-[0.06em] text-ink-muted transition-colors hover:text-ink",
+          body: "space-y-3 px-3 pb-3 pt-1",
+        };
+    }
+  })();
+  return (
+    <details
+      className={styles.container}
+      open={open}
+      onToggle={(e) => {
+        if (!openApi) return;
+        const target = e.currentTarget;
+        // Sync only when state diverges (toggle was a real user action,
+        // not a controlled-render echo) to avoid feedback loops.
+        if (target.open !== open) {
+          openApi.toggle(id);
+        }
+      }}
+    >
+      <summary className={styles.summary}>{summary}</summary>
+      <div className={styles.body}>{children}</div>
+    </details>
+  );
+}
 
-      {others.length > 0 && (
-        <details className="group rounded-sm border border-border">
-          <summary className="cursor-pointer select-none px-3 py-2 font-mono text-[11px] uppercase tracking-[0.14em] text-ink-faint transition-colors hover:text-ink">
-            Other ({others.length})
-          </summary>
-          <div className="space-y-3 px-3 pb-3 pt-1">{others.map(renderRow)}</div>
-        </details>
-      )}
-    </form>
+// ExpandCollapseToolbar — VSCode-style + / − buttons that flip the
+// form's mode wholesale. Live in the form header so they're stable
+// across section scrolling.
+function ExpandCollapseToolbar({ openApi }: { openApi: FormOpenApi }) {
+  return (
+    <div className="flex items-center justify-end gap-1 pb-1">
+      <button
+        type="button"
+        onClick={openApi.expandAll}
+        disabled={openApi.isAllExpanded}
+        title="Expand all sections"
+        aria-label="Expand all"
+        className="rounded-sm border border-border-strong px-2 py-0.5 font-mono text-[10.5px] text-ink-faint transition-colors hover:border-ink-muted hover:text-ink disabled:cursor-not-allowed disabled:opacity-40"
+      >
+        + expand all
+      </button>
+      <button
+        type="button"
+        onClick={openApi.collapseAll}
+        disabled={openApi.isAllCollapsed}
+        title="Collapse all sections"
+        aria-label="Collapse all"
+        className="rounded-sm border border-border-strong px-2 py-0.5 font-mono text-[10.5px] text-ink-faint transition-colors hover:border-ink-muted hover:text-ink disabled:cursor-not-allowed disabled:opacity-40"
+      >
+        − collapse all
+      </button>
+    </div>
   );
 }
 
@@ -240,16 +354,21 @@ export function FieldRow({ descriptor, values, issues, mode, onChange }: FieldRo
   const readOnly = mode === "edit" && descriptor.editable === "create-only";
 
   return (
-    <div>
-      <div className="flex items-baseline gap-2">
+    <div className="min-w-0">
+      <div className="flex min-w-0 items-baseline gap-2">
         <label htmlFor={id} className="inline-flex items-baseline font-mono text-[12px] text-ink">
           {descriptor.label}
           {descriptor.required ? <span className="text-red"> *</span> : null}
           <InfoTip text={descriptor.description} />
         </label>
-        <span className="font-mono text-[10.5px] text-ink-faint">
-          {pathBreadcrumb(descriptor.path)}
-        </span>
+        {pathBreadcrumb(descriptor.path) ? (
+          <span
+            className="block min-w-0 truncate font-mono text-[10.5px] text-ink-faint"
+            title={descriptor.path.join(".")}
+          >
+            {pathBreadcrumb(descriptor.path)}
+          </span>
+        ) : null}
         {readOnly ? (
           <span className="font-mono text-[10.5px] uppercase tracking-[0.12em] text-ink-faint">
             read-only after create
@@ -616,35 +735,25 @@ function ArrayOfObjectsInput({
   return (
     <div className="space-y-2">
       {arr.map((row, idx) => (
-        <fieldset key={idx} className="rounded-sm border border-border px-3 pb-3 pt-2">
-          <legend className="flex items-center gap-2 px-1">
-            <span className="font-mono text-[11px] uppercase tracking-[0.14em] text-ink-faint">
-              {descriptor.label} #{idx + 1}
-            </span>
-            {readOnly ? null : (
-              <button
-                type="button"
-                onClick={() => removeRow(idx)}
-                className="font-mono text-[10.5px] text-ink-faint hover:text-red"
-                aria-label={`remove ${descriptor.label} ${idx + 1}`}
-              >
-                remove
-              </button>
-            )}
-          </legend>
-          <div className="space-y-3">
-            {childDescriptors.map((child) => (
-              <FieldRow
-                key={child.path.join(".")}
-                descriptor={child}
-                values={row}
-                issues={[]}
-                mode={readOnly ? "edit" : "edit"}
-                onChange={(nextRow) => updateRow(idx, nextRow)}
-              />
-            ))}
-          </div>
-        </fieldset>
+        <ArrayRow
+          key={idx}
+          rowIdx={idx}
+          row={row}
+          parentPath={descriptor.path}
+          label={descriptor.label}
+          readOnly={readOnly}
+          onRemove={() => removeRow(idx)}
+        >
+          <ArrayRowChildren
+            row={row}
+            rowIdx={idx}
+            parentPath={descriptor.path}
+            childDescriptors={childDescriptors}
+            subSections={descriptor.rowSubSections}
+            onChange={updateRow}
+            readOnly={readOnly}
+          />
+        </ArrayRow>
       ))}
       {readOnly ? null : (
         <button
@@ -830,6 +939,196 @@ function BranchSubForm({
   );
 }
 
+// ArrayRow — single-row container for an array-of-objects descriptor's
+// row values. When the FormOpenContext is present (sectioned K8s
+// forms), renders as a controlled <details> with a row summary
+// (e.g. "name: ct-writer · image: ct-writer:local"). When absent
+// (Helm path), falls back to the legacy always-open <fieldset>.
+function ArrayRow({
+  rowIdx,
+  row,
+  parentPath,
+  label,
+  readOnly,
+  onRemove,
+  children,
+}: {
+  rowIdx: number;
+  row: Record<string, unknown>;
+  parentPath: string[];
+  label: string;
+  readOnly?: boolean;
+  onRemove: () => void;
+  children: ReactNode;
+}) {
+  const openApi = useFormOpenContext();
+  const summary = rowSummary(row);
+
+  if (!openApi) {
+    return (
+      <fieldset className="rounded-sm border border-border px-3 pb-3 pt-2">
+        <legend className="flex items-center gap-2 px-1">
+          <span className="font-mono text-[11px] uppercase tracking-[0.14em] text-ink-faint">
+            {label} #{rowIdx + 1}
+          </span>
+          {readOnly ? null : (
+            <button
+              type="button"
+              onClick={onRemove}
+              className="font-mono text-[10.5px] text-ink-faint hover:text-red"
+              aria-label={`remove ${label} ${rowIdx + 1}`}
+            >
+              remove
+            </button>
+          )}
+        </legend>
+        <div className="space-y-3">{children}</div>
+      </fieldset>
+    );
+  }
+
+  // Controlled <details> path. Row id includes the parent dotted path
+  // so two arrays with index-0 rows don't collide.
+  const id = `row.${parentPath.join(".")}[${rowIdx}]`;
+  const open = openApi.isOpen(id);
+  return (
+    <details
+      className="rounded-sm border border-border/80 bg-bg/40"
+      open={open}
+      onToggle={(e) => {
+        const target = e.currentTarget;
+        if (target.open !== open) openApi.toggle(id);
+      }}
+    >
+      <summary className="flex cursor-pointer select-none items-center gap-2 px-3 py-1.5 font-mono text-[11px] tracking-[0.06em] text-ink-muted transition-colors hover:text-ink">
+        <span className="text-ink-faint">{label} #{rowIdx + 1}</span>
+        {summary ? (
+          <span className="truncate text-ink-faint">— {summary}</span>
+        ) : null}
+        {readOnly ? null : (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              onRemove();
+            }}
+            className="ml-auto font-mono text-[10.5px] text-ink-faint hover:text-red"
+            aria-label={`remove ${label} ${rowIdx + 1}`}
+          >
+            remove
+          </button>
+        )}
+      </summary>
+      <div className="space-y-3 px-3 pb-3 pt-1">{children}</div>
+    </details>
+  );
+}
+
+// ArrayRowChildren — renders an array-of-objects ROW's children.
+// When the descriptor carries a rowSubSections list (kind has
+// declared per-row sub-section grouping for this array), the
+// children get grouped by section and rendered as L2 blocks. The
+// L2 sub-section <details> are controlled by the same FormOpenContext
+// as L1, so the expand-all / collapse-all buttons sweep them too.
+// When no rowSubSections are set OR no descriptor carries a sub-
+// section stamp, falls back to the flat list render — preserves
+// Helm + non-sectioned-K8s behavior.
+function ArrayRowChildren({
+  row,
+  rowIdx,
+  parentPath,
+  childDescriptors,
+  subSections,
+  onChange,
+  readOnly,
+}: {
+  row: Record<string, unknown>;
+  rowIdx: number;
+  parentPath: string[];
+  childDescriptors: FieldDescriptor[];
+  subSections?: RowSubSectionConfig[];
+  onChange: (idx: number, next: Record<string, unknown>) => void;
+  readOnly?: boolean;
+}) {
+  const openApi = useFormOpenContext();
+  const renderRow = (child: FieldDescriptor) => (
+    <FieldRow
+      key={child.path.join(".")}
+      descriptor={child}
+      values={row}
+      issues={[]}
+      mode={readOnly ? "edit" : "edit"}
+      onChange={(nextRow) => onChange(rowIdx, nextRow)}
+    />
+  );
+
+  if (!subSections || subSections.length === 0) {
+    return <>{childDescriptors.map(renderRow)}</>;
+  }
+
+  const grouped = collectRowSubSections(childDescriptors);
+  if (grouped.total === 0) {
+    return <>{childDescriptors.map(renderRow)}</>;
+  }
+
+  // Children that didn't match any sub-section path stay visible at
+  // the bottom in an "Other" fold so we don't silently drop new K8s
+  // fields the allowlist hasn't been updated for.
+  const others = childDescriptors.filter((c) => c.section === undefined);
+  const rowKey = `${parentPath.join(".")}[${rowIdx}]`;
+
+  return (
+    <>
+      {subSections.map((sub) => {
+        const bucket = grouped.byId.get(sub.id) ?? [];
+        if (bucket.length === 0) return null;
+        const summaryText = sub.showCount
+          ? `${sub.label} (${bucket.length})`
+          : sub.label;
+        const id = `subsection.${rowKey}.${sub.id}`;
+        const open = openApi ? openApi.isOpen(id) : false;
+        return (
+          <details
+            key={sub.id}
+            className="rounded-sm border border-border/60"
+            open={open}
+            onToggle={(e) => {
+              if (!openApi) return;
+              const target = e.currentTarget;
+              if (target.open !== open) openApi.toggle(id);
+            }}
+          >
+            <summary className="cursor-pointer select-none px-2.5 py-1.5 font-mono text-[10.5px] tracking-[0.08em] text-ink-faint transition-colors hover:text-ink">
+              {summaryText}
+            </summary>
+            <div className="space-y-2 px-2.5 pb-2.5 pt-1">{bucket.map(renderRow)}</div>
+          </details>
+        );
+      })}
+      {others.length > 0 && (() => {
+        const id = `subsection.${rowKey}.__other__`;
+        const open = openApi ? openApi.isOpen(id) : false;
+        return (
+          <details
+            className="rounded-sm border border-border/60"
+            open={open}
+            onToggle={(e) => {
+              if (!openApi) return;
+              const target = e.currentTarget;
+              if (target.open !== open) openApi.toggle(id);
+            }}
+          >
+            <summary className="cursor-pointer select-none px-2.5 py-1.5 font-mono text-[10.5px] tracking-[0.08em] text-ink-faint transition-colors hover:text-ink">
+              Other ({others.length})
+            </summary>
+            <div className="space-y-2 px-2.5 pb-2.5 pt-1">{others.map(renderRow)}</div>
+          </details>
+        );
+      })()}
+    </>
+  );
+}
 // ─── coercion / path helpers ────────────────────────────────────
 
 function pathStartsWith(p: string[], prefix: string[]): boolean {
@@ -842,6 +1141,12 @@ function pathStartsWith(p: string[], prefix: string[]): boolean {
 
 function pathBreadcrumb(path: string[]): string {
   if (path.length <= 1) return "";
+  // Deeply-nested K8s paths (PodAffinity, NodeAffinity etc.) blow
+  // past the form's ~640px width — and at that depth the surrounding
+  // fieldset legends already locate the field, so the breadcrumb is
+  // redundant noise. Drop entirely beyond 4 segments.
+  if (path.length > 4) return "";
+  // For 2-4 segments, show full path (still short enough to fit).
   return path.join(".");
 }
 

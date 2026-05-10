@@ -11,6 +11,8 @@ const PLURAL_TO_KIND: Record<string, SupportedKind> = {
   secrets: "Secret",
   services: "Service",
   ingresses: "Ingress",
+  deployments: "Deployment",
+  statefulsets: "StatefulSet",
 };
 
 export function kindFromYamlKind(yamlKind: string): SupportedKind | undefined {

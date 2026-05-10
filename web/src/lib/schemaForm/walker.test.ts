@@ -619,3 +619,96 @@ describe("walker — sectionResolver stamps descriptor.section + displayOrder", 
     }
   });
 });
+
+describe("walker — array-of-objects row child sub-section stamping (#136)", () => {
+  // Synthetic Deployment-like schema with a containers array.
+  // Tests that the walker stamps row children with the synthetic
+  // "*"-bearing absolute path, and stashes rowSubSections on the
+  // array descriptor.
+  const schema: JSONSchema = {
+    type: "object",
+    properties: {
+      spec: {
+        type: "object",
+        properties: {
+          template: {
+            type: "object",
+            properties: {
+              spec: {
+                type: "object",
+                properties: {
+                  containers: {
+                    type: "array",
+                    items: {
+                      type: "object",
+                      properties: {
+                        name: { type: "string" },
+                        image: { type: "string" },
+                        livenessProbe: { type: "object", properties: { failureThreshold: { type: "integer" } } },
+                        command: { type: "array", items: { type: "string" } },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+  };
+
+  it("stamps row children with sub-section ids via synthetic `*` paths", () => {
+    const ds = buildFieldDescriptors(schema, {
+      allowArrayOfObjects: true,
+      sectionResolver: getSectionResolver("Deployment"),
+      subSectionResolver: (parentPath) => {
+        return parentPath.join(".") === "spec.template.spec.containers"
+          ? [
+              { id: "primary", label: "Primary", defaultOpen: true },
+              { id: "probes", label: "Probes" },
+              { id: "advanced", label: "Container advanced" },
+            ]
+          : undefined;
+      },
+    });
+
+    // Drill down to the containers descriptor.
+    const spec = ds.find((d) => d.path.join(".") === "spec");
+    const template = spec?.children?.find((c) => c.path.join(".") === "spec.template");
+    const podSpec = template?.children?.find((c) => c.path.join(".") === "spec.template.spec");
+    const containers = podSpec?.children?.find(
+      (c) => c.path.join(".") === "spec.template.spec.containers",
+    );
+
+    expect(containers?.type).toBe("array-of-objects");
+    expect(containers?.rowSubSections?.map((s) => s.id)).toEqual([
+      "primary",
+      "probes",
+      "advanced",
+    ]);
+
+    // Row children carry section stamps from the resolver via the
+    // synthetic "containers.*.image" / etc. lookup.
+    const rowChildren = containers?.children ?? [];
+    const byPath = (p: string) => rowChildren.find((c) => c.path.join(".") === p);
+
+    expect(byPath("name")?.section).toBe("primary");
+    expect(byPath("image")?.section).toBe("primary");
+    expect(byPath("livenessProbe")?.section).toBe("probes");
+    expect(byPath("command")?.section).toBe("advanced");
+  });
+
+  it("returns undefined rowSubSections when subSectionResolver is omitted", () => {
+    const ds = buildFieldDescriptors(schema, {
+      allowArrayOfObjects: true,
+      sectionResolver: getSectionResolver("Deployment"),
+    });
+    const containers = ds
+      .find((d) => d.path.join(".") === "spec")
+      ?.children?.find((c) => c.path.join(".") === "spec.template")
+      ?.children?.find((c) => c.path.join(".") === "spec.template.spec")
+      ?.children?.find((c) => c.path.join(".") === "spec.template.spec.containers");
+    expect(containers?.rowSubSections).toBeUndefined();
+  });
+});

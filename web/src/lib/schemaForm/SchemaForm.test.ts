@@ -42,12 +42,12 @@ describe("collectSectioned", () => {
     ];
     const out = collectSectioned(ds);
     expect(out.total).toBe(3);
-    expect(out.primary.map((d) => d.path.join("."))).toEqual([
+    expect((out.byId.get("primary") ?? []).map((d) => d.path.join("."))).toEqual([
       "data",
       "binaryData",
     ]);
-    expect(out.advanced.map((d) => d.path.join("."))).toEqual(["immutable"]);
-    expect(out.metadata).toEqual([]);
+    expect((out.byId.get("advanced") ?? []).map((d) => d.path.join("."))).toEqual(["immutable"]);
+    expect((out.byId.get("metadata") ?? [])).toEqual([]);
   });
 
   it("promotes nested children of an unsectioned parent into their section bucket", () => {
@@ -64,7 +64,7 @@ describe("collectSectioned", () => {
     const out = collectSectioned(ds);
     expect(out.total).toBe(5);
     // Sorted by displayOrder regardless of the source-tree order.
-    expect(out.metadata.map((d) => d.path.join("."))).toEqual([
+    expect((out.byId.get("metadata") ?? []).map((d) => d.path.join("."))).toEqual([
       "metadata.name",
       "metadata.namespace",
       "metadata.labels",
@@ -79,9 +79,9 @@ describe("collectSectioned", () => {
     ];
     const out = collectSectioned(ds);
     expect(out.total).toBe(0);
-    expect(out.primary).toEqual([]);
-    expect(out.metadata).toEqual([]);
-    expect(out.advanced).toEqual([]);
+    expect((out.byId.get("primary") ?? [])).toEqual([]);
+    expect((out.byId.get("metadata") ?? [])).toEqual([]);
+    expect((out.byId.get("advanced") ?? [])).toEqual([]);
   });
 
   it("descriptors without displayOrder sort to the end of their bucket", () => {
@@ -91,7 +91,7 @@ describe("collectSectioned", () => {
       stringField(["c"], { section: "primary", displayOrder: 1 }),
     ];
     const out = collectSectioned(ds);
-    expect(out.primary.map((d) => d.path.join("."))).toEqual(["b", "c", "a"]);
+    expect((out.byId.get("primary") ?? []).map((d) => d.path.join("."))).toEqual(["b", "c", "a"]);
   });
 });
 
