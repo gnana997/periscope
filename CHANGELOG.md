@@ -41,6 +41,16 @@ tag.
   
 ### Added
 
+- Schema form: form sections start collapsed; users open what they
+  need to edit. Replaces the prior "primary section open by default"
+  layout — for Deployment / StatefulSet (7+ sections) the always-
+  open header was overwhelming, so all sections at every depth
+  (top-level, container row, container row sub-section) start
+  closed. New `+ expand all` / `− collapse all` buttons in the
+  form header sweep every accordion in one click (VSCode-style).
+  Last-opened L1 section per kind is remembered in localStorage so
+  the next visit restores your preferred entry point.
+
 - Schema-aware form editor: Deployment + StatefulSet support, with
   per-kind L1 sectioning (#136, builds on #144). Each workload kind
   now opens with the most-edited fields up top — Containers

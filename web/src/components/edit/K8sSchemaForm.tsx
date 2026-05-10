@@ -103,6 +103,7 @@ export function K8sSchemaForm({
       schema={rootSchema}
       walkOptions={walkOptions}
       sections={getSections(kind)}
+      formKey={kind}
       mode={mode}
       onValuesYamlChange={onValuesYamlChange}
       banner={banner}

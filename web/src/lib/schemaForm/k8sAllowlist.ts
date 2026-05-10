@@ -115,7 +115,6 @@ const CONTAINER_SUBSECTIONS: RowSubSection[] = [
     id: "primary",
     label: "Primary",
     paths: ["name", "image", "imagePullPolicy", "ports", "env", "envFrom", "resources"],
-    defaultOpen: true,
   },
   {
     id: "probes",
@@ -159,7 +158,7 @@ const INIT_CONTAINER_SUBSECTIONS: RowSubSection[] = CONTAINER_SUBSECTIONS.map((s
 const KIND_SPECS: Record<SupportedKind, KindSpec> = {
   ConfigMap: {
     sections: [
-      { id: "primary", label: "Data", paths: ["data", "binaryData"], defaultOpen: true },
+      { id: "primary", label: "Data", paths: ["data", "binaryData"] },
       {
         id: "metadata",
         label: "Metadata",
@@ -172,7 +171,7 @@ const KIND_SPECS: Record<SupportedKind, KindSpec> = {
 
   Secret: {
     sections: [
-      { id: "primary", label: "Data", paths: ["type", "data", "stringData"], defaultOpen: true },
+      { id: "primary", label: "Data", paths: ["type", "data", "stringData"] },
       {
         id: "metadata",
         label: "Metadata",
@@ -189,7 +188,6 @@ const KIND_SPECS: Record<SupportedKind, KindSpec> = {
         id: "primary",
         label: "Networking",
         paths: ["spec.type", "spec.selector", "spec.ports"],
-        defaultOpen: true,
       },
       {
         id: "metadata",
@@ -226,7 +224,6 @@ const KIND_SPECS: Record<SupportedKind, KindSpec> = {
         id: "primary",
         label: "Routing & TLS",
         paths: ["spec.ingressClassName", "spec.rules", "spec.tls"],
-        defaultOpen: true,
       },
       {
         id: "metadata",
@@ -254,7 +251,6 @@ const KIND_SPECS: Record<SupportedKind, KindSpec> = {
           "spec.template.spec.containers",
           "spec.template.spec.initContainers",
         ],
-        defaultOpen: true,
       },
       {
         id: "volumes",
@@ -336,7 +332,6 @@ const KIND_SPECS: Record<SupportedKind, KindSpec> = {
           "spec.template.spec.containers",
           "spec.template.spec.initContainers",
         ],
-        defaultOpen: true,
       },
       {
         id: "volumes",

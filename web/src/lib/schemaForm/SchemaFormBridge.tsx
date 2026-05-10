@@ -37,6 +37,9 @@ export interface SchemaFormBridgeProps {
    *  primary / metadata / advanced sections. K8sSchemaForm sets this;
    *  Helm leaves it undefined to keep the legacy flat layout. */
   sections?: SchemaFormSectionConfig[];
+  /** Stable identifier for localStorage-backed open-state memory.
+   *  K8sSchemaForm passes the kind name. */
+  formKey?: string;
 }
 
 export function SchemaFormBridge({
@@ -49,6 +52,7 @@ export function SchemaFormBridge({
   banner,
   onParseError,
   sections,
+  formKey,
 }: SchemaFormBridgeProps) {
   const [obj, setObj] = useState<Record<string, unknown>>(() => parseSafe(valuesYaml, onParseError));
 
@@ -80,6 +84,7 @@ export function SchemaFormBridge({
         mode={mode}
         emptyMessage={emptyMessage}
         sections={sections}
+        formKey={formKey}
         onChange={(next) => {
           setObj(next);
           // Re-serialize and bubble. Default key order — sortKeys
