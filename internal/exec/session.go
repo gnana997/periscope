@@ -278,7 +278,6 @@ func Run(ctx context.Context, ws *websocket.Conn, p credentials.Provider, params
 				Retryable: false,
 			})
 			setOverride("agent_upstream")
-			override = closeOverride.Load()
 			result.Reason = "agent_upstream"
 			return result, stats, execErr
 		}

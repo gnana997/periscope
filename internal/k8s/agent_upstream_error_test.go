@@ -185,7 +185,7 @@ func TestParseAgentUpstreamBody(t *testing.T) {
 // the failure was on the agent side or in our own loopback proxy.
 func TestRespondProxyError_WireFormat(t *testing.T) {
 	c1, c2 := net.Pipe()
-	defer c1.Close()
+	defer func() { _ = c1.Close() }()
 	go func() {
 		respondProxyError(c2, http.StatusBadGateway, "pre-prod", &agentUpstreamWire{
 			Code:     AgentUpstreamErrorCode,

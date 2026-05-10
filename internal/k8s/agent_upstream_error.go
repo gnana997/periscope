@@ -22,6 +22,7 @@
 package k8s
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -201,7 +202,7 @@ func wrapAgentUpstream(rt http.RoundTripper) http.RoundTripper {
 			return nil, fmt.Errorf("read agent response: %w", readErr)
 		}
 		// Restore the body for the non-match path.
-		resp.Body = io.NopCloser(strings.NewReader(string(body)))
+		resp.Body = io.NopCloser(bytes.NewReader(body))
 
 		ct := resp.Header.Get("Content-Type")
 		if !strings.HasPrefix(ct, "application/json") {
