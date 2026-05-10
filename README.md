@@ -50,7 +50,7 @@ kind create cluster --name periscope-demo
 helm install periscope \
   oci://ghcr.io/gnana997/charts/periscope --version 1.0.5 \
   --namespace periscope --create-namespace \
-  --values https://raw.githubusercontent.com/gnana997/periscope/main/examples/values-kind.yaml
+  --values https://periscopehq.dev/examples/values-kind.yaml
 
 # 3. Wait + open
 kubectl -n periscope wait --for=condition=Available deploy/periscope --timeout=120s
