@@ -30,6 +30,28 @@ to its fleet view.
 > [RFC 0004](../rfcs/0004-exec-over-agent-tunnel-poc.md) for the
 > integration details.
 
+## What you see (UI-driven onboarding)
+
+The fastest path is the SPA'\''s `+ onboard cluster` button on the fleet view. Two-step flow:
+
+### 1. Name the new cluster
+
+![Onboard dialog — enter the cluster name](../assets/agent/onboard-step1-name.png)
+
+The name **must match a backend `agent` entry already in your central server'\''s `clusters[]`**. The UI does not add the registry entry for you in v1.x — the explicit clusters[] config remains the source of truth so it'\''s reviewable + version-controlled. Mismatched name = registration rejected.
+
+### 2. Copy the install command
+
+![Generated helm-install command with the bootstrap token](../assets/agent/onboard-step2-token.png)
+
+The dialog mints a **single-use bootstrap token** with a ~15-minute TTL (the timer counts down in the header strip), pre-formats the full `helm upgrade --install periscope-agent ...` command with `serverURL`, `clusterName`, and `registrationToken` set, and waits for you to copy + run it on the managed cluster. The token is **burn-on-attempt** — invalid cluster name or expired token both consume the token, so you'\''ll need a fresh one.
+
+After the agent connects, refresh the fleet page and the new cluster'\''s card flips from `unknown` to `healthy`.
+
+---
+
+The CLI / config-driven flow below is the equivalent without the SPA — useful for GitOps-managed clusters where the helm install lives in a chart-of-charts you commit to a repo.
+
 ## Prerequisites (apply to every topology)
 
 On the **central cluster** (where the periscope server runs):

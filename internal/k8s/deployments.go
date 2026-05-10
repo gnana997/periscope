@@ -104,6 +104,7 @@ func deploymentSummary(d *appsv1.Deployment) Deployment {
 	if d.Spec.Replicas != nil {
 		replicas = *d.Spec.Replicas
 	}
+	firstImage, imageCount := firstContainerImage(d.Spec.Template.Spec)
 	return Deployment{
 		Name:              d.Name,
 		Namespace:         d.Namespace,
@@ -111,6 +112,8 @@ func deploymentSummary(d *appsv1.Deployment) Deployment {
 		ReadyReplicas:     d.Status.ReadyReplicas,
 		UpdatedReplicas:   d.Status.UpdatedReplicas,
 		AvailableReplicas: d.Status.AvailableReplicas,
+		Image:             firstImage,
+		ImageCount:        imageCount,
 		CreatedAt:         d.CreationTimestamp.Time,
 	}
 }

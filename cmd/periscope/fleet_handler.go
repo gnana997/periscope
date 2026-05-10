@@ -58,6 +58,13 @@ type FleetClusterEntry struct {
 	// backends; empty for EKS.
 	Context     string            `json:"context,omitempty"`
 	Tags        map[string]string `json:"tags,omitempty"`
+
+	// EKS lifecycle window. Sourced from ClusterSummary; populated
+	// only for EKSCapable() clusters with eks:DescribeClusterVersions
+	// permission. Drives the version + EoSS chip on the cluster card.
+	KubernetesVersion        string     `json:"kubernetesVersion,omitempty"`
+	EndOfStandardSupportDate *time.Time `json:"endOfStandardSupportDate,omitempty"`
+	EndOfExtendedSupportDate *time.Time `json:"endOfExtendedSupportDate,omitempty"`
 	Status      string            `json:"status"`
 	LastContact time.Time         `json:"lastContact"`
 	Summary     *FleetSummary     `json:"summary,omitempty"`
@@ -222,6 +229,9 @@ func collectOne(ctx context.Context, c clusters.Cluster, p credentials.Provider,
 		StuckOrFailed: summary.PodPhases.Stuck + summary.PodPhases.Failed,
 	}
 	entry.HotSignals = summarizeHotSignals(summary.NeedsAttention)
+	entry.KubernetesVersion = summary.KubernetesVersion
+	entry.EndOfStandardSupportDate = summary.EndOfStandardSupportDate
+	entry.EndOfExtendedSupportDate = summary.EndOfExtendedSupportDate
 
 	cache.Put(p.Actor(), c.Name, imp.Groups, entry)
 	return entry

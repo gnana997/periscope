@@ -134,6 +134,7 @@ func secretSummary(s *corev1.Secret) Secret {
 		Namespace: s.Namespace,
 		Type:      string(s.Type),
 		KeyCount:  len(s.Data),
+		TLSExpiresAt: secretTLSExpiry(s),
 		CreatedAt: s.CreationTimestamp.Time,
 	}
 }

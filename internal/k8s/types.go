@@ -15,6 +15,16 @@ type Node struct {
 	Roles          []string  `json:"roles"`
 	KubeletVersion string    `json:"kubeletVersion"`
 	InternalIP     string    `json:"internalIP"`
+	// Cloud-provider metadata derived from node labels. Empty
+	// strings on bare-metal / unlabeled nodes.
+	InstanceType string `json:"instanceType,omitempty"`
+	Zone         string `json:"zone,omitempty"`
+	// CapacityType is "ON_DEMAND" or "SPOT" on EKS managed node
+	// groups (label eks.amazonaws.com/capacityType), or "on-demand"/
+	// "spot" on Karpenter (label karpenter.sh/capacity-type). Empty
+	// for unmanaged nodes; the SPA shows a yellow chip on spot so
+	// "why did my pod die overnight" is visible at scroll glance.
+	CapacityType string `json:"capacityType,omitempty"`
 	CPUCapacity    string    `json:"cpuCapacity"`
 	MemoryCapacity string    `json:"memoryCapacity"`
 	CreatedAt      time.Time `json:"createdAt"`
@@ -89,6 +99,17 @@ type Pod struct {
 	// Ready is the kubectl-style "ready/total" container count, e.g. "2/3".
 	Ready     string    `json:"ready"`
 	Restarts  int32     `json:"restarts"`
+	// Image is the container image of the FIRST container in the pod
+	// (or the empty string when the pod has no containers, which
+	// kubelet rejects but the K8s API briefly accepts during
+	// scheduling). When ImageCount > 1, the SPA renders a small
+	// "+N" suffix to surface multi-container pods at glance.
+	Image      string `json:"image,omitempty"`
+	ImageCount int    `json:"imageCount,omitempty"`
+	// QoS is the kubectl-style QoS class (Guaranteed/Burstable/
+	// BestEffort). Informs eviction-order story during incidents:
+	// BestEffort gets evicted first when the node is under pressure.
+	QoS string `json:"qos,omitempty"`
 	CreatedAt time.Time `json:"createdAt"`
 }
 
@@ -160,6 +181,10 @@ type Deployment struct {
 	ReadyReplicas     int32     `json:"readyReplicas"`
 	UpdatedReplicas   int32     `json:"updatedReplicas"`
 	AvailableReplicas int32     `json:"availableReplicas"`
+	// Image is the container image of the FIRST container in the
+	// pod template. When ImageCount > 1, the SPA renders "+N".
+	Image      string `json:"image,omitempty"`
+	ImageCount int    `json:"imageCount,omitempty"`
 	CreatedAt         time.Time `json:"createdAt"`
 }
 
@@ -199,6 +224,11 @@ type Service struct {
 	ClusterIP  string        `json:"clusterIP,omitempty"`
 	ExternalIP string        `json:"externalIP,omitempty"`
 	Ports      []ServicePort `json:"ports"`
+	// Endpoint counts. Aggregated from all EndpointSlices labeled
+	// kubernetes.io/service-name = <svc> at list time. Calls out the
+	// "Service points at zero pods" failure mode at scroll glance.
+	EndpointCount      int `json:"endpointCount"`
+	ReadyEndpointCount int `json:"readyEndpointCount"`
 	CreatedAt  time.Time     `json:"createdAt"`
 }
 
@@ -275,6 +305,10 @@ type StatefulSet struct {
 	ReadyReplicas   int32     `json:"readyReplicas"`
 	UpdatedReplicas int32     `json:"updatedReplicas"`
 	CurrentReplicas int32     `json:"currentReplicas"`
+	// Image is the container image of the FIRST container in the
+	// pod template. When ImageCount > 1, the SPA renders "+N".
+	Image      string `json:"image,omitempty"`
+	ImageCount int    `json:"imageCount,omitempty"`
 	CreatedAt       time.Time `json:"createdAt"`
 }
 
@@ -304,6 +338,10 @@ type DaemonSet struct {
 	UpdatedNumberScheduled int32     `json:"updatedNumberScheduled"`
 	NumberAvailable        int32     `json:"numberAvailable"`
 	NumberMisscheduled     int32     `json:"numberMisscheduled"`
+	// Image is the container image of the FIRST container in the
+	// pod template. When ImageCount > 1, the SPA renders "+N".
+	Image      string `json:"image,omitempty"`
+	ImageCount int    `json:"imageCount,omitempty"`
 	CreatedAt              time.Time `json:"createdAt"`
 }
 
@@ -336,6 +374,10 @@ type Secret struct {
 	Namespace string    `json:"namespace"`
 	Type      string    `json:"type"`
 	KeyCount  int       `json:"keyCount"`
+	// TLSExpiresAt is the NotAfter of the leaf certificate in
+	// data["tls.crt"], for Secrets of type kubernetes.io/tls. nil
+	// for non-TLS secrets or unparseable certs.
+	TLSExpiresAt *time.Time `json:"tlsExpiresAt,omitempty"`
 	CreatedAt time.Time `json:"createdAt"`
 }
 
@@ -364,6 +406,11 @@ type Ingress struct {
 	Class     string    `json:"class,omitempty"`
 	Hosts     []string  `json:"hosts"`
 	Address   string    `json:"address,omitempty"`
+	// TLSExpiresAt is the soonest NotAfter across all TLS secrets
+	// referenced by spec.tls[]. nil when the ingress has no TLS
+	// section or when secret.list permission is unavailable to
+	// the actor (soft-fail at handler level).
+	TLSExpiresAt *time.Time `json:"tlsExpiresAt,omitempty"`
 	CreatedAt time.Time `json:"createdAt"`
 }
 
@@ -565,6 +612,11 @@ type StorageClass struct {
 	ReclaimPolicy        string    `json:"reclaimPolicy,omitempty"`
 	VolumeBindingMode    string    `json:"volumeBindingMode,omitempty"`
 	AllowVolumeExpansion bool      `json:"allowVolumeExpansion"`
+	// IsDefault mirrors the storageclass.kubernetes.io/is-default-class
+	// annotation. Multiple StorageClasses can carry it (which is a
+	// misconfiguration: the operator should fix the cluster). The SPA
+	// shows a (default) tag next to the matching name.
+	IsDefault bool `json:"isDefault"`
 	CreatedAt            time.Time `json:"createdAt"`
 }
 
@@ -742,6 +794,20 @@ type ServiceAccountDetail struct {
 type ClusterSummary struct {
 	KubernetesVersion string  `json:"kubernetesVersion"`
 	Provider          string  `json:"provider"` // "EKS" | "Kubeconfig"
+
+	// EKS lifecycle window. Populated when the cluster's registry
+	// entry is EKSCapable() (ARN + Region + parseable cluster name)
+	// AND the IAM principal has eks:DescribeClusterVersions; zero
+	// values otherwise. Not fatal — every other summary field is
+	// independent.
+	//
+	// Frontend rule of thumb (matches the SPA's chip):
+	//   now < eos - 180d         → grey   (plenty of runway)
+	//   eos - 180d ≤ now < eos   → yellow (plan upgrade)
+	//   eos ≤ now < eos-extended → red    (extended support — $0.60/hr surcharge)
+	//   now ≥ eos-extended       → red    (no AWS support at all)
+	EndOfStandardSupportDate *time.Time `json:"endOfStandardSupportDate,omitempty"`
+	EndOfExtendedSupportDate *time.Time `json:"endOfExtendedSupportDate,omitempty"`
 	NodeCount         int     `json:"nodeCount"`
 	NodeReadyCount    int     `json:"nodeReadyCount"`
 	PodCount          int     `json:"podCount"`
@@ -902,6 +968,10 @@ type PDBDetail struct {
 type ReplicaSet struct {
 	Name      string    `json:"name"`
 	Namespace string    `json:"namespace"`
+	// Image is the container image of the FIRST container in the
+	// pod template. When ImageCount > 1, the SPA renders "+N".
+	Image      string `json:"image,omitempty"`
+	ImageCount int    `json:"imageCount,omitempty"`
 	CreatedAt time.Time `json:"createdAt"`
 	Desired   int32     `json:"desired"`
 	Current   int32     `json:"current"`

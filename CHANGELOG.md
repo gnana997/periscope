@@ -13,6 +13,32 @@ tag.
 
 ## [Unreleased]
 
+### Fixed
+
+- Auth: explicit logout no longer loops back through silent SSO when
+  the IdP session is still valid. The SPA bundle is now served outside
+  the chi router so the auth middleware's "redirect HTML browser
+  navigations to `/api/auth/login`" fallback can't run on the
+  post-logout `/` load. Logout handlers redirect to `/?signedOut=1`;
+  the SPA's AuthProvider strips the flag after reading and stays on
+  the login screen instead of re-authenticating against Auth0's still-
+  valid session (#98).
+
+### Changed
+
+- Auth: when `auth.groupsClaim` is configured but absent from BOTH the
+  ID token and the access token at callback time, login now hard-fails
+  with `401 Unauthorized` and a "your IdP did not return a groups
+  claim" message. Previously the user was silently funneled to
+  `defaultTier`, masking IdP misconfiguration. Operators upgrading from
+  v1.0 with conditional / per-app group enrichment must verify the
+  configured claim is present on every login path before this lands.
+  Claim **present-but-empty** (`"groups": []`) still resolves cleanly
+  to zero groups — only an absent claim is refused (#98).
+- Auth: `/api/auth/whoami` now always emits `"groups": []` for users
+  with zero groups, never `null`. The wire shape is now stable across
+  all session states — the SPA's UserMenu can drop its null-guard.
+  
 ### Added
 
 - Form-mode coverage for `oneOf` discriminators and `allOf`
@@ -153,7 +179,7 @@ tag.
   `GET /api/clusters/{c}/eks/addons` (list) and
   `GET /api/clusters/{c}/eks/addons/{name}` (detail) wire
   `eks:ListAddons` + `eks:DescribeAddon` (addon-scoped resource
-  ARN — see `docs/setup/deploy.md` §4.1 for the policy split) plus
+  ARN — see `docs/setup/deploy.md` 4.1 for the policy split) plus
   `eks:DescribeAddonVersions`. Two-tier server-side cache: per-cluster
   1h, plus a shared `(addonName, k8sVersion)` 6h sticky-error catalog
   so a fleet of N 1.31 clusters hits AWS once per cache window.
@@ -347,7 +373,7 @@ tag.
 
 ### Fixed
 
-- IAM policy snippet in `docs/setup/deploy.md` §4.1 and
+- IAM policy snippet in `docs/setup/deploy.md` 4.1 and
   `docs/setup/eks-upgrade-readiness.md` was incomplete: it grouped
   `eks:DescribeNodegroup` with the cluster-scoped EKS actions under
   `Resource: arn:aws:eks:*:<account>:cluster/*`. AWS scopes
@@ -475,7 +501,7 @@ features, extend Periscope's AWS role with the following IAM actions
 - `ec2:DescribeImages` (resource: `*` — the API has no per-image ARN)
 
 The full IAM policy snippet is in
-[`docs/setup/deploy.md` §4.1](docs/setup/deploy.md). The Helm chart
+[`docs/setup/deploy.md` 4.1](docs/setup/deploy.md). The Helm chart
 itself does not change; non-EKS clusters and existing features
 continue to work without these additions.
 ## [1.0.0]
@@ -517,7 +543,7 @@ Initial stable release.
     page mints a token and renders the helm install command with the
     token baked in, copy-paste ready.
   - **Pod exec on agent-managed clusters** (#43, collapses into
-    #42 per RFC 0004 §10). client-go's WebSocket and SPDY exec
+    #42 per RFC 0004 10). client-go's WebSocket and SPDY exec
     executors bypass `rest.Config.Transport`, so a loopback HTTP
     CONNECT proxy in `internal/k8s/agent_exec_proxy.go` translates
     per-cluster CONNECTs into tunnel dials. The agent's reverse

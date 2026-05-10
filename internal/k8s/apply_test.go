@@ -257,7 +257,7 @@ func TestApplyResource_NamespaceNotFoundPropagatesUnwrapped(t *testing.T) {
 
 func TestApplyResource_ConflictPropagatesUnwrapped(t *testing.T) {
 	// SSA conflicts return 409 with details.causes[] driving the SPA's
-	// per-field conflict resolver (docs/api.md §"apply" pattern). The
+	// per-field conflict resolver (docs/api.md "apply" pattern). The
 	// handler depends on kerrors.IsConflict matching.
 	conflictErr := kerrors.NewConflict(
 		schema.GroupResource{Group: "apps", Resource: "deployments"},

@@ -17,6 +17,75 @@ behavior affects what you see in the UI.
 
 ---
 
+## What you see
+
+### Releases list
+
+![Helm releases on peri-server](../assets/helm/installed-list.png)
+
+The list page shows every release on the cluster — **name**, **namespace**, **chart and chart version**, **app version**, **status pill** (`deployed`, `superseded`, `failed`), and **current revision number**. Clicking a row opens the detail pane.
+
+### Install dialog
+
+![Helm install dialog — external-dns chart with values editor](../assets/helm/install-dialog.png)
+
+The **+ Install chart** action opens a side-pane installer. Left column carries the **chart reference** (helm repo URL or OCI ref), **version** dropdown, **target namespace + release name**, and a **values editor** that toggles between **YAML** and **FORM** modes (form mode renders when the chart ships a `values.schema.json`). Right column carries the **rendered preview** — chart metadata (app version, type, schema availability, maintainers) at the top, and once you click **preview** the rendered manifest + RBAC pre-flight + diff vs current state below. Footer: the equivalent `helm install ...` command Periscope would run, copyable for ops who prefer to run it themselves; **atomic install** is on by default so failures auto-roll-back.
+
+### Upgrade dialog
+
+![Upgrade dialog for metrics-server — diff tab showing 22 changes (modify 19, remove 2, add 1)](../assets/helm/upgrade-dialog-diff.png)
+
+Click **upgrade** on a release to open the upgrade variant of the same dialog. Pre-filled with the release's current chart ref + values from the Periscope-written annotation, so the operator only changes the **version dropdown** + edits the values they need. The right pane carries the chart-action tabs:
+
+- **diff** — side-by-side YAML diff between the current rendered manifests and what the upgrade would produce. Header counts changes by kind (`modify: 19 · remove: 2 · add: 1` in the screencap above).
+- **manifest** — the proposed full rendered output (read-only Monaco viewer).
+- **resources** — flat list of every K8s object the upgrade touches, grouped by kind:
+
+  ![Upgrade dialog — resources tab grouping the 9 K8s objects metrics-server's upgrade touches](../assets/helm/upgrade-dialog-resources.png)
+
+  Counts per kind on the section headers (`CLUSTERROLE (2)`, `CLUSTERROLEBINDING (2)`, …); each row is `apiVersion · namespace/name`. Useful for spotting an upgrade that adds an unexpected resource (a new CRD, a new ClusterRole) before clicking **upgrade**.
+
+Bottom strip carries the **command preview** — the literal `helm upgrade …` that Periscope would run, copyable for operators who prefer to run it themselves. **atomic upgrade** is on by default, called out under the strip: `atomic upgrade — failures auto-roll-back to previous revision`.
+
+While the upgrade is in flight the action button reads `upgrading…` (disabled) and the dialog stays open so the operator sees the result without losing context:
+
+![Upgrade dialog mid-flight — upgrading… button state, resources tab still scoped to the upgrade plan](../assets/helm/upgrade-running.png)
+
+### Release detail — values
+
+![metrics-server release detail — values tab showing the installed values yaml](../assets/helm/metrics-server-values.png)
+
+Each release detail has four tabs: **values** (the values yaml the release was installed with — pictured), **manifest** (every K8s object Helm produced from the chart + values), **history** (per-revision metadata with diff-between-any-two-revisions), and **notes** (the chart's NOTES.txt rendered output). The header strip carries `upgrade` and `uninstall` actions, plus a resource summary like `9 resources · 2 ClusterRole · 1 ClusterRoleBinding · …` so an operator sees the chart's footprint at a glance.
+
+### Comparing revisions
+
+![Helm release diff page — periscope r5 → r7, 2 changes, filter-changes pane on the right](../assets/helm/release-diff.png)
+
+Clicking **diff** between any two revisions on the **history** tab opens the standalone diff page (`/helm/releases/{ns}/{name}/diff?from=N&to=M`). The page is a full-width viewer designed for revision archaeology — what changed, when, and why.
+
+- **Header** — `periscope diff · {release} · r{from} → r{to} · N changes`. Direction is always old → new; flip the URL params to invert.
+- **Left pane** — the full rendered manifest at the `to` revision, with each doc preceded by a `# Source: chart/templates/...yaml` comment so you can find which template a change came from.
+- **Right pane (Filter changes)** — every change as a row: `MODIFY` / `ADD` / `REMOVE` chip, JSON Pointer path (`/metadata/labels/app.kubernetes.io/component`), and **before** / **after** values. Filterable by substring; useful when a release has dozens of edits but you're hunting one of them.
+- **Per-row click** — scrolls the left pane to the matching line and highlights the change inline.
+
+The same `/diff` API the upgrade dialog's **diff** tab uses, but rendered as a full-page navigation target so an operator can deep-link to "what changed between r5 and r7" in an incident-review or PR comment.
+
+
+### Forbidden state
+
+![Helm page rendered as a forbidden state for a read-tier user — lock icon, kind-specific access-denied copy](../assets/helm/access-denied.png)
+
+When the impersonated user's K8s identity lacks `list` on the Helm storage kind for the cluster (Secrets by default), the Helm page renders as a centered access-denied state instead of the list:
+
+- **Lock icon** + **`access denied`** title.
+- **Kind-specific copy** — `Your role doesn't allow listing helm releases here. needs list permission on the helm storage Secrets (or ConfigMaps) in at least one namespace.` Operator-actionable: names the verb + the kind + the namespace scope.
+- **`Contact your cluster admin if you think this is wrong.`** — falls back to the standard forbidden-state copy.
+- The avatar popover (cluster rail, lower-left) confirms the tier — the screencap shows `OIDC` + `READ` badges, so the user is on the `read` tier and the `view` ClusterRole's deliberate Secret-read exclusion is what's blocking them.
+
+To unblock read-tier users for Secret-driver releases, see [`cluster-rbac.md` → Helm release browser RBAC](./cluster-rbac.md#helm-release-browser-rbac).
+
+---
+
 ## 1. Endpoints
 
 | Method | Path | Purpose |

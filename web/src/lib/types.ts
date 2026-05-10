@@ -40,6 +40,12 @@ export interface Node {
   roles: string[];
   kubeletVersion: string;
   internalIP: string;
+  /** From node.kubernetes.io/instance-type label. Empty on bare-metal. */
+  instanceType?: string;
+  /** From topology.kubernetes.io/zone label. */
+  zone?: string;
+  /** EKS "ON_DEMAND"|"SPOT" or Karpenter "on-demand"|"spot". Empty on unmanaged. */
+  capacityType?: string;
   cpuCapacity: string;
   memoryCapacity: string;
   createdAt: string;
@@ -108,6 +114,12 @@ export interface Pod {
   podIP?: string;
   ready: string;
   restarts: number;
+  /** First container's image; "" when the pod has no containers. */
+  image?: string;
+  /** Total container count (only set when > 1; SPA renders "+N" suffix). */
+  imageCount?: number;
+  /** QoS class — Guaranteed | Burstable | BestEffort. Empty during scheduling. */
+  qos?: string;
   createdAt: string;
 }
 
@@ -178,6 +190,9 @@ export interface Deployment {
   readyReplicas: number;
   updatedReplicas: number;
   availableReplicas: number;
+  /** First container's image from the pod template. */
+  image?: string;
+  imageCount?: number;
   createdAt: string;
 }
 
@@ -216,6 +231,9 @@ export interface StatefulSet {
   readyReplicas: number;
   updatedReplicas: number;
   currentReplicas: number;
+  /** First container's image from the pod template. */
+  image?: string;
+  imageCount?: number;
   createdAt: string;
 }
 
@@ -244,6 +262,9 @@ export interface DaemonSet {
   updatedNumberScheduled: number;
   numberAvailable: number;
   numberMisscheduled: number;
+  /** First container's image from the pod template. */
+  image?: string;
+  imageCount?: number;
   createdAt: string;
 }
 
@@ -279,6 +300,11 @@ export interface Service {
   clusterIP?: string;
   externalIP?: string;
   ports: ServicePort[];
+  /** Total endpoints across all EndpointSlices labeled
+   *  kubernetes.io/service-name = <svc>. 0 calls out the
+   *  "selector matches no pods" failure mode. */
+  endpointCount: number;
+  readyEndpointCount: number;
   createdAt: string;
 }
 
@@ -302,6 +328,10 @@ export interface Ingress {
   class?: string;
   hosts: string[];
   address?: string;
+  /** RFC3339. Soonest expiry across all spec.tls[] secrets;
+   *  absent when ingress has no TLS or when the actor lacks
+   *  secret.list permission (handler soft-fails). */
+  tlsExpiresAt?: string;
   createdAt: string;
 }
 
@@ -364,6 +394,9 @@ export interface Secret {
   namespace: string;
   type: string;
   keyCount: number;
+  /** RFC3339. NotAfter of leaf cert in data["tls.crt"] for
+   *  Secrets of type kubernetes.io/tls. Absent for non-TLS. */
+  tlsExpiresAt?: string;
   createdAt: string;
 }
 
@@ -573,6 +606,8 @@ export interface StorageClass {
   reclaimPolicy?: string;
   volumeBindingMode?: string;
   allowVolumeExpansion: boolean;
+  /** Mirrors storageclass.kubernetes.io/is-default-class annotation. */
+  isDefault: boolean;
   createdAt: string;
 }
 
@@ -758,6 +793,12 @@ export interface StorageInfo {
 export interface ClusterSummary {
   kubernetesVersion: string;
   provider: string;
+
+  /** EKS lifecycle window — RFC3339 strings. Populated only for
+   *  EKSCapable clusters with eks:DescribeClusterVersions; absent
+   *  on kubeconfig backends or when the IAM perm is missing. */
+  endOfStandardSupportDate?: string;
+  endOfExtendedSupportDate?: string;
   nodeCount: number;
   nodeReadyCount: number;
   podCount: number;
@@ -1010,6 +1051,9 @@ export interface ReplicaSet {
   desired: number;
   current: number;
   ready: number;
+  /** First container's image from the pod template. */
+  image?: string;
+  imageCount?: number;
   owner: string;
 }
 
@@ -1261,6 +1305,15 @@ export interface FleetClusterEntry {
   /** Kubeconfig context name; only present for kubeconfig backends. */
   context?: string;
   tags?: Record<string, string>;
+
+  /** EKS lifecycle window. Populated only for EKSCapable clusters with
+   *  the eks:DescribeClusterVersions IAM permission. Drives the
+   *  version + EoSS chip on the cluster card. */
+  kubernetesVersion?: string;
+  /** RFC3339. Empty when AWS has not yet announced EoSS for this version. */
+  endOfStandardSupportDate?: string;
+  /** RFC3339. Empty when extended support is not announced. */
+  endOfExtendedSupportDate?: string;
   status: FleetStatus;
   /** RFC3339 timestamp. v1: "now" on every response (no historical ledger). */
   lastContact: string;
@@ -1795,6 +1848,15 @@ export interface NodegroupDetail extends NodegroupSummary {
   diskSize?: number;
   labels?: Record<string, string>;
   tags?: Record<string, string>;
+
+  /** EKS lifecycle window. Populated only for EKSCapable clusters with
+   *  the eks:DescribeClusterVersions IAM permission. Drives the
+   *  version + EoSS chip on the cluster card. */
+  kubernetesVersion?: string;
+  /** RFC3339. Empty when AWS has not yet announced EoSS for this version. */
+  endOfStandardSupportDate?: string;
+  /** RFC3339. Empty when extended support is not announced. */
+  endOfExtendedSupportDate?: string;
   healthIssues?: NodegroupHealthIssue[];
   launchTemplate?: LaunchTemplateRef;
   modifiedAt?: string;

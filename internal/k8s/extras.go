@@ -293,6 +293,7 @@ func replicaSetSummary(r *appsv1.ReplicaSet) ReplicaSet {
 	if r.Spec.Replicas != nil {
 		desired = *r.Spec.Replicas
 	}
+	firstImage, imageCount := firstContainerImage(r.Spec.Template.Spec)
 	return ReplicaSet{
 		Name:      r.Name,
 		Namespace: r.Namespace,
@@ -300,6 +301,8 @@ func replicaSetSummary(r *appsv1.ReplicaSet) ReplicaSet {
 		Desired:   desired,
 		Current:   r.Status.Replicas,
 		Ready:     r.Status.ReadyReplicas,
+		Image:      firstImage,
+		ImageCount: imageCount,
 		Owner:     owner,
 	}
 }

@@ -20,7 +20,7 @@ import (
 
 // Tests for bulkDownloadAuditHandler — the SPA-driven audit emission
 // that records "alice bulk-downloaded N {kind} from cluster X" as a
-// single structured row per download. See RFC 0003 §4 (`bulk_download`
+// single structured row per download. See RFC 0003 4 (`bulk_download`
 // verb) and the issue tracker (#82) for design rationale.
 //
 // fakeProvider is shared with cani_handler_test.go (same package).
