@@ -410,7 +410,7 @@ func ListKarpenterPendingPods(ctx context.Context, cs kubernetes.Interface, now 
 		view := PendingPodView{
 			Namespace:  pod.Namespace,
 			Name:       pod.Name,
-			PendingFor: ageString(nowT.Time.Sub(pod.CreationTimestamp.Time)),
+			PendingFor: ageString(nowT.Sub(pod.CreationTimestamp.Time)),
 		}
 		if msg, ok := eventByUID[string(pod.UID)]; ok {
 			view.Reason = truncateString(msg, 240)
