@@ -21,6 +21,7 @@ import { buildFieldDescriptors } from "./walker";
 import { buildRefResolver, findSchemaByGVK } from "./refResolver";
 import {
   filterSchemaForKind,
+  getSectionResolver,
   getCreateOnlyPaths,
   getKindGVK,
   type SupportedKind,
@@ -414,4 +415,109 @@ describe("YAML 1.1 boolean-keyword strings — regression", () => {
       expect(result).toEqual({ data: { KEY: sample } });
     });
   }
+});
+
+describe("section grouping is UI-only — round-trip preserves all fields", () => {
+  // The renderer regroups descriptors into primary / metadata /
+  // advanced sections; that grouping must NOT alter the values
+  // payload that flows back through the bridge to YAML. This
+  // exercises the same buildFieldDescriptors → setAtPath →
+  // stringify path SchemaFormBridge uses, with sectionResolver
+  // turned on.
+
+  it("ConfigMap: edit a primary field, untouched annotations + immutable persist", () => {
+    const yaml = [
+      "apiVersion: v1",
+      "kind: ConfigMap",
+      "metadata:",
+      "  name: app-config",
+      "  namespace: default",
+      "  annotations:",
+      "    cert-manager.io/issuer: letsencrypt",
+      "  labels:",
+      "    app: web",
+      "data:",
+      "  PORT: \"8080\"",
+      "immutable: true",
+      "",
+    ].join("\n");
+
+    const schema = schemaFor("ConfigMap");
+    const opts = {
+      ...walkOptionsFor("ConfigMap"),
+      sectionResolver: getSectionResolver("ConfigMap"),
+    };
+    const ds = buildFieldDescriptors(schema, opts);
+    const all = flatten(ds);
+
+    // Confirm the walker stamped sections (sanity: this is what
+    // makes the renderer regroup; we want to prove the regroup
+    // doesn't drop fields on save).
+    const data = all.find((d) => d.path.join(".") === "data");
+    const annotations = all.find(
+      (d) => d.path.join(".") === "metadata.annotations",
+    );
+    const immutable = all.find((d) => d.path.join(".") === "immutable");
+    expect(data?.section).toBe("primary");
+    expect(annotations?.section).toBe("metadata");
+    expect(immutable?.section).toBe("advanced");
+
+    // Simulate a primary-section edit: bump data.PORT.
+    const obj = parseYaml(yaml) as Record<string, unknown>;
+    const dataPath = data?.path ?? [];
+    const updated = setAtPath(obj, [...dataPath, "PORT"], "9090");
+    const reYaml = stringifyYaml(updated, { lineWidth: 0, schema: "yaml-1.1" });
+    const reParsed = parseYaml(reYaml) as {
+      data: { PORT: string };
+      metadata: {
+        annotations: Record<string, string>;
+        labels: Record<string, string>;
+      };
+      immutable: boolean;
+    };
+
+    // Primary edit landed.
+    expect(reParsed.data.PORT).toBe("9090");
+    // Untouched fields from OTHER sections survived intact.
+    expect(reParsed.metadata.annotations["cert-manager.io/issuer"]).toBe(
+      "letsencrypt",
+    );
+    expect(reParsed.metadata.labels.app).toBe("web");
+    expect(reParsed.immutable).toBe(true);
+  });
+
+  it("Service: edit advanced clusterIP, primary type/selector/ports persist", () => {
+    const yaml = [
+      "apiVersion: v1",
+      "kind: Service",
+      "metadata:",
+      "  name: web",
+      "spec:",
+      "  type: ClusterIP",
+      "  selector:",
+      "    app: web",
+      "  ports:",
+      "    - port: 80",
+      "      targetPort: 8080",
+      "  clusterIP: 10.0.0.42",
+      "",
+    ].join("\n");
+
+    const obj = parseYaml(yaml) as Record<string, unknown>;
+    const updated = setAtPath(obj, ["spec", "clusterIP"], "10.0.0.99");
+    const reYaml = stringifyYaml(updated, { lineWidth: 0, schema: "yaml-1.1" });
+    const reParsed = parseYaml(reYaml) as {
+      spec: {
+        type: string;
+        selector: Record<string, string>;
+        ports: Array<{ port: number; targetPort: number }>;
+        clusterIP: string;
+      };
+    };
+
+    expect(reParsed.spec.clusterIP).toBe("10.0.0.99");
+    expect(reParsed.spec.type).toBe("ClusterIP");
+    expect(reParsed.spec.selector.app).toBe("web");
+    expect(reParsed.spec.ports[0]).toEqual({ port: 80, targetPort: 8080 });
+  });
 });

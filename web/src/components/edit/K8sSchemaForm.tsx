@@ -16,6 +16,8 @@ import { SchemaFormBridge } from "../../lib/schemaForm/SchemaFormBridge";
 import { buildRefResolver, findSchemaByGVK } from "../../lib/schemaForm/refResolver";
 import {
   filterSchemaForKind,
+  getSectionLabels,
+  getSectionResolver,
   getCreateOnlyPaths,
   getKindGVK,
   type SupportedKind,
@@ -66,6 +68,7 @@ export function K8sSchemaForm({
       // surfaces as the YAML-mode hint.
       allowOneOfDiscriminator: true,
       createOnlyPaths: getCreateOnlyPaths(kind),
+      sectionResolver: getSectionResolver(kind),
     };
     return { rootSchema: filtered, walkOptions: opts };
   }, [schemaQuery.data, gvk.group, gvk.version, gvk.kind, kind]);
@@ -95,6 +98,7 @@ export function K8sSchemaForm({
       valuesYaml={valuesYaml}
       schema={rootSchema}
       walkOptions={walkOptions}
+      sectionLabels={getSectionLabels(kind)}
       mode={mode}
       onValuesYamlChange={onValuesYamlChange}
       banner={banner}

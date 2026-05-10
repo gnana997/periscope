@@ -8,7 +8,12 @@
 // unchanged.
 
 import { mergeAllOf } from "./allOfMerger";
-import type { DiscriminatorBranch, FieldDescriptor, JSONSchema } from "./types";
+import type {
+  DiscriminatorBranch,
+  FieldDescriptor,
+  FieldSection,
+  JSONSchema,
+} from "./types";
 
 export interface WalkOptions {
   /** Resolve a `$ref` string (e.g. "#/components/schemas/...") to a
@@ -32,6 +37,15 @@ export interface WalkOptions {
    *  flag with `editable: "create-only"`. Surfaced by the renderer
    *  as read-only inputs in edit mode. */
   createOnlyPaths?: string[];
+  /** When provided, the walker stamps `descriptor.section` and
+   *  `descriptor.displayOrder` on every descriptor whose dotted path
+   *  matches. K8sSchemaForm uses this to assign primary/metadata/
+   *  advanced sections per kind; SchemaForm renders sectioned blocks
+   *  when any descriptor carries a section, otherwise falls back to
+   *  the flat layout (back-compat for the Helm consumer). */
+  sectionResolver?: (
+    path: string[],
+  ) => { section: FieldSection; displayOrder: number } | undefined;
 }
 
 /** Walk schema, emit a tree of field descriptors. */
@@ -94,6 +108,24 @@ function walkObject(
 }
 
 function walkField(
+  raw: JSONSchema,
+  path: string[],
+  required: boolean,
+  options: WalkOptions,
+  parentSeen: Set<string>,
+): FieldDescriptor {
+  const desc = walkFieldImpl(raw, path, required, options, parentSeen);
+  if (options.sectionResolver) {
+    const sec = options.sectionResolver(path);
+    if (sec) {
+      desc.section = sec.section;
+      desc.displayOrder = sec.displayOrder;
+    }
+  }
+  return desc;
+}
+
+function walkFieldImpl(
   raw: JSONSchema,
   path: string[],
   required: boolean,

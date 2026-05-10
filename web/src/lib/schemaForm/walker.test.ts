@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { buildFieldDescriptors } from "./walker";
 import { buildRefResolver, findSchemaByGVK } from "./refResolver";
-import { filterSchemaForKind, getCreateOnlyPaths } from "./k8sAllowlist";
+import { filterSchemaForKind, getCreateOnlyPaths, getSectionResolver } from "./k8sAllowlist";
 import type { JSONSchema } from "./types";
 import type { OpenAPIDoc } from "../api";
 
@@ -464,5 +464,158 @@ describe("walker — allOf merging (#132)", () => {
     const ds = buildFieldDescriptors(schema);
     const bad = ds.find((d) => d.path.join(".") === "bad");
     expect(bad?.type).toBe("unsupported");
+  });
+});
+
+describe("walker — sectionResolver stamps descriptor.section + displayOrder", () => {
+  // Synthetic ConfigMap-shaped schema. Lets the test exercise the
+  // walker's stamping in isolation from the live K8s OpenAPI schema
+  // (we test the per-kind resolvers directly via k8sAllowlist).
+  const cmShape: JSONSchema = {
+    type: "object",
+    properties: {
+      metadata: {
+        type: "object",
+        properties: {
+          name: { type: "string" },
+          namespace: { type: "string" },
+          labels: { type: "object", additionalProperties: { type: "string" } },
+          annotations: { type: "object", additionalProperties: { type: "string" } },
+        },
+      },
+      data: { type: "object", additionalProperties: { type: "string" } },
+      binaryData: { type: "object", additionalProperties: { type: "string" } },
+      immutable: { type: "boolean" },
+    },
+  };
+
+  it("ConfigMap: top-level primary/advanced fields are stamped at root", () => {
+    const ds = buildFieldDescriptors(cmShape, {
+      allowKvMap: true,
+      sectionResolver: getSectionResolver("ConfigMap"),
+    });
+    const data = ds.find((d) => d.path.join(".") === "data");
+    const binaryData = ds.find((d) => d.path.join(".") === "binaryData");
+    const immutable = ds.find((d) => d.path.join(".") === "immutable");
+    const metadata = ds.find((d) => d.path.join(".") === "metadata");
+
+    expect(data?.section).toBe("primary");
+    expect(data?.displayOrder).toBe(0);
+    expect(binaryData?.section).toBe("primary");
+    expect(binaryData?.displayOrder).toBe(1);
+    expect(immutable?.section).toBe("advanced");
+    expect(immutable?.displayOrder).toBe(0);
+    // The metadata container itself is NOT stamped — only its
+    // children are. The renderer drops the unsectioned parent and
+    // promotes the children into the metadata section.
+    expect(metadata?.section).toBeUndefined();
+  });
+
+  it("ConfigMap: nested metadata.* children get the metadata section", () => {
+    const ds = buildFieldDescriptors(cmShape, {
+      allowKvMap: true,
+      sectionResolver: getSectionResolver("ConfigMap"),
+    });
+    const metaChildren = ds.find((d) => d.path.join(".") === "metadata")?.children ?? [];
+    const byPath = (p: string) => metaChildren.find((c) => c.path.join(".") === p);
+
+    expect(byPath("metadata.name")?.section).toBe("metadata");
+    expect(byPath("metadata.name")?.displayOrder).toBe(0);
+    expect(byPath("metadata.namespace")?.section).toBe("metadata");
+    expect(byPath("metadata.namespace")?.displayOrder).toBe(1);
+    expect(byPath("metadata.labels")?.section).toBe("metadata");
+    expect(byPath("metadata.labels")?.displayOrder).toBe(2);
+    expect(byPath("metadata.annotations")?.section).toBe("metadata");
+    expect(byPath("metadata.annotations")?.displayOrder).toBe(3);
+  });
+
+  it("Service: spec.* fields split between primary and advanced", () => {
+    const svcShape: JSONSchema = {
+      type: "object",
+      properties: {
+        spec: {
+          type: "object",
+          properties: {
+            type: { type: "string" },
+            selector: { type: "object", additionalProperties: { type: "string" } },
+            ports: { type: "array", items: { type: "object" } },
+            clusterIP: { type: "string" },
+            externalTrafficPolicy: { type: "string" },
+            sessionAffinity: { type: "string" },
+          },
+        },
+      },
+    };
+    const ds = buildFieldDescriptors(svcShape, {
+      allowKvMap: true,
+      allowArrayOfObjects: true,
+      sectionResolver: getSectionResolver("Service"),
+    });
+    const specChildren = ds.find((d) => d.path.join(".") === "spec")?.children ?? [];
+    const byPath = (p: string) => specChildren.find((c) => c.path.join(".") === p);
+
+    expect(byPath("spec.type")?.section).toBe("primary");
+    expect(byPath("spec.type")?.displayOrder).toBe(0);
+    expect(byPath("spec.selector")?.section).toBe("primary");
+    expect(byPath("spec.selector")?.displayOrder).toBe(1);
+    expect(byPath("spec.ports")?.section).toBe("primary");
+    expect(byPath("spec.ports")?.displayOrder).toBe(2);
+    expect(byPath("spec.clusterIP")?.section).toBe("advanced");
+    expect(byPath("spec.externalTrafficPolicy")?.section).toBe("advanced");
+    expect(byPath("spec.sessionAffinity")?.section).toBe("advanced");
+  });
+
+  it("Ingress: spec.rules and spec.tls primary; spec.defaultBackend advanced", () => {
+    const ingShape: JSONSchema = {
+      type: "object",
+      properties: {
+        spec: {
+          type: "object",
+          properties: {
+            ingressClassName: { type: "string" },
+            rules: { type: "array", items: { type: "object" } },
+            tls: { type: "array", items: { type: "object" } },
+            defaultBackend: { type: "object", properties: { service: { type: "object" } } },
+          },
+        },
+      },
+    };
+    const ds = buildFieldDescriptors(ingShape, {
+      allowArrayOfObjects: true,
+      sectionResolver: getSectionResolver("Ingress"),
+    });
+    const specChildren = ds.find((d) => d.path.join(".") === "spec")?.children ?? [];
+    const byPath = (p: string) => specChildren.find((c) => c.path.join(".") === p);
+
+    expect(byPath("spec.ingressClassName")?.section).toBe("primary");
+    expect(byPath("spec.ingressClassName")?.displayOrder).toBe(0);
+    expect(byPath("spec.rules")?.section).toBe("primary");
+    expect(byPath("spec.rules")?.displayOrder).toBe(1);
+    expect(byPath("spec.tls")?.section).toBe("primary");
+    expect(byPath("spec.tls")?.displayOrder).toBe(2);
+    expect(byPath("spec.defaultBackend")?.section).toBe("advanced");
+    expect(byPath("spec.defaultBackend")?.displayOrder).toBe(0);
+  });
+
+  it("paths not in any section list get no section property", () => {
+    const ds = buildFieldDescriptors(cmShape, {
+      allowKvMap: true,
+      sectionResolver: getSectionResolver("ConfigMap"),
+    });
+    // `metadata.uid` doesn't exist in our test shape, but more
+    // importantly: the `metadata` container path itself has no
+    // entry in the resolver — verify that yields an undefined
+    // section rather than a default like "primary".
+    const metadata = ds.find((d) => d.path.join(".") === "metadata");
+    expect(metadata?.section).toBeUndefined();
+    expect(metadata?.displayOrder).toBeUndefined();
+  });
+
+  it("walker without sectionResolver leaves descriptors unstamped (Helm back-compat)", () => {
+    const ds = buildFieldDescriptors(cmShape, { allowKvMap: true });
+    for (const d of ds) {
+      expect(d.section).toBeUndefined();
+      expect(d.displayOrder).toBeUndefined();
+    }
   });
 });

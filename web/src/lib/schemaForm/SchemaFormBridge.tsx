@@ -9,7 +9,11 @@
 
 import { useEffect, useState, type ReactNode } from "react";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
-import { SchemaForm, type SchemaFormMode } from "./SchemaForm";
+import {
+  SchemaForm,
+  type SchemaFormMode,
+  type SchemaFormSectionLabels,
+} from "./SchemaForm";
 import type { JSONSchema } from "./types";
 import type { WalkOptions } from "./walker";
 
@@ -29,6 +33,10 @@ export interface SchemaFormBridgeProps {
    *  consumers that want to switch the user back to YAML mode use
    *  this signal. */
   onParseError?: (raw: string) => void;
+  /** When provided, SchemaForm renders descriptors grouped into
+   *  primary / metadata / advanced sections. K8sSchemaForm sets this;
+   *  Helm leaves it undefined to keep the legacy flat layout. */
+  sectionLabels?: SchemaFormSectionLabels;
 }
 
 export function SchemaFormBridge({
@@ -40,6 +48,7 @@ export function SchemaFormBridge({
   emptyMessage,
   banner,
   onParseError,
+  sectionLabels,
 }: SchemaFormBridgeProps) {
   const [obj, setObj] = useState<Record<string, unknown>>(() => parseSafe(valuesYaml, onParseError));
 
@@ -70,6 +79,7 @@ export function SchemaFormBridge({
         walkOptions={walkOptions}
         mode={mode}
         emptyMessage={emptyMessage}
+        sectionLabels={sectionLabels}
         onChange={(next) => {
           setObj(next);
           // Re-serialize and bubble. Default key order — sortKeys
