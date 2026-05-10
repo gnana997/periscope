@@ -38,6 +38,33 @@ Periscope is a self-hosted, multi-cluster Kubernetes console focused on EKS envi
 
 ## Quickstart
 
+### Try locally with kind <span title="60-second evaluation">⚡</span>
+
+The fastest way to see Periscope without touching AWS or an IdP. Runs on any local Kubernetes — kind / k3d / minikube. Sign-in uses an in-process dev fallback so anyone hitting the dashboard becomes `dev@local`.
+
+```sh
+# 1. Create a local cluster
+kind create cluster --name periscope-demo
+
+# 2. Install with the kind-tuned values
+helm install periscope \
+  oci://ghcr.io/gnana997/charts/periscope --version 1.0.5 \
+  --namespace periscope --create-namespace \
+  --values https://raw.githubusercontent.com/gnana997/periscope/main/examples/values-kind.yaml
+
+# 3. Wait + open
+kubectl -n periscope wait --for=condition=Available deploy/periscope --timeout=120s
+kubectl -n periscope port-forward svc/periscope 8080:8080
+
+# 4. Visit http://localhost:8080 in your browser.
+#    Sign-in is automatic — you arrive as "dev@local". No IdP setup.
+```
+
+Cleanup: `kind delete cluster --name periscope-demo`.
+
+> ⚠️  Dev sign-in is for local evaluation only. Don't run this profile against a cluster that holds real workloads — anyone who can reach the SPA becomes the configured `dev` user with `cluster-admin` impersonation.
+
+
 ### Run locally
 
 Prerequisites: Go 1.26, Node 22, and a kubeconfig with access to at least one cluster.
