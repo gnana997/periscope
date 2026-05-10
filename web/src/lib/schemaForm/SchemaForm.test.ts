@@ -6,7 +6,7 @@
 // descriptor lands in which bucket is fully testable here.
 
 import { describe, it, expect } from "vitest";
-import { collectSectioned, descendantHasSection } from "./SchemaForm";
+import { collectSectioned, descendantHasSection } from "./sections";
 import type { FieldDescriptor } from "./types";
 
 const stringField = (

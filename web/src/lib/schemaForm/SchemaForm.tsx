@@ -13,6 +13,7 @@
 import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import { buildFieldDescriptors, type WalkOptions } from "./walker";
 import { validateValues } from "./validate";
+import { collectSectioned, descendantHasSection } from "./sections";
 import { cn } from "../cn";
 import { getAtPath, setAtPath } from "./pathOps";
 import type { FieldDescriptor, JSONSchema, ValidationIssue } from "./types";
@@ -75,55 +76,6 @@ export interface SchemaFormProps {
    *  keep the legacy flat layout. */
   sectionLabels?: SchemaFormSectionLabels;
 }
-
-interface SectionedBuckets {
-  primary: FieldDescriptor[];
-  metadata: FieldDescriptor[];
-  advanced: FieldDescriptor[];
-  total: number;
-}
-
-// Walk the descriptor tree and collect every descriptor whose walker
-// stamped a section. Descriptors land in the bucket directly, even if
-// they are nested children of an unsectioned object container (e.g.
-// `metadata.name` is collected under "metadata" while its parent
-// `metadata` descriptor itself is unsectioned and gets dropped from
-// the layout).
-export function collectSectioned(
-  descriptors: FieldDescriptor[],
-): SectionedBuckets {
-  const buckets: SectionedBuckets = {
-    primary: [],
-    metadata: [],
-    advanced: [],
-    total: 0,
-  };
-  const visit = (d: FieldDescriptor) => {
-    if (d.section) {
-      buckets[d.section].push(d);
-      buckets.total += 1;
-    }
-    if (d.children) {
-      for (const c of d.children) visit(c);
-    }
-  };
-  for (const d of descriptors) visit(d);
-  const byOrder = (a: FieldDescriptor, b: FieldDescriptor) =>
-    (a.displayOrder ?? Number.MAX_SAFE_INTEGER) -
-    (b.displayOrder ?? Number.MAX_SAFE_INTEGER);
-  buckets.primary.sort(byOrder);
-  buckets.metadata.sort(byOrder);
-  buckets.advanced.sort(byOrder);
-  return buckets;
-}
-
-export function descendantHasSection(d: FieldDescriptor): boolean {
-  if (!d.children) return false;
-  return d.children.some(
-    (c) => c.section !== undefined || descendantHasSection(c),
-  );
-}
-
 export function SchemaForm({
   schema,
   values,
