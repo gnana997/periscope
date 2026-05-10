@@ -41,6 +41,27 @@ export type FieldType =
   | "discriminator"
   | "unsupported";
 
+/** Where a top-level descriptor lives in the sectioned form layout
+ *  (introduced for the K8s ConfigMap/Secret/Service/Ingress curated
+ *  forms — Helm consumers leave this unset and get flat rendering).
+ *
+ *  Section semantics:
+ *    primary  — the kind-specific spec content the operator came to
+ *               edit. Always visible at the top of the form.
+ *    metadata — metadata.name / namespace / labels / annotations.
+ *               Useful but rarely the reason someone opened the
+ *               editor; collapsed by default.
+ *    advanced — Spec fields that are valid but rarely touched
+ *               (Service.spec.externalTrafficPolicy etc.) plus
+ *               immutable-after-create flags. Hidden behind a
+ *               "Show advanced" toggle.
+ *
+ *  Stamped by the walker when WalkOptions.sectionResolver is
+ *  supplied. Children of object descriptors inherit visually from
+ *  their parent — only top-level descriptors carry an explicit
+ *  section. */
+export type FieldSection = "primary" | "metadata" | "advanced";
+
 /** One option in a `discriminator`-typed field. The renderer shows a
  *  branch picker (segmented buttons) and recurses into the chosen
  *  branch's `schema` to render the sub-form. `discriminatorKey` is
@@ -98,6 +119,16 @@ export interface FieldDescriptor {
   /** For type=unsupported, why we couldn't render this field as a
    *  form. Surfaced as a "edit in YAML mode" hint. */
   unsupportedReason?: string;
+  /** Curated layout grouping — set on top-level descriptors by the
+   *  walker when WalkOptions.sectionResolver is supplied. The K8s
+   *  forms use this to render primary fields above the fold and
+   *  collapse metadata/advanced. Helm + other unsectioned consumers
+   *  leave this undefined and get the flat-list render. */
+  section?: FieldSection;
+  /** Explicit ordering within a section. Lower number renders first.
+   *  Set alongside `section` by the walker. When unset, descriptors
+   *  fall back to schema-walk order within their section. */
+  displayOrder?: number;
 }
 
 export interface ValidationIssue {

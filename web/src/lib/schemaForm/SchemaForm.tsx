@@ -43,6 +43,18 @@ function InfoTip({ text }: { text: string | undefined }) {
 
 export type SchemaFormMode = "create" | "edit";
 
+export interface SchemaFormSectionLabels {
+  /** Required header for the always-open primary section. Kind-specific
+   *  to give the operator clear intent ("Data" for ConfigMap, "Networking"
+   *  for Service, etc.). */
+  primary: string;
+  /** Header for the collapsed metadata section. Defaults to "Metadata". */
+  metadata?: string;
+  /** Header for the collapsed advanced section. Defaults to "Advanced".
+   *  The renderer appends a `(N)` field count automatically. */
+  advanced?: string;
+}
+
 export interface SchemaFormProps {
   schema: JSONSchema;
   /** Current values. The form treats this as immutable; onChange
@@ -57,6 +69,59 @@ export interface SchemaFormProps {
   mode?: SchemaFormMode;
   /** Rendered when the schema produces zero descriptors. */
   emptyMessage?: ReactNode;
+  /** When set, descriptors are grouped into primary / metadata /
+   *  advanced sections according to `descriptor.section` stamped by the
+   *  walker. K8sSchemaForm passes this; Helm leaves it undefined to
+   *  keep the legacy flat layout. */
+  sectionLabels?: SchemaFormSectionLabels;
+}
+
+interface SectionedBuckets {
+  primary: FieldDescriptor[];
+  metadata: FieldDescriptor[];
+  advanced: FieldDescriptor[];
+  total: number;
+}
+
+// Walk the descriptor tree and collect every descriptor whose walker
+// stamped a section. Descriptors land in the bucket directly, even if
+// they are nested children of an unsectioned object container (e.g.
+// `metadata.name` is collected under "metadata" while its parent
+// `metadata` descriptor itself is unsectioned and gets dropped from
+// the layout).
+export function collectSectioned(
+  descriptors: FieldDescriptor[],
+): SectionedBuckets {
+  const buckets: SectionedBuckets = {
+    primary: [],
+    metadata: [],
+    advanced: [],
+    total: 0,
+  };
+  const visit = (d: FieldDescriptor) => {
+    if (d.section) {
+      buckets[d.section].push(d);
+      buckets.total += 1;
+    }
+    if (d.children) {
+      for (const c of d.children) visit(c);
+    }
+  };
+  for (const d of descriptors) visit(d);
+  const byOrder = (a: FieldDescriptor, b: FieldDescriptor) =>
+    (a.displayOrder ?? Number.MAX_SAFE_INTEGER) -
+    (b.displayOrder ?? Number.MAX_SAFE_INTEGER);
+  buckets.primary.sort(byOrder);
+  buckets.metadata.sort(byOrder);
+  buckets.advanced.sort(byOrder);
+  return buckets;
+}
+
+export function descendantHasSection(d: FieldDescriptor): boolean {
+  if (!d.children) return false;
+  return d.children.some(
+    (c) => c.section !== undefined || descendantHasSection(c),
+  );
 }
 
 export function SchemaForm({
@@ -66,12 +131,14 @@ export function SchemaForm({
   walkOptions,
   mode = "edit",
   emptyMessage,
+  sectionLabels,
 }: SchemaFormProps) {
   const descriptors = useMemo(
     () => buildFieldDescriptors(schema, walkOptions),
     [schema, walkOptions],
   );
   const issues = useMemo(() => validateValues(schema, values), [schema, values]);
+  const sectioned = useMemo(() => collectSectioned(descriptors), [descriptors]);
 
   if (descriptors.length === 0) {
     return (
@@ -81,18 +148,76 @@ export function SchemaForm({
     );
   }
 
+  const renderRow = (d: FieldDescriptor) => (
+    <FieldRow
+      key={d.path.join(".")}
+      descriptor={d}
+      values={values}
+      issues={issues}
+      mode={mode}
+      onChange={onChange}
+    />
+  );
+
+  // Back-compat fallback: when the caller hasn't asked for sections,
+  // OR no descriptor has a section stamp (Helm path), render the flat
+  // ordered list exactly like the pre-#142 layout.
+  if (!sectionLabels || sectioned.total === 0) {
+    return (
+      <form className="space-y-3" onSubmit={(e) => e.preventDefault()}>
+        {descriptors.map(renderRow)}
+      </form>
+    );
+  }
+
+  // "Other" catches top-level descriptors that aren't sectioned and
+  // whose children also aren't — typically forward-compatible cases
+  // where a future K8s field for a supported kind hasn't been added
+  // to the per-kind allowlist yet. Render at the bottom so they're
+  // discoverable rather than silently dropped.
+  const others = descriptors.filter(
+    (d) => d.section === undefined && !descendantHasSection(d),
+  );
+
   return (
     <form className="space-y-3" onSubmit={(e) => e.preventDefault()}>
-      {descriptors.map((d) => (
-        <FieldRow
-          key={d.path.join(".")}
-          descriptor={d}
-          values={values}
-          issues={issues}
-          mode={mode}
-          onChange={onChange}
-        />
-      ))}
+      <section className="space-y-3">
+        <h3 className="font-mono text-[11px] uppercase tracking-[0.14em] text-ink-faint">
+          {sectionLabels.primary}
+        </h3>
+        <div className="space-y-3">{sectioned.primary.map(renderRow)}</div>
+      </section>
+
+      {sectioned.metadata.length > 0 && (
+        <details className="group rounded-sm border border-border">
+          <summary className="cursor-pointer select-none px-3 py-2 font-mono text-[11px] uppercase tracking-[0.14em] text-ink-faint transition-colors hover:text-ink">
+            {sectionLabels.metadata ?? "Metadata"}
+          </summary>
+          <div className="space-y-3 px-3 pb-3 pt-1">
+            {sectioned.metadata.map(renderRow)}
+          </div>
+        </details>
+      )}
+
+      {sectioned.advanced.length > 0 && (
+        <details className="group rounded-sm border border-border">
+          <summary className="cursor-pointer select-none px-3 py-2 font-mono text-[11px] uppercase tracking-[0.14em] text-ink-faint transition-colors hover:text-ink">
+            {sectionLabels.advanced ?? "Advanced"} ({sectioned.advanced.length})
+          </summary>
+          <div className="space-y-3 px-3 pb-3 pt-1">
+            {sectioned.advanced.map(renderRow)}
+          </div>
+        </details>
+      )}
+
+      {others.length > 0 && (
+        <details className="group rounded-sm border border-border">
+          <summary className="cursor-pointer select-none px-3 py-2 font-mono text-[11px] uppercase tracking-[0.14em] text-ink-faint transition-colors hover:text-ink">
+            Other ({others.length})
+          </summary>
+          <div className="space-y-3 px-3 pb-3 pt-1">{others.map(renderRow)}</div>
+        </details>
+      )}
     </form>
   );
 }
