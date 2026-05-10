@@ -14,9 +14,11 @@ import type { ReactNode } from "react";
 import { useOpenAPISchema } from "../../hooks/useResource";
 import { SchemaFormBridge } from "../../lib/schemaForm/SchemaFormBridge";
 import { buildRefResolver, findSchemaByGVK } from "../../lib/schemaForm/refResolver";
+import { buildK8sDiscriminatorHints } from "../../lib/schemaForm/k8sDiscriminatorHints";
 import {
   filterSchemaForKind,
-  getSectionLabels,
+  getSections,
+  getRowSubSections,
   getSectionResolver,
   getCreateOnlyPaths,
   getKindGVK,
@@ -69,6 +71,8 @@ export function K8sSchemaForm({
       allowOneOfDiscriminator: true,
       createOnlyPaths: getCreateOnlyPaths(kind),
       sectionResolver: getSectionResolver(kind),
+      subSectionResolver: (parentPath) => getRowSubSections(kind, parentPath.join(".")),
+      discriminatorHints: buildK8sDiscriminatorHints(),
     };
     return { rootSchema: filtered, walkOptions: opts };
   }, [schemaQuery.data, gvk.group, gvk.version, gvk.kind, kind]);
@@ -98,7 +102,7 @@ export function K8sSchemaForm({
       valuesYaml={valuesYaml}
       schema={rootSchema}
       walkOptions={walkOptions}
-      sectionLabels={getSectionLabels(kind)}
+      sections={getSections(kind)}
       mode={mode}
       onValuesYamlChange={onValuesYamlChange}
       banner={banner}

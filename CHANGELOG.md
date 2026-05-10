@@ -41,6 +41,25 @@ tag.
   
 ### Added
 
+- Schema-aware form editor: Deployment + StatefulSet support, with
+  per-kind L1 sectioning (#136, builds on #144). Each workload kind
+  now opens with the most-edited fields up top — Containers
+  (replicas + containers[] + initContainers[]) is always open;
+  Volumes auto-expands when populated; Strategy & lifecycle, Pod
+  metadata, the Deployment's own Metadata, the immutable Selector,
+  and Advanced (15-field count) live in collapsed `<details>`
+  sections. StatefulSet adds a Persistent storage section for
+  `volumeClaimTemplates` + retention policy. Container array rows
+  themselves get an L2 sub-section split inside the row — Primary
+  (image / env / resources), Probes & lifecycle, Volume mounts
+  (auto-expanding when populated), and Container advanced (count).
+  Walker stamps both L1 and L2 section ids via a single resolver
+  using `*` as the array-element boundary in synthetic absolute
+  paths. Brings in K8s-style polymorphism support too: Probe /
+  LifecycleHandler / Volume / EnvVarSource render as proper
+  discriminator pickers via a hint table, instead of surfacing all
+  ~30 sibling Volume types as simultaneously editable.
+
 - Helm release rollback (#77). New `POST /api/clusters/{c}/helm/
   releases/{ns}/{name}/rollback` endpoint patches the cluster from
   the current revision to the operator-selected target revision via

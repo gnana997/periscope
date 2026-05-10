@@ -12,7 +12,7 @@ import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import {
   SchemaForm,
   type SchemaFormMode,
-  type SchemaFormSectionLabels,
+  type SchemaFormSectionConfig,
 } from "./SchemaForm";
 import type { JSONSchema } from "./types";
 import type { WalkOptions } from "./walker";
@@ -36,7 +36,7 @@ export interface SchemaFormBridgeProps {
   /** When provided, SchemaForm renders descriptors grouped into
    *  primary / metadata / advanced sections. K8sSchemaForm sets this;
    *  Helm leaves it undefined to keep the legacy flat layout. */
-  sectionLabels?: SchemaFormSectionLabels;
+  sections?: SchemaFormSectionConfig[];
 }
 
 export function SchemaFormBridge({
@@ -48,7 +48,7 @@ export function SchemaFormBridge({
   emptyMessage,
   banner,
   onParseError,
-  sectionLabels,
+  sections,
 }: SchemaFormBridgeProps) {
   const [obj, setObj] = useState<Record<string, unknown>>(() => parseSafe(valuesYaml, onParseError));
 
@@ -79,7 +79,7 @@ export function SchemaFormBridge({
         walkOptions={walkOptions}
         mode={mode}
         emptyMessage={emptyMessage}
-        sectionLabels={sectionLabels}
+        sections={sections}
         onChange={(next) => {
           setObj(next);
           // Re-serialize and bubble. Default key order — sortKeys

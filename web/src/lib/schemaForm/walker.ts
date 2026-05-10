@@ -9,11 +9,15 @@
 
 import { mergeAllOf } from "./allOfMerger";
 import type {
+  DiscriminatorHint,
+  RowSubSectionConfig,
   DiscriminatorBranch,
   FieldDescriptor,
   FieldSection,
   JSONSchema,
 } from "./types";
+
+export type { DiscriminatorHint, RowSubSectionConfig } from "./types";
 
 export interface WalkOptions {
   /** Resolve a `$ref` string (e.g. "#/components/schemas/...") to a
@@ -46,6 +50,22 @@ export interface WalkOptions {
   sectionResolver?: (
     path: string[],
   ) => { section: FieldSection; displayOrder: number } | undefined;
+  /** Per-array-of-objects sub-section table. Called with the
+   *  array's parent path; if the kind has declared row
+   *  sub-sections for this array (e.g. Container Primary /
+   *  Probes / Mounts / Advanced for `spec.template.spec.containers`),
+   *  the resolver returns the ordered config list. The walker
+   *  stashes it on the array-of-objects descriptor as
+   *  `rowSubSections`; the renderer reads that to draw L2 blocks
+   *  inside each row. */
+  subSectionResolver?: (parentPath: string[]) => RowSubSectionConfig[] | undefined;
+  /** Sibling-property polymorphism hint table — see DiscriminatorHint.
+   *  Map key is the schema's `$ref` string (matched against the
+   *  property's primary ref before deref — covers both
+   *  `{$ref: X}` and `{allOf: [{$ref: X}]}` envelopes). When matched,
+   *  the walker emits a Shape B-style discriminator over `branches[]`
+   *  with the remaining (non-branch) properties as `sharedChildren`. */
+  discriminatorHints?: Map<string, DiscriminatorHint>;
 }
 
 /** Walk schema, emit a tree of field descriptors. */
@@ -137,6 +157,15 @@ function walkFieldImpl(
   // other's resolution state, or `Outer { a: Inner, b: Inner }`
   // would emit `b` as recursive even though it isn't.
   const seen = new Set(parentSeen);
+  // Discriminator hint pre-detect — match raw schema's primary $ref
+  // BEFORE deref so we can recognise K8s envelopes like
+  // `{allOf:[{$ref: Probe}]}` before they collapse into a flat object
+  // structurally indistinguishable from any other K8s sub-resource.
+  // Look up up front; act on it after deref (we still need the
+  // resolved properties to build the branch sub-forms).
+  const primaryRef = extractPrimaryRef(raw);
+  const hint =
+    primaryRef !== undefined ? options.discriminatorHints?.get(primaryRef) : undefined;
   // Resolve a $ref before reading the rest of the fields so the
   // walker can see the underlying type/properties.
   const schema = derefIfNeeded(raw, options, seen);
@@ -157,6 +186,21 @@ function walkFieldImpl(
     default: schema.default,
     ...(createOnly ? { editable: "create-only" as const } : {}),
   };
+
+  // Hinted discriminator: the host schema told us this type is
+  // a sibling-encoded oneOf. Build a Shape B-style picker over
+  // `hint.branches`; remaining properties become sharedChildren
+  // (rendered alongside the picker, preserved across branch
+  // switches). This is THE bridge that makes K8s Probe / Volume /
+  // EnvVarSource / LifecycleHandler render as proper discriminators
+  // even though their JSON Schema doesn't use `oneOf`.
+  if (hint && schema.properties) {
+    const built = buildHintedDiscriminator(schema, hint, options, seen);
+    if (built) {
+      return { ...base, type: "discriminator", ...built };
+    }
+    // Fall through when no branch keys present in resolved schema.
+  }
 
   // oneOf detection — emit a discriminator descriptor instead of
   // unsupported. Two structural shapes:
@@ -274,11 +318,26 @@ function walkFieldImpl(
         // Children paths are RELATIVE to the row item, not absolute
         // from the form root. The array-of-objects widget composes
         // the absolute path at render time.
-        return {
+        const rowChildren = walkObject(resolvedItems, [], options, seen);
+        // Stamp row children with section/displayOrder via synthetic
+        // absolute paths (parent path + "*" + child path). The
+        // resolver's key map for kinds with sub-sections has those
+        // synthetic keys baked in (see k8sAllowlist.getSectionResolver).
+        if (options.sectionResolver) {
+          stampRowChildrenSections(rowChildren, [...path, "*"], options.sectionResolver);
+        }
+        const arrayDesc: FieldDescriptor = {
           ...base,
           type: "array-of-objects",
-          children: walkObject(resolvedItems, [], options, seen),
+          children: rowChildren,
         };
+        // Stash the kind's row sub-section list on the descriptor so
+        // the renderer can draw L2 blocks inside each row.
+        if (options.subSectionResolver) {
+          const subs = options.subSectionResolver(path);
+          if (subs) arrayDesc.rowSubSections = subs;
+        }
+        return arrayDesc;
       }
       return {
         ...base,
@@ -509,4 +568,97 @@ function branchLabelFor(
   // Last resort. Operators editing CRDs with poorly-titled schemas
   // see "option N" — imperfect but better than yaml-only.
   return `option ${(fallbackIdx ?? 0) + 1}`;
+}
+
+// stampRowChildrenSections walks an array-of-objects descriptor's
+// row children and stamps `section` + `displayOrder` from a section
+// resolver, using a synthetic absolute path computed as
+// [...prefix, ...descriptor.path]. `prefix` is the array's parent
+// path with `*` appended (e.g. ["spec","template","spec","containers","*"]).
+//
+// Doesn't recurse into nested arrays-of-objects or discriminator
+// children — those carry their own walks and would conflict.
+function stampRowChildrenSections(
+  descriptors: FieldDescriptor[],
+  prefix: string[],
+  resolver: (path: string[]) => { section: FieldSection; displayOrder: number } | undefined,
+) {
+  for (const d of descriptors) {
+    const absolute = [...prefix, ...d.path];
+    const sec = resolver(absolute);
+    if (sec) {
+      d.section = sec.section;
+      d.displayOrder = sec.displayOrder;
+    }
+    if (d.children && d.type !== "array-of-objects" && d.type !== "discriminator") {
+      stampRowChildrenSections(d.children, prefix, resolver);
+    }
+  }
+}
+
+// extractPrimaryRef pulls the schema's $ref BEFORE deref. Looks
+// through a single-element `allOf:[{$ref:...}]` envelope (the standard
+// kube-openapi shape). Returns undefined when the schema isn't a ref
+// or has more complex structure.
+function extractPrimaryRef(schema: JSONSchema): string | undefined {
+  if (!schema || typeof schema !== "object") return undefined;
+  if (typeof schema.$ref === "string") return schema.$ref;
+  if (Array.isArray(schema.allOf) && schema.allOf.length === 1) {
+    const entry = schema.allOf[0] as JSONSchema | undefined;
+    if (entry && typeof entry === "object" && typeof entry.$ref === "string") {
+      return entry.$ref;
+    }
+  }
+  return undefined;
+}
+
+// buildHintedDiscriminator constructs a Shape B-style discriminator
+// from a hint table entry. Each entry in hint.branches becomes a
+// branch with the corresponding property's schema; remaining
+// properties become sharedChildren (e.g. Probe's threshold knobs
+// render alongside the branch picker, preserved across switches).
+function buildHintedDiscriminator(
+  schema: JSONSchema,
+  hint: DiscriminatorHint,
+  options: WalkOptions,
+  parentSeen: Set<string>,
+): { branches: DiscriminatorBranch[]; sharedChildren?: FieldDescriptor[] } | undefined {
+  const props = schema.properties ?? {};
+  const branchKeys = hint.branches.filter((k) => k in props);
+  if (branchKeys.length === 0) return undefined;
+
+  const branches: DiscriminatorBranch[] = [];
+  for (const key of branchKeys) {
+    const sub = props[key];
+    if (!sub) continue;
+    const seen = new Set(parentSeen);
+    const descriptors = walkBranchSchema(sub, [key], options, seen);
+    branches.push({
+      label: hint.labels?.[key] ?? branchLabelFor(sub, key),
+      description: typeof sub.description === "string" ? sub.description : undefined,
+      schema: sub,
+      discriminatorKey: key,
+      descriptors,
+    });
+  }
+  if (branches.length === 0) return undefined;
+
+  // Remaining properties become sharedChildren — walked as relative-
+  // path descriptors rooted at [key] (consistent with the Shape B
+  // discriminator path convention).
+  const branchSet = new Set(branchKeys);
+  const sharedChildren: FieldDescriptor[] = [];
+  const requiredSet = new Set(schema.required ?? []);
+  for (const key of Object.keys(props)) {
+    if (branchSet.has(key)) continue;
+    const childSeen = new Set(parentSeen);
+    sharedChildren.push(
+      walkField(props[key], [key], requiredSet.has(key), options, childSeen),
+    );
+  }
+
+  return {
+    branches,
+    sharedChildren: sharedChildren.length > 0 ? sharedChildren : undefined,
+  };
 }

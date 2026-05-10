@@ -60,7 +60,33 @@ export type FieldType =
  *  supplied. Children of object descriptors inherit visually from
  *  their parent — only top-level descriptors carry an explicit
  *  section. */
-export type FieldSection = "primary" | "metadata" | "advanced";
+export type FieldSection = string;
+
+/** Per-row sub-section config. The walker stamps an array-of-objects
+ *  descriptor with `rowSubSections` so the renderer knows how to
+ *  group the row's children into Primary / Probes / Mounts /
+ *  Container advanced (or whatever the kind has declared). */
+export interface RowSubSectionConfig {
+  id: FieldSection;
+  label: string;
+  defaultOpen?: boolean;
+  openWhenPopulated?: boolean;
+  showCount?: boolean;
+}
+
+/** Sibling-property hint for K8s-style polymorphism — see WalkOptions
+ *  `discriminatorHints`. K8s encodes Probe / Volume / EnvVarSource /
+ *  LifecycleHandler this way (mutually exclusive sibling props with
+ *  no `oneOf`); the hint table tells the walker to emit a Shape B
+ *  discriminator instead of a flat object. */
+export interface DiscriminatorHint {
+  /** Property keys that are mutually exclusive — exactly one of them
+   *  should be set on the value at a time. The walker emits one
+   *  branch per key. */
+  branches: string[];
+  /** Optional human label per branch (defaults to the key). */
+  labels?: Record<string, string>;
+}
 
 /** One option in a `discriminator`-typed field. The renderer shows a
  *  branch picker (segmented buttons) and recurses into the chosen
@@ -106,6 +132,12 @@ export interface FieldDescriptor {
    *  between. The renderer recurses into the chosen branch's
    *  schema to render the sub-form. */
   branches?: DiscriminatorBranch[];
+  /** For type=discriminator (hinted shape): properties that are
+   *  NOT branch picks but should still render alongside the picker
+   *  (e.g. Probe's thresholds — initialDelaySeconds, periodSeconds —
+   *  rendered above the branch-specific sub-form, preserved across
+   *  branch switches). */
+  sharedChildren?: FieldDescriptor[];
   /** Constraints surfaced for inline validation hints. */
   pattern?: string;
   format?: string;
@@ -129,6 +161,11 @@ export interface FieldDescriptor {
    *  Set alongside `section` by the walker. When unset, descriptors
    *  fall back to schema-walk order within their section. */
   displayOrder?: number;
+  /** Sub-section grouping for an array-of-objects descriptor's row
+   *  children. Stamped by the walker when WalkOptions.subSectionResolver
+   *  matches. Renderer reads this list to draw L2 sections (e.g.
+   *  Primary / Probes / Mounts / Container advanced) inside each row. */
+  rowSubSections?: RowSubSectionConfig[];
 }
 
 export interface ValidationIssue {
