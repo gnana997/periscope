@@ -51,6 +51,26 @@ While the upgrade is in flight the action button reads `upgrading…` (disabled)
 
 ![Upgrade dialog mid-flight — upgrading… button state, resources tab still scoped to the upgrade plan](../assets/helm/upgrade-running.png)
 
+### Rollback
+
+The release detail's **history** tab carries a per-revision `rollback` action, plus a `compare selected` affordance to diff any two revisions before deciding which one to roll back to:
+
+![Helm release history — 4 revisions with per-row rollback action and compare-selected affordance](../assets/helm/history.png)
+
+Clicking **rollback** opens a focused dialog scoped to the chosen revision pair. The body shows the side-by-side YAML diff that Helm would apply (current → target), so the operator sees exactly which fields change before committing. **Advanced** flags are exposed at the bottom: **wait** (default on — block until rolled-back resources are ready), **cleanup on fail** (default on — remove partially-applied resources if the rollback errors mid-flight), and **disable hooks** (off — skip pre-/post-rollback hooks, only useful when a hook itself is the thing that's stuck):
+
+![Rollback dialog — podinfo r4 → r2 with side-by-side YAML diff and advanced wait / cleanup / disable-hooks flags](../assets/helm/rollback-dialog.png)
+
+While the rollback is in flight the action button reads `rolling back…` (disabled), matching the upgrade dialog's mid-flight UX:
+
+![Rollback dialog mid-flight — rolling back… button state](../assets/helm/rolling-back.png)
+
+After the rollback succeeds, the history tab shows a fresh revision row with the description **`Rollback to N`** — Helm assigns the new highest revision number to the rollback itself, so the rollback is itself reversible by another rollback:
+
+![Helm release history after rollback — r5 deployed with description "Rollback to 2", four prior revisions superseded below](../assets/helm/post-rollback.png)
+
+The action emits a `helm_rollback` audit row (one per release) with the `from_revision` / `to_revision` extras. Like all helm mutations the rollback runs under the requesting user's impersonated identity — a user without the verbs Helm needs (`patch`/`delete`/`create` on the rendered resource kinds) gets a clean apiserver 403 surfaced in the dialog before the rollback starts.
+
 ### Release detail — values
 
 ![metrics-server release detail — values tab showing the installed values yaml](../assets/helm/metrics-server-values.png)
@@ -149,6 +169,12 @@ the relevant namespaces — see the
 [cluster-rbac.md helm browser appendix](./cluster-rbac.md#helm-release-browser-rbac)
 for a copy-pasteable sample.
 
+Mutations (install, upgrade, rollback, uninstall) additionally need
+`patch` / `create` / `delete` on every kind the rendered chart
+manifests touch. Periscope runs a SubjectAccessReview pre-flight
+fan-out for the dialog's preview step and surfaces denials inline
+before the action fires.
+
 ---
 
 ## 4. Response caps and truncation
@@ -207,18 +233,25 @@ The browser surfaces:
 - Side-by-side diff between any two revisions: values diff +
   manifest diff.
 
-It does **not** support:
+Mutations supported (v1.1):
 
-- `helm install` / `helm upgrade` / `helm uninstall` (write
-  operations are explicitly out of scope for v1; SAR fan-out per
-  rendered resource is planned for v2).
+- **Install** — `helm install` with atomic-on-default + RBAC
+  pre-flight against the rendered resources.
+- **Upgrade** — `helm upgrade` with the same atomic + pre-flight
+  guarantees, prefilled from the live release's values.
+- **Rollback** — per-revision rollback with side-by-side diff and
+  the standard wait / cleanup-on-fail / disable-hooks knobs.
+- **Uninstall** — `helm uninstall` with confirmation.
+
+Not supported:
+
 - Chart catalog browsing.
-- Repository management.
+- Repository management (helm repo add / update).
 - The `sql` storage driver.
 
-The Helm release browser is a debugging / observability surface, not
-a deployment tool. For deploys, your existing GitOps (ArgoCD, Flux)
-or pipeline tooling stays the source of truth.
+For longer-term deploy strategy, your existing GitOps (ArgoCD, Flux)
+or pipeline tooling should remain the source of truth — the helm
+mutations in Periscope are operator-grade, not pipeline replacements.
 
 ---
 

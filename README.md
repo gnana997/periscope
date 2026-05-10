@@ -141,6 +141,7 @@ Both signed (cosign keyless) and discoverable on [Artifact Hub](https://artifact
 **Helm**
 - Release browser per cluster: per-release values, manifest, history, NOTES.txt, and structured dyff-based diff between revisions (read paths use direct Secret/ConfigMap decoding, no Helm SDK on the read path)
 - In-browser install / upgrade / uninstall with Atomic-by-default rollback on partial failure
+- Per-revision rollback from the history tab: pick the target revision, see the side-by-side diff before clicking, with `wait` / `cleanup-on-fail` / `disable-hooks` knobs surfaced inline
 - Schema-aware values editor: structured form when the chart ships `values.schema.json`, Monaco YAML otherwise, with binary form/YAML toggle for `$ref`-heavy schemas
 - Dry-run preview pane shows the rendered manifests + RBAC pre-flight denials + (upgrade) semantic diff against the live cluster before the operator commits
 - Public HTTP and OCI chart fetch with SSRF protection (IMDS / link-local always blocked, RFC1918 opt-in via env)
@@ -156,6 +157,14 @@ Both signed (cosign keyless) and discoverable on [Artifact Hub](https://artifact
 - Upgrade Insights surface with per-issue severity, kubernetes-version-step, and remediation links
 - Managed node group AMI drift detection so operators see which groups need a rotation before bumping the cluster
 - Works on `in-cluster`, `agent`, `eks`, and `kubeconfig` backends as long as the cluster entry has `arn` + `region`
+
+**Karpenter**
+- Curated read-only dashboard at `/clusters/{c}/karpenter`, auto-detected via the `karpenter.sh/v1` CRD probe — sidebar entry only appears on Karpenter-enabled clusters
+- NodePool table with weight, disruption budgets, current/limit usage, and per-pool `$/hr` + spot-savings (controller `/metrics` scraped via apiserver service-proxy under impersonation)
+- NodeClaims grouped by NodePool with `Drifted` / `Initialized` / `Launched` conditions surfaced as badges; pools with any drifted claim auto-expand
+- Pending pods waiting on Karpenter with the per-NodePool incompatibility breakdown extracted from the `FailedScheduling` apiserver Event — operators no longer have to grep karpenter-controller logs to see *why* a pod isn't being scheduled
+- Resizable detail pane on row click for describe / yaml / events without leaving the dashboard
+- Graceful degradation: missing `/metrics` or events list failures degrade individual panels without failing the whole response
 
 **Audit & observability**
 - Every privileged action signed by the human user — apply, delete, exec, secret reveal, log open, cronjob trigger
@@ -182,6 +191,9 @@ Both signed (cosign keyless) and discoverable on [Artifact Hub](https://artifact
 - [Apply YAML dialog](docs/setup/apply-yaml.md) — paste/drop multi-doc YAML with per-doc RBAC pre-flight
 - [Multi-cluster onboarding (agent)](docs/setup/agent-onboarding.md) — register a managed cluster via the periscope-agent tunnel
 - [EKS upgrade readiness](docs/setup/eks-upgrade-readiness.md) — Upgrade Insights + managed node group AMI drift
+
+**Usage**
+- [Karpenter dashboard](docs/usage/karpenter-view.md) — NodePool/$/hr/Drift/pending-pods walkthrough + cost-RBAC sample
 
 **Architecture**
 - [Architecture overview](docs/architecture/README.md) — component map, source-tree guide, reading order for new contributors

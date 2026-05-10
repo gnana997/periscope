@@ -60,11 +60,20 @@ tag.
   type / zone). Graceful degradation: missing /metrics or events
   list failures degrade individual panels (`metricsAvailable: false`,
   empty incompatibility breakdown) without failing the whole
-  response. Sidebar entry auto-hides on clusters without
-  Karpenter installed. New `karpenter_read` audit verb mirrors the
-  existing `eks_insights_read` pattern (read-style, emit-on-every-call).
-  Phase 2 follow-ups (disruption-blocked badge, AMI drift rollout,
-  ICE blacklist panel) tracked in #148.
+  response. Clicking any NodePool or NodeClaim row opens a resizable
+  detail pane on the right with describe / yaml / events tabs;
+  width persists across sessions via `localStorage` and matches the
+  pattern used by other list+detail pages. The cost-summary scrape
+  has a 15-second budget and the SPA auto-refetches every 12 seconds,
+  so cold-start `metricsAvailable: false` (TLS handshake + connection
+  warmup on the first apiserver-proxy call) self-heals on the next
+  poll without operator action. Sidebar entry auto-hides on clusters
+  without Karpenter installed. New `karpenter_read` audit verb mirrors
+  the existing `eks_insights_read` pattern (read-style,
+  emit-on-every-call). Sample RBAC for the cost-summary verb shipped
+  at `examples/karpenter-cost-rbac.yaml`. Phase 2 follow-ups
+  (disruption-blocked badge, AMI drift rollout, ICE blacklist panel)
+  tracked in #148.
 
 - Schema form: form sections start collapsed; users open what they
   need to edit. Replaces the prior "primary section open by default"
