@@ -318,7 +318,44 @@ function walkFieldImpl(
         // Children paths are RELATIVE to the row item, not absolute
         // from the form root. The array-of-objects widget composes
         // the absolute path at render time.
-        const rowChildren = walkObject(resolvedItems, [], options, seen);
+        // Hint check at the row-schema level: if the row schema is a
+        // sibling-encoded discriminator (Volume, EnvVarSource, etc.),
+        // emit a single discriminator descriptor as the row's only
+        // child instead of dumping all ~30 sibling properties as
+        // simultaneously editable fieldsets. Same hint table the
+        // walkField hint detection uses, just applied at the
+        // array-item boundary the array case otherwise bypasses.
+        const itemPrimaryRef = extractPrimaryRef(items);
+        const itemHint = itemPrimaryRef !== undefined
+          ? options.discriminatorHints?.get(itemPrimaryRef)
+          : undefined;
+        let rowChildren: FieldDescriptor[];
+        if (itemHint && resolvedItems.properties) {
+          const built = buildHintedDiscriminator(
+            resolvedItems,
+            itemHint,
+            options,
+            seen,
+          );
+          if (built) {
+            const rowLabel = (resolvedItems.title as string) || "";
+            const discDesc: FieldDescriptor = {
+              path: [],
+              label: rowLabel,
+              description: typeof resolvedItems.description === "string"
+                ? resolvedItems.description
+                : undefined,
+              type: "discriminator",
+              required: false,
+              ...built,
+            };
+            rowChildren = [discDesc];
+          } else {
+            rowChildren = walkObject(resolvedItems, [], options, seen);
+          }
+        } else {
+          rowChildren = walkObject(resolvedItems, [], options, seen);
+        }
         // Stamp row children with section/displayOrder via synthetic
         // absolute paths (parent path + "*" + child path). The
         // resolver's key map for kinds with sub-sections has those

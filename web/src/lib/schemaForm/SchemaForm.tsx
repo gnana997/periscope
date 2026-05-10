@@ -354,16 +354,21 @@ export function FieldRow({ descriptor, values, issues, mode, onChange }: FieldRo
   const readOnly = mode === "edit" && descriptor.editable === "create-only";
 
   return (
-    <div>
-      <div className="flex items-baseline gap-2">
+    <div className="min-w-0">
+      <div className="flex min-w-0 items-baseline gap-2">
         <label htmlFor={id} className="inline-flex items-baseline font-mono text-[12px] text-ink">
           {descriptor.label}
           {descriptor.required ? <span className="text-red"> *</span> : null}
           <InfoTip text={descriptor.description} />
         </label>
-        <span className="font-mono text-[10.5px] text-ink-faint">
-          {pathBreadcrumb(descriptor.path)}
-        </span>
+        {pathBreadcrumb(descriptor.path) ? (
+          <span
+            className="block min-w-0 truncate font-mono text-[10.5px] text-ink-faint"
+            title={descriptor.path.join(".")}
+          >
+            {pathBreadcrumb(descriptor.path)}
+          </span>
+        ) : null}
         {readOnly ? (
           <span className="font-mono text-[10.5px] uppercase tracking-[0.12em] text-ink-faint">
             read-only after create
@@ -1136,6 +1141,12 @@ function pathStartsWith(p: string[], prefix: string[]): boolean {
 
 function pathBreadcrumb(path: string[]): string {
   if (path.length <= 1) return "";
+  // Deeply-nested K8s paths (PodAffinity, NodeAffinity etc.) blow
+  // past the form's ~640px width — and at that depth the surrounding
+  // fieldset legends already locate the field, so the breadcrumb is
+  // redundant noise. Drop entirely beyond 4 segments.
+  if (path.length > 4) return "";
+  // For 2-4 segments, show full path (still short enough to fit).
   return path.join(".");
 }
 
