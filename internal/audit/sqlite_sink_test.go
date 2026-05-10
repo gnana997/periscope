@@ -551,7 +551,7 @@ func TestSQLiteSink_HelmRollbackRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("query: %v", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	type rowT struct {
 		verb, outcome, actor, cluster, ns, name string
