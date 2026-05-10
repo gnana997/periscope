@@ -35,7 +35,14 @@ auth:
     clientID: ""
     clientSecret: ""              # not used in dev mode
   authorization:
-    mode: shared
+    mode: tier
+    groupTiers:
+      # dev@local resolves to admin tier so the impersonation chain
+      # in the chart's cluster-rbac.yaml grants cluster-admin via
+      # the periscope-tier:admin ClusterRoleBinding. Required for the
+      # dev user to actually see resources in the SPA — shared mode
+      # left the SA with no RBAC and every list-call returned 403.
+      periscope-users: admin
   dev:
     subject: dev@local
     email:   dev@local
