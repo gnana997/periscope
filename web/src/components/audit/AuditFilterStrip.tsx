@@ -10,14 +10,31 @@ const OUTCOMES: Array<{ value: AuditOutcome | "all"; label: string }> = [
 ];
 
 const VERBS = [
+  // Resource-mutation verbs.
   "apply",
   "delete",
   "trigger",
+  "secret_reveal",
+  // Bulk + meta.
+  "bulk_download",
+  // Pod exec / log.
   "exec_open",
   "exec_close",
-  "secret_reveal",
   "log_open",
-  "bulk_download",
+  // Helm action surface (#78). Intent rows fire before the SDK
+  // call; the unprefixed verb fires after. Operators investigating
+  // a single helm action typically want both rows joined by
+  // (actor, namespace, name, timestamp).
+  "helm_chart_fetch",
+  "helm_preview",
+  "helm_install_intent",
+  "helm_install",
+  "helm_upgrade_intent",
+  "helm_upgrade",
+  "helm_uninstall_intent",
+  "helm_uninstall",
+  "helm_rollback_intent",
+  "helm_rollback",
 ] as const;
 
 

@@ -3,6 +3,7 @@ package audit
 import (
 	"strings"
 	"context"
+	"encoding/json"
 	"database/sql"
 	"path/filepath"
 	"testing"
@@ -485,5 +486,129 @@ func TestSQLiteSink_Migrations_RefuseDowngrade(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "downgrade") {
 		t.Errorf("error missing 'downgrade': %v", err)
+	}
+}
+
+// TestSQLiteSink_HelmRollbackRoundTrip verifies the helm verb
+// subject shape (#78) round-trips through the SQLite sink without
+// loss. Specifically:
+//   - The `helm.<verb>` constant is stored as its underlying string.
+//   - `Resource{Namespace, Name}` carries the release identity.
+//   - `Extra` carries the helm-specific bag (targetRevision /
+//     fromRevision / toRevision / newRevision for rollback,
+//     ref / version / atomic for install / upgrade) as JSON,
+//     and the round-tripped JSON parses back to the same field
+//     values.
+//
+// Mirrors the existing TestSQLiteSink_RoundTrip pattern so any
+// future schema-shape change in the SQLite columns surfaces a
+// failure here too.
+func TestSQLiteSink_HelmRollbackRoundTrip(t *testing.T) {
+	s := openTestSink(t, SQLiteConfig{})
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	// Intent row first.
+	s.Record(ctx, Event{
+		Timestamp: now,
+		RequestID: "req-rb-1",
+		Actor:     Actor{Sub: "ana@x", Email: "ana@x", Groups: []string{"sre"}},
+		Verb:      VerbHelmRollbackIntent,
+		Outcome:   OutcomeSuccess,
+		Cluster:   "prod",
+		Resource:  ResourceRef{Namespace: "demo", Name: "podinfo"},
+		Extra: map[string]any{
+			"targetRevision": 3,
+			"wait":           true,
+			"cleanupOnFail":  false,
+			"disableHooks":   false,
+		},
+	})
+
+	// Outcome row.
+	s.Record(ctx, Event{
+		Timestamp: now.Add(2 * time.Second),
+		RequestID: "req-rb-1",
+		Actor:     Actor{Sub: "ana@x", Email: "ana@x", Groups: []string{"sre"}},
+		Verb:      VerbHelmRollback,
+		Outcome:   OutcomeSuccess,
+		Cluster:   "prod",
+		Resource:  ResourceRef{Namespace: "demo", Name: "podinfo"},
+		Extra: map[string]any{
+			"targetRevision": 3,
+			"fromRevision":   5,
+			"toRevision":     3,
+			"newRevision":    6,
+			"wait":           true,
+			"cleanupOnFail":  false,
+			"disableHooks":   false,
+		},
+	})
+
+	rows, err := s.db.Query(`
+		SELECT verb, outcome, actor_sub, cluster, res_namespace, res_name, extra
+		FROM audit_events ORDER BY ts_unix_nano ASC`)
+	if err != nil {
+		t.Fatalf("query: %v", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	type rowT struct {
+		verb, outcome, actor, cluster, ns, name string
+		extra                                   string
+	}
+	var got []rowT
+	for rows.Next() {
+		var r rowT
+		var extra sql.NullString
+		if err := rows.Scan(&r.verb, &r.outcome, &r.actor, &r.cluster, &r.ns, &r.name, &extra); err != nil {
+			t.Fatalf("scan: %v", err)
+		}
+		if !extra.Valid {
+			t.Errorf("extra is NULL for verb=%s; helm rows must always carry parameters", r.verb)
+		}
+		r.extra = extra.String
+		got = append(got, r)
+	}
+	if len(got) != 2 {
+		t.Fatalf("expected 2 rows (intent + outcome), got %d", len(got))
+	}
+
+	// Pair shape — intent first, outcome second.
+	if got[0].verb != string(VerbHelmRollbackIntent) || got[1].verb != string(VerbHelmRollback) {
+		t.Errorf("verb pair wrong: %q + %q", got[0].verb, got[1].verb)
+	}
+	for _, r := range got {
+		if r.outcome != string(OutcomeSuccess) || r.actor != "ana@x" {
+			t.Errorf("unexpected base fields on %s: %+v", r.verb, r)
+		}
+		if r.cluster != "prod" || r.ns != "demo" || r.name != "podinfo" {
+			t.Errorf("release identity lost on %s: cluster=%q ns=%q name=%q",
+				r.verb, r.cluster, r.ns, r.name)
+		}
+	}
+
+	// Extra round-trip — outcome row carries the revision triplet.
+	var outcomeExtra map[string]any
+	if err := json.Unmarshal([]byte(got[1].extra), &outcomeExtra); err != nil {
+		t.Fatalf("outcome extra unmarshal: %v", err)
+	}
+	for _, want := range []struct {
+		key string
+		val float64 // JSON numbers come back as float64
+	}{
+		{"targetRevision", 3},
+		{"fromRevision", 5},
+		{"toRevision", 3},
+		{"newRevision", 6},
+	} {
+		got, ok := outcomeExtra[want.key].(float64)
+		if !ok {
+			t.Errorf("outcome.Extra[%q] missing or wrong type: %v", want.key, outcomeExtra[want.key])
+			continue
+		}
+		if got != want.val {
+			t.Errorf("outcome.Extra[%q] = %v, want %v", want.key, got, want.val)
+		}
 	}
 }

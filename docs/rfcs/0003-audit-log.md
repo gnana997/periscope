@@ -114,6 +114,16 @@ are not allowed — every emission site uses a `audit.Verb*` constant.
 | `bulk_download` | `bulkDownloadAuditHandler` (POST `/api/clusters/{c}/audit/bulk-download`, called by the SPA after a bulk YAML download resolves) | `success` (≥1 fetch succeeded) / `failure` (zero fetches succeeded) | `kind: string`, `count: int`, `ids: []string` (server-truncated to 50), `failure_count: int` |
 | `exec_open` | `execHandler` immediately after session admit | `success` only | `session_id`, `container`, `tty`, `command`, `k8s_identity`, `started_at` |
 | `exec_close` | `execHandler` once `execsess.Run` returns | `success` / `failure` | all `exec_open` fields plus `transport`, `ended_at`, `duration_ms`, `exit_code`, `bytes_stdin`, `bytes_stdout`, `err`. `Reason` carries the close disposition: `completed` / `idle_timeout` / `abort` / `server_error` |
+| `helm_chart_fetch` | `helmChartHandler` (POST `/api/clusters/{c}/helm/chart/values`) | `success` / `failure` | `ref: string`, `chart: string`, `version: string`, `cached: bool` |
+| `helm_preview` | `helmInstallPreviewHandler` / `helmUpgradePreviewHandler` | `success` / `failure` / `denied` | `op: "install" | "upgrade"`. `denied` outcome carries the SAR pre-flight verdict in `Reason`. |
+| `helm_install_intent` | `helmInstallHandler`, BEFORE the helm SDK call | `success` only (intent rows are always success) | `ref: string`, `version: string`, `atomic: bool`, `wait: bool`, `timeoutSeconds: int` |
+| `helm_install` | `helmInstallHandler`, AFTER the helm SDK call returns | `success` / `failure` / `denied` | `ref: string`, `version: string`, `atomic: bool`. On `success`: `revision: int`, optional `rolledBack: bool` (helm Atomic auto-rollback) |
+| `helm_upgrade_intent` | `helmUpgradeHandler`, BEFORE the helm SDK call | `success` only | `ref: string`, `version: string`, `atomic: bool`, `wait: bool`, `timeoutSeconds: int` |
+| `helm_upgrade` | `helmUpgradeHandler`, AFTER | `success` / `failure` / `denied` | `ref: string`, `version: string`, `atomic: bool`. On `success`: `revision: int`, optional `rolledBack: bool` |
+| `helm_uninstall_intent` | `helmUninstallHandler`, BEFORE | `success` only | `keepHistory: bool`, `disableHooks: bool` |
+| `helm_uninstall` | `helmUninstallHandler`, AFTER | `success` / `failure` / `denied` | `keepHistory: bool`, `disableHooks: bool`. On `success`: `revisionsRemoved: int` |
+| `helm_rollback_intent` | `helmRollbackHandler`, BEFORE | `success` only | `targetRevision: int`, `wait: bool`, `cleanupOnFail: bool`, `disableHooks: bool` |
+| `helm_rollback` | `helmRollbackHandler`, AFTER | `success` / `failure` / `denied` | `targetRevision: int`, `wait: bool`, `cleanupOnFail: bool`, `disableHooks: bool`. On `success`: `fromRevision: int`, `toRevision: int`, `newRevision: int` |
 | `log_open` | _reserved_ | _reserved_ | _reserved_ |
 
 `bulk_download` is **SPA-emitted**, not server-derived. The endpoint
@@ -138,6 +148,30 @@ update.
 because the access pattern (long-lived SSE) needs ratelimit-aware
 emission to avoid flooding the audit table. Adding it is a self-contained
 follow-up; the constant exists so the taxonomy is visible.
+
+
+The `helm_*` verbs (install / upgrade / uninstall / rollback) all
+emit as **intent / outcome pairs**: `<verb>_intent` fires BEFORE the
+helm SDK call, `<verb>` fires AFTER it returns. The intent row
+captures operator-stated parameters (target revision, ref, atomic
+flag, etc.) so a hung or partitioned helm action still leaves a
+forensic trail; the outcome row closes the loop with the resulting
+revision number. Querying audit for "what did helm do?" should join
+the pair via `(actor, cluster, namespace, name, timestamp window)` —
+a successful pair has both rows; a hung action has only the intent.
+
+`helm_install` and `helm_upgrade` carry an optional `rolledBack: true`
+on `success` outcomes when the helm Atomic flag triggered an
+auto-rollback after a partial-failure. The outcome is still `success`
+in audit terms (the apiserver state is back to a healthy revision)
+but the flag is the canonical signal for "the upgrade tried, failed,
+and atomically reverted."
+
+Helm `denied` outcomes come from the SAR pre-flight that runs before
+every action — operators whose role can't apply / patch / delete the
+release's manifests get a 403 with the failing (verb, GVR) tuples
+in the response body and a `denied` audit row before any helm SDK
+state mutation. Mirrors the `apply` verb's pre-flight pattern.
 
 ---
 
