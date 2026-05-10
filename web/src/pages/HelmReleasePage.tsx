@@ -7,8 +7,17 @@
 
 import { useMemo, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
-import { useHelmHistory, useHelmRelease, useUninstallHelmRelease } from "../hooks/useHelm";
+import {
+  useHelmHistory,
+  useHelmRelease,
+  useRollbackHelmRelease,
+  useUninstallHelmRelease,
+} from "../hooks/useHelm";
 import { UninstallReleaseModal } from "../components/helm/UninstallReleaseModal";
+import {
+  RollbackModal,
+  type RollbackModalError,
+} from "../components/helm/RollbackModal";
 import { showToast } from "../lib/toastBus";
 import { ApiError } from "../lib/api";
 import type { HelmHistoryEntry, HelmManifestObject } from "../lib/types";
@@ -273,6 +282,9 @@ function ResourceSummary({ resources }: { resources: HelmManifestObject[] }) {
 // row → "compare" button enables → diff route. Single-click on a row
 // navigates the page to that revision.
 function HistoryTab({
+  cluster,
+  namespace,
+  name,
   entries,
   currentRevision,
   isLoading,
@@ -293,6 +305,16 @@ function HistoryTab({
   onCompare: (from: number, to: number) => void;
 }) {
   const [selected, setSelected] = useState<Set<number>>(new Set());
+  const [rollbackTarget, setRollbackTarget] = useState<number | undefined>(undefined);
+  const rollbackMutation = useRollbackHelmRelease(cluster, namespace, name);
+
+  // ApiError carries the JSON error body as bodyText. For 403 the
+  // backend returns { code, message, denied: [...] }; parse it once
+  // here so the modal renders denials specifically rather than dumping
+  // the raw body.
+  const rollbackError: RollbackModalError | null = rollbackMutation.error
+    ? toRollbackModalError(rollbackMutation.error)
+    : null;
 
   if (isLoading) return <LoadingState resource="history" />;
   if (isError) {
@@ -330,6 +352,7 @@ function HistoryTab({
   const sortedSel = Array.from(selected).sort((a, b) => a - b);
 
   return (
+    <>
     <div className="flex h-full min-h-0 w-full flex-col">
       <div className="flex items-center justify-between border-b border-border px-6 py-2">
         <span className="font-mono text-[11px] text-ink-muted">
@@ -395,10 +418,87 @@ function HistoryTab({
                   {e.updated ? ageFrom(e.updated) : "—"}
                 </span>
               </button>
+              {/* Rollback button per row — disabled on the current
+                  revision since rolling back to self is a no-op the
+                  backend rejects with a 422. */}
+              <button
+                type="button"
+                disabled={isCurrent}
+                onClick={() => setRollbackTarget(e.revision)}
+                aria-label={`rollback to revision ${e.revision}`}
+                className={cn(
+                  "rounded-sm border border-border-strong px-2.5 py-1 font-mono text-[11.5px] transition-colors",
+                  "hover:border-ink-muted hover:text-ink",
+                  "disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-border-strong",
+                )}
+              >
+                rollback
+              </button>
             </div>
           );
         })}
       </div>
     </div>
+      <RollbackModal
+        open={rollbackTarget !== undefined}
+        cluster={cluster}
+        namespace={namespace}
+        releaseName={name}
+        currentRevision={currentRevision}
+        targetRevision={rollbackTarget ?? 0}
+        pending={rollbackMutation.isPending}
+        error={rollbackError}
+        onClose={() => {
+          setRollbackTarget(undefined);
+          rollbackMutation.reset();
+        }}
+        onConfirm={(opts) => {
+          if (rollbackTarget === undefined) return;
+          rollbackMutation.mutate(
+            { revision: rollbackTarget, ...opts },
+            {
+              onSuccess: (result) => {
+                showToast(
+                  `rolled back ${name} to revision ${result.toRevision} (now r${result.newRevision})`,
+                  "success",
+                );
+                setRollbackTarget(undefined);
+                rollbackMutation.reset();
+              },
+            },
+          );
+        }}
+      />
+    </>
   );
+}
+
+// toRollbackModalError extracts a structured error shape from the
+// thrown ApiError so the modal can render denials specifically. The
+// backend returns:
+//   200    → not an error
+//   403    → { code: "E_HELM_PREFLIGHT_DENIED", message, denied: [...] }
+//   422    → { code: "E_HELM_NO_DEPLOYED_RELEASES", message }
+//   404    → { code: "E_HELM_RELEASE_NOT_FOUND", message }
+//   500    → { code: "E_INTERNAL", message } or plain text
+function toRollbackModalError(err: unknown): RollbackModalError {
+  if (err instanceof ApiError) {
+    if (err.bodyText) {
+      try {
+        const parsed = JSON.parse(err.bodyText) as {
+          message?: string;
+          denied?: RollbackModalError["denied"];
+        };
+        return {
+          status: err.status,
+          message: parsed.message ?? err.message,
+          denied: parsed.denied,
+        };
+      } catch {
+        return { status: err.status, message: err.bodyText || err.message };
+      }
+    }
+    return { status: err.status, message: err.message };
+  }
+  return { message: (err as Error)?.message ?? "unknown error" };
 }

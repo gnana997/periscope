@@ -1641,6 +1641,17 @@ export interface HelmUninstallResult {
   revisionsRemoved: number;
 }
 
+// HelmRollbackResult mirrors the backend (#77) HelmRollbackResult.
+// helm always assigns a NEW revision on rollback rather than mutating
+// the target — newRevision is what the SPA shows in the success toast,
+// fromRevision/toRevision capture the audit-relevant transition.
+export interface HelmRollbackResult {
+  release: HelmActionResult["release"];
+  newRevision: number;
+  fromRevision: number;
+  toRevision: number;
+}
+
 export interface HelmActionResult {
   release: {
     name: string;

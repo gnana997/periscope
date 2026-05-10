@@ -88,6 +88,7 @@ import type {
   HelmUpgradeRequest,
   HelmActionResult,
   HelmUninstallResult,
+  HelmRollbackResult,
   RevisionHistory,
   RollbackRequest,
   RollbackResponse,
@@ -1015,6 +1016,24 @@ export const api = {
       signal,
     );
   },
+
+  /**
+   * Helm release rollback (#77). POST /helm/releases/{ns}/{name}/rollback.
+   * Sync — blocks until helm SDK returns. Pre-flight SAR (verb=patch)
+   * denials return 403 with E_HELM_PREFLIGHT_DENIED.
+   */
+  helmRollback: (
+    cluster: string,
+    namespace: string,
+    name: string,
+    body: { revision: number; wait?: boolean; cleanupOnFail?: boolean; disableHooks?: boolean; timeoutSeconds?: number },
+    signal?: AbortSignal,
+  ) =>
+    postJSON<HelmRollbackResult>(
+      `/api/clusters/${enc(cluster)}/helm/releases/${enc(namespace)}/${enc(name)}/rollback`,
+      body,
+      signal,
+    ),
 
   /**
    * Workload rollback (#71). Two endpoints, called from the

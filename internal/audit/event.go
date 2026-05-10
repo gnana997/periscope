@@ -96,6 +96,15 @@ const (
 	// 8 revisions of release X" vs "release was already at 1 revision".
 	VerbHelmUninstallIntent Verb = "helm_uninstall_intent"
 	VerbHelmUninstall       Verb = "helm_uninstall"
+	// VerbHelmRollbackIntent / VerbHelmRollback — pre/post pair for
+	// the helm rollback action (issue #77). Pre-flight SAR (verb=patch)
+	// runs against each kind in the TARGET revision's manifest list;
+	// denial blocks before the SDK call. Intent fires before the
+	// helm SDK call captures revision target + current revision so a
+	// hung or partitioned rollback still leaves a forensic trail.
+	// Outcome carries the new revision number on success in Extra.
+	VerbHelmRollbackIntent Verb = "helm_rollback_intent"
+	VerbHelmRollback       Verb = "helm_rollback"
 	// VerbRollbackIntent is emitted before the apiserver patch fires —
 	// captures the operator's intent (target revision, reason) even
 	// when the patch later fails or the request hangs. Pair with

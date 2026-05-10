@@ -41,6 +41,21 @@ tag.
   
 ### Added
 
+- Helm release rollback (#77). New `POST /api/clusters/{c}/helm/
+  releases/{ns}/{name}/rollback` endpoint patches the cluster from
+  the current revision to the operator-selected target revision via
+  the helm SDK. Pre-flight SAR (verb=patch) runs against the target
+  revision’s manifest list; denials block the action with a 403 and
+  surface the (verb, GVR) tuples in the modal so the operator can
+  take them to their cluster admin. Audit emits a pre/post pair
+  (`helm_rollback_intent` / `helm_rollback`) carrying
+  `fromRevision` / `toRevision` / `newRevision`. The release page
+  history tab adds a per-row Rollback button (disabled on the
+  current revision); the modal renders a side-by-side diff of the
+  current vs. target manifests before submission and stays open with
+  a spinner + inline error / denial state until the mutation
+  settles.
+
 - Form-mode coverage for `oneOf` discriminators and `allOf`
   composition (#132, builds on #131). Adds two extensions to the
   shared `lib/schemaForm/` engine that close the most common

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -493,5 +494,214 @@ func TestHelmUninstallHandler_ValidationMissingPathParams(t *testing.T) {
 	)
 	if rec.Code != http.StatusBadRequest {
 		t.Errorf("status = %d, want 400 for empty ns", rec.Code)
+	}
+}
+
+func withRollbackReleaseFn(t *testing.T, fn func(context.Context, credentials.Provider, clusters.Cluster, k8s.HelmRollbackArgs) (*k8s.HelmRollbackResult, error)) {
+	t.Helper()
+	prev := rollbackHelmReleaseFn
+	rollbackHelmReleaseFn = fn
+	t.Cleanup(func() { rollbackHelmReleaseFn = prev })
+}
+
+func TestHelmRollbackHandler_HappyPathEmitsAuditPair(t *testing.T) {
+	withRollbackReleaseFn(t, func(_ context.Context, _ credentials.Provider, _ clusters.Cluster, args k8s.HelmRollbackArgs) (*k8s.HelmRollbackResult, error) {
+		if args.Namespace != "app-ns" || args.ReleaseName != "web" {
+			t.Errorf("rollback args ns/name should come from URL: %+v", args)
+		}
+		if args.Revision != 3 {
+			t.Errorf("revision should come from body: %+v", args)
+		}
+		if !args.Wait {
+			t.Error("Wait should default to true")
+		}
+		return &k8s.HelmRollbackResult{
+			Release: k8s.ActionReleaseInfo{
+				Name: "web", Namespace: "app-ns", Revision: 6, Status: "deployed",
+			},
+			NewRevision:  6,
+			FromRevision: 5,
+			ToRevision:   3,
+		}, nil
+	})
+
+	reg := testRegistry(t)
+	rec, sink := actionHandlerInvoke(t,
+		func(e *audit.Emitter) credentials.Handler { return helmRollbackHandler(reg, e) },
+		http.MethodPost, "/api/clusters/test/helm/releases/app-ns/web/rollback",
+		map[string]string{"cluster": "test", "ns": "app-ns", "name": "web"},
+		[]byte(`{"revision":3}`),
+	)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	events := sink.snapshot()
+	if len(events) != 2 {
+		t.Fatalf("expected 2 audit events (intent + outcome), got %d", len(events))
+	}
+	if events[0].Verb != audit.VerbHelmRollbackIntent || events[1].Verb != audit.VerbHelmRollback {
+		t.Errorf("verb pair wrong: %q + %q", events[0].Verb, events[1].Verb)
+	}
+	if events[1].Outcome != audit.OutcomeSuccess {
+		t.Errorf("outcome row = %q, want success", events[1].Outcome)
+	}
+	if from, _ := events[1].Extra["fromRevision"].(int); from != 5 {
+		t.Errorf("Extra.fromRevision = %v, want 5", events[1].Extra["fromRevision"])
+	}
+	if to, _ := events[1].Extra["toRevision"].(int); to != 3 {
+		t.Errorf("Extra.toRevision = %v, want 3", events[1].Extra["toRevision"])
+	}
+	if newRev, _ := events[1].Extra["newRevision"].(int); newRev != 6 {
+		t.Errorf("Extra.newRevision = %v, want 6", events[1].Extra["newRevision"])
+	}
+}
+
+func TestHelmRollbackHandler_KnobsHonored(t *testing.T) {
+	var captured k8s.HelmRollbackArgs
+	withRollbackReleaseFn(t, func(_ context.Context, _ credentials.Provider, _ clusters.Cluster, args k8s.HelmRollbackArgs) (*k8s.HelmRollbackResult, error) {
+		captured = args
+		return &k8s.HelmRollbackResult{Release: k8s.ActionReleaseInfo{Name: "web"}}, nil
+	})
+	reg := testRegistry(t)
+	body := `{"revision":2,"wait":false,"cleanupOnFail":true,"disableHooks":true,"timeoutSeconds":120}`
+	rec, _ := actionHandlerInvoke(t,
+		func(e *audit.Emitter) credentials.Handler { return helmRollbackHandler(reg, e) },
+		http.MethodPost, "/api/clusters/test/helm/releases/app-ns/web/rollback",
+		map[string]string{"cluster": "test", "ns": "app-ns", "name": "web"},
+		[]byte(body),
+	)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d", rec.Code)
+	}
+	if captured.Wait {
+		t.Error("Wait should be false when body wait=false")
+	}
+	if !captured.CleanupOnFail {
+		t.Error("CleanupOnFail should be true when body cleanupOnFail=true")
+	}
+	if !captured.DisableHooks {
+		t.Error("DisableHooks should be true when body disableHooks=true")
+	}
+	if captured.Timeout <= 0 {
+		t.Error("Timeout should be set (positive duration) when timeoutSeconds=120")
+	}
+}
+
+func TestHelmRollbackHandler_ValidationMissingRevision(t *testing.T) {
+	cases := []struct {
+		name string
+		body string
+	}{
+		{"empty body", `{}`},
+		{"zero revision", `{"revision":0}`},
+		{"negative revision", `{"revision":-1}`},
+		{"malformed json", `{not json`},
+	}
+	reg := testRegistry(t)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			withRollbackReleaseFn(t, func(_ context.Context, _ credentials.Provider, _ clusters.Cluster, _ k8s.HelmRollbackArgs) (*k8s.HelmRollbackResult, error) {
+				t.Fatal("rollback fn should NOT be called when validation fails")
+				return nil, nil
+			})
+			rec, _ := actionHandlerInvoke(t,
+				func(e *audit.Emitter) credentials.Handler { return helmRollbackHandler(reg, e) },
+				http.MethodPost, "/api/clusters/test/helm/releases/app-ns/web/rollback",
+				map[string]string{"cluster": "test", "ns": "app-ns", "name": "web"},
+				[]byte(tc.body),
+			)
+			if rec.Code != http.StatusBadRequest {
+				t.Errorf("status = %d, want 400; body=%s", rec.Code, rec.Body.String())
+			}
+		})
+	}
+}
+
+func TestHelmRollbackHandler_PreflightDeniedReturns403(t *testing.T) {
+	withRollbackReleaseFn(t, func(_ context.Context, _ credentials.Provider, _ clusters.Cluster, _ k8s.HelmRollbackArgs) (*k8s.HelmRollbackResult, error) {
+		return nil, &k8s.DeniedError{Denials: []k8s.PreviewDenial{
+			{Group: "apps", Resource: "deployments", Verb: "patch", Reason: "denied"},
+		}}
+	})
+	reg := testRegistry(t)
+	rec, sink := actionHandlerInvoke(t,
+		func(e *audit.Emitter) credentials.Handler { return helmRollbackHandler(reg, e) },
+		http.MethodPost, "/api/clusters/test/helm/releases/app-ns/web/rollback",
+		map[string]string{"cluster": "test", "ns": "app-ns", "name": "web"},
+		[]byte(`{"revision":3}`),
+	)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403; body=%s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "E_HELM_PREFLIGHT_DENIED") {
+		t.Errorf("body missing E_HELM_PREFLIGHT_DENIED: %s", rec.Body.String())
+	}
+	events := sink.snapshot()
+	if len(events) != 2 || events[1].Outcome != audit.OutcomeDenied {
+		t.Errorf("expected intent + denied outcome pair; got %+v", events)
+	}
+}
+
+func TestHelmRollbackHandler_NoOpRollbackRejected(t *testing.T) {
+	// rollback to current is rejected by the k8s layer; verify the
+	// handler bubbles the error and emits a Failure outcome.
+	withRollbackReleaseFn(t, func(_ context.Context, _ credentials.Provider, _ clusters.Cluster, _ k8s.HelmRollbackArgs) (*k8s.HelmRollbackResult, error) {
+		return nil, fmt.Errorf("rollback: target revision 5 is already current")
+	})
+	reg := testRegistry(t)
+	rec, sink := actionHandlerInvoke(t,
+		func(e *audit.Emitter) credentials.Handler { return helmRollbackHandler(reg, e) },
+		http.MethodPost, "/api/clusters/test/helm/releases/app-ns/web/rollback",
+		map[string]string{"cluster": "test", "ns": "app-ns", "name": "web"},
+		[]byte(`{"revision":5}`),
+	)
+	if rec.Code < 400 {
+		t.Fatalf("status = %d, want >=400; body=%s", rec.Code, rec.Body.String())
+	}
+	events := sink.snapshot()
+	if len(events) != 2 || events[1].Outcome != audit.OutcomeFailure {
+		t.Errorf("expected intent + failure outcome pair; got %+v", events)
+	}
+}
+
+func TestHelmRollbackHandler_ReleaseNotFoundReturns404(t *testing.T) {
+	withRollbackReleaseFn(t, func(_ context.Context, _ credentials.Provider, _ clusters.Cluster, _ k8s.HelmRollbackArgs) (*k8s.HelmRollbackResult, error) {
+		return nil, driver.ErrReleaseNotFound
+	})
+	reg := testRegistry(t)
+	rec, _ := actionHandlerInvoke(t,
+		func(e *audit.Emitter) credentials.Handler { return helmRollbackHandler(reg, e) },
+		http.MethodPost, "/api/clusters/test/helm/releases/app-ns/missing/rollback",
+		map[string]string{"cluster": "test", "ns": "app-ns", "name": "missing"},
+		[]byte(`{"revision":1}`),
+	)
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want 404; body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestHelmRollbackHandler_ValidationMissingPathParams(t *testing.T) {
+	cases := []struct {
+		name        string
+		urlSuffix   string
+		params      map[string]string
+		wantStatus  int
+	}{
+		{"missing ns", "/helm/releases//web/rollback", map[string]string{"cluster": "test", "ns": "", "name": "web"}, http.StatusBadRequest},
+		{"missing name", "/helm/releases/app-ns//rollback", map[string]string{"cluster": "test", "ns": "app-ns", "name": ""}, http.StatusBadRequest},
+		{"unknown cluster", "/helm/releases/app-ns/web/rollback", map[string]string{"cluster": "missing", "ns": "app-ns", "name": "web"}, http.StatusNotFound},
+	}
+	reg := testRegistry(t)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			rec, _ := actionHandlerInvoke(t,
+				func(e *audit.Emitter) credentials.Handler { return helmRollbackHandler(reg, e) },
+				http.MethodPost, "/api/clusters/"+tc.params["cluster"]+tc.urlSuffix,
+				tc.params, []byte(`{"revision":1}`),
+			)
+			if rec.Code != tc.wantStatus {
+				t.Errorf("status = %d, want %d", rec.Code, tc.wantStatus)
+			}
+		})
 	}
 }
