@@ -146,4 +146,4 @@ dashboard.
 
 Every page load emits one `karpenter_read` audit row regardless of
 outcome, with an `op` extra distinguishing `available_false` /
-`list` / `*_failed` paths. See RFC 0003 §4 for the full taxonomy.
+`list` / `*_failed` paths. See RFC 0003 4 for the full taxonomy.
