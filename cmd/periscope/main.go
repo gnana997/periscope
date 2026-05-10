@@ -297,6 +297,11 @@ func main() {
 		credentials.Wrap(factory, helmUpgradeHandler(registry, auditEmitter)))
 	router.Delete("/api/clusters/{cluster}/helm/releases/{ns}/{name}",
 		credentials.Wrap(factory, helmUninstallHandler(registry, auditEmitter)))
+	// Helm release rollback (#77). Sync handler; pre/post audit pair
+	// fires around the SDK call. SAR pre-flight against TARGET
+	// revision's manifests with verb=patch.
+	router.Post("/api/clusters/{cluster}/helm/releases/{ns}/{name}/rollback",
+		credentials.Wrap(factory, helmRollbackHandler(registry, auditEmitter)))
 	// --- EKS Upgrade Insights (read-only) ---
 	//
 	// EKS scans every cluster's audit log daily and produces a list

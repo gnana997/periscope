@@ -189,3 +189,45 @@ export function useUninstallHelmRelease(
     },
   });
 }
+
+// useRollbackHelmRelease (#77). Mutation wrapper around POST
+// /helm/releases/{ns}/{name}/rollback. Caller passes { revision }
+// (and optional knobs) to the .mutate() call. Cluster + namespace
+// + release name are bound at hook-construction time since they're
+// stable in the URL the hook is used from.
+//
+// Invalidates list (status badge), history (revision row state),
+// and the detail tab on success. Errors bubble through useMutation's
+// `error` so the caller can surface them — the modal in #77 keeps
+// itself open until the mutation settles and shows the error inline.
+export function useRollbackHelmRelease(
+  cluster: string,
+  namespace: string,
+  name: string,
+) {
+  const qc = useQueryClient();
+  return useMutation<
+    import("../lib/types").HelmRollbackResult,
+    Error,
+    {
+      revision: number;
+      wait?: boolean;
+      cleanupOnFail?: boolean;
+      disableHooks?: boolean;
+      timeoutSeconds?: number;
+    }
+  >({
+    mutationFn: (body) => api.helmRollback(cluster, namespace, name, body),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: queryKeys.cluster(cluster).helm.list() });
+      qc.invalidateQueries({
+        queryKey: queryKeys.cluster(cluster).helm.history(namespace, name),
+      });
+      // The detail key includes a revision, so invalidate the entire
+      // helm subtree for this release rather than enumerating revs.
+      qc.invalidateQueries({
+        queryKey: ["cluster", cluster, "helm", "detail", namespace, name],
+      });
+    },
+  });
+}

@@ -50,6 +50,7 @@ var (
 	installHelmReleaseFn   = k8s.InstallHelmRelease
 	upgradeHelmReleaseFn   = k8s.UpgradeHelmRelease
 	uninstallHelmReleaseFn = k8s.UninstallHelmRelease
+	rollbackHelmReleaseFn  = k8s.RollbackHelmRelease
 )
 
 // helmActionDefaultTimeout / helmActionMaxTimeout are server-side
@@ -469,6 +470,141 @@ func emitHelmUninstallOutcome(ctx context.Context, emitter *audit.Emitter, c clu
 	emitter.Record(ctx, audit.Event{
 		Actor:   actorFromContext(ctx),
 		Verb:    audit.VerbHelmUninstall,
+		Outcome: outcome,
+		Cluster: c.Name,
+		Resource: audit.ResourceRef{
+			Namespace: args.Namespace,
+			Name:      args.ReleaseName,
+		},
+		Reason: reason,
+		Extra:  extra,
+	})
+}
+
+// helmRollbackRequest is the rollback body. Revision is the only
+// required field; the wait/cleanup/disable-hooks knobs follow the
+// install/upgrade pattern. timeoutSeconds is honored within the
+// server-side cap (helmActionMaxTimeout).
+type helmRollbackRequest struct {
+	Revision       int   `json:"revision"`
+	Wait           *bool `json:"wait,omitempty"`
+	CleanupOnFail  bool  `json:"cleanupOnFail,omitempty"`
+	DisableHooks   bool  `json:"disableHooks,omitempty"`
+	TimeoutSeconds int   `json:"timeoutSeconds,omitempty"`
+}
+
+// helmRollbackHandler powers POST /api/clusters/{cluster}/helm/
+// releases/{ns}/{name}/rollback. Sync — blocks until the helm SDK
+// rollback returns. Audit pre/post pair fires around the SDK call.
+//
+// URL conforms to the existing helm sub-resource pattern (verb at
+// the end, namespace + release name in the path), matching the
+// upgrade/uninstall siblings. Body carries only the bits that
+// can't live in the URL.
+func helmRollbackHandler(reg *clusters.Registry, emitter *audit.Emitter) credentials.Handler {
+	return func(w http.ResponseWriter, r *http.Request, p credentials.Provider) {
+		c, ok := reg.ByName(chi.URLParam(r, "cluster"))
+		if !ok {
+			http.Error(w, "cluster not found", http.StatusNotFound)
+			return
+		}
+		ns := chi.URLParam(r, "ns")
+		name := chi.URLParam(r, "name")
+		if ns == "" || name == "" {
+			http.Error(w, "namespace and name path params required", http.StatusBadRequest)
+			return
+		}
+
+		var req helmRollbackRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "invalid request body: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+		if req.Revision <= 0 {
+			http.Error(w, "revision must be > 0", http.StatusBadRequest)
+			return
+		}
+
+		args := k8s.HelmRollbackArgs{
+			Namespace:     ns,
+			ReleaseName:   name,
+			Revision:      req.Revision,
+			Wait:          boolDefault(req.Wait, true),
+			CleanupOnFail: req.CleanupOnFail,
+			DisableHooks:  req.DisableHooks,
+			Timeout:       clampTimeout(req.TimeoutSeconds),
+		}
+
+		emitHelmRollbackIntent(r.Context(), emitter, c, args)
+
+		result, err := rollbackHelmReleaseFn(r.Context(), p, c, args)
+		if err != nil {
+			handleHelmRollbackFailure(r.Context(), w, emitter, c, args, err)
+			return
+		}
+		emitHelmRollbackOutcome(r.Context(), emitter, c, audit.OutcomeSuccess, args, result, "")
+		writeJSON(w, http.StatusOK, result)
+	}
+}
+
+func handleHelmRollbackFailure(ctx context.Context, w http.ResponseWriter, emitter *audit.Emitter, c clusters.Cluster, args k8s.HelmRollbackArgs, err error) {
+	if denied, ok := k8s.IsDeniedError(err); ok {
+		emitHelmRollbackOutcome(ctx, emitter, c, audit.OutcomeDenied, args, nil, err.Error())
+		writeJSON(w, http.StatusForbidden, map[string]any{
+			"code":    "E_HELM_PREFLIGHT_DENIED",
+			"message": "RBAC pre-flight denied one or more resources",
+			"denied":  denied.Denials,
+		})
+		return
+	}
+	slog.WarnContext(ctx, "helm rollback failed",
+		"cluster", c.Name, "namespace", args.Namespace, "releaseName", args.ReleaseName,
+		"targetRevision", args.Revision, "err", err)
+	emitHelmRollbackOutcome(ctx, emitter, c, audit.OutcomeFailure, args, nil, err.Error())
+	status, code := classifyHelmPreviewErr(err)
+	writeAPIErrorJSON(w, status, code, err.Error())
+}
+
+func emitHelmRollbackIntent(ctx context.Context, emitter *audit.Emitter, c clusters.Cluster, args k8s.HelmRollbackArgs) {
+	if emitter == nil {
+		return
+	}
+	emitter.Record(ctx, audit.Event{
+		Actor:   actorFromContext(ctx),
+		Verb:    audit.VerbHelmRollbackIntent,
+		Outcome: audit.OutcomeSuccess,
+		Cluster: c.Name,
+		Resource: audit.ResourceRef{
+			Namespace: args.Namespace,
+			Name:      args.ReleaseName,
+		},
+		Extra: map[string]any{
+			"targetRevision": args.Revision,
+			"wait":           args.Wait,
+			"cleanupOnFail":  args.CleanupOnFail,
+			"disableHooks":   args.DisableHooks,
+		},
+	})
+}
+
+func emitHelmRollbackOutcome(ctx context.Context, emitter *audit.Emitter, c clusters.Cluster, outcome audit.Outcome, args k8s.HelmRollbackArgs, result *k8s.HelmRollbackResult, reason string) {
+	if emitter == nil {
+		return
+	}
+	extra := map[string]any{
+		"targetRevision": args.Revision,
+		"wait":           args.Wait,
+		"cleanupOnFail":  args.CleanupOnFail,
+		"disableHooks":   args.DisableHooks,
+	}
+	if result != nil {
+		extra["fromRevision"] = result.FromRevision
+		extra["toRevision"] = result.ToRevision
+		extra["newRevision"] = result.NewRevision
+	}
+	emitter.Record(ctx, audit.Event{
+		Actor:   actorFromContext(ctx),
+		Verb:    audit.VerbHelmRollback,
 		Outcome: outcome,
 		Cluster: c.Name,
 		Resource: audit.ResourceRef{
