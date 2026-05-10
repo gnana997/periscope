@@ -1,0 +1,68 @@
+# Periscope on kind (or k3d / minikube) — quickstart values.
+#
+# Goal: a single `helm install` that boots the SPA on any local
+# Kubernetes cluster in ~60s, with zero AWS / OIDC setup. Sign in
+# uses the in-process dev fallback so anyone hitting the dashboard
+# becomes "dev@local" — fine for evaluating the product on your
+# laptop, not for any environment that touches real workloads.
+#
+#   $ kind create cluster --name periscope-demo
+#   $ helm install periscope \
+#       oci://ghcr.io/gnana997/charts/periscope --version 1.0.5 \
+#       --namespace periscope --create-namespace \
+#       --values https://raw.githubusercontent.com/gnana997/periscope/main/examples/values-kind.yaml
+#   $ kubectl -n periscope wait --for=condition=Available deploy/periscope --timeout=120s
+#   $ kubectl -n periscope port-forward svc/periscope 8080:8080
+#   $ open http://localhost:8080
+#
+# What this turns on / off vs. the chart defaults:
+#   - auth.oidc.issuer="" → dev fallback identity ("dev@local").
+#   - secrets.mode=plain with empty client secret → no Secret needed
+#     (chart renders an empty stringData Secret to keep the deployment
+#     happy without an out-of-band create step).
+#   - One cluster: in-cluster backend → Periscope manages the kind
+#     cluster it's running in. No registration token, no agent.
+#   - Conservative resources so it fits comfortably on a single-node
+#     kind/k3d cluster (kind defaults to ~6Gi memory / 4 cores).
+#   - No ingress / no tls — port-forward is the access path.
+
+# ─── Auth ────────────────────────────────────────────────────────────
+# Dev mode: leaving issuer empty triggers the in-process dev fallback.
+# Anyone reaching the dashboard becomes the user defined under auth.dev.
+auth:
+  oidc:
+    issuer: ""                    # ← dev mode trigger
+    clientID: ""
+    clientSecret: ""              # not used in dev mode
+  authorization:
+    mode: shared
+  dev:
+    subject: dev@local
+    email:   dev@local
+    groups:  [periscope-users]    # matches a typical default-tier admin group
+
+# ─── Secret ──────────────────────────────────────────────────────────
+# `plain` mode with empty value → chart renders an empty Secret so the
+# Deployment's envFrom doesn't fail. Periscope ignores the OIDC secret
+# entirely when issuer is empty.
+secrets:
+  mode: plain
+  plain:
+    clientSecret: "dev-mode-placeholder-ignored"
+
+# ─── Cluster registry ────────────────────────────────────────────────
+# Just the local cluster, via in-cluster backend (kubelet-mounted SA).
+# This auto-renders the per-cluster RBAC bindings (templates/cluster-rbac.yaml
+# detects in-cluster mode and emits the impersonation chain).
+clusters:
+  - name: kind-local
+    backend: in-cluster
+
+# ─── Resource limits — sized for a single-node kind/k3d cluster ──────
+resources:
+  requests:
+    cpu: 50m
+    memory: 96Mi
+  limits:
+    cpu: 500m
+    memory: 256Mi
