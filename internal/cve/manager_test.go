@@ -19,9 +19,9 @@ import (
 // --- stub clients shared across tests ---
 
 type stubInspector struct {
-	enabled      bool
-	enabledErr   error
-	digestCalls  atomic.Int32
+	enabled       bool
+	enabledErr    error
+	digestCalls   atomic.Int32
 	instanceCalls atomic.Int32
 
 	digestFindings   map[string][]Finding
@@ -35,20 +35,20 @@ func (s *stubInspector) IsEnabled(_ context.Context) (bool, error) {
 	return s.enabled, nil
 }
 
-func (s *stubInspector) ListFindingsByInstance(_ context.Context, ids []string) (map[string][]Finding, error) {
+func (s *stubInspector) ListFindingsByInstance(_ context.Context, ids []string) ([]Finding, error) {
 	s.instanceCalls.Add(1)
-	out := make(map[string][]Finding, len(ids))
+	var out []Finding
 	for _, id := range ids {
-		out[id] = append(out[id], s.instanceFindings[id]...)
+		out = append(out, s.instanceFindings[id]...)
 	}
 	return out, nil
 }
 
-func (s *stubInspector) ListFindingsByImageDigest(_ context.Context, digests []string) (map[string][]Finding, error) {
+func (s *stubInspector) ListFindingsByImageDigest(_ context.Context, digests []string) ([]Finding, error) {
 	s.digestCalls.Add(1)
-	out := make(map[string][]Finding, len(digests))
+	var out []Finding
 	for _, d := range digests {
-		out[d] = append(out[d], s.digestFindings[d]...)
+		out = append(out, s.digestFindings[d]...)
 	}
 	return out, nil
 }
@@ -167,18 +167,13 @@ func TestManager_TTL_RefreshesStale(t *testing.T) {
 	}
 	baselineDigestCalls := insp.digestCalls.Load()
 
-	// runLoops registers two waiters on the fake clock (the TTL +
-	// eviction tickers). Block until both are in place before
-	// advancing — otherwise Advance can race the goroutine and
-	// silently drop the tick.
-	blockCtx, blockCancel := context.WithTimeout(context.Background(), 5*time.Second)
-	if err := clock.BlockUntilContext(blockCtx, 2); err != nil {
-		blockCancel()
-		t.Fatalf("BlockUntilContext: %v", err)
-	}
-	blockCancel()
-	clock.Advance(2 * time.Hour) // past TTL boundary, fires both ticks
-	deadline := time.Now().Add(5 * time.Second)
+	// Fast-forward 2 hours past TTL. The next tick should re-fetch.
+	clock.Advance(2 * time.Hour)
+	// Allow the ticker goroutine to wake up. clockwork's FakeClock
+	// requires waiting on tickers; we drive a tick by advancing
+	// enough to trigger one and then waiting briefly.
+	clock.Advance(2 * time.Minute) // past two TTLScanInterval ticks
+	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
 		if insp.digestCalls.Load() > baselineDigestCalls {
 			break
@@ -211,17 +206,10 @@ func TestManager_Eviction_DropsZeroRefStale(t *testing.T) {
 	st.IncDigestRef("evict-me")
 	st.DecDigestRef("evict-me")
 
-	// Wait until both tickers (TTL + eviction) are registered with
-	// the fake clock so Advance reliably fires them.
-	blockCtx, blockCancel := context.WithTimeout(context.Background(), 5*time.Second)
-	if err := clock.BlockUntilContext(blockCtx, 2); err != nil {
-		blockCancel()
-		t.Fatalf("BlockUntilContext: %v", err)
-	}
-	blockCancel()
-	clock.Advance(2 * time.Hour) // past EvictAfter
+	clock.Advance(2 * time.Hour)   // past EvictAfter
+	clock.Advance(2 * time.Minute) // past two EvictionScanInterval ticks
 
-	deadline := time.Now().Add(5 * time.Second)
+	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
 		if st.GetDigest("evict-me") == nil {
 			return

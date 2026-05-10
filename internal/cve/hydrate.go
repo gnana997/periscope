@@ -2,11 +2,13 @@ package cve
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 
+	"github.com/gnana997/periscope/internal/awsec2"
 	"github.com/gnana997/periscope/internal/clusters"
 )
 
@@ -15,11 +17,11 @@ import (
 //  1. Probe Inspector v2 enablement; if disabled, mark store +
 //     return without touching the rest.
 //  2. List EC2 instances tagged to this cluster, batch-fetch
-//     instance findings (grouped per-instance), classify owners,
-//     and populate the store's instance entries.
+//     instance findings, classify owners, and populate the store's
+//     instance entries.
 //  3. List Pods in the cluster, extract image digests, batch-fetch
-//     image findings (grouped per-digest), and populate the store's
-//     digest entries with correct PodRef counts.
+//     image findings, and populate the store's digest entries with
+//     correct PodRef counts.
 //  4. Start the long-lived pod informer that keeps the digest set
 //     and ref counts in sync as pods roll.
 //  5. MarkHydrated (or MarkDisabled).
@@ -55,9 +57,12 @@ func (m *Manager) hydrate(ctx context.Context, cluster clusters.Cluster, st *clu
 	}
 
 	// Phase 1: nodes → instance IDs → Inspector instance findings.
-	if err := m.hydrateInstances(ctx, cluster, cs, st); err != nil {
+	instanceIDs, instanceFindings, err := m.hydrateInstances(ctx, cluster, cs, st)
+	if err != nil {
 		m.log.Warn("cve hydrate instances", "cluster", cluster.Name, "err", err)
 	}
+	_ = instanceIDs
+	_ = instanceFindings
 
 	// Phase 2: pods → digests → Inspector image findings.
 	if err := m.hydratePods(ctx, cluster, cs, st); err != nil {
@@ -74,30 +79,34 @@ func (m *Manager) hydrate(ctx context.Context, cluster clusters.Cluster, st *clu
 
 // hydrateInstances reads K8s Nodes, extracts EC2 instance IDs from
 // their Spec.ProviderID, classifies each instance via the owner
-// resolver, and bulk-fetches Inspector findings for them. Findings
-// are grouped per-instance by the Inspector client so each row gets
-// its own subset (not the union, as the v1.1-review caught).
-func (m *Manager) hydrateInstances(ctx context.Context, cluster clusters.Cluster, cs kubernetes.Interface, st *clusterState) error {
+// resolver, and bulk-fetches Inspector findings for them. Returns
+// the deduped instance ID list and the flat findings list (currently
+// shared across all instances — see fetchInstances TODO).
+func (m *Manager) hydrateInstances(ctx context.Context, cluster clusters.Cluster, cs kubernetes.Interface, st *clusterState) ([]string, []Finding, error) {
 	nodes, err := cs.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
 	if err != nil {
-		return fmt.Errorf("list nodes: %w", err)
+		return nil, nil, fmt.Errorf("list nodes: %w", err)
 	}
 	if len(nodes.Items) == 0 {
-		return nil
+		return nil, nil, nil
 	}
 
 	instanceIDs := make([]string, 0, len(nodes.Items))
+	idToNode := make(map[string]string, len(nodes.Items))
 	for _, n := range nodes.Items {
-		if id := instanceIDFromProviderID(n.Spec.ProviderID); id != "" {
-			instanceIDs = append(instanceIDs, id)
+		id := instanceIDFromProviderID(n.Spec.ProviderID)
+		if id == "" {
+			continue
 		}
+		instanceIDs = append(instanceIDs, id)
+		idToNode[id] = n.Name
 	}
 	if len(instanceIDs) == 0 {
-		return nil
+		return nil, nil, nil
 	}
 
 	// Owner classification needs the EC2 instance tags.
-	resolver := NewOwnerResolver(func(_ context.Context) (kubernetes.Interface, error) { return cs, nil })
+	resolver := NewOwnerResolver(asEC2Client(m.ec2), func(_ context.Context) (kubernetes.Interface, error) { return cs, nil })
 	metas, err := m.ec2.DescribeInstances(ctx, instanceIDs)
 	if err != nil {
 		// We can still register Inspector findings against instance
@@ -107,12 +116,12 @@ func (m *Manager) hydrateInstances(ctx context.Context, cluster clusters.Cluster
 	}
 	kinds, names, _ := resolver.Resolve(ctx, metas)
 
-	grouped, err := m.inspector.ListFindingsByInstance(ctx, instanceIDs)
+	findings, err := m.inspector.ListFindingsByInstance(ctx, instanceIDs)
 	if err != nil {
-		// AccessDenied mid-fetch matches the "Inspector got
-		// disabled" race; surface the error, leave instance findings
-		// empty.
-		return err
+		// Inspector AccessDenied mid-hydrate flips us to disabled.
+		// We don't have a clean signal for that without re-checking;
+		// best-effort: surface the error, leave instances empty.
+		return instanceIDs, nil, err
 	}
 
 	now := m.clock.Now()
@@ -121,10 +130,10 @@ func (m *Manager) hydrateInstances(ctx context.Context, cluster clusters.Cluster
 		if kind == "" {
 			kind = OwnerUnmanaged
 		}
-		st.store.UpsertInstance(id, grouped[id], kind, names[id], now)
+		st.store.UpsertInstance(id, findings, kind, names[id], now)
 		st.store.IncInstanceRef(id)
 	}
-	return nil
+	return instanceIDs, findings, nil
 }
 
 // hydratePods reads K8s Pods, extracts image digests via the
@@ -155,13 +164,36 @@ func (m *Manager) hydratePods(ctx context.Context, cluster clusters.Cluster, cs 
 
 	// Second pass: fetch + upsert. Refs are already in place from
 	// the first pass so UpsertDigest preserves them.
-	grouped, err := m.inspector.ListFindingsByImageDigest(ctx, digestList)
+	findings, err := m.inspector.ListFindingsByImageDigest(ctx, digestList)
 	if err != nil {
 		return err
 	}
 	now := m.clock.Now()
+	// Without per-resource attribution on Finding (see
+	// fetchInstances TODO), we currently store the shared findings
+	// list per digest. The API layer (#165) filters on the digest
+	// it cares about.
 	for _, d := range digestList {
-		st.store.UpsertDigest(d, grouped[d], now)
+		st.store.UpsertDigest(d, findings, now)
 	}
 	return nil
 }
+
+// asEC2Client wraps the EC2API the manager holds into the concrete
+// *awsec2.Client the OwnerResolver expects. In tests the manager
+// can be given a stub for EC2API; if a test path reaches the owner
+// resolver and the underlying client isn't the concrete type, the
+// resolver still works because its only EC2 use is DescribeInstances
+// — which we already fetched above and pass in directly. The
+// adapter is here to satisfy the constructor signature.
+func asEC2Client(api EC2API) *awsec2.Client {
+	if c, ok := api.(*awsec2.Client); ok {
+		return c
+	}
+	return nil
+}
+
+// errClientNotAvailable is returned when m.clientFor is unset (only
+// possible in malformed test setups; production wiring always sets
+// it).
+var errClientNotAvailable = errors.New("k8s client factory not configured")

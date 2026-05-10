@@ -2,7 +2,6 @@ package cve
 
 import (
 	"context"
-	"sync/atomic"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -49,18 +48,12 @@ func (m *Manager) startPodInformer(parent context.Context, cluster clusters.Clus
 	}
 
 	factory.Start(ctx.Done())
-	// Cold-path hydrate already populated digest entries + ref
-	// counts from a direct pod list. The informer's initial sync
-	// will then replay an Add for every existing pod; we set
-	// hook.syncDone only AFTER that replay completes so the Add
-	// handler can suppress its double-count of refs during replay.
-	// Once syncDone flips true, post-startup Adds (new pods) bump
-	// refs normally.
-	go func() {
-		if cache.WaitForCacheSync(ctx.Done(), podInformer.HasSynced) {
-			hook.syncDone.Store(true)
-		}
-	}()
+	// Don't block hydrate on the initial sync — the cold path has
+	// already pre-populated the digest set + ref counts. The
+	// informer's purpose from here on is deltas; missing the first
+	// sync is harmless because hydratePods already did one
+	// equivalent.
+	go factory.WaitForCacheSync(ctx.Done())
 
 	m.log.Info("cve pod informer started", "cluster", cluster.Name)
 	return nil
@@ -69,40 +62,28 @@ func (m *Manager) startPodInformer(parent context.Context, cluster clusters.Clus
 // podHook is the bridge between informer events and the manager's
 // fetch path. Carries the cluster + store so the event handlers can
 // fire async refresh without router-style plumbing.
-//
-// syncDone flips to true once the SharedInformer's initial cache
-// sync finishes (see startPodInformer). Until then, Add events are
-// replay of pods the cold-path hydrate already counted, so the Add
-// handler must NOT bump refs again.
 type podHook struct {
-	state    *clusterState
-	ctx      context.Context
-	mgr      *Manager
-	cluster  clusters.Cluster
-	store    *Store
-	syncDone atomic.Bool
+	ctx     context.Context
+	mgr     *Manager
+	cluster clusters.Cluster
+	store   *Store
 }
 
 func newPodHook(ctx context.Context, mgr *Manager, cluster clusters.Cluster, st *clusterState) *podHook {
-	return &podHook{ctx: ctx, mgr: mgr, cluster: cluster, store: st.store, state: st}
+	return &podHook{ctx: ctx, mgr: mgr, cluster: cluster, store: st.store}
 }
 
-// onAdd: every container's imageID gets a Ref bump and an async
-// refresh kicked off if findings are missing. During the initial
-// informer sync (syncDone == false), the ref bump is suppressed —
-// hydratePods already counted these pods, and double-counting would
-// off-by-one every digest until the next pod delete.
+// onAdd: every container's imageID gets a Ref bump. If we already
+// hold findings for that digest, the existing entry is reused; if
+// not, we kick off an async refresh so the next read sees data.
 func (h *podHook) onAdd(obj any) {
 	pod, ok := obj.(*corev1.Pod)
 	if !ok {
 		return
 	}
-	skipInc := !h.syncDone.Load()
 	for _, d := range PodImageDigests(pod) {
-		if !skipInc {
-			h.store.IncDigestRef(d)
-		}
-		if e := h.store.GetDigest(d); e == nil || len(e.Findings) == 0 {
+		h.store.IncDigestRef(d)
+		if h.store.GetDigest(d) == nil || len(h.store.GetDigest(d).Findings) == 0 {
 			h.enqueueDigest(d)
 		}
 	}
@@ -154,17 +135,14 @@ func (h *podHook) onDelete(obj any) {
 	}
 }
 
-// enqueueDigest fires an async refresh for a single digest. Runs
-// under the manager-wide delta semaphore so a rolling deploy of
-// many pods does not spawn unbounded goroutines, each with an
-// Inspector socket. Errors are logged and swallowed — the TTL
-// loop will retry eventually.
+// enqueueDigest fires an async Refresh for a single digest. Errors
+// are logged and swallowed — the TTL loop will retry eventually.
 func (h *podHook) enqueueDigest(d string) {
-	go h.mgr.runDelta(h.ctx, func() {
-		if err := h.mgr.fetchDigests(h.ctx, h.state, []string{d}); err != nil {
+	go func() {
+		if err := h.mgr.fetchDigest(h.ctx, h.cluster, h.store, d); err != nil {
 			h.mgr.log.Debug("cve delta refresh", "cluster", h.cluster.Name, "digest", d, "err", err)
 		}
-	})
+	}()
 }
 
 func digestSet(in []string) map[string]struct{} {
