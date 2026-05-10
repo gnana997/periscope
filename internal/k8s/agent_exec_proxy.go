@@ -188,7 +188,7 @@ func handleAgentProxyConn(ctx context.Context, conn net.Conn) {
 	if err != nil {
 		respondProxyError(conn, http.StatusBadGateway, cluster, &agentUpstreamWire{
 			Code:     "E_NO_AGENT",
-			Category: "network",
+			Category: "no_agent",
 			Message:  fmt.Sprintf("no agent connected for cluster %q", cluster),
 			Detail:   err.Error(),
 		})
@@ -303,6 +303,11 @@ func clusterNameFromCONNECTHost(hostport string) (string, bool) {
 // central server's transport interceptor (wrapAgentUpstream) parses
 // CONNECT-proxy-side failures with the same code path that handles
 // agent-side failures. cluster is stamped into the body when known.
+//
+// NOTE: pre-#68 this function wrote a plain-text body. Anything that
+// CONNECTs to this proxy with a non-Periscope client (curl debug
+// session, custom kubectl plugin) now receives application/json
+// instead of "agent → apiserver: …". The status code is unchanged.
 func respondProxyError(c net.Conn, status int, cluster string, w *agentUpstreamWire) {
 	if w == nil {
 		w = &agentUpstreamWire{Code: AgentUpstreamErrorCode, Category: "unknown"}

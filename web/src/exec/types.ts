@@ -36,7 +36,7 @@ export interface ErrorFrame {
   /** Agent-upstream error category. Populated only on
    *  code === "E_AGENT_UPSTREAM" frames; the drawer banner switches
    *  on this to render network/tls/timeout-specific copy. */
-  category?: "network" | "tls" | "timeout" | "unknown";
+  category?: "network" | "tls" | "timeout" | "no_agent" | "unknown";
   /** Cluster the agent reported the failure for. Populated alongside
    *  category on E_AGENT_UPSTREAM frames. */
   cluster?: string;
@@ -95,7 +95,7 @@ export interface ExecSessionMeta {
   errorCode?: string;
   errorMessage?: string;
   /** Mirrors ErrorFrame.category for E_AGENT_UPSTREAM frames. */
-  errorCategory?: "network" | "tls" | "timeout" | "unknown";
+  errorCategory?: "network" | "tls" | "timeout" | "no_agent" | "unknown";
   /** Cluster name carried on the error frame (agent-stamped). */
   errorCluster?: string;
   /** End-to-end trace id from the agent's slog line. */

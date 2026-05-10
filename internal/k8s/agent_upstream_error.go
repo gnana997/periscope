@@ -29,13 +29,15 @@ import (
 	"io"
 	"net/http"
 	"strings"
+
+	"github.com/gnana997/periscope/internal/agentupstream"
 )
 
-// AgentUpstreamErrorCode is the stable wire code shared with the
-// agent's ErrorHandler. Mirrors the constant in
-// cmd/periscope-agent/proxy.go (duplicated rather than imported so
-// the central-server build doesn't pull the agent main package).
-const AgentUpstreamErrorCode = "E_AGENT_UPSTREAM"
+// AgentUpstreamErrorCode aliases agentupstream.CodeAgentUpstream so
+// existing call sites that depend on the typed error continue to
+// compile. New code should reference agentupstream.CodeAgentUpstream
+// (and the no-tunnel variant agentupstream.CodeNoAgent) directly.
+const AgentUpstreamErrorCode = agentupstream.CodeAgentUpstream
 
 // AgentUpstreamError is the typed error produced by wrapAgentUpstream
 // (and by the exec CONNECT proxy interceptor) when the agent reverse
@@ -117,24 +119,22 @@ func AsAgentUpstreamError(err error) (*AgentUpstreamError, bool) {
 	return nil, false
 }
 
-// agentUpstreamWire is the on-wire JSON shape the agent emits. Mirrors
-// upstreamErrorBody in cmd/periscope-agent/proxy.go.
-type agentUpstreamWire struct {
-	Code     string `json:"code"`
-	Message  string `json:"message"`
-	Category string `json:"category"`
-	Cluster  string `json:"cluster,omitempty"`
-	Detail   string `json:"detail,omitempty"`
-	TraceID  string `json:"trace_id,omitempty"`
-}
+// agentUpstreamWire is the on-wire JSON shape the agent emits, retained
+// here as a package-local alias for the shared agentupstream.Envelope
+// so existing test code and the CONNECT proxy in agent_exec_proxy.go
+// continue to compile without importing the shared package directly.
+// New code should reference agentupstream.Envelope.
+type agentUpstreamWire = agentupstream.Envelope
 
 // parseAgentUpstreamBody attempts to read an agent JSON envelope from
 // resp.Body. Returns the typed error on success; nil otherwise. The
 // caller is responsible for any further response handling — this
 // function does NOT close the body, only drain what it parsed.
 //
-// Conservative: only recognises bodies whose `code` matches
-// AgentUpstreamErrorCode. A 502 from a generic upstream (e.g. an
+// Conservative: only recognises bodies whose `code` is in
+// agentupstream.RecognizedCodes (today: E_AGENT_UPSTREAM from the
+// agent's reverse proxy + E_NO_AGENT from the central server's
+// loopback CONNECT proxy). A 502 from a generic upstream (e.g. an
 // ingress controller in front of a future deployment shape) is left
 // alone so callers can decide what to do.
 func parseAgentUpstreamBody(resp *http.Response) *AgentUpstreamError {
@@ -155,7 +155,7 @@ func parseAgentUpstreamBody(resp *http.Response) *AgentUpstreamError {
 	if err := json.Unmarshal(raw, &w); err != nil {
 		return nil
 	}
-	if w.Code != AgentUpstreamErrorCode {
+	if !agentupstream.IsRecognized(w.Code) {
 		return nil
 	}
 	return &AgentUpstreamError{
@@ -194,7 +194,13 @@ func wrapAgentUpstream(rt http.RoundTripper) http.RoundTripper {
 		}
 		// Buffer the body so we can both classify and (on miss) hand
 		// it back to the caller untouched. Cap protects us from
-		// pathological bodies.
+		// pathological bodies. Note the cap is silent: if a
+		// (hypothetical) upstream sent > maxBody of valid JSON, the
+		// LimitReader truncates, json.Unmarshal fails, and we fall
+		// through to the non-match branch — caller receives the
+		// truncated body. Acceptable because in practice
+		// E_AGENT_UPSTREAM envelopes are < 1 KB; raise maxBody if
+		// that ever stops being true.
 		const maxBody = 16 * 1024
 		body, readErr := io.ReadAll(io.LimitReader(resp.Body, maxBody))
 		_ = resp.Body.Close()
@@ -209,7 +215,7 @@ func wrapAgentUpstream(rt http.RoundTripper) http.RoundTripper {
 			return resp, nil
 		}
 		var w agentUpstreamWire
-		if err := json.Unmarshal(body, &w); err != nil || w.Code != AgentUpstreamErrorCode {
+		if err := json.Unmarshal(body, &w); err != nil || !agentupstream.IsRecognized(w.Code) {
 			return resp, nil
 		}
 		// Match — close the body and return the typed error. The

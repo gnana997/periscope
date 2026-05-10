@@ -635,6 +635,13 @@ function agentUpstreamHeadline(
       return `tls handshake with cluster '${c}' apiserver failed. check the agent's mounted ca bundle.`;
     case "timeout":
       return `request to cluster '${c}' apiserver timed out.`;
+    case "no_agent":
+      // The central server's CONNECT proxy reported there is no
+      // registered tunnel for this cluster. Distinct from `network`
+      // because the apiserver is fine — it's the *agent* link
+      // that's gone. Operator action: check that the agent pod is
+      // running on the cluster and re-establish the tunnel.
+      return `agent for cluster '${c}' is disconnected. confirm the periscope-agent pod is running and re-registered.`;
     default:
       return `agent could not reach cluster '${c}' apiserver.`;
   }

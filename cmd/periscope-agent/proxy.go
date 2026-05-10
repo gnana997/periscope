@@ -46,13 +46,9 @@ import (
 	"time"
 
 	"k8s.io/client-go/rest"
-)
 
-// AgentUpstreamErrorCode is the stable error code emitted by the agent
-// reverse proxy when it can't reach the local apiserver. The central
-// server's transport layer pivots on this code to surface a typed
-// *AgentUpstreamError to handlers and the SPA exec banner.
-const AgentUpstreamErrorCode = "E_AGENT_UPSTREAM"
+	"github.com/gnana997/periscope/internal/agentupstream"
+)
 
 // startAPIProxy stands up a localhost HTTP server that forwards every
 // request to the local apiserver with the agent's SA bearer token
@@ -177,29 +173,16 @@ func apiserverTLSConfig(inClusterCfg *rest.Config) (*tls.Config, error) {
 // without touching the filesystem. Production points at os.ReadFile.
 var readFile = os.ReadFile
 
-// upstreamErrorBody is the JSON envelope the proxy emits to the central
-// server whenever the reverse-proxy ErrorHandler fires. The central
-// server's tunnel RoundTripper detects this shape and converts it to a
-// typed *AgentUpstreamError; the SPA's exec drawer renders a friendly
-// banner per category.
-//
-// Stability: this is a wire contract between the agent and the central
-// server. Renaming or repurposing fields here requires a coordinated
-// rollout. New optional fields are safe.
-type upstreamErrorBody struct {
-	Code     string `json:"code"`
-	Message  string `json:"message"`
-	Category string `json:"category"`
-	Cluster  string `json:"cluster,omitempty"`
-	Detail   string `json:"detail,omitempty"`
-	TraceID  string `json:"trace_id,omitempty"`
-}
-
 // writeUpstreamErrorJSON classifies err, logs a structured warning line,
 // and writes a JSON body the central server can parse. Status code
 // follows category (504 for timeout; 502 for everything else) so the
 // kubectl-style 502/504 distinction stays meaningful for non-Periscope
 // HTTP clients (k8s curl, debug shells) too.
+//
+// The on-wire shape is agentupstream.Envelope; the central server's
+// internal/k8s/agent_upstream_error.go inspects bodies whose `code`
+// is in agentupstream.RecognizedCodes and converts them to a typed
+// *AgentUpstreamError before they reach handlers.
 func writeUpstreamErrorJSON(w http.ResponseWriter, r *http.Request, cluster string, err error) {
 	category, message, status := classifyUpstreamError(err)
 
@@ -217,8 +200,8 @@ func writeUpstreamErrorJSON(w http.ResponseWriter, r *http.Request, cluster stri
 		"err", err,
 	)
 
-	body := upstreamErrorBody{
-		Code:     AgentUpstreamErrorCode,
+	body := agentupstream.Envelope{
+		Code:     agentupstream.CodeAgentUpstream,
 		Message:  message,
 		Category: category,
 		Cluster:  cluster,
@@ -233,6 +216,23 @@ func writeUpstreamErrorJSON(w http.ResponseWriter, r *http.Request, cluster stri
 // classifyUpstreamError maps a reverse-proxy transport error into the
 // (category, friendly message, http status) triple the JSON body and
 // access log share.
+//
+// Priority order is intentional and load-bearing:
+//  1. TLS first — *tls.CertificateVerificationError /
+//     tls.RecordHeaderError / x509.UnknownAuthorityError /
+//     x509.HostnameError. Always category=tls regardless of how the
+//     error eventually unwraps.
+//  2. Timeout next — context.DeadlineExceeded and any net.Error whose
+//     Timeout()=true (covers *net.OpError wrapping syscall.ETIMEDOUT
+//     plus dial / read / write deadlines). A slow TLS handshake that
+//     itself hits ctx.DeadlineExceeded therefore reports as `timeout`,
+//     not `tls` — operators see "timeout" and check network/tls
+//     latency, which is the correct triage path.
+//  3. Network — *net.DNSError + the connect/reset syscall set, then a
+//     fallback *net.OpError catch-all so anything not specifically
+//     classified still surfaces as actionable network trouble.
+//  4. unknown — last resort. Operators are unlikely to see this in
+//     practice; it exists so the function is total.
 //
 // Auth (401/403) is intentionally NOT a category here — apiserver auth
 // failures arrive as normal HTTP responses, never reach ErrorHandler,

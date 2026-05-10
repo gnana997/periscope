@@ -17,6 +17,8 @@ import (
 	"testing"
 
 	"k8s.io/client-go/rest"
+
+	"github.com/gnana997/periscope/internal/agentupstream"
 )
 
 // TestProxy_InjectsBearerAndPreservesImpersonation is the load-bearing
@@ -279,12 +281,12 @@ func TestWriteUpstreamErrorJSON_FullEnvelope(t *testing.T) {
 		t.Errorf("Content-Type = %q, want application/json", ct)
 	}
 
-	var body upstreamErrorBody
+	var body agentupstream.Envelope
 	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 		t.Fatalf("unmarshal body: %v", err)
 	}
-	if body.Code != AgentUpstreamErrorCode {
-		t.Errorf("code = %q, want %q", body.Code, AgentUpstreamErrorCode)
+	if body.Code != agentupstream.CodeAgentUpstream {
+		t.Errorf("code = %q, want %q", body.Code, agentupstream.CodeAgentUpstream)
 	}
 	if body.Category != "network" {
 		t.Errorf("category = %q, want network", body.Category)
@@ -313,7 +315,7 @@ func TestWriteUpstreamErrorJSON_FallbackTraceID(t *testing.T) {
 
 	writeUpstreamErrorJSON(rec, req, "test-cluster", errors.New("boom"))
 
-	var body upstreamErrorBody
+	var body agentupstream.Envelope
 	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}

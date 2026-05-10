@@ -351,9 +351,18 @@ type controlFrame struct {
 	Rows             int    `json:"rows,omitempty"`
 
 	// Agent-upstream error fields. Populated only on
-	// {type:"error", code:"E_AGENT_UPSTREAM"} frames so the SPA's
-	// drawer banner can render category-specific copy and surface a
-	// trace id for log correlation.
+	// {type:"error", code:"E_AGENT_UPSTREAM"} (and the no-tunnel
+	// variant code:"E_NO_AGENT") frames so the SPA's drawer banner
+	// can render category-specific copy and surface a trace id for
+	// log correlation.
+	//
+	// Casing note: the on-the-wire JSON tag for trace id is
+	// `traceId` (camelCase) here on the central-server → SPA hop,
+	// but `trace_id` (snake_case) on the agent → central-server
+	// hop. The flip is deliberate — Go convention vs JS
+	// convention — and the conversion happens in this struct's
+	// tags. When debugging end-to-end, look for the same opaque hex
+	// token under either name across the three layers.
 	Category string `json:"category,omitempty"`
 	Cluster  string `json:"cluster,omitempty"`
 	TraceID  string `json:"traceId,omitempty"`
