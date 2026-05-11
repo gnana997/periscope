@@ -37,8 +37,8 @@ import (
 // returns OwnerKarpenter with an empty OwnerName rather than failing
 // the whole hydrate.
 type OwnerResolver struct {
-	listFn  func(ctx context.Context, cs kubernetes.Interface) ([]nodeClaimRef, error) // overridable for tests
-	getCS   func(ctx context.Context) (kubernetes.Interface, error)
+	listFn func(ctx context.Context, cs kubernetes.Interface) ([]nodeClaimRef, error) // overridable for tests
+	getCS  func(ctx context.Context) (kubernetes.Interface, error)
 }
 
 // nodeClaimRef is the projected shape of a Karpenter NodeClaim that
