@@ -310,7 +310,7 @@ func cvePodsHandler(reg *clusters.Registry, mgr *cve.Manager) credentials.Handle
 
 		rows := make([]cve.PodRow, 0, len(page))
 		for _, p := range page {
-			rows = append(rows, buildPodRow(p, store))
+			rows = append(rows, buildPodRow(p, store, false)) // list: counts only
 		}
 		var next string
 		if end < len(pods) {
@@ -352,7 +352,7 @@ func cvePodsOneHandler(reg *clusters.Registry, mgr *cve.Manager) credentials.Han
 			writeAPIError(w, err, http.StatusNotFound)
 			return
 		}
-		writeJSON(w, http.StatusOK, buildPodRow(p, store))
+		writeJSON(w, http.StatusOK, buildPodRow(p, store, true)) // detail: include findings
 	}
 }
 
@@ -448,7 +448,7 @@ func decodeCursor(raw string) string {
 // classify ECR / non-ECR / pending and (when scanned) look up
 // findings for the digest. Roll up severity counts across scanned
 // containers; compute scanCoverage from the per-container mix.
-func buildPodRow(p *corev1.Pod, store *cve.Store) cve.PodRow {
+func buildPodRow(p *corev1.Pod, store *cve.Store, withFindings bool) cve.PodRow {
 	rolled := cve.SeverityCounts{}
 	containers := make([]cve.ContainerRow, 0, len(p.Spec.Containers)+len(p.Spec.InitContainers))
 
@@ -470,6 +470,13 @@ func buildPodRow(p *corev1.Pod, store *cve.Store) cve.PodRow {
 				counts := cve.CountSeverities(e.Findings)
 				wire := cve.WireSeverity(counts)
 				row.SeverityCounts = &wire
+				if withFindings && len(e.Findings) > 0 {
+					// Wire per-container findings so the SPA Security
+					// tab can render CVE-IDs / titles / remediation.
+					// Copied to avoid sharing the store's backing slice
+					// (callers may sort / filter in place).
+					row.Packages = cve.GroupByPackage(e.Findings)
+				}
 				rolled.Add(counts)
 			} else {
 				zero := cve.WireSeverity(cve.SeverityCounts{})
@@ -578,7 +585,7 @@ func cveByWorkloadHandler(reg *clusters.Registry, mgr *cve.Manager) credentials.
 		scannedContainers, totalContainers := 0, 0
 		rows := make([]cve.PodRow, 0, len(matched))
 		for _, p := range matched {
-			row := buildPodRow(p, store)
+			row := buildPodRow(p, store, true) // by-workload: include findings on each container
 			rows = append(rows, row)
 			// Re-aggregate via WireSeverityCounts since PodRow only
 			// keeps the wire shape — cheap, the row already walked
