@@ -200,6 +200,10 @@ export function ExecSessionsProvider({ children }: { children: ReactNode }) {
           closedAt: Date.now(),
           errorCode: frame.code,
           errorMessage: frame.message,
+          errorCategory: frame.category,
+          errorCluster: frame.cluster,
+          errorTraceId: frame.traceId,
+          errorDetail: frame.detail,
         });
       });
       client.onStdout(() => {
