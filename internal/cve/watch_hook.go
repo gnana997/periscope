@@ -2,6 +2,7 @@ package cve
 
 import (
 	"context"
+	"sync/atomic"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -48,12 +49,18 @@ func (m *Manager) startPodInformer(parent context.Context, cluster clusters.Clus
 	}
 
 	factory.Start(ctx.Done())
-	// Don't block hydrate on the initial sync — the cold path has
-	// already pre-populated the digest set + ref counts. The
-	// informer's purpose from here on is deltas; missing the first
-	// sync is harmless because hydratePods already did one
-	// equivalent.
-	go factory.WaitForCacheSync(ctx.Done())
+	// Cold-path hydrate already populated digest entries + ref
+	// counts from a direct pod list. The informer's initial sync
+	// will then replay an Add for every existing pod; we set
+	// hook.syncDone only AFTER that replay completes so the Add
+	// handler can suppress its double-count of refs during replay.
+	// Once syncDone flips true, post-startup Adds (new pods) bump
+	// refs normally.
+	go func() {
+		if cache.WaitForCacheSync(ctx.Done(), podInformer.HasSynced) {
+			hook.syncDone.Store(true)
+		}
+	}()
 
 	m.log.Info("cve pod informer started", "cluster", cluster.Name)
 	return nil
@@ -62,28 +69,39 @@ func (m *Manager) startPodInformer(parent context.Context, cluster clusters.Clus
 // podHook is the bridge between informer events and the manager's
 // fetch path. Carries the cluster + store so the event handlers can
 // fire async refresh without router-style plumbing.
+//
+// syncDone flips to true once the SharedInformer's initial cache
+// sync finishes (see startPodInformer). Until then, Add events are
+// replay of pods the cold-path hydrate already counted, so the Add
+// handler must NOT bump refs again.
 type podHook struct {
-	ctx     context.Context
-	mgr     *Manager
-	cluster clusters.Cluster
-	store   *Store
+	ctx      context.Context
+	mgr      *Manager
+	cluster  clusters.Cluster
+	store    *Store
+	syncDone atomic.Bool
 }
 
 func newPodHook(ctx context.Context, mgr *Manager, cluster clusters.Cluster, st *clusterState) *podHook {
 	return &podHook{ctx: ctx, mgr: mgr, cluster: cluster, store: st.store}
 }
 
-// onAdd: every container's imageID gets a Ref bump. If we already
-// hold findings for that digest, the existing entry is reused; if
-// not, we kick off an async refresh so the next read sees data.
+// onAdd: every container's imageID gets a Ref bump and an async
+// refresh kicked off if findings are missing. During the initial
+// informer sync (syncDone == false), the ref bump is suppressed —
+// hydratePods already counted these pods, and double-counting would
+// off-by-one every digest until the next pod delete.
 func (h *podHook) onAdd(obj any) {
 	pod, ok := obj.(*corev1.Pod)
 	if !ok {
 		return
 	}
+	skipInc := !h.syncDone.Load()
 	for _, d := range PodImageDigests(pod) {
-		h.store.IncDigestRef(d)
-		if h.store.GetDigest(d) == nil || len(h.store.GetDigest(d).Findings) == 0 {
+		if !skipInc {
+			h.store.IncDigestRef(d)
+		}
+		if e := h.store.GetDigest(d); e == nil || len(e.Findings) == 0 {
 			h.enqueueDigest(d)
 		}
 	}

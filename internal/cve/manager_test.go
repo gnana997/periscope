@@ -167,13 +167,13 @@ func TestManager_TTL_RefreshesStale(t *testing.T) {
 	}
 	baselineDigestCalls := insp.digestCalls.Load()
 
-	// Fast-forward 2 hours past TTL. The next tick should re-fetch.
-	clock.Advance(2 * time.Hour)
-	// Allow the ticker goroutine to wake up. clockwork's FakeClock
-	// requires waiting on tickers; we drive a tick by advancing
-	// enough to trigger one and then waiting briefly.
-	clock.Advance(2 * time.Minute) // past two TTLScanInterval ticks
-	deadline := time.Now().Add(2 * time.Second)
+	// runLoops registers two waiters on the fake clock (the TTL +
+	// eviction tickers). Block until both are in place before
+	// advancing — otherwise Advance can race the goroutine and
+	// silently drop the tick.
+	clock.BlockUntil(2)
+	clock.Advance(2 * time.Hour) // past TTL boundary, fires both ticks
+	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
 		if insp.digestCalls.Load() > baselineDigestCalls {
 			break
@@ -206,10 +206,12 @@ func TestManager_Eviction_DropsZeroRefStale(t *testing.T) {
 	st.IncDigestRef("evict-me")
 	st.DecDigestRef("evict-me")
 
-	clock.Advance(2 * time.Hour)        // past EvictAfter
-	clock.Advance(2 * time.Minute)      // past two EvictionScanInterval ticks
+	// Wait until both tickers (TTL + eviction) are registered with
+	// the fake clock so Advance reliably fires them.
+	clock.BlockUntil(2)
+	clock.Advance(2 * time.Hour) // past EvictAfter
 
-	deadline := time.Now().Add(2 * time.Second)
+	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
 		if st.GetDigest("evict-me") == nil {
 			return

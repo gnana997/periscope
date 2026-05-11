@@ -107,6 +107,11 @@ func newHookFixture(t *testing.T) (*Manager, *podHook, *Store) {
 	store.MarkHydrated()
 	st := &clusterState{store: store}
 	hook := newPodHook(context.Background(), mgr, dummyCluster(), st)
+	// Watch-hook unit tests exercise the steady-state delta path:
+	// the initial informer sync has completed, so Add/Update events
+	// represent real pod churn (not cache replay) and should bump
+	// refs.
+	hook.syncDone.Store(true)
 	return mgr, hook, store
 }
 
