@@ -94,6 +94,7 @@ import type {
   RollbackResponse,
   UpgradeInsightsListResponse,
   UpgradeInsightDetail,
+  KarpenterDashboard,
   NodegroupsListResponse,
   NodegroupDetail,
   AddonsListResponse,
@@ -1082,6 +1083,17 @@ export const api = {
   upgradeInsight: (cluster: string, insightId: string, signal?: AbortSignal) =>
     getJSON<UpgradeInsightDetail>(
       `/api/clusters/${enc(cluster)}/eks/upgrade-insights/${enc(insightId)}`,
+      signal,
+    ),
+
+  /** Karpenter dashboard (issue #118) — single GET joining
+   *  NodePools + NodeClaims + pending pods + price metrics.
+   *  Returns `{available: false}` immediately on clusters without
+   *  karpenter.sh/v1 CRDs (no 422 — the SPA gates the sidebar entry
+   *  on the boolean field, not the status code). */
+  karpenter: (cluster: string, signal?: AbortSignal) =>
+    getJSON<KarpenterDashboard>(
+      `/api/clusters/${enc(cluster)}/karpenter`,
       signal,
     ),
 

@@ -41,6 +41,40 @@ tag.
   
 ### Added
 
+- Karpenter dashboard (#118). Curated read-only view at
+  `/clusters/{c}/karpenter` that auto-detects via the
+  `karpenter.sh/v1` CRD probe and joins three data sources kubectl
+  cant: NodePools (with weight + disruption budgets + per-pool
+  $/hr from the controllers `/metrics` exposition), NodeClaims
+  grouped by NodePool with the `Drifted` condition surfaced as a
+  badge, and pending pods waiting on Karpenter with the per-NodePool
+  rejection reasons extracted from the `FailedScheduling` apiserver
+  Event. The pending-pods join is the differentiator: operators no
+  longer have to grep karpenter-controller logs to find out why a
+  pod isnt being scheduled — each rejected NodePool renders inline
+  next to the pod with the wrapped reason ("incompatible
+  requirements", "insufficient capacity", etc.). Cost summary uses
+  the apiserver service-proxy verb to scrape
+  `karpenter_cloudprovider_instance_type_offering_price_estimate`
+  and joins it to live NodeClaim labels (instance type / capacity
+  type / zone). Graceful degradation: missing /metrics or events
+  list failures degrade individual panels (`metricsAvailable: false`,
+  empty incompatibility breakdown) without failing the whole
+  response. Clicking any NodePool or NodeClaim row opens a resizable
+  detail pane on the right with describe / yaml / events tabs;
+  width persists across sessions via `localStorage` and matches the
+  pattern used by other list+detail pages. The cost-summary scrape
+  has a 15-second budget and the SPA auto-refetches every 12 seconds,
+  so cold-start `metricsAvailable: false` (TLS handshake + connection
+  warmup on the first apiserver-proxy call) self-heals on the next
+  poll without operator action. Sidebar entry auto-hides on clusters
+  without Karpenter installed. New `karpenter_read` audit verb mirrors
+  the existing `eks_insights_read` pattern (read-style,
+  emit-on-every-call). Sample RBAC for the cost-summary verb shipped
+  at `examples/karpenter-cost-rbac.yaml`. Phase 2 follow-ups
+  (disruption-blocked badge, AMI drift rollout, ICE blacklist panel)
+  tracked in #148.
+
 - Schema form: form sections start collapsed; users open what they
   need to edit. Replaces the prior "primary section open by default"
   layout — for Deployment / StatefulSet (7+ sections) the always-
