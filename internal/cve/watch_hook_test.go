@@ -104,7 +104,7 @@ func newHookFixture(t *testing.T) (*Manager, *podHook, *Store) {
 		EvictionScanInterval: time.Hour,
 	}, nil)
 	store := NewStore()
-	store.MarkHydrated()
+	store.MarkHydrated(time.Now())
 	st := &clusterState{store: store}
 	hook := newPodHook(context.Background(), mgr, dummyCluster(), st)
 	// Watch-hook unit tests exercise the steady-state delta path:

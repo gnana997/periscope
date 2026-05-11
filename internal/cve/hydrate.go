@@ -35,19 +35,19 @@ func (m *Manager) hydrate(ctx context.Context, cluster clusters.Cluster, st *clu
 		// The store stays empty but un-disabled; the next manual
 		// refresh or a future SIGHUP can retry. Mark hydrated so
 		// readers don't deadlock.
-		st.store.MarkHydrated()
+		st.store.MarkHydrated(m.clock.Now())
 		return err
 	}
 	if !enabled {
 		m.log.Info("cve hydrate: inspector v2 not enabled", "cluster", cluster.Name)
-		st.store.MarkDisabled()
+		st.store.MarkDisabled(m.clock.Now())
 		return nil
 	}
 
 	// Defer the MarkHydrated so an early-return from instance- or
 	// pod-side hydration still unblocks waiters with whatever data
 	// we managed to collect.
-	defer st.store.MarkHydrated()
+	defer st.store.MarkHydrated(m.clock.Now())
 
 	cs, err := m.clientFor(ctx, cluster)
 	if err != nil {
@@ -106,6 +106,10 @@ func (m *Manager) hydrateInstances(ctx context.Context, cluster clusters.Cluster
 		m.log.Warn("cve hydrate: ec2 describe instances", "cluster", cluster.Name, "err", err)
 	}
 	kinds, names, _ := resolver.Resolve(ctx, metas)
+	amiByID := make(map[string]string, len(metas))
+	for _, mt := range metas {
+		amiByID[mt.InstanceID] = mt.AMI
+	}
 
 	grouped, err := m.inspector.ListFindingsByInstance(ctx, instanceIDs)
 	if err != nil {
@@ -121,7 +125,7 @@ func (m *Manager) hydrateInstances(ctx context.Context, cluster clusters.Cluster
 		if kind == "" {
 			kind = OwnerUnmanaged
 		}
-		st.store.UpsertInstance(id, grouped[id], kind, names[id], now)
+		st.store.UpsertInstance(id, grouped[id], kind, names[id], amiByID[id], now)
 		st.store.IncInstanceRef(id)
 	}
 	return nil

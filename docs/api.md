@@ -476,6 +476,193 @@ contract between server and `periscope-agent` only.
    even with a still-valid cert.
 
 
+### `/api/clusters/{cluster}/cve/*` — Inspector v2 CVE surface (v1.1+)
+
+Seven endpoints. All reads serve from the per-cluster local store
+(populated by the background Inspector v2 scanner, see
+[`docs/setup/cluster-rbac.md`](setup/cluster-rbac.md#aws-inspector-v2-optional-v11));
+the SPA never hits Inspector directly. Cold first-read blocks on the
+~10-30s hydrate; subsequent reads are O(1) map lookups.
+
+**Empty-state contract.** When the operator has `inspector.enabled:
+false` in Helm, OR the AWS account doesn't have Inspector v2 enabled
+/ the IAM grant is missing, every endpoint returns HTTP **200** with
+`{"inspectorEnabled": false, "hydrated": true, ...}`. There is no
+error envelope for this state — the SPA reads `inspectorEnabled` and
+renders the "Inspector v2 not enabled" hint. Don't script around
+transport errors for this case; check the flag.
+
+**Caching.** Read endpoints set:
+- `Cache-Control: no-store` — the SPA's TanStack Query layer handles
+  client-side cache.
+- `ETag: W/"<lastHydrate-nanos>-<digestCount>-<instanceCount>"` —
+  weak validator. Clients sending matching `If-None-Match` get **304
+  Not Modified**. The ETag changes when a hydrate or eviction
+  shifts the store; per-entry delta refreshes (a single digest
+  re-fetch from the watch hook) do NOT bump it — chips don't need
+  real-time accuracy. Operators who want immediate confirmation of a
+  fix should POST `/refresh` and re-read.
+
+#### `GET /api/clusters/{cluster}/cve/status`
+
+Cache state. Does NOT trigger a cold hydrate — the SPA polls this
+during the spinner state without forcing 30s of Inspector traffic.
+
+```json
+{
+  "inspectorEnabled": true,
+  "hydrated": true,
+  "lastHydrate": "2026-05-11T08:14:32Z",
+  "entryCounts": { "digests": 412, "instances": 47 }
+}
+```
+
+`lastHydrate` is omitted when `hydrated: false`.
+
+#### `GET /api/clusters/{cluster}/cve/by-instance`
+
+Per-instance severity counts joined to the instance's owner
+(managed nodegroup / Karpenter NodeClaim / unmanaged) and the
+underlying AMI. Ordered by `instanceId`.
+
+```json
+{
+  "instances": [
+    {
+      "instanceId": "i-0abc",
+      "owner": { "kind": "karpenter-nodeclaim", "name": "default-9f3kz" },
+      "ami": "ami-0xyz",
+      "severityCounts": { "critical": 2, "high": 5, "medium": 12, "low": 3, "informational": 0 },
+      "lastFetchedAt": "2026-05-11T08:14:32Z"
+    }
+  ],
+  "inspectorEnabled": true,
+  "hydrated": true
+}
+```
+
+#### `GET /api/clusters/{cluster}/cve/by-instance/{instanceID}`
+
+Full Inspector findings for one instance. Each `finding` carries the
+pre-built `inspectorUrl` deep-link for the AWS console.
+
+```json
+{
+  "findings": [
+    {
+      "resourceId": "i-0abc",
+      "cve": "CVE-2026-12345",
+      "severity": "HIGH",
+      "cvssV3Score": 7.5,
+      "packageName": "openssl",
+      "packageVersion": "1.0.0",
+      "fixedVersion": "1.0.1",
+      "title": "openssl vulnerability ...",
+      "firstObservedAt": "2026-04-01T00:00:00Z",
+      "lastObservedAt": "2026-05-10T12:00:00Z",
+      "inspectorUrl": "https://us-east-1.console.aws.amazon.com/inspector/v2/home?region=us-east-1#/findings?findingArn=..."
+    }
+  ],
+  "lastFetchedAt": "2026-05-11T08:14:32Z",
+  "inspectorEnabled": true,
+  "hydrated": true
+}
+```
+
+Returns **404** if the instance isn't in the cache (typo, terminated,
+or not yet hydrated).
+
+#### `GET /api/clusters/{cluster}/cve/by-digest/{digest}`
+
+Full findings for one ECR image digest. The `{digest}` segment is the
+bare `sha256:abc...` hash; chi unescapes the colon. Same response
+shape as `by-instance/{instanceID}` with the resource ID set to the
+digest. Returns **404** when the digest isn't in the cache.
+
+#### `GET /api/clusters/{cluster}/cve/pods?cursor=<b64>`
+
+Per-pod aggregate. Walks the long-lived pod informer's index;
+returns 100 pods per page (no override knob — frontend pages further
+locally if needed). `next` is `base64(namespace/podname)` of the last
+pod on the page; pass it back as `?cursor=...` for the next page.
+Returned `next` is empty when the last page is exhausted.
+
+```json
+{
+  "pods": [
+    {
+      "namespace": "payments",
+      "name": "checkout-7b9-xyz",
+      "containers": [
+        { "name": "app",     "image": "...dkr.ecr...amazonaws.com/app:v1", "digest": "sha256:abc", "scanState": "scanned", "severityCounts": { "critical": 0, "high": 3, "medium": 7, "low": 1, "informational": 0 } },
+        { "name": "sidecar", "image": "docker.io/foo:1.2",                                          "scanState": "non-ecr" }
+      ],
+      "rolledUpSeverityCounts": { "critical": 0, "high": 3, "medium": 7, "low": 1, "informational": 0 },
+      "scanCoverage": "partial"
+    }
+  ],
+  "next": "cGF5bWVudHMvY2hlY2tvdXQtN2I5LXh5eg",
+  "inspectorEnabled": true,
+  "hydrated": true
+}
+```
+
+**Container `scanState`**:
+- `scanned` — ECR image with a resolved digest; findings looked up.
+- `non-ecr` — image isn't in ECR (docker.io, ghcr.io, etc.); Inspector
+  v2 doesn't cover it.
+- `pending` — ECR image but `containerStatus.imageID` is empty (pod
+  mid-pull). A later poll resolves to `scanned`.
+
+**Pod `scanCoverage`**:
+- `full` — every container scanned.
+- `partial` — at least one scanned, at least one non-ecr/pending.
+- `none` — zero scanned.
+
+**Cursor stability.** A pod created between page 1 and page 2 can
+shift the lex order; under churn an operator may see a single
+skip/duplicate during paging. This is acceptable for v1.1.
+
+#### `GET /api/clusters/{cluster}/cve/pods/{namespace}/{pod}`
+
+Single pod, full per-container findings. Returns the same `PodRow`
+shape as a single entry in `/cve/pods`; returns **404** if the
+pod isn't in the informer cache, **503** if the informer hasn't
+started yet (rare cold-path race).
+
+#### `POST /api/clusters/{cluster}/cve/refresh`
+
+Force-fetch the listed digests/instances from Inspector, bypassing
+TTL. Synchronous: returns **200** when the refresh completes.
+
+```json
+{
+  "digests":     ["sha256:abc", "sha256:def"],
+  "instanceIds": ["i-0abc"]
+}
+```
+
+Both fields optional. An empty body is accepted (logs the operator's
+"I checked" intent without forcing a fetch).
+
+Returns **202** with `Next-Poll: 2` (seconds) when the cluster's cold
+hydrate is still in flight — the SPA polls `/cve/status` until
+`hydrated: true` and resubmits. The 202 response also emits the
+audit row.
+
+**Audit.** Each call emits exactly one audit row:
+
+```
+verb=cve_refresh outcome=success
+extra={ digests: [...], instanceIds: [...] }
+```
+
+Reads of the CVE surface do NOT emit audit rows — they are internal
+metadata reads. AWS CloudTrail records the underlying Inspector API
+calls against the periscope-server's role; that's the auditable
+trail for "what did the server fetch."
+
+
 ## 4. Tier 2 — SPA-coupled patterns
 
 The remaining ~130 endpoints follow eight patterns. Specific

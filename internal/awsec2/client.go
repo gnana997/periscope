@@ -20,6 +20,7 @@ import (
 // InstanceMeta is the projected EC2 metadata the owner resolver needs.
 type InstanceMeta struct {
 	InstanceID string
+	AMI        string
 	Tags       map[string]string
 }
 
@@ -80,6 +81,9 @@ func (c *Client) DescribeInstances(ctx context.Context, ids []string) ([]Instanc
 
 func projectInstance(in ec2types.Instance) InstanceMeta {
 	m := InstanceMeta{Tags: make(map[string]string, len(in.Tags))}
+	if in.ImageId != nil {
+		m.AMI = *in.ImageId
+	}
 	if in.InstanceId != nil {
 		m.InstanceID = *in.InstanceId
 	}
