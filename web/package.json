@@ -16,7 +16,7 @@
     "@fontsource/instrument-serif": "^5.2.8",
     "@radix-ui/react-popover": "^1.1.15",
     "@radix-ui/react-tooltip": "^1.2.8",
-    "@tailwindcss/vite": "^4.2.4",
+    "@tailwindcss/vite": "^4.3.0",
     "@tanstack/react-query": "^5.100.6",
     "@tanstack/react-virtual": "^3.13.24",
     "@xterm/addon-fit": "^0.11.0",
@@ -24,13 +24,13 @@
     "ajv": "^8.20.0",
     "clsx": "^2.1.1",
     "lucide-react": "^1.14.0",
-    "monaco-editor": "^0.52.2",
-    "monaco-yaml": "^5.4.1",
+    "monaco-editor": "^0.55.1",
+    "monaco-yaml": "^5.5.0",
     "react": "^19.2.5",
     "react-dom": "^19.2.5",
     "react-router-dom": "^7.14.2",
     "tailwindcss": "^4.2.4",
-    "yaml": "^2.8.4"
+    "yaml": "^2.9.0"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
