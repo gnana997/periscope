@@ -680,7 +680,7 @@ backed by Amazon Inspector v2's `ListFindings` / `ListCoverage` APIs.
 Default Helm value is `inspector.enabled: false` so v1.0.x → v1.1
 upgrades don't trip AccessDenied alarms before the IAM is in place.
 
-The four permissions go on the **periscope-server's** Pod Identity
+The Inspector v2 + EC2 permissions go on the **periscope-server's** Pod Identity
 or IRSA role — NOT on a per-cluster cluster-role. Inspector's API
 surface is account-scoped: a single grant on the server's principal
 covers every EKS cluster the operator is reading.
@@ -694,7 +694,10 @@ covers every EKS cluster the operator is reading.
       "inspector2:ListFindings",
       "inspector2:ListCoverage",
       "inspector2:GetFindings",
-      "inspector2:BatchGetFindingDetails"
+      "inspector2:BatchGetFindingDetails",
+      "inspector2:ListCoverageStatistics",
+      "inspector2:BatchGetAccountStatus",
+      "inspector2:DescribeOrganizationConfiguration"
     ],
     "Resource": "*"
   }]
@@ -712,7 +715,12 @@ existing fleet / node UI; double-check it's present:
   "Version": "2012-10-17",
   "Statement": [{
     "Effect": "Allow",
-    "Action": ["ec2:DescribeInstances"],
+    "Action": [
+      "ec2:DescribeInstances",
+      "ec2:DescribeInstanceTypes",
+      "ec2:DescribeImages",
+      "ec2:DescribeTags"
+    ],
     "Resource": "*"
   }]
 }

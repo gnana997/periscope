@@ -73,6 +73,12 @@ type ContainerRow struct {
 	Digest         string              `json:"digest,omitempty"`
 	ScanState      ScanState           `json:"scanState"`
 	SeverityCounts *WireSeverityCounts `json:"severityCounts,omitempty"`
+	// Packages is the per-package grouped + prioritized projection
+	// of this container's findings. Server-side grouping means SPA
+	// and MCP/AI-agent tool calls share one source of truth. Omitted
+	// (nil) on the listing endpoint to keep response sizes small;
+	// populated on detail + by-workload endpoints.
+	Packages []PackageGroup `json:"packages,omitempty"`
 }
 
 // ScanCoverage classifies a pod's overall scan completeness for the

@@ -15,7 +15,7 @@
 //   - workload → deduped-by-digest container groups across replicas,
 //                plus a per-pod replica chip list at the bottom.
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import {
   useCveByInstanceOne,
   useCveByWorkload,
@@ -29,6 +29,15 @@ import type {
   CveScanCoverage,
 } from "../../lib/types";
 import { type ScanState } from "../../lib/severity";
+import {
+  type FindingFilters,
+  NO_FILTERS,
+  filterPackageGroup,
+  isExploit,
+  isFixable,
+} from "../../lib/findingFilters";
+import { PackageGroupBlock } from "./PackageGroupBlock";
+import { FindingFilterChips } from "./FindingFilterChips";
 import {
   collectDigests,
   collectDigestsAcrossPods,
@@ -88,6 +97,15 @@ function PodSecurityTab({
 }) {
   const q = useCvePodDetail(cluster, ns, name);
   const refresh = useCveRefresh(cluster);
+  const [filters, setFilters] = useState<FindingFilters>(NO_FILTERS);
+  const totals = useMemo(
+    () => computeFilterTotals(q.data?.containers ?? []),
+    [q.data?.containers],
+  );
+  const visibleFindings = useMemo(
+    () => countVisibleFindings(q.data?.containers ?? [], filters),
+    [q.data?.containers, filters],
+  );
   if (q.isLoading) {
     return <DetailLoading label="scanning for vulnerabilities…" />;
   }
@@ -118,9 +136,18 @@ function PodSecurityTab({
         }
         refreshing={refresh.isPending}
       />
+      <FindingFilterChips
+        totals={totals.counts}
+        exploitCount={totals.exploitCount}
+        fixableCount={totals.fixableCount}
+        totalFindings={totals.totalFindings}
+        visibleFindings={visibleFindings}
+        filters={filters}
+        onChange={setFilters}
+      />
       <div className="min-h-0 flex-1 overflow-y-auto px-5 py-3">
         {pod.containers.map((c) => (
-          <ContainerBlock key={c.name} container={c} cluster={cluster} />
+          <ContainerBlock key={c.name} container={c} cluster={cluster} filters={filters} />
         ))}
       </div>
     </div>
@@ -206,6 +233,19 @@ function WorkloadSecurityTab({
 }) {
   const q = useCveByWorkload(cluster, workloadKind, ns, name);
   const refresh = useCveRefresh(cluster);
+  const [filters, setFilters] = useState<FindingFilters>(NO_FILTERS);
+  const wlContainers = useMemo(
+    () => (q.data ? q.data.pods.flatMap((p) => p.containers) : []),
+    [q.data],
+  );
+  const totals = useMemo(
+    () => computeFilterTotals(wlContainers),
+    [wlContainers],
+  );
+  const visibleFindings = useMemo(
+    () => countVisibleFindings(wlContainers, filters),
+    [wlContainers, filters],
+  );
   const dedupedContainers = useMemo(
     () => (q.data ? dedupContainersByDigest(q.data.pods) : []),
     [q.data],
@@ -245,6 +285,15 @@ function WorkloadSecurityTab({
         }
         refreshing={refresh.isPending}
       />
+      <FindingFilterChips
+        totals={totals.counts}
+        exploitCount={totals.exploitCount}
+        fixableCount={totals.fixableCount}
+        totalFindings={totals.totalFindings}
+        visibleFindings={visibleFindings}
+        filters={filters}
+        onChange={setFilters}
+      />
       <div className="min-h-0 flex-1 overflow-y-auto px-5 py-3">
         <SectionTitle>Unique containers (deduped across pods)</SectionTitle>
         {dedupedContainers.length === 0 ? (
@@ -256,6 +305,7 @@ function WorkloadSecurityTab({
               container={c.row}
               cluster={cluster}
               replicaCount={c.podCount}
+              filters={filters}
             />
           ))
         )}
@@ -365,14 +415,24 @@ function CoveragePill({ coverage }: { coverage: CveScanCoverage }) {
 
 function ContainerBlock({
   container,
-  cluster: _cluster,
   replicaCount,
+  filters,
 }: {
   container: CveContainerRow;
   cluster: string;
   replicaCount?: number;
+  filters: FindingFilters;
 }) {
-  const findings = useCveContainerFindings(container);
+  // Server-side groups + sorts findings into package buckets
+  // (internal/cve/findings_group.go). Listing endpoints omit
+  // `packages` to keep their payload small; detail + by-workload
+  // populate it. Client-side filters hide rows from view without
+  // re-querying.
+  const packages = container.packages ?? [];
+  const filteredPackages = packages.map((g) => filterPackageGroup(g, filters));
+  const firstWithFindings = filteredPackages.findIndex(
+    (g) => g.findings.length > 0,
+  );
   return (
     <div className="mb-3 border-l-2 border-border pl-3">
       <div className="flex items-baseline gap-3 font-mono text-[12px]">
@@ -405,13 +465,18 @@ function ContainerBlock({
         </div>
       </div>
       {container.scanState === "scanned" ? (
-        findings.isLoading ? (
-          <div className="mt-2 text-[11px] text-ink-faint">loading findings…</div>
-        ) : findings.list.length === 0 ? (
+        packages.length === 0 ? (
           <div className="mt-2 text-[11px] text-ink-faint">no findings</div>
         ) : (
           <div className="mt-2">
-            <FindingsList findings={findings.list} />
+            {filteredPackages.map((g, idx) => (
+              <PackageGroupBlock
+                key={g.packageName}
+                group={g}
+                totalCount={packages[idx].findings.length}
+                defaultOpen={idx === firstWithFindings}
+              />
+            ))}
           </div>
         )
       ) : container.scanState === "non-ecr" ? (
@@ -437,30 +502,61 @@ function FindingsList({ findings }: { findings: CveFinding[] }) {
   );
 }
 
-/** useCveContainerFindings — placeholder for v1.1: the per-container
- *  findings come from the parent CvePodDetail response (we don't
- *  re-fetch by digest). When `kind === "workload"` and only the
- *  container row is in scope, this returns an empty list — the
- *  workload tab shows the dedup'd container's severity chip and the
- *  operator clicks into a pod row to see findings. Tracked: a future
- *  /cve/by-digest fetch could populate findings here without a pod
- *  round-trip.
- *
- *  For now: the pod-side ContainerBlock reads findings from the
- *  parent response since the API doesn't return them inside the
- *  container row. The chip column is enough at the workload level. */
-function useCveContainerFindings(_c: CveContainerRow): {
-  isLoading: boolean;
-  list: CveFinding[];
-} {
-  // The CvePodRow shape does not surface per-container findings —
-  // /cve/pods returns container-level severity counts only. The
-  // detail of "which CVE on which container" requires drilling into
-  // /cve/by-digest/{digest}. We render an empty list here and rely
-  // on the operator clicking the pod row's "open ↗" to see findings.
-  //
-  // The pod-detail variant (/cve/pods/{ns}/{name}) returns the same
-  // shape, so this is consistent with what the backend gives us.
-  return { isLoading: false, list: [] };
+
+
+// ── Filter totals + visibility (helpers used by Pod + Workload) ────
+
+interface FilterTotals {
+  counts: { critical: number; high: number; medium: number; low: number; informational: number };
+  exploitCount: number;
+  fixableCount: number;
+  totalFindings: number;
 }
 
+function computeFilterTotals(containers: readonly CveContainerRow[]): FilterTotals {
+  const counts = { critical: 0, high: 0, medium: 0, low: 0, informational: 0 };
+  let exploitCount = 0;
+  let fixableCount = 0;
+  let totalFindings = 0;
+  for (const c of containers) {
+    for (const g of c.packages ?? []) {
+      for (const f of g.findings) {
+        totalFindings++;
+        if (isExploit(f)) exploitCount++;
+        if (isFixable(f)) fixableCount++;
+        const s = (f.severity ?? "").toUpperCase();
+        if (s === "CRITICAL") counts.critical++;
+        else if (s === "HIGH") counts.high++;
+        else if (s === "MEDIUM") counts.medium++;
+        else if (s === "LOW") counts.low++;
+        else if (s === "INFORMATIONAL" || s === "INFO") counts.informational++;
+      }
+    }
+  }
+  return { counts, exploitCount, fixableCount, totalFindings };
+}
+
+function countVisibleFindings(
+  containers: readonly CveContainerRow[],
+  filters: FindingFilters,
+): number {
+  if (!filters.severity && !filters.exploitOnly && !filters.fixableOnly) {
+    return computeFilterTotals(containers).totalFindings;
+  }
+  let n = 0;
+  for (const c of containers) {
+    for (const g of c.packages ?? []) {
+      for (const f of g.findings) {
+        if (filters.severity) {
+          const got = (f.severity ?? "").toUpperCase();
+          const norm = got === "INFO" ? "INFORMATIONAL" : got;
+          if (norm !== filters.severity.toUpperCase()) continue;
+        }
+        if (filters.exploitOnly && !isExploit(f)) continue;
+        if (filters.fixableOnly && !isFixable(f)) continue;
+        n++;
+      }
+    }
+  }
+  return n;
+}

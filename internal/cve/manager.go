@@ -123,6 +123,11 @@ type Manager struct {
 	// deltaSem caps concurrent watch-driven async refreshes.
 	deltaSem chan struct{}
 
+	// bgCtx is the long-lived context bound to Start(parent). Used
+	// by per-cluster pod informers so they survive past the HTTP
+	// request that triggered the cold-path hydrate.
+	bgCtx    context.Context
+
 	stopOnce sync.Once
 	cancel   context.CancelFunc
 	doneCh   chan struct{}
@@ -178,6 +183,7 @@ func (m *Manager) Start(parent context.Context) {
 	}
 	ctx, cancel := context.WithCancel(parent)
 	m.cancel = cancel
+	m.bgCtx = ctx
 	go m.runLoops(ctx)
 	m.log.Info("cve manager started",
 		"refresh_interval", m.cfg.RefreshInterval,

@@ -695,6 +695,59 @@ if it bites at scale we can add `?dedup=true` server-side.)
 Same ETag + empty-state contract as the other read endpoints.
 
 #### `POST /api/clusters/{cluster}/cve/refresh`
+#### `ContainerRow.packages[]` — server-side package grouping (v1.1, rc2)
+
+`/cve/pods/{ns}/{name}` and `/cve/by-workload/{kind}/{ns}/{name}`
+populate `packages[]` on each scanned `ContainerRow`. The
+`/cve/pods` paged listing endpoint **omits** the field to keep page
+payloads small (chips only need the rolled-up counts).
+
+A typical container with 200+ raw Inspector findings collapses to
+~5-20 package groups, because most CVEs cluster in the same
+upstream package. Each entry:
+
+```json
+{
+  "packageName": "go/stdlib",
+  "currentVersion": "1.16.1",
+  "suggestedFix": "1.26.3",
+  "counts": { "critical": 1, "high": 24, "medium": 87, "low": 4, "informational": 0 },
+  "exploitCount": 4,
+  "fixableCount": 116,
+  "findings": [
+    { /* sorted Finding[]: exploits desc → severity desc → CVSS desc → EPSS desc → CVE asc */ }
+  ]
+}
+```
+
+- `packageName` is the canonical first non-empty token of Inspector's
+  `packageName` (Inspector sometimes emits `"go/stdlib, go/stdlib"`
+  for the same package matched twice via CPE; we collapse to one
+  group).
+- `currentVersion` is the first non-empty `packageVersion` seen in
+  the group. Inspector reports the same version on every CVE in a
+  group, so first-non-empty is sufficient.
+- `suggestedFix` is the **maximum** `fixedVersion` across the
+  group — upgrading to it closes every CVE in the group. Empty
+  string when no fix is published for any finding.
+- `counts` mirrors `SeverityCounts` (already used elsewhere in the
+  API).
+- `exploitCount` and `fixableCount` are pre-computed so the SPA
+  doesn't have to walk `findings` to render the group header.
+
+**Group ordering** is worst-finding-first: severity rank desc, then
+exploit count desc, then `severityScore`, then top CVSS, then
+package name (stable tiebreaker). The first group an operator sees
+is the one they should triage first.
+
+**Why server-side, not SPA-side.** The grouping logic lives in
+`internal/cve/findings_group.go` so it serves both the SPA and a
+future MCP / AI-agent tool layer (v1.2 epic #151). An LLM calling
+the same `/cve/by-workload/...` endpoint receives a pre-grouped,
+pre-sorted, pre-prioritized representation — no second
+"agent-friendly" shape to maintain, and the LLM gets a tractable
+view (5-20 packages) instead of 200 raw rows.
+
 
 Force-fetch the listed digests/instances from Inspector, bypassing
 TTL. Synchronous: returns **200** when the refresh completes.

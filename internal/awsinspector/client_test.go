@@ -3,6 +3,7 @@ package awsinspector
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -392,5 +393,56 @@ func TestProjectFinding_OptionalFieldsSafeOnNil(t *testing.T) {
 	}
 	if f.ExploitAvailable != "" || f.FixAvailable != "" {
 		t.Errorf("missing enums should be empty, got exploit=%q fix=%q", f.ExploitAvailable, f.FixAvailable)
+	}
+}
+
+// Regression test for the v1.0.7-rc1 smoke-cluster failure where
+// >10 distinct ECR digests in use triggered a 400 ValidationException
+// on ListFindings (Inspector v2 caps EcrImageHash filter cardinality
+// at 10, stricter than ResourceId's 100). Per-digest hydrate aborted
+// and the per-pod CVE store stayed empty.
+//
+// With the fix, 11 digests should produce 2 ListFindings calls
+// (10 + 1), not one 11-digest call.
+func TestListFindingsByDigest_ChunksAt10(t *testing.T) {
+	digests := make([]string, 11)
+	for i := range digests {
+		digests[i] = fmt.Sprintf("sha256:%040x", i)
+	}
+	api := &stubAPI{}
+	c := NewWithAPI(api, "us-east-1")
+	if _, err := c.ListFindingsByImageDigest(context.Background(), digests); err != nil {
+		t.Fatalf("ListFindingsByImageDigest: %v", err)
+	}
+	if len(api.captureFilters) != 2 {
+		t.Fatalf("want 2 chunks (10 + 1), got %d", len(api.captureFilters))
+	}
+	if got := len(api.captureFilters[0].EcrImageHash); got != 10 {
+		t.Errorf("chunk 0: want 10 filters, got %d", got)
+	}
+	if got := len(api.captureFilters[1].EcrImageHash); got != 1 {
+		t.Errorf("chunk 1: want 1 filter, got %d", got)
+	}
+}
+
+// Instance side is unaffected — BatchSize=50 still applies because
+// ResourceId's per-call cap is generous. 51 instances → 2 chunks
+// (50 + 1), proving the digest batch size didn't accidentally
+// regress the instance batch size.
+func TestListFindingsByInstance_StillChunksAt50(t *testing.T) {
+	ids := make([]string, 51)
+	for i := range ids {
+		ids[i] = fmt.Sprintf("i-%016x", i)
+	}
+	api := &stubAPI{}
+	c := NewWithAPI(api, "us-east-1")
+	if _, err := c.ListFindingsByInstance(context.Background(), ids); err != nil {
+		t.Fatalf("ListFindingsByInstance: %v", err)
+	}
+	if len(api.captureFilters) != 2 {
+		t.Fatalf("want 2 chunks (50 + 1), got %d", len(api.captureFilters))
+	}
+	if got := len(api.captureFilters[0].ResourceId); got != 50 {
+		t.Errorf("chunk 0: want 50 filters, got %d", got)
 	}
 }
