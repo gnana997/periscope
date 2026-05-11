@@ -157,6 +157,23 @@ export const queryKeys = {
       yamlDrift: (ns: string, name: string) =>
         ["cluster", c, "cr", group, version, plural, "yaml-drift", ns, name] as const,
     }),
+
+    // CVE / Inspector v2 (#165 + #166). Cluster-scoped; the
+    // backend cache is also cluster-keyed.
+    cve: {
+      all: ["cluster", c, "cve"] as const,
+      status: () => ["cluster", c, "cve", "status"] as const,
+      podSummariesAll: () => ["cluster", c, "cve", "pods", "summaries"] as const,
+      podDetail: (ns: string, name: string) =>
+        ["cluster", c, "cve", "pod", ns, name] as const,
+      byInstance: () => ["cluster", c, "cve", "instances"] as const,
+      byInstanceOne: (id: string) =>
+        ["cluster", c, "cve", "instance", id] as const,
+      byDigest: (digest: string) =>
+        ["cluster", c, "cve", "digest", digest] as const,
+      byWorkload: (kind: string, ns: string, name: string) =>
+        ["cluster", c, "cve", "workload", kind, ns, name] as const,
+    },
   }),
 
   // Editor dirty-bit pub/sub channel (see hooks/useEditorDirty). Lives

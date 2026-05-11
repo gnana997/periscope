@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { SecurityEmptyBanner } from "../components/security/SecurityEmptyBanner";
 import { useNodegroup, useNodegroups } from "../hooks/useNodegroups";
 import { isAWSForbidden, isAWSThrottled, isBackendNotEKS } from "../lib/api";
 import { cn } from "../lib/cn";
@@ -86,6 +87,7 @@ export function NodeGroupsPage({ cluster }: { cluster: string }) {
 
   return (
     <div className="flex h-full min-h-0 flex-col overflow-y-auto px-6 py-5">
+      <SecurityEmptyBanner cluster={cluster} />
       <header className="mb-4">
         <h1 className="text-[16px] font-medium">Node groups</h1>
         <p className="mt-0.5 text-[12px] text-ink-faint">

@@ -166,6 +166,14 @@ Both signed (cosign keyless) and discoverable on [Artifact Hub](https://artifact
 - Resizable detail pane on row click for describe / yaml / events without leaving the dashboard
 - Graceful degradation: missing `/metrics` or events list failures degrade individual panels without failing the whole response
 
+**Security & CVE surfacing**
+- Inline severity chips on Pods / Nodes / Karpenter list pages — at-a-glance `2C · 5H · 12M` per row, sourced from Amazon Inspector v2
+- New `security` detail-pane tab on Pod / Node / Deployment / StatefulSet / DaemonSet / Karpenter NodeClaim with the full finding list (description, remediation, EPSS score, exploit-availability flag, vendor advisory link, Inspector deep-link)
+- Per-cluster local cache, lazily hydrated on first activation; reads are O(1) thereafter, with 6h TTL background refresh and a manual `↻ refresh` button (entity-scoped, emits one `cve_refresh` audit row)
+- Empty-state contract: when Inspector v2 is disabled or the IAM grant is missing, every CVE-aware page renders an unobtrusive once-per-cluster hairline banner instead of erroring out
+- Opt-in via Helm (`inspector.enabled: true`) — see [usage guide](docs/usage/cve.md) for the IAM block and cost considerations
+
+**Audit & observability**
 **Audit & observability**
 - Every privileged action signed by the human user — apply, delete, exec, secret reveal, log open, cronjob trigger
 - Persistent audit log: SQLite (single-replica), with retention and size caps
@@ -194,6 +202,7 @@ Both signed (cosign keyless) and discoverable on [Artifact Hub](https://artifact
 
 **Usage**
 - [Karpenter dashboard](docs/usage/karpenter-view.md) — NodePool/$/hr/Drift/pending-pods walkthrough + cost-RBAC sample
+- [CVE surfacing (Inspector v2)](docs/usage/cve.md) — chip column + Security tab walkthrough, enablement, audit + cost
 
 **Architecture**
 - [Architecture overview](docs/architecture/README.md) — component map, source-tree guide, reading order for new contributors

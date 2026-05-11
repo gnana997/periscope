@@ -41,6 +41,33 @@ tag.
   
 ### Added
 
+- CVE surfacing via AWS Inspector v2 (#163 epic / #166 frontend; built on
+  #164 cache + #165 API in the same minor).
+  Per-pod and per-instance vulnerability counts render inline as compact
+  severity chips (`2C · 5H · 12M`) on the Pods, Nodes, and Karpenter
+  pages, with a `vulnerable only` page-header chip that filters the list
+  to entities with at least one critical or high. A new `security` tab
+  joins the existing `describe / yaml / events / logs` strip on Pod /
+  Node / Deployment / StatefulSet / DaemonSet / Karpenter NodeClaim
+  detail panes — collapsible per-finding rows expose the description,
+  remediation text, EPSS score, exploit-availability flag, vendor
+  advisory link, and an Inspector console deep-link. The tab carries a
+  per-entity \`↻ refresh\` button that emits one `cve_refresh` audit
+  row (read endpoints emit none — they are internal metadata reads;
+  CloudTrail covers the underlying Inspector calls). When inspector is
+  disabled cluster-side or in Helm, a once-per-cluster hairline banner
+  surfaces the empty state with a link to docs/usage/cve.md; dismissal
+  is cluster-scoped via localStorage. The Pods column is populated by a
+  page-walker hook that hydrates `/cve/pods` summaries into a
+  `Map<ns/name, SeverityCounts>` lookup so the chip accessor is O(1)
+  per row. Workload aggregation (#168 backend) uses `/cve/by-workload`
+  with the SPA collapsing replica duplicates client-side via `useMemo`.
+  Deferred to a v1.1.x follow-up: workload-page chip column (needs a
+  per-workload index hook), NodeGroup row chip (depends on the
+  nodegroup → instance-id mapping that the existing NodegroupSummary
+  shape does not surface), ReplicaSet / Job Security tabs (the SPA
+  detail panes for those resources are thin / non-existent today).
+
 - Karpenter dashboard (#118). Curated read-only view at
   `/clusters/{c}/karpenter` that auto-detects via the
   `karpenter.sh/v1` CRD probe and joins three data sources kubectl
