@@ -158,6 +158,14 @@ const (
 	//   "configuration"         — addon-version JSON Schema (#119)
 	//   "configuration:cache_hit"
 	VerbEKSAddonsRead Verb = "eks_addons_read"
+	// VerbKarpenterRead records a read against the curated Karpenter
+	// dashboard surface (#118) — NodePool / NodeClaim list, pending-pod
+	// scheduling failures, and the per-NodePool cost summary computed
+	// from karpenter-controller's `/metrics` exposition. Read-style
+	// verb mirroring VerbEKSInsightsRead: emitted on every call
+	// regardless of outcome so compliance can answer "did anyone view
+	// the autoscaler dashboard before this 3am node churn?".
+	VerbKarpenterRead Verb = "karpenter_read"
 	// VerbEKSAddonInstallIntent / VerbEKSAddonInstall are the paired
 	// audit rows for an EKS managed add-on install (#119, PR-2).
 	//

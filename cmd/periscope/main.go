@@ -318,6 +318,15 @@ func main() {
 	router.Get("/api/clusters/{cluster}/eks/upgrade-insights/{insightId}", credentials.Wrap(factory,
 		eksInsightsGetHandler(registry, eksInsightsC, auditEmitter)))
 
+	// --- Karpenter dashboard (read-only, issue #118) ---
+	//
+	// Curated view of karpenter.sh/v1 NodePools + NodeClaims joined
+	// to pending pods' FailedScheduling events and the controller's
+	// /metrics exposition. Auto-detects via CRD probe; returns
+	// {available: false} on clusters without Karpenter installed.
+	router.Get("/api/clusters/{cluster}/karpenter", credentials.Wrap(factory,
+		karpenterHandler(registry, auditEmitter)))
+
 	// --- EKS managed node groups + AMI drift (read-only, issue #103) ---
 	//
 	// List + per-nodegroup detail with drift detection layered in

@@ -4,6 +4,7 @@ import { cn } from "../../lib/cn";
 import { RESOURCE_GROUPS, resourcesByGroup } from "../../lib/resources";
 import { CRDSubTree } from "./CRDSubTree";
 import { useAuth } from "../../auth/useAuth";
+import { useKarpenter } from "../../hooks/useKarpenter";
 
 const STORAGE_KEY = "periscope.sidebar.openGroups";
 const DEFAULT_OPEN: string[] = ["Cluster"];
@@ -26,6 +27,7 @@ function groupForPath(pathname: string): string | null {
 	if (pathname.includes("/audit")) return "History";
 	if (pathname.includes("/helm")) return "Packages";
 	if (pathname.includes("/upgrade-readiness")) return "EKS";
+	if (pathname.includes("/karpenter")) return "Cluster";
 	if (pathname.includes("/nodegroups")) return "EKS";
 	if (pathname.includes("/addons")) return "EKS";
   for (const group of RESOURCE_GROUPS) {
@@ -287,6 +289,7 @@ export function ResourceNav() {
                   )}
                 </NavLink>
               </li>
+              <KarpenterSidebarEntry cluster={cluster} />
             </CollapsibleSection>
           )}
           {group === "Workloads" && cluster && (
@@ -434,5 +437,43 @@ function CollapsibleSection({
         <ul className="overflow-hidden">{children}</ul>
       </div>
     </div>
+  );
+}
+
+// KarpenterSidebarEntry — a single sidebar link that auto-hides
+// itself when the cluster doesn't have karpenter.sh/v1 CRDs. Shares
+// the same useKarpenter query as the page (TanStack Query dedupes),
+// so opening the sidebar costs one network call regardless of
+// whether the page is mounted.
+function KarpenterSidebarEntry({ cluster }: { cluster: string }) {
+  const { data, isPending } = useKarpenter(cluster);
+  if (isPending) return null;
+  if (!data?.available) return null;
+  return (
+    <li>
+      <NavLink
+        to={`/clusters/${encodeURIComponent(cluster)}/karpenter`}
+        className={({ isActive }) =>
+          cn(
+            "flex items-center gap-2 rounded-sm px-3 py-1.5 text-[12.5px] transition-colors",
+            isActive
+              ? "bg-accent-soft text-accent"
+              : "text-ink hover:bg-surface-2",
+          )
+        }
+      >
+        {({ isActive }) => (
+          <>
+            <span
+              className={cn(
+                "block size-1 shrink-0 rounded-full",
+                isActive ? "bg-accent" : "bg-transparent",
+              )}
+            />
+            <span className="flex-1">Karpenter</span>
+          </>
+        )}
+      </NavLink>
+    </li>
   );
 }
