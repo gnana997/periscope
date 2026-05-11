@@ -25,17 +25,22 @@ import { ResourceActions } from "../edit/ResourceActions";
 import type { EditorSource } from "../../lib/customResources";
 import { queryKeys } from "../../lib/queryKeys";
 import { cn } from "../../lib/cn";
+import { SecurityTab } from "../security/SecurityTab";
 
 interface Props {
   cluster: string;
   /** Karpenter resource kind: "NodePool" or "NodeClaim". Both
    *  cluster-scoped, both `karpenter.sh/v1`. */
   kind: "NodePool" | "NodeClaim";
+  /** EC2 providerID for NodeClaim — passed down from the parent
+   *  so the security tab can join the per-instance CVE API without
+   *  re-fetching the claim. Empty / undefined on NodePool. */
+  providerID?: string;
   name: string;
   onClose: () => void;
 }
 
-export function KarpenterDetailPane({ cluster, kind, name, onClose }: Props) {
+export function KarpenterDetailPane({ cluster, kind, name, providerID, onClose }: Props) {
   const [activeTab, setActiveTab] = useState<string>("describe");
   const plural = kind === "NodePool" ? "nodepools" : "nodeclaims";
   const group = "karpenter.sh";
@@ -111,9 +116,31 @@ export function KarpenterDetailPane({ cluster, kind, name, onClose }: Props) {
             />
           ),
         },
+        ...(kind === "NodeClaim"
+          ? [
+              {
+                id: "security",
+                label: "security",
+                ready: true,
+                content: (
+                  <SecurityTab
+                    kind="instance"
+                    cluster={cluster}
+                    instanceId={extractInstanceIdFromProviderID(providerID)}
+                  />
+                ),
+              },
+            ]
+          : []),
       ]}
     />
   );
+}
+
+function extractInstanceIdFromProviderID(providerID?: string): string {
+  if (!providerID) return "";
+  const m = providerID.match(/\/(i-[a-f0-9]+)$/);
+  return m ? m[1] : "";
 }
 
 interface EventsProps {

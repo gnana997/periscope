@@ -9,17 +9,24 @@
 // so this panel is purely a join + summary, no new detail page.
 
 import { useState } from "react";
-import type { NodeClaimView } from "../../lib/types";
+import type { NodeClaimView, CveSeverityCounts } from "../../lib/types";
+import { SeverityChip } from "../security/SeverityChip";
+import { combineCounts } from "../../lib/severity";
 import { cn } from "../../lib/cn";
 
 interface Props {
+
+  /** Per-instance CVE counts keyed by EC2 instance id. Built by the
+   *  KarpenterPage parent from useCveByInstance + threaded down so
+   *  the chip is a synchronous lookup, not a per-row fetch. */
+  cveByInstance?: Map<string, CveSeverityCounts>;
 
   claims: NodeClaimView[];
   onSelect: (name: string) => void;
   selectedName: string | null;
 }
 
-export function NodeClaimsByPool({ claims, onSelect, selectedName }: Props) {
+export function NodeClaimsByPool({ claims, onSelect, selectedName, cveByInstance }: Props) {
   if (claims.length === 0) {
     return (
       <p className="px-1 py-4 font-mono text-[12px] text-ink-faint">
@@ -53,7 +60,7 @@ export function NodeClaimsByPool({ claims, onSelect, selectedName }: Props) {
       </div>
       <div className="space-y-2">
         {pools.map((p) => (
-          <PoolGroup key={p} pool={p} claims={byPool.get(p)!} onSelect={onSelect} selectedName={selectedName} />
+          <PoolGroup key={p} pool={p} claims={byPool.get(p)!} onSelect={onSelect} selectedName={selectedName} cveByInstance={cveByInstance} />
         ))}
       </div>
     </div>
@@ -66,12 +73,14 @@ function PoolGroup({
   claims,
   onSelect,
   selectedName,
+  cveByInstance,
 }: {
 
   pool: string;
   claims: NodeClaimView[];
   onSelect: (name: string) => void;
   selectedName: string | null;
+  cveByInstance?: Map<string, CveSeverityCounts>;
 }) {
   // Default open when the pool has any drifted claim — operators
   // landing on the page should see the drift signal without a click.
@@ -98,10 +107,19 @@ function PoolGroup({
             drifted
           </span>
         ) : null}
+        {cveByInstance ? (
+          <span className="ml-2">
+            <SeverityChip
+              mode="compact"
+              counts={aggregateClaimSeverity(claims, cveByInstance)}
+              state="has-findings"
+            />
+          </span>
+        ) : null}
       </summary>
       <div className="space-y-1 px-3 pb-3 pt-1">
         {claims.map((c) => (
-          <ClaimRow key={c.name} claim={c} onSelect={onSelect} isSelected={c.name === selectedName} />
+          <ClaimRow key={c.name} claim={c} onSelect={onSelect} isSelected={c.name === selectedName} cveByInstance={cveByInstance} />
         ))}
       </div>
     </details>
@@ -113,11 +131,13 @@ function ClaimRow({
   claim,
   onSelect,
   isSelected,
+  cveByInstance,
 }: {
 
   claim: NodeClaimView;
   onSelect: (name: string) => void;
   isSelected: boolean;
+  cveByInstance?: Map<string, CveSeverityCounts>;
 }) {
   const drifted = (claim.conditions ?? []).some(
     (c) => c.type === "Drifted" && c.status === "True",
@@ -167,6 +187,20 @@ function ClaimRow({
           drifted
         </span>
       ) : null}
+      {(() => {
+        const id = claim.providerID && claim.providerID.match(/\/(i-[a-f0-9]+)$/)?.[1];
+        if (!id || !cveByInstance) return null;
+        const s = cveByInstance.get(id);
+        if (!s) return null;
+        const isClean = s.critical + s.high + s.medium + s.low === 0;
+        return (
+          <SeverityChip
+            mode="compact"
+            counts={s}
+            state={isClean ? "clean" : "has-findings"}
+          />
+        );
+      })()}
     </button>
   );
 }
@@ -186,4 +220,19 @@ function provisioningHint(claim: NodeClaimView): string {
     }
   }
   return "";
+}
+
+function aggregateClaimSeverity(
+  claims: NodeClaimView[],
+  cveByInstance: Map<string, CveSeverityCounts>,
+): CveSeverityCounts {
+  const slices: CveSeverityCounts[] = [];
+  for (const c of claims) {
+    const m = c.providerID?.match(/\/(i-[a-f0-9]+)$/);
+    const id = m ? m[1] : "";
+    if (!id) continue;
+    const s = cveByInstance.get(id);
+    if (s) slices.push(s);
+  }
+  return combineCounts(...slices);
 }

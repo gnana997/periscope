@@ -21,11 +21,23 @@ import { NodePoolTable } from "../components/karpenter/NodePoolTable";
 import { NodeClaimsByPool } from "../components/karpenter/NodeClaimsByPool";
 import { PendingPodsPanel } from "../components/karpenter/PendingPodsPanel";
 import { KarpenterDetailPane } from "../components/karpenter/KarpenterDetailPane";
+import { useCveByInstance } from "../hooks/useCve";
+import { SecurityEmptyBanner } from "../components/security/SecurityEmptyBanner";
 
 export function KarpenterPage() {
   const { cluster } = useParams<{ cluster: string }>();
   const cl = cluster ?? "";
   const query = useKarpenter(cl);
+  const cveInstances = useCveByInstance(cl);
+  const cveByInstance = (() => {
+    const m = new Map<string, import("../lib/types").CveSeverityCounts>();
+    if (cveInstances.data) {
+      for (const i of cveInstances.data.instances) {
+        m.set(i.instanceId, i.severityCounts);
+      }
+    }
+    return m;
+  })();
   const [params, setParams] = useSearchParams();
 
   // Parse `?sel=Kind/Name` into the pane's two args.
@@ -106,6 +118,7 @@ export function KarpenterPage() {
         selectedName={selKind === "NodePool" ? selName : null}
       />
       <NodeClaimsByPool
+        cveByInstance={cveByInstance}
         claims={data.nodeclaims ?? []}
         onSelect={(name) => select("NodeClaim", name)}
         selectedName={selKind === "NodeClaim" ? selName : null}
@@ -121,6 +134,7 @@ export function KarpenterPage() {
   return (
     <div className="flex h-full min-h-0 flex-col">
       <PageHeader title="Karpenter" subtitle={cl} />
+      <SecurityEmptyBanner cluster={cl} />
       <div className="flex min-h-0 flex-1">
         <SplitPane
           storageKey="periscope.detailWidth.karpenter"
@@ -128,6 +142,7 @@ export function KarpenterPage() {
           right={
             detailOpen ? (
               <KarpenterDetailPane
+                providerID={data.nodeclaims?.find((c) => c.name === selName)?.providerID}
                 cluster={cl}
                 kind={selKind as "NodePool" | "NodeClaim"}
                 name={selName}
