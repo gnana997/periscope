@@ -4,7 +4,8 @@ import { useResource } from "../hooks/useResource";
 import type { Node, NodeList } from "../lib/types";
 import { ageFrom, nameMatches } from "../lib/format";
 import { PageHeader } from "../components/page/PageHeader";
-import { SplitPane } from "../components/page/SplitPane";
+import { DetailOverlay } from "../components/page/DetailOverlay";
+import { buildOverlayNav } from "../components/page/detailOverlayHelpers";
 import {
   type Column,
   type RowTint,
@@ -126,6 +127,17 @@ export function NodesPage({ cluster }: { cluster: string }) {
     }
     return r;
   }, [all, search, vulnOnly, cveByInstance]);
+
+  // NodesPage has no useEditorDirty/useConfirmDiscard — nodes
+  // are not editable from the SPA today. Cycling and dismiss
+  // call setMany directly without a confirm gate.
+  const overlayNav = buildOverlayNav({
+    rows: filtered,
+    selectedKey: selectedName,
+    keyOf: (n) => n.name,
+    navigateTo: (n) => setMany({ sel: n.name, tab: activeTab }),
+    dismiss: () => setMany({ sel: null, tab: null }),
+  });
 
   const columns: Column<Node>[] = [
     {
@@ -341,7 +353,7 @@ export function NodesPage({ cluster }: { cluster: string }) {
           {all.length}
         </div>
       </div>
-      <SplitPane
+      <DetailOverlay {...overlayNav}
         storageKey="periscope.detailWidth.v4"
         left={
           query.isLoading ? (

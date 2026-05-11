@@ -15,7 +15,7 @@
 import { useParams, useSearchParams } from "react-router-dom";
 import { useKarpenter } from "../hooks/useKarpenter";
 import { PageHeader } from "../components/page/PageHeader";
-import { SplitPane } from "../components/page/SplitPane";
+import { DetailOverlay } from "../components/page/DetailOverlay";
 import { ErrorState, LoadingState } from "../components/table/states";
 import { NodePoolTable } from "../components/karpenter/NodePoolTable";
 import { NodeClaimsByPool } from "../components/karpenter/NodeClaimsByPool";
@@ -107,7 +107,7 @@ export function KarpenterPage() {
   const detailOpen = Boolean(validKind && selName);
 
   // List panels — share rendering whether or not the detail pane is
-  // open. SplitPane handles the narrowing itself; we just always feed
+  // open. DetailOverlay handles the narrowing itself; we just always feed
   // the same ReactNode into its `left` slot.
   const listPanels = (
     <div className="h-full space-y-6 overflow-y-auto px-6 py-4">
@@ -136,9 +136,10 @@ export function KarpenterPage() {
       <PageHeader title="Karpenter" subtitle={cl} />
       <SecurityEmptyBanner cluster={cl} />
       <div className="flex min-h-0 flex-1">
-        <SplitPane
+        <DetailOverlay
           storageKey="periscope.detailWidth.karpenter"
           left={listPanels}
+          onDismiss={detailOpen ? clear : undefined}
           right={
             detailOpen ? (
               <KarpenterDetailPane

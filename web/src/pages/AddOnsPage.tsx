@@ -3,7 +3,8 @@ import { AddonDetailPane } from "../components/eks/AddonDetailPane";
 import { DeleteAddOnModal } from "../components/eks/DeleteAddOnModal";
 import { UpgradeAddOnDialog } from "../components/eks/UpgradeAddOnDialog";
 import { KebabMenu } from "../components/ui/KebabMenu";
-import { SplitPane } from "../components/page/SplitPane";
+import { DetailOverlay } from "../components/page/DetailOverlay";
+import { buildOverlayNav } from "../components/page/detailOverlayHelpers";
 import { useAddon, useAddons } from "../hooks/useAddons";
 import { useAddonCatalog } from "../hooks/useAddonCatalog";
 import { isAWSForbidden, isAWSThrottled, isBackendNotEKS } from "../lib/api";
@@ -12,7 +13,7 @@ import type { AddonHealthGlyph, AddonSummary, CatalogAddon } from "../lib/types"
 
 // AddOnsPage — dedicated /clusters/{c}/addons view (issue #117).
 //
-// Layout: SplitPane with the installed-add-ons table on the left and
+// Layout: DetailOverlay with the installed-add-ons table on the left and
 // AddonDetailPane on the right. Row click opens the pane (replaces
 // the original inline-row-expand which couldn't scroll independently
 // of the page). Pane width persists under the shared
@@ -135,6 +136,14 @@ export function AddOnsPage({ cluster }: { cluster: string }) {
 
   if (!data) return null;
   const rows = data.addons;
+
+  const overlayNav = buildOverlayNav({
+    rows,
+    selectedKey: selected,
+    keyOf: (r) => r.name,
+    navigateTo: (r) => setSelected(r.name),
+    dismiss: () => setSelected(null),
+  });
   const selectedRow = selected ? rows.find((r) => r.name === selected) : null;
   const selectedTransient =
     selectedRow != null &&
@@ -189,7 +198,7 @@ export function AddOnsPage({ cluster }: { cluster: string }) {
         </p>
       </header>
 
-      <SplitPane
+      <DetailOverlay {...overlayNav}
         storageKey="periscope.detailWidth.v4"
         left={
           rows.length === 0 ? (

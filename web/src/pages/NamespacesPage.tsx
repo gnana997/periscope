@@ -4,7 +4,8 @@ import { useResource } from "../hooks/useResource";
 import type { Namespace, NamespaceList } from "../lib/types";
 import { ageFrom, nameMatches } from "../lib/format";
 import { PageHeader } from "../components/page/PageHeader";
-import { SplitPane } from "../components/page/SplitPane";
+import { DetailOverlay } from "../components/page/DetailOverlay";
+import { buildOverlayNav } from "../components/page/detailOverlayHelpers";
 import {
   type Column,
   type RowTint,
@@ -71,6 +72,16 @@ export function NamespacesPage({ cluster }: { cluster: string }) {
   const editFlag = useEditorDirty(cluster, "namespaces", undefined, selectedName);
   const confirmDiscard = useConfirmDiscard(editFlag.dirty);
 
+  const overlayNav = buildOverlayNav({
+    rows: filtered,
+    selectedKey: selectedName,
+    keyOf: (r) => r.name,
+    navigateTo: (r) =>
+      confirmDiscard(() => setMany({ sel: r.name, tab: activeTab })),
+    dismiss: () =>
+      confirmDiscard(() => setMany({ sel: null, tab: null })),
+  });
+
   const detail = selectedName ? (
     <DetailPane
       title={selectedName}
@@ -124,7 +135,7 @@ export function NamespacesPage({ cluster }: { cluster: string }) {
           {all.length}
         </div>
       </div>
-      <SplitPane
+      <DetailOverlay {...overlayNav}
         storageKey="periscope.detailWidth.v4"
         left={
           query.isLoading ? (

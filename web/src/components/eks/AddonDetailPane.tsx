@@ -1,5 +1,5 @@
 // AddonDetailPane — right-edge detail pane for the EKS add-ons
-// surface. Lives inside SplitPane on both AddOnsPage and the catalog
+// surface. Lives inside DetailOverlay on both AddOnsPage and the catalog
 // page; replaces the old inline-row-expand which couldn't scroll
 // independently of the page (#117 follow-up).
 //
@@ -72,7 +72,7 @@ export function AddonDetailPane({
   }, [name, selection.kind]);
 
   return (
-    // min-w-0 mirrors DetailPane — the SplitPane right pane is
+    // min-w-0 mirrors DetailPane — the DetailOverlay right pane is
     // fixed-width and min-w-0; nested flex containers must opt-in
     // for `truncate` and overflow-hidden to actually clip.
     <div className="flex h-full min-h-0 min-w-0 flex-col bg-surface">

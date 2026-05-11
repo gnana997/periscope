@@ -302,7 +302,7 @@ function SecretsRevealConfirm({
 }) {
   return (
     <div
-      className="fixed inset-0 z-40 flex items-center justify-center bg-black/40 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm"
       role="dialog"
       aria-modal="true"
       aria-labelledby="bulk-secret-confirm-title"

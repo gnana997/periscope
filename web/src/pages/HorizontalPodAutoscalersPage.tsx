@@ -6,7 +6,8 @@ import { ageFrom, nameMatches } from "../lib/format";
 import { cn } from "../lib/cn";
 import { PageHeader } from "../components/page/PageHeader";
 import { FilterStrip } from "../components/page/FilterStrip";
-import { SplitPane } from "../components/page/SplitPane";
+import { DetailOverlay } from "../components/page/DetailOverlay";
+import { buildOverlayNav } from "../components/page/detailOverlayHelpers";
 import { type Column } from "../components/table/DataTable";
 import { SelectableDataTable } from "../components/table/SelectableDataTable";
 import { api } from "../lib/api";
@@ -76,6 +77,16 @@ export function HorizontalPodAutoscalersPage({ cluster }: { cluster: string }) {
   const editFlag = useEditorDirty(cluster, "horizontalpodautoscalers", selectedNs ?? undefined, selectedName);
   const confirmDiscard = useConfirmDiscard(editFlag.dirty);
 
+  const overlayNav = buildOverlayNav({
+    rows: filtered,
+    selectedKey,
+    keyOf: (r) => `${r.namespace}/${r.name}`,
+    navigateTo: (r) =>
+      confirmDiscard(() => setMany({ sel: r.name, selNs: r.namespace, tab: activeTab })),
+    dismiss: () =>
+      confirmDiscard(() => setMany({ sel: null, selNs: null, tab: null })),
+  });
+
   const detail =
     selectedNs && selectedName ? (
       <DetailPane
@@ -109,7 +120,7 @@ export function HorizontalPodAutoscalersPage({ cluster }: { cluster: string }) {
         trailing={<NamespacePicker />}
       />
       <FilterStrip search={search} onSearch={(v) => setParam("q", v)} resultCount={filtered.length} totalCount={all.length} />
-      <SplitPane
+      <DetailOverlay {...overlayNav}
         storageKey="periscope.detailWidth.v4"
         left={
           query.isLoading ? <LoadingState resource="horizontalpodautoscalers" /> :

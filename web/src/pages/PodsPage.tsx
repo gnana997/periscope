@@ -5,7 +5,8 @@ import type { Pod, PodList } from "../lib/types";
 import { ageFrom, nameMatches } from "../lib/format";
 import { PageHeader } from "../components/page/PageHeader";
 import { FilterStrip } from "../components/page/FilterStrip";
-import { SplitPane } from "../components/page/SplitPane";
+import { DetailOverlay } from "../components/page/DetailOverlay";
+import { buildOverlayNav } from "../components/page/detailOverlayHelpers";
 import {
   type Column,
   type RowTint,
@@ -223,6 +224,16 @@ export function PodsPage({ cluster }: { cluster: string }) {
   const editFlag = useEditorDirty(cluster, "pods", selectedNs ?? undefined, selectedName);
   const confirmDiscard = useConfirmDiscard(editFlag.dirty);
 
+
+  const overlayNav = buildOverlayNav<Pod>({
+    rows: filtered,
+    selectedKey,
+    keyOf: (p) => `${p.namespace}/${p.name}`,
+    navigateTo: (p) =>
+      confirmDiscard(() => setMany({ sel: p.name, selNs: p.namespace, tab: activeTab })),
+    dismiss: () =>
+      confirmDiscard(() => setMany({ sel: null, selNs: null, tab: null })),
+  });
   const detail =
     selectedNs && selectedName ? (
       <DetailPane
@@ -325,7 +336,7 @@ export function PodsPage({ cluster }: { cluster: string }) {
         resultCount={filtered.length}
         totalCount={allPods.length}
       />
-      <SplitPane
+      <DetailOverlay {...overlayNav}
         storageKey="periscope.detailWidth.v4"
         left={
           podsQuery.isLoading ? (
