@@ -2029,3 +2029,70 @@ export interface AddonConfigurationResponse {
    *  the YAML editor in that case. */
   configurationSchema: string;
 }
+
+// ─── Karpenter dashboard (#118) ──────────────────────────────────────────
+
+export interface KarpenterDashboard {
+  available: boolean;
+  nodepools?: NodePoolView[];
+  nodeclaims?: NodeClaimView[];
+  pendingPods?: PendingPodView[];
+  truncated?: boolean;
+  metricsAvailable: boolean;
+}
+
+export interface NodePoolView {
+  name: string;
+  weight?: number;
+  disruption: NodePoolDisruption;
+  limits?: Record<string, string>;
+  usage?: Record<string, string>;
+  nodeCount: number;
+  conditions?: NodeCondition[];
+  cost?: NodePoolCost;
+}
+
+export interface NodePoolDisruption {
+  consolidationPolicy?: string;
+  consolidateAfter?: string;
+  expireAfter?: string;
+  budgets?: NodePoolBudgetEntry[];
+}
+
+export interface NodePoolBudgetEntry {
+  nodes?: string;
+  schedule?: string;
+  duration?: string;
+  reasons?: string[];
+}
+
+export interface NodePoolCost {
+  currentHourly: number;
+  onDemandHourly: number;
+  spotSavingsPct: number;
+}
+
+export interface NodeClaimView {
+  name: string;
+  nodepool: string;
+  instanceType?: string;
+  capacityType?: string;
+  zone?: string;
+  providerID?: string;
+  ec2NodeClass?: string;
+  conditions?: NodeCondition[];
+  createdAt?: string;
+}
+
+export interface PendingPodView {
+  namespace: string;
+  name: string;
+  pendingFor: string;
+  reason?: string;
+  incompatibilityReasons?: NodePoolIncompat[];
+}
+
+export interface NodePoolIncompat {
+  nodepool: string;
+  reason: string;
+}

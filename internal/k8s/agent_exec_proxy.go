@@ -42,6 +42,7 @@ package k8s
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
@@ -163,22 +164,34 @@ func handleAgentProxyConn(ctx context.Context, conn net.Conn) {
 		return
 	}
 	if req.Method != http.MethodConnect {
-		respondProxyError(conn, http.StatusMethodNotAllowed,
-			"only CONNECT is supported by this proxy")
+		respondProxyError(conn, http.StatusMethodNotAllowed, "", &agentUpstreamWire{
+			Code:     "E_INVALID_CONNECT",
+			Category: "unknown",
+			Message:  "only CONNECT is supported by this proxy",
+			Detail:   fmt.Sprintf("got method %s", req.Method),
+		})
 		return
 	}
 
 	cluster, ok := clusterNameFromCONNECTHost(req.Host)
 	if !ok {
-		respondProxyError(conn, http.StatusBadRequest,
-			fmt.Sprintf("CONNECT host %q must be apiserver.<cluster>.tunnel[:port]", req.Host))
+		respondProxyError(conn, http.StatusBadRequest, "", &agentUpstreamWire{
+			Code:     "E_INVALID_CONNECT",
+			Category: "unknown",
+			Message:  "CONNECT host must be apiserver.<cluster>.tunnel[:port]",
+			Detail:   fmt.Sprintf("got CONNECT host %q", req.Host),
+		})
 		return
 	}
 
 	dial, err := currentAgentLookup()(cluster)
 	if err != nil {
-		respondProxyError(conn, http.StatusBadGateway,
-			fmt.Sprintf("no tunnel for cluster %q: %v", cluster, err))
+		respondProxyError(conn, http.StatusBadGateway, cluster, &agentUpstreamWire{
+			Code:     "E_NO_AGENT",
+			Category: "no_agent",
+			Message:  fmt.Sprintf("no agent connected for cluster %q", cluster),
+			Detail:   err.Error(),
+		})
 		return
 	}
 
@@ -188,8 +201,12 @@ func handleAgentProxyConn(ctx context.Context, conn net.Conn) {
 	// agent log line shows the requested target.
 	upstream, err := dial(ctx, "tcp", req.Host)
 	if err != nil {
-		respondProxyError(conn, http.StatusBadGateway,
-			fmt.Sprintf("tunnel dial: %v", err))
+		respondProxyError(conn, http.StatusBadGateway, cluster, &agentUpstreamWire{
+			Code:     AgentUpstreamErrorCode,
+			Category: "network",
+			Message:  fmt.Sprintf("could not dial agent tunnel for cluster %q", cluster),
+			Detail:   err.Error(),
+		})
 		return
 	}
 	defer func() { _ = upstream.Close() }()
@@ -281,9 +298,32 @@ func clusterNameFromCONNECTHost(hostport string) (string, bool) {
 	return name, true
 }
 
-func respondProxyError(c net.Conn, status int, msg string) {
-	body := msg + "\n"
+// respondProxyError writes a non-200 CONNECT response on c. The JSON
+// body is the same envelope the agent's reverse proxy emits, so the
+// central server's transport interceptor (wrapAgentUpstream) parses
+// CONNECT-proxy-side failures with the same code path that handles
+// agent-side failures. cluster is stamped into the body when known.
+//
+// NOTE: pre-#68 this function wrote a plain-text body. Anything that
+// CONNECTs to this proxy with a non-Periscope client (curl debug
+// session, custom kubectl plugin) now receives application/json
+// instead of "agent → apiserver: …". The status code is unchanged.
+func respondProxyError(c net.Conn, status int, cluster string, w *agentUpstreamWire) {
+	if w == nil {
+		w = &agentUpstreamWire{Code: AgentUpstreamErrorCode, Category: "unknown"}
+	}
+	if cluster != "" && w.Cluster == "" {
+		w.Cluster = cluster
+	}
+	body, err := json.Marshal(w)
+	if err != nil {
+		// json.Marshal on a small struct effectively never fails;
+		// fall back to a minimal body so we still close the
+		// connection cleanly with a non-200 status.
+		body = []byte(`{"code":"E_AGENT_UPSTREAM","message":"agent upstream error"}`)
+	}
+	body = append(body, '\n')
 	_, _ = fmt.Fprintf(c,
-		"HTTP/1.1 %d %s\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: %d\r\nConnection: close\r\n\r\n%s",
+		"HTTP/1.1 %d %s\r\nContent-Type: application/json\r\nContent-Length: %d\r\nConnection: close\r\n\r\n%s",
 		status, http.StatusText(status), len(body), body)
 }

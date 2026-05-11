@@ -1,0 +1,83 @@
+# karpenter-cost-rbac.yaml — RBAC sample for Periscope's Karpenter
+# cost-summary feature.
+#
+# What this is for
+# ----------------
+# The Karpenter dashboard's `$/hr` + `spot %` columns are populated
+# by scraping the karpenter-controller's `/metrics` endpoint via the
+# apiserver service-proxy verb under the impersonated user. If the
+# operator's role doesn't include `services/proxy` (and `services`
+# get/list) on the karpenter namespace, the scrape returns 403 and
+# the dashboard hides the cost columns with a "metrics unreachable"
+# hint.
+#
+# Apply this manifest in the cluster where Karpenter is installed
+# (default namespace: `karpenter`). Bind it to whichever Periscope
+# tier group should see cost metrics — `read` covers most observers;
+# tighten to `triage` / `write` if you don't want read-tier users to
+# learn the cluster's Karpenter spend.
+#
+# Scope notes
+# -----------
+# - This is namespace-scoped. The cost feature only needs proxy
+#   access to one Service in one namespace, so a Role beats a
+#   ClusterRole in least-privilege terms.
+# - `services/proxy` is the verb that takes you through the
+#   apiserver to the pod. `get` on `services` is needed for the
+#   apiserver-proxy lookup; `list` is needed for the discovery probe
+#   that confirms the karpenter Service exists before scraping.
+# - The verb is read-only — there's no "metrics push" path here.
+#
+# How to apply
+# ------------
+#   kubectl apply -f examples/karpenter-cost-rbac.yaml
+#
+# How to verify
+# -------------
+#   kubectl auth can-i get services/proxy -n karpenter \
+#     --as=system:serviceaccount:periscope:periscope \
+#     --as-group=periscope-tier:read
+#   # yes
+#
+# After applying, refresh the Karpenter dashboard. The yellow
+# "metrics unreachable" banner should disappear and the $/hr column
+# should populate within ~12s (the SPA's auto-refetch cadence).
+
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: periscope-karpenter-metrics
+  namespace: karpenter
+  labels:
+    app.kubernetes.io/managed-by: periscope
+    app.kubernetes.io/component: karpenter-dashboard
+rules:
+  # Discovery + lookup of the karpenter Service.
+  - apiGroups: [""]
+    resources: ["services"]
+    verbs: ["get", "list"]
+  # The actual proxy hop into the karpenter pod's /metrics endpoint.
+  - apiGroups: [""]
+    resources: ["services/proxy"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: periscope-karpenter-metrics
+  namespace: karpenter
+  labels:
+    app.kubernetes.io/managed-by: periscope
+    app.kubernetes.io/component: karpenter-dashboard
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: periscope-karpenter-metrics
+subjects:
+  # Default: every Periscope-impersonated user gets cost-summary
+  # access. If you'd rather hide spend numbers from read-tier users,
+  # swap `periscope-tier:read` for a tighter group like
+  # `periscope-tier:triage` or `periscope-tier:write`.
+  - kind: Group
+    name: periscope-tier:read
+    apiGroup: rbac.authorization.k8s.io
