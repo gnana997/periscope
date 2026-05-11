@@ -510,3 +510,118 @@ func buildPodRow(p *corev1.Pod, store *cve.Store) cve.PodRow {
 // for future content-negotiation needs (the SPA's fetch wrapper
 // trims trailing newlines so we don't pay for one).
 var _ = strings.TrimSpace
+
+// --- /by-workload/{kind}/{namespace}/{name} ---------------------
+
+func cveByWorkloadHandler(reg *clusters.Registry, mgr *cve.Manager) credentials.Handler {
+	return func(w http.ResponseWriter, r *http.Request, _ credentials.Provider) {
+		c, ok := resolveCveCluster(w, r, reg)
+		if !ok {
+			return
+		}
+		kind := chi.URLParam(r, "kind")
+		namespace := chi.URLParam(r, "namespace")
+		name := chi.URLParam(r, "name")
+		if !cve.IsSupportedWorkloadKind(kind) {
+			// Tight allow-list — keeps the handler honest about what
+			// it can resolve. CronJob omission is documented in
+			// owner_walk.go.
+			http.Error(w, "unsupported workload kind: "+kind, http.StatusBadRequest)
+			return
+		}
+		empty := cve.WorkloadCveResp{
+			Workload: cve.WorkloadRef{Kind: kind, Namespace: namespace, Name: name},
+			Pods:     []cve.PodRow{},
+			Hydrated: true,
+		}
+		store, ok := ensureHydratedOrEmpty(w, r, mgr, c, empty)
+		if !ok {
+			return
+		}
+		if setCveReadHeaders(w, r, store) {
+			return
+		}
+
+		lister := mgr.PodLister(c.Name)
+		if lister == nil {
+			// Informer hasn't started yet — same race as /cve/pods.
+			// Return empty rather than 503 to keep the SPA's
+			// workload Security tab quiet during cold-path warmup.
+			writeJSON(w, http.StatusOK, cve.WorkloadCveResp{
+				Workload:         cve.WorkloadRef{Kind: kind, Namespace: namespace, Name: name},
+				Pods:             []cve.PodRow{},
+				InspectorEnabled: true,
+				Hydrated:         true,
+			})
+			return
+		}
+		rsLister := mgr.ReplicaSetLister(c.Name)
+		// rsLister == nil is fine when kind != "Deployment"; the
+		// owner-walk helper handles it.
+
+		allPods, err := lister.Pods(namespace).List(labels.Everything())
+		if err != nil {
+			slog.Warn("cve by-workload: lister failed", "cluster", c.Name, "err", err)
+			writeAPIError(w, err, http.StatusInternalServerError)
+			return
+		}
+
+		matched := make([]*corev1.Pod, 0, len(allPods))
+		for _, p := range allPods {
+			if cve.PodOwnedBy(p, kind, namespace, name, rsLister) {
+				matched = append(matched, p)
+			}
+		}
+		sort.Slice(matched, func(i, j int) bool { return matched[i].Name < matched[j].Name })
+
+		rolled := cve.SeverityCounts{}
+		scannedContainers, totalContainers := 0, 0
+		rows := make([]cve.PodRow, 0, len(matched))
+		for _, p := range matched {
+			row := buildPodRow(p, store)
+			rows = append(rows, row)
+			// Re-aggregate via WireSeverityCounts since PodRow only
+			// keeps the wire shape — cheap, the row already walked
+			// findings once.
+			rolled.Critical += row.RolledUpSeverityCounts.Critical
+			rolled.High += row.RolledUpSeverityCounts.High
+			rolled.Medium += row.RolledUpSeverityCounts.Medium
+			rolled.Low += row.RolledUpSeverityCounts.Low
+			rolled.Informational += row.RolledUpSeverityCounts.Informational
+			// Coverage counters: any scanned/non-scanned container
+			// contributes to the workload-wide ratio so a mostly-
+			// scanned DaemonSet with one outlier sidecar doesn't
+			// flip the chip to "none".
+			for _, ctr := range row.Containers {
+				totalContainers++
+				if ctr.ScanState == cve.ScanStateScanned {
+					scannedContainers++
+				}
+			}
+		}
+
+		var coverage cve.ScanCoverage
+		switch {
+		case totalContainers == 0:
+			// No matched pods (or pods with no containers — exotic).
+			// Render as "none" so the SPA shows a "no scan coverage"
+			// hint rather than a misleading "full" chip.
+			coverage = cve.CoverageNone
+		case scannedContainers == 0:
+			coverage = cve.CoverageNone
+		case scannedContainers == totalContainers:
+			coverage = cve.CoverageFull
+		default:
+			coverage = cve.CoveragePartial
+		}
+
+		writeJSON(w, http.StatusOK, cve.WorkloadCveResp{
+			Workload:               cve.WorkloadRef{Kind: kind, Namespace: namespace, Name: name},
+			Pods:                   rows,
+			RolledUpSeverityCounts: cve.WireSeverity(rolled),
+			ScanCoverage:           coverage,
+			InspectorEnabled:       true,
+			Hydrated:               true,
+		})
+	}
+}

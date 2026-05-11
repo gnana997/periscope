@@ -127,3 +127,27 @@ type RefreshReq struct {
 	Digests     []string `json:"digests"`
 	InstanceIDs []string `json:"instanceIds"`
 }
+
+// WorkloadRef is the echoed identity of the queried workload on
+// /cve/by-workload responses. Lets the SPA assert it got data back
+// for the right entity without re-parsing the URL.
+type WorkloadRef struct {
+	Kind      string `json:"kind"`
+	Namespace string `json:"namespace"`
+	Name      string `json:"name"`
+}
+
+// WorkloadCveResp is the envelope for /cve/by-workload. Pods is one
+// PodRow per matched pod (no server-side dedup — the SPA collapses
+// duplicate digests across replicas client-side via useMemo, per the
+// v1.1 design decision). RolledUpSeverityCounts + ScanCoverage are
+// the workload-level aggregates so the chip surface on the workload
+// row can render without re-walking pods.
+type WorkloadCveResp struct {
+	Workload               WorkloadRef        `json:"workload"`
+	Pods                   []PodRow           `json:"pods"`
+	RolledUpSeverityCounts WireSeverityCounts `json:"rolledUpSeverityCounts"`
+	ScanCoverage           ScanCoverage       `json:"scanCoverage"`
+	InspectorEnabled       bool               `json:"inspectorEnabled"`
+	Hydrated               bool               `json:"hydrated"`
+}

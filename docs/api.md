@@ -646,6 +646,54 @@ shape as a single entry in `/cve/pods`; returns **404** if the
 pod isn't in the informer cache, **503** if the informer hasn't
 started yet (rare cold-path race).
 
+#### `GET /api/clusters/{cluster}/cve/by-workload/{kind}/{namespace}/{name}`
+
+Owner-aware aggregation: returns every pod owned (directly or
+transitively) by the named workload, plus the workload-wide
+rolled-up severity and scan coverage. The reason this exists as
+a separate endpoint instead of a `?ownerKind=` filter on
+`/cve/pods`: in production, operators reason in Deployments /
+StatefulSets / DaemonSets — the Pod is ephemeral, the workload
+is the stable identity. The SPA detail-pane Security tab calls
+this on workload selection.
+
+Supported `kind` values: `Deployment`, `StatefulSet`,
+`DaemonSet`, `ReplicaSet`, `Job`. `CronJob` is intentionally
+omitted (Pod → Job → CronJob is a three-hop ownerRef walk that
+would need a Job informer too; revisit in v1.2 if needed).
+Unsupported kinds return **400**.
+
+Ownership resolution:
+- Direct: pod ownerRef matches `(kind, name)`. Covers
+  StatefulSet, DaemonSet, ReplicaSet, Job.
+- Two-hop via ReplicaSet: pod owned by ReplicaSet R; R owned
+  by `(Deployment, name)`. Covers the Deployment case, since
+  the Deployment controller spawns a ReplicaSet which spawns
+  pods.
+
+```json
+{
+  "workload": { "kind": "Deployment", "namespace": "payments", "name": "checkout" },
+  "pods": [
+    { /* PodRow shape — same as /cve/pods entries */ },
+    ...
+  ],
+  "rolledUpSeverityCounts": { "critical": 0, "high": 3, "medium": 7, "low": 1, "informational": 0 },
+  "scanCoverage": "partial",
+  "inspectorEnabled": true,
+  "hydrated": true
+}
+```
+
+**No backend dedup.** A 20-replica Deployment with identical
+image digests across replicas returns 20 PodRow entries; the
+SPA collapses duplicate digests client-side via `useMemo` so
+the detail pane renders one canonical container row per
+digest with a "× 20 pods" annotation. (v1.1 design choice —
+if it bites at scale we can add `?dedup=true` server-side.)
+
+Same ETag + empty-state contract as the other read endpoints.
+
 #### `POST /api/clusters/{cluster}/cve/refresh`
 
 Force-fetch the listed digests/instances from Inspector, bypassing

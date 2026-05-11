@@ -35,6 +35,9 @@ func (m *Manager) startPodInformer(parent context.Context, cluster clusters.Clus
 
 	factory := informers.NewSharedInformerFactory(cs, podInformerResyncPeriod)
 	podIface := factory.Core().V1().Pods()
+	rsIface := factory.Apps().V1().ReplicaSets()
+	rsLister := rsIface.Lister()
+	rsInformer := rsIface.Informer()
 	lister := podIface.Lister()
 	podInformer := podIface.Informer()
 
@@ -52,6 +55,7 @@ func (m *Manager) startPodInformer(parent context.Context, cluster clusters.Clus
 
 	m.mu.Lock()
 	st.podLister = lister
+	st.rsLister = rsLister
 	m.mu.Unlock()
 	factory.Start(ctx.Done())
 	// Cold-path hydrate already populated digest entries + ref
@@ -62,7 +66,7 @@ func (m *Manager) startPodInformer(parent context.Context, cluster clusters.Clus
 	// Once syncDone flips true, post-startup Adds (new pods) bump
 	// refs normally.
 	go func() {
-		if cache.WaitForCacheSync(ctx.Done(), podInformer.HasSynced) {
+		if cache.WaitForCacheSync(ctx.Done(), podInformer.HasSynced, rsInformer.HasSynced) {
 			hook.syncDone.Store(true)
 		}
 	}()

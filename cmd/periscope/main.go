@@ -456,6 +456,8 @@ func main() {
 		credentials.Wrap(factory, cvePodsHandler(registry, cveMgr)))
 	router.Get("/api/clusters/{cluster}/cve/pods/{namespace}/{pod}",
 		credentials.Wrap(factory, cvePodsOneHandler(registry, cveMgr)))
+	router.Get("/api/clusters/{cluster}/cve/by-workload/{kind}/{namespace}/{name}",
+		credentials.Wrap(factory, cveByWorkloadHandler(registry, cveMgr)))
 	router.Post("/api/clusters/{cluster}/cve/refresh",
 		credentials.Wrap(factory, cveRefreshHandler(registry, cveMgr, auditEmitter)))
 

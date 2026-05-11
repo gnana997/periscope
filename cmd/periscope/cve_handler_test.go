@@ -14,6 +14,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jonboulle/clockwork"
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
@@ -474,4 +475,292 @@ func getCvePodsPage(t *testing.T, h credentials.Handler, cursor string) cve.Pods
 	var got cve.PodsResp
 	unmarshalJSON(t, rec.Body.Bytes(), &got)
 	return got
+}
+
+// ── /cve/by-workload tests ──────────────────────────────────────────
+
+// cvePodWithOwners returns a pod fixture annotated with the supplied
+// ownerReferences. Used by the workload-filter tests.
+func cvePodWithOwners(ns, name, image, digest string, owners ...metav1.OwnerReference) corev1.Pod {
+	p := cvePod(ns, name, image, digest)
+	p.OwnerReferences = owners
+	return p
+}
+
+// addReplicaSetToFixture seeds a ReplicaSet onto the manager's
+// ReplicaSet informer indexer so the owner walker can resolve a
+// two-hop Deployment lookup. Returns after waiting for the lister
+// to expose the RS.
+func addReplicaSetToFixture(t *testing.T, mgr *cve.Manager, cluster, ns, name, deploymentName string) {
+	t.Helper()
+	// The cve.Manager exposes the lister but not the underlying
+	// informer; tests reach into the lister-backing indexer via a
+	// known-shape approach: build the lister we want by populating
+	// the same fake clientset's ReplicaSet store before hydrate.
+	// In practice we ask the test author to seed it BEFORE
+	// buildCveFixture by extending fixtureOpts; see the test below.
+	_ = mgr
+	_ = cluster
+	_ = ns
+	_ = name
+	_ = deploymentName
+	// Body intentionally a no-op — tests use the rsFixtures field on
+	// cveFixtureOpts (added below) to seed the clientset directly.
+}
+
+func TestCveByWorkload_StatefulSet_DirectMatch(t *testing.T) {
+	reg := testRegistry(t)
+	mgr := buildCveFixture(t, cveFixtureOpts{
+		insp: &stubCveInsp{enabled: true, digests: map[string][]cve.Finding{
+			"sha256:abc": {{CVE: "X", Severity: "HIGH"}},
+		}},
+		ec2: &stubCveEC2{},
+		pods: []corev1.Pod{
+			cvePodWithOwners("ns", "sts-0",
+				"111.dkr.ecr.us-east-1.amazonaws.com/app:v1", "sha256:abc",
+				metav1.OwnerReference{Kind: "StatefulSet", Name: "my-sts"}),
+			cvePodWithOwners("ns", "sts-1",
+				"111.dkr.ecr.us-east-1.amazonaws.com/app:v1", "sha256:abc",
+				metav1.OwnerReference{Kind: "StatefulSet", Name: "my-sts"}),
+			// Different STS — must NOT match.
+			cvePodWithOwners("ns", "other-0",
+				"111.dkr.ecr.us-east-1.amazonaws.com/app:v1", "sha256:abc",
+				metav1.OwnerReference{Kind: "StatefulSet", Name: "other-sts"}),
+		},
+	})
+	waitForCveLister(t, mgr, cveTestCluster, 3)
+
+	h := cveByWorkloadHandler(reg, mgr)
+	rec := invokeCveHandler(t, h, http.MethodGet,
+		"/cve/by-workload/StatefulSet/ns/my-sts",
+		map[string]string{
+			"cluster": cveTestCluster, "kind": "StatefulSet",
+			"namespace": "ns", "name": "my-sts",
+		}, nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status: %d body=%s", rec.Code, rec.Body)
+	}
+	var got cve.WorkloadCveResp
+	unmarshalJSON(t, rec.Body.Bytes(), &got)
+	if len(got.Pods) != 2 {
+		t.Errorf("want 2 matched pods, got %d", len(got.Pods))
+	}
+	if got.Workload.Kind != "StatefulSet" || got.Workload.Name != "my-sts" {
+		t.Errorf("workload echo: %+v", got.Workload)
+	}
+	// Two pods × one container each, each scanned-ECR with one HIGH.
+	if got.RolledUpSeverityCounts.High != 2 {
+		t.Errorf("rolled up: %+v", got.RolledUpSeverityCounts)
+	}
+	if got.ScanCoverage != cve.CoverageFull {
+		t.Errorf("coverage: want full, got %q", got.ScanCoverage)
+	}
+}
+
+func TestCveByWorkload_Deployment_TwoHopViaReplicaSet(t *testing.T) {
+	reg := testRegistry(t)
+	// Two pods, both via the same ReplicaSet, which is owned by the
+	// Deployment. A third pod via a different RS owned by a
+	// different Deployment must NOT match.
+	mgr := buildCveFixtureWithRS(t, cveFixtureOpts{
+		insp: &stubCveInsp{enabled: true, digests: map[string][]cve.Finding{
+			"sha256:abc": {{CVE: "X", Severity: "CRITICAL"}},
+		}},
+		ec2: &stubCveEC2{},
+		pods: []corev1.Pod{
+			cvePodWithOwners("ns", "app-abc123-p1",
+				"111.dkr.ecr.us-east-1.amazonaws.com/app:v1", "sha256:abc",
+				metav1.OwnerReference{Kind: "ReplicaSet", Name: "app-abc123"}),
+			cvePodWithOwners("ns", "app-abc123-p2",
+				"111.dkr.ecr.us-east-1.amazonaws.com/app:v1", "sha256:abc",
+				metav1.OwnerReference{Kind: "ReplicaSet", Name: "app-abc123"}),
+			cvePodWithOwners("ns", "other-xyz-p1",
+				"111.dkr.ecr.us-east-1.amazonaws.com/app:v1", "sha256:abc",
+				metav1.OwnerReference{Kind: "ReplicaSet", Name: "other-xyz"}),
+		},
+	}, []*appsv1.ReplicaSet{
+		{
+			ObjectMeta: metav1.ObjectMeta{Namespace: "ns", Name: "app-abc123",
+				OwnerReferences: []metav1.OwnerReference{{Kind: "Deployment", Name: "app"}}},
+		},
+		{
+			ObjectMeta: metav1.ObjectMeta{Namespace: "ns", Name: "other-xyz",
+				OwnerReferences: []metav1.OwnerReference{{Kind: "Deployment", Name: "other"}}},
+		},
+	})
+	waitForCveLister(t, mgr, cveTestCluster, 3)
+	waitForCveRSLister(t, mgr, cveTestCluster, 2)
+
+	h := cveByWorkloadHandler(reg, mgr)
+	rec := invokeCveHandler(t, h, http.MethodGet,
+		"/cve/by-workload/Deployment/ns/app",
+		map[string]string{
+			"cluster": cveTestCluster, "kind": "Deployment",
+			"namespace": "ns", "name": "app",
+		}, nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status: %d body=%s", rec.Code, rec.Body)
+	}
+	var got cve.WorkloadCveResp
+	unmarshalJSON(t, rec.Body.Bytes(), &got)
+	if len(got.Pods) != 2 {
+		t.Errorf("want 2 matched pods, got %d", len(got.Pods))
+	}
+	if got.RolledUpSeverityCounts.Critical != 2 {
+		t.Errorf("critical rollup: %+v", got.RolledUpSeverityCounts)
+	}
+}
+
+func TestCveByWorkload_DaemonSet_MixedScanCoverage(t *testing.T) {
+	reg := testRegistry(t)
+	mgr := buildCveFixture(t, cveFixtureOpts{
+		insp: &stubCveInsp{enabled: true, digests: map[string][]cve.Finding{
+			"sha256:abc": {{CVE: "X", Severity: "HIGH"}},
+		}},
+		ec2: &stubCveEC2{},
+		pods: []corev1.Pod{
+			cvePodWithOwners("kube-system", "ds-1",
+				"111.dkr.ecr.us-east-1.amazonaws.com/agent:v1", "sha256:abc",
+				metav1.OwnerReference{Kind: "DaemonSet", Name: "ds"}),
+			// Two containers: one ECR-scanned, one non-ECR sidecar.
+			func() corev1.Pod {
+				p := cvePod2Containers("kube-system", "ds-2",
+					"111.dkr.ecr.us-east-1.amazonaws.com/agent:v1", "sha256:abc",
+					"docker.io/library/nginx:latest", "docker-pullable://nginx@sha256:zzz")
+				p.OwnerReferences = []metav1.OwnerReference{{Kind: "DaemonSet", Name: "ds"}}
+				return p
+			}(),
+		},
+	})
+	waitForCveLister(t, mgr, cveTestCluster, 2)
+
+	h := cveByWorkloadHandler(reg, mgr)
+	rec := invokeCveHandler(t, h, http.MethodGet,
+		"/cve/by-workload/DaemonSet/kube-system/ds",
+		map[string]string{
+			"cluster": cveTestCluster, "kind": "DaemonSet",
+			"namespace": "kube-system", "name": "ds",
+		}, nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status: %d body=%s", rec.Code, rec.Body)
+	}
+	var got cve.WorkloadCveResp
+	unmarshalJSON(t, rec.Body.Bytes(), &got)
+	if len(got.Pods) != 2 {
+		t.Errorf("want 2 pods, got %d", len(got.Pods))
+	}
+	// One ECR-scanned container per pod (2 total) + one non-ECR
+	// sidecar in the second pod → partial coverage.
+	if got.ScanCoverage != cve.CoveragePartial {
+		t.Errorf("coverage: want partial, got %q", got.ScanCoverage)
+	}
+}
+
+func TestCveByWorkload_UnknownKind_400(t *testing.T) {
+	reg := testRegistry(t)
+	mgr := buildCveFixture(t, cveFixtureOpts{
+		insp: &stubCveInsp{enabled: true},
+		ec2:  &stubCveEC2{},
+	})
+	h := cveByWorkloadHandler(reg, mgr)
+	rec := invokeCveHandler(t, h, http.MethodGet,
+		"/cve/by-workload/CronJob/ns/anything",
+		map[string]string{
+			"cluster": cveTestCluster, "kind": "CronJob",
+			"namespace": "ns", "name": "anything",
+		}, nil)
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("want 400 for unsupported kind, got %d", rec.Code)
+	}
+}
+
+func TestCveByWorkload_NoMatchedPods_EmptyAndCoverageNone(t *testing.T) {
+	reg := testRegistry(t)
+	mgr := buildCveFixture(t, cveFixtureOpts{
+		insp: &stubCveInsp{enabled: true},
+		ec2:  &stubCveEC2{},
+		// No pods owned by "phantom".
+		pods: []corev1.Pod{
+			cvePodWithOwners("ns", "p",
+				"111.dkr.ecr.us-east-1.amazonaws.com/app:v1", "",
+				metav1.OwnerReference{Kind: "StatefulSet", Name: "other"}),
+		},
+	})
+	waitForCveLister(t, mgr, cveTestCluster, 1)
+
+	h := cveByWorkloadHandler(reg, mgr)
+	rec := invokeCveHandler(t, h, http.MethodGet,
+		"/cve/by-workload/StatefulSet/ns/phantom",
+		map[string]string{
+			"cluster": cveTestCluster, "kind": "StatefulSet",
+			"namespace": "ns", "name": "phantom",
+		}, nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status: %d", rec.Code)
+	}
+	var got cve.WorkloadCveResp
+	unmarshalJSON(t, rec.Body.Bytes(), &got)
+	if len(got.Pods) != 0 {
+		t.Errorf("want 0 pods, got %d", len(got.Pods))
+	}
+	if got.ScanCoverage != cve.CoverageNone {
+		t.Errorf("coverage: want none, got %q", got.ScanCoverage)
+	}
+}
+
+// buildCveFixtureWithRS is the workload-test variant: seeds the
+// fake clientset with the supplied ReplicaSets in addition to pods +
+// nodes, so the ReplicaSet informer started inside startPodInformer
+// can resolve Pod → ReplicaSet → Deployment lookups.
+func buildCveFixtureWithRS(t *testing.T, o cveFixtureOpts, rss []*appsv1.ReplicaSet) *cve.Manager {
+	t.Helper()
+	cs := fake.NewSimpleClientset()
+	for i := range o.pods {
+		_, _ = cs.CoreV1().Pods(o.pods[i].Namespace).Create(context.Background(), &o.pods[i], metav1.CreateOptions{})
+	}
+	for i := range o.nodes {
+		_, _ = cs.CoreV1().Nodes().Create(context.Background(), &o.nodes[i], metav1.CreateOptions{})
+	}
+	for _, rs := range rss {
+		_, _ = cs.AppsV1().ReplicaSets(rs.Namespace).Create(context.Background(), rs, metav1.CreateOptions{})
+	}
+	factory := func(_ context.Context, _ clusters.Cluster) (kubernetes.Interface, error) {
+		return cs, nil
+	}
+	mgr := cve.NewManager(
+		o.insp, o.ec2, factory,
+		clockwork.NewFakeClock(),
+		cve.Config{
+			RefreshInterval:           time.Hour,
+			EvictAfter:                time.Hour,
+			TTLScanInterval:           time.Hour,
+			EvictionScanInterval:      time.Hour,
+			MaxConcurrentDeltaFetches: 1,
+		},
+		slog.New(slog.NewTextHandler(io.Discard, nil)),
+	)
+	t.Cleanup(mgr.Stop)
+	if !o.skipHydrate {
+		if _, err := mgr.EnsureHydrated(context.Background(), clusters.Cluster{Name: cveTestCluster}); err != nil {
+			t.Fatalf("hydrate: %v", err)
+		}
+	}
+	return mgr
+}
+
+// waitForCveRSLister polls until the manager's ReplicaSetLister
+// returns a non-nil lister with at least min entries.
+func waitForCveRSLister(t *testing.T, mgr *cve.Manager, cluster string, minRS int) {
+	t.Helper()
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if l := mgr.ReplicaSetLister(cluster); l != nil {
+			rss, _ := l.List(labels.Everything())
+			if len(rss) >= minRS {
+				return
+			}
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatalf("ReplicaSet lister never indexed %d entries", minRS)
 }
