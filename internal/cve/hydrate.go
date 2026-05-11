@@ -2,7 +2,6 @@ package cve
 
 import (
 	"context"
-	"errors"
 	"fmt"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -193,7 +192,3 @@ func asEC2Client(api EC2API) *awsec2.Client {
 	return nil
 }
 
-// errClientNotAvailable is returned when m.clientFor is unset (only
-// possible in malformed test setups; production wiring always sets
-// it).
-var errClientNotAvailable = errors.New("k8s client factory not configured")

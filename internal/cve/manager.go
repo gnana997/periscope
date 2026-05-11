@@ -2,7 +2,6 @@ package cve
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
 	"sync"
@@ -353,11 +352,6 @@ func (m *Manager) scanEvict() {
 		}
 	}
 }
-
-// errInspectorDisabled is sentinelled (not exported) so fetch helpers
-// can short-circuit cleanly when the store has been marked disabled
-// mid-flight.
-var errInspectorDisabled = errors.New("inspector v2 disabled")
 
 // fetchDigest fetches a single digest via single-flight. The
 // single-flight key namespaces digests under "d:" so a digest that
