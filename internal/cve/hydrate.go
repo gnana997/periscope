@@ -137,10 +137,10 @@ func (m *Manager) hydrateInstances(ctx context.Context, cluster clusters.Cluster
 // eviction sweeper has the right starting state.
 func (m *Manager) hydratePods(ctx context.Context, cluster clusters.Cluster, cs kubernetes.Interface, st *clusterState) error {
 	pods, err := cs.CoreV1().Pods("").List(ctx, metav1.ListOptions{})
-	m.log.Info("cve hydratePods listed", "cluster", cluster.Name, "pod_count", len(pods.Items), "list_err", err)
 	if err != nil {
 		return fmt.Errorf("list pods: %w", err)
 	}
+	m.log.Info("cve hydratePods listed", "cluster", cluster.Name, "pod_count", len(pods.Items), "list_err", err)
 
 	// First pass: count refs and collect the unique digest set.
 	seenDigest := make(map[string]struct{}, len(pods.Items))
