@@ -672,3 +672,59 @@ What the agent does **not** do:
 For the failure-mode catalogue (cert expired, agent disconnected,
 deregistered cluster, server CA rotated) see
 [`docs/architecture/agent-tunnel.md`](../architecture/agent-tunnel.md) 10.
+
+## AWS Inspector v2 (optional, v1.1+)
+
+Opt-in. Adds CVE chips on the Nodes / Pods / Workloads pages,
+backed by Amazon Inspector v2's `ListFindings` / `ListCoverage` APIs.
+Default Helm value is `inspector.enabled: false` so v1.0.x → v1.1
+upgrades don't trip AccessDenied alarms before the IAM is in place.
+
+The four permissions go on the **periscope-server's** Pod Identity
+or IRSA role — NOT on a per-cluster cluster-role. Inspector's API
+surface is account-scoped: a single grant on the server's principal
+covers every EKS cluster the operator is reading.
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [{
+    "Effect": "Allow",
+    "Action": [
+      "inspector2:ListFindings",
+      "inspector2:ListCoverage",
+      "inspector2:GetFindings",
+      "inspector2:BatchGetFindingDetails"
+    ],
+    "Resource": "*"
+  }]
+}
+```
+
+`ec2:DescribeInstances` is also required so Periscope can read the
+`eks:nodegroup-name` and `karpenter.sh/nodepool` tags that classify
+each instance as managed-nodegroup / karpenter-nodeclaim /
+unmanaged. EKS-backed deployments already grant this for the
+existing fleet / node UI; double-check it's present:
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [{
+    "Effect": "Allow",
+    "Action": ["ec2:DescribeInstances"],
+    "Resource": "*"
+  }]
+}
+```
+
+After granting and setting `inspector.enabled: true` in your Helm
+values (see [`values.md`](./values.md#aws-inspector-v2--container--ami-cve-surfacing-v11)),
+restart the periscope pod. CVE data hydrates lazily on first
+activation per cluster (~10-30s scan); the local in-memory cache
+serves subsequent reads in under a millisecond and refreshes every
+6h.
+
+Audit note: Inspector reads are internal metadata fetches, not user
+actions — they do not emit audit rows. AWS CloudTrail records the
+underlying API calls against the periscope-server's role.

@@ -346,6 +346,31 @@ agent-appropriate request/limit values.
 
 ---
 
+## AWS Inspector v2 — container + AMI CVE surfacing (v1.1+)
+
+Surfaces Inspector v2 findings inline on the Nodes / Pods / Workloads pages.
+
+**Default: disabled.** Existing v1.0.x deployments stay byte-identical on upgrade. To turn it on:
+
+1. Enable Amazon Inspector v2 in the AWS account you want scanned (per-scan billing applies; this is an operator decision).
+2. Grant the periscope-server's Pod Identity / IRSA role the four `inspector2:*` permissions listed in [`cluster-rbac.md`](./cluster-rbac.md#aws-inspector-v2-optional-v11).
+3. Set `inspector.enabled: true` in your Helm values.
+
+| Value | Type | Default | Description |
+|---|---|---|---|
+| `inspector.enabled` | bool | `false` | Master switch. Renders no env vars (and no goroutines run) when false. |
+| `inspector.refreshInterval` | duration | `6h` | Per-entry TTL. Catches newly-published CVEs against unchanged digests. |
+| `inspector.evictAfter` | duration | `24h` | Cooldown before a zero-ref entry is dropped. Keeps recently-deleted pod digests warm. |
+| `inspector.hydrateBatchSize` | int | `50` | Inspector ListFindings batch size during cold-path hydrate. Capped at 50 (SDK BatchGet limit). |
+
+Maps one-to-one to `PERISCOPE_INSPECTOR_*` env vars; see [`environment-variables.md`](./environment-variables.md).
+
+Architecture: per-cluster in-memory cache hydrated lazily on first activation (~10-30s scan), kept fresh via the pod watch hook + the 6h TTL, served at <1ms thereafter. The SPA never calls Inspector directly. See issue #163 for the design notes.
+
+When Inspector v2 is not enabled on the AWS account (or the IAM grant is missing), the store flips to a "disabled" state and the UI renders an "Inspector v2 not enabled" hint instead of a generic error — no AccessDenied loop, no retries until the next process restart.
+
+---
+
 ## See also
 
 - [`environment-variables.md`](./environment-variables.md) — `PERISCOPE_*` env vars the binary reads (one-to-one mapping with most typed values above).

@@ -131,6 +131,29 @@ spec:
               value: {{ .perUserLimit | quote }}
             {{- end }}
             {{- end }}
+            {{- /*
+              Inspector v2 CVE surfacing (v1.1+). Opt-in via
+              .Values.inspector.enabled; renders nothing when disabled
+              so existing v1.0.x deployments stay byte-identical.
+            */}}
+            {{- with .Values.inspector }}
+            {{- if .enabled }}
+            - name: PERISCOPE_INSPECTOR_ENABLED
+              value: "true"
+            {{- if .refreshInterval }}
+            - name: PERISCOPE_INSPECTOR_REFRESH_INTERVAL
+              value: {{ .refreshInterval | quote }}
+            {{- end }}
+            {{- if .evictAfter }}
+            - name: PERISCOPE_INSPECTOR_EVICT_AFTER
+              value: {{ .evictAfter | quote }}
+            {{- end }}
+            {{- if .hydrateBatchSize }}
+            - name: PERISCOPE_INSPECTOR_HYDRATE_BATCH_SIZE
+              value: {{ .hydrateBatchSize | quote }}
+            {{- end }}
+            {{- end }}
+            {{- end }}
             {{- if .Values.agent.enabled }}
             - name: PERISCOPE_AGENT_LISTEN_ADDR
               value: {{ .Values.agent.listenAddr | quote }}

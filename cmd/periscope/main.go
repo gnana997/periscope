@@ -23,8 +23,11 @@ import (
 	"github.com/gnana997/periscope/internal/audit"
 	"github.com/gnana997/periscope/internal/auth"
 	"github.com/gnana997/periscope/internal/authz"
+	"github.com/gnana997/periscope/internal/awsec2"
+	"github.com/gnana997/periscope/internal/awsinspector"
 	"github.com/gnana997/periscope/internal/clusters"
 	"github.com/gnana997/periscope/internal/credentials"
+	"github.com/gnana997/periscope/internal/cve"
 	execsess "github.com/gnana997/periscope/internal/exec"
 	"github.com/gnana997/periscope/internal/httpx"
 	"github.com/gnana997/periscope/internal/k8s"
@@ -32,6 +35,7 @@ import (
 	"github.com/gnana997/periscope/internal/spa"
 	"github.com/gnana997/periscope/internal/sse"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes"
 )
 
 // version is set via -ldflags "-X main.version=v1.x.y" at build time
@@ -204,6 +208,47 @@ func main() {
 		slog.Info("agent backend enabled",
 			"listen_addr", agentListenAddr,
 			"agent_clusters_in_registry", len(agentBackedNames(registry)))
+	}
+
+	// --- CVE manager (issue #164) ---
+	//
+	// Local in-memory cache for AWS Inspector v2 findings. Opt-in
+	// via PERISCOPE_INSPECTOR_ENABLED so existing v1.0.x → v1.1
+	// upgrades that have not added the new inspector2:* IAM perms
+	// do not spam AccessDenied on every cluster activation. When
+	// disabled, no goroutines start and no Inspector calls are made.
+	var cveMgr *cve.Manager
+	if parseBoolEnv("PERISCOPE_INSPECTOR_ENABLED", false) {
+		cveCfg := cve.Config{
+			RefreshInterval: parseDurationEnv("PERISCOPE_INSPECTOR_REFRESH_INTERVAL", 6*time.Hour),
+			EvictAfter:      parseDurationEnv("PERISCOPE_INSPECTOR_EVICT_AFTER", 24*time.Hour),
+			HydrateBatchSize: parseIntEnv("PERISCOPE_INSPECTOR_HYDRATE_BATCH_SIZE", awsinspector.BatchSize),
+		}
+		inspectorClient := awsinspector.New(factory.AWSConfig())
+		ec2Client := awsec2.New(factory.AWSConfig())
+		cveMgr = cve.NewManager(inspectorClient, ec2Client,
+			func(ctx context.Context, c clusters.Cluster) (kubernetes.Interface, error) {
+				// Cluster reads are read-only metadata; use a
+				// non-impersonated session so the same client can
+				// serve every request handler. The audit lives in
+				// the Inspector AWS account via CloudTrail, not in
+				// per-user K8s impersonation, per epic #163.
+				prov, perr := factory.For(ctx, credentials.Session{Subject: "cve-manager"})
+				if perr != nil {
+					return nil, perr
+				}
+				return k8s.NewClientset(ctx, prov, c)
+			},
+			nil, // real clock
+			cveCfg,
+			slog.Default().With("component", "cve"),
+		)
+		slog.Info("cve manager configured",
+			"refresh_interval", cveCfg.RefreshInterval,
+			"evict_after", cveCfg.EvictAfter,
+			"hydrate_batch", cveCfg.HydrateBatchSize)
+	} else {
+		slog.Info("cve manager disabled (set inspector.enabled=true to opt in)")
 	}
 
 	router.Get("/healthz", func(w http.ResponseWriter, _ *http.Request) {
@@ -1117,6 +1162,15 @@ func main() {
 	// from a single signal goroutine started below.
 	serverCtx, cancelServer := context.WithCancel(context.Background())
 	defer cancelServer()
+
+	// Start the CVE manager's background loops (TTL refresh +
+	// eviction). Stop is deferred so a graceful drain shuts the
+	// per-cluster pod informers cleanly. No-op when the manager is
+	// disabled at startup.
+	if cveMgr != nil {
+		cveMgr.Start(serverCtx)
+		defer cveMgr.Stop()
+	}
 
 	// watchHandlerDeps bundles the cross-cutting dependencies the kind-
 	// agnostic resourceWatchHandler needs. Shared across every watch
@@ -2608,6 +2662,38 @@ func (u *userStreamLimiter) release(actor string) {
 	if u.counts[actor] == 0 {
 		delete(u.counts, actor)
 	}
+}
+
+// parseDurationEnv reads a Go duration string from the named env var
+// (e.g. "6h", "30m", "24h"); returns fallback on unset, empty, or
+// malformed value.
+func parseDurationEnv(name string, fallback time.Duration) time.Duration {
+	raw := strings.TrimSpace(os.Getenv(name))
+	if raw == "" {
+		return fallback
+	}
+	d, err := time.ParseDuration(raw)
+	if err != nil || d <= 0 {
+		slog.Warn("invalid env var, using default", "name", name, "value", raw, "default", fallback)
+		return fallback
+	}
+	return d
+}
+
+// parseBoolEnv reads a boolean from the named env var. Accepts the
+// common forms recognised by strconv.ParseBool: 1/0, t/f, true/false,
+// TRUE/FALSE, etc. Returns fallback on unset or malformed.
+func parseBoolEnv(name string, fallback bool) bool {
+	raw := strings.TrimSpace(os.Getenv(name))
+	if raw == "" {
+		return fallback
+	}
+	b, err := strconv.ParseBool(raw)
+	if err != nil {
+		slog.Warn("invalid env var, using default", "name", name, "value", raw, "default", fallback)
+		return fallback
+	}
+	return b
 }
 
 // parseIntEnv reads a positive integer from the named env var; returns
