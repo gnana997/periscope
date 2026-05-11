@@ -171,7 +171,12 @@ func TestManager_TTL_RefreshesStale(t *testing.T) {
 	// eviction tickers). Block until both are in place before
 	// advancing — otherwise Advance can race the goroutine and
 	// silently drop the tick.
-	clock.BlockUntil(2)
+	blockCtx, blockCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	if err := clock.BlockUntilContext(blockCtx, 2); err != nil {
+		blockCancel()
+		t.Fatalf("BlockUntilContext: %v", err)
+	}
+	blockCancel()
 	clock.Advance(2 * time.Hour) // past TTL boundary, fires both ticks
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
@@ -208,7 +213,12 @@ func TestManager_Eviction_DropsZeroRefStale(t *testing.T) {
 
 	// Wait until both tickers (TTL + eviction) are registered with
 	// the fake clock so Advance reliably fires them.
-	clock.BlockUntil(2)
+	blockCtx, blockCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	if err := clock.BlockUntilContext(blockCtx, 2); err != nil {
+		blockCancel()
+		t.Fatalf("BlockUntilContext: %v", err)
+	}
+	blockCancel()
 	clock.Advance(2 * time.Hour) // past EvictAfter
 
 	deadline := time.Now().Add(5 * time.Second)
