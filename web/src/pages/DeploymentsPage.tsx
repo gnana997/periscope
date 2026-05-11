@@ -20,6 +20,8 @@ import {
 } from "../components/table/states";
 import { isForbidden } from "../components/table/isForbidden";
 import { DetailPane } from "../components/detail/DetailPane";
+import { SecurityTab } from "../components/security/SecurityTab";
+import { SecurityEmptyBanner } from "../components/security/SecurityEmptyBanner";
 import { DeploymentDescribe } from "../components/detail/describe/DeploymentDescribe";
 import { YamlView } from "../components/detail/YamlView";
 import { useEditorDirty } from "../hooks/useEditorDirty";
@@ -127,6 +129,7 @@ export function DeploymentsPage({ cluster }: { cluster: string }) {
           { id: "yaml", label: "yaml", ready: true, content: <YamlView cluster={cluster} source={{ kind: "builtin", yamlKind: "deployments" }} ns={selectedNs} name={selectedName} />, dirty: editFlag.dirty },
           { id: "events", label: "events", ready: true, content: <EventsView cluster={cluster} kind="deployments" ns={selectedNs} name={selectedName} /> },
           { id: "logs", label: "logs", ready: true, content: <WorkloadLogsTab kind="deployment" cluster={cluster} ns={selectedNs} name={selectedName} /> },
+          { id: "security", label: "security", ready: true, content: <SecurityTab kind="workload" workloadKind="Deployment" cluster={cluster} ns={selectedNs} name={selectedName} /> },
         ]}
         actions={
           <ResourceActions
@@ -153,6 +156,7 @@ export function DeploymentsPage({ cluster }: { cluster: string }) {
         }
         trailing={<NamespacePicker />}
       />
+      <SecurityEmptyBanner cluster={cluster} />
       <FilterStrip
         search={search}
         onSearch={(v) => setParam("q", v)}
