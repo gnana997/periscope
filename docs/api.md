@@ -560,7 +560,13 @@ pre-built `inspectorUrl` deep-link for the AWS console.
       "title": "openssl vulnerability ...",
       "firstObservedAt": "2026-04-01T00:00:00Z",
       "lastObservedAt": "2026-05-10T12:00:00Z",
-      "inspectorUrl": "https://us-east-1.console.aws.amazon.com/inspector/v2/home?region=us-east-1#/findings?findingArn=..."
+      "inspectorUrl": "https://us-east-1.console.aws.amazon.com/inspector/v2/home?region=us-east-1#/findings?findingArn=...",
+      "description": "Buffer-overflow in libfoo lets a remote attacker crash the process. ...",
+      "remediation": "Upgrade openssl to 1.0.1 or later.",
+      "remediationUrl": "https://nvd.nist.gov/vuln/detail/CVE-2026-12345",
+      "epssScore": 0.87,
+      "exploitAvailable": "YES",
+      "fixAvailable": "YES"
     }
   ],
   "lastFetchedAt": "2026-05-11T08:14:32Z",
@@ -568,6 +574,16 @@ pre-built `inspectorUrl` deep-link for the AWS console.
   "hydrated": true
 }
 ```
+
+Operator-actionable detail beyond the chip surface:
+
+- `description` — long-form prose from Inspector ("what is this CVE").
+- `remediation` / `remediationUrl` — vendor-supplied "how to fix" guidance + link, when Inspector ships one.
+- `epssScore` — Exploit Prediction Scoring System probability (0.0-1.0). 0 when Inspector did not report one.
+- `exploitAvailable` — `YES` / `NO` / empty (unset).
+- `fixAvailable`     — `YES` / `NO` / `PARTIAL` / empty. Operators get the categorical flag alongside the concrete `fixedVersion` string.
+
+These fields are part of the cached Finding so the SPA detail drawer renders inline without a second Inspector round-trip.
 
 Returns **404** if the instance isn't in the cache (typo, terminated,
 or not yet hydrated).
