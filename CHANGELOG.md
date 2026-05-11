@@ -15,6 +15,14 @@ tag.
 
 ### Fixed
 
+- Apply YAML: dialog footer now shows a clear "✓ applied N" confirmation
+  when every doc in a batch lands successfully, and the apply button is
+  replaced with a primary close button so the operator gets an obvious
+  exit. Partial outcomes (any conflict / failure) surface a red "M
+  applied · K conflict · L failed" line and disable re-apply until the
+  YAML buffer is edited. Editing the YAML resets the prior outcome so
+  the banner cannot survive into the next batch (#175).
+
 - Auth: explicit logout no longer loops back through silent SSO when
   the IdP session is still valid. The SPA bundle is now served outside
   the chi router so the auth middleware's "redirect HTML browser
