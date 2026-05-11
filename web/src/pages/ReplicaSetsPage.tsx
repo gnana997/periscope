@@ -6,7 +6,8 @@ import { ageFrom, nameMatches } from "../lib/format";
 import { cn } from "../lib/cn";
 import { api } from "../lib/api";
 import { PageHeader } from "../components/page/PageHeader";
-import { SplitPane } from "../components/page/SplitPane";
+import { DetailOverlay } from "../components/page/DetailOverlay";
+import { buildOverlayNav } from "../components/page/detailOverlayHelpers";
 import { EmptyState, ErrorState, ForbiddenState, LoadingState } from "../components/table/states";
 import { isForbidden } from "../components/table/isForbidden";
 import { BulkActionsToolbar } from "../components/table/BulkActionsToolbar";
@@ -159,6 +160,16 @@ export function ReplicaSetsPage({ cluster }: { cluster: string }) {
   const editFlag = useEditorDirty(cluster, "replicasets", selectedNs ?? undefined, selectedName);
   const confirmDiscard = useConfirmDiscard(editFlag.dirty);
 
+  const overlayNav = buildOverlayNav({
+    rows: filtered,
+    selectedKey,
+    keyOf: (r) => `${r.namespace}/${r.name}`,
+    navigateTo: (r) =>
+      confirmDiscard(() => setMany({ sel: r.name, selNs: r.namespace, tab: activeTab })),
+    dismiss: () =>
+      confirmDiscard(() => setMany({ sel: null, selNs: null, tab: null })),
+  });
+
   const detail =
     selectedNs && selectedName ? (
       <DetailPane
@@ -268,7 +279,7 @@ export function ReplicaSetsPage({ cluster }: { cluster: string }) {
         </div>
       </div>
 
-      <SplitPane
+      <DetailOverlay {...overlayNav}
         storageKey="periscope.detailWidth.v4"
         left={
           query.isLoading ? <LoadingState resource="replicasets" /> :

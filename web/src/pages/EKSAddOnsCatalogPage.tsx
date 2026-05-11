@@ -7,7 +7,7 @@
 // Filter chips narrow by ownership (AWS vs third-party) and by
 // type (networking / storage / observability / security).
 //
-// Layout: SplitPane with the catalog table on the left and
+// Layout: DetailOverlay with the catalog table on the left and
 // AddonDetailPane on the right. Both installed and available rows
 // open the pane on click; the row's primary action (Install / kebab)
 // stops propagation so the operator can still skip to the modal
@@ -19,7 +19,7 @@ import { DeleteAddOnModal } from "../components/eks/DeleteAddOnModal";
 import { InstallAddOnDialog } from "../components/eks/InstallAddOnDialog";
 import { UpgradeAddOnDialog } from "../components/eks/UpgradeAddOnDialog";
 import { KebabMenu } from "../components/ui/KebabMenu";
-import { SplitPane } from "../components/page/SplitPane";
+import { DetailOverlay } from "../components/page/DetailOverlay";
 import { useAddonCatalog } from "../hooks/useAddonCatalog";
 import { useAddon, useAddons } from "../hooks/useAddons";
 import {
@@ -257,7 +257,7 @@ export function EKSAddOnsCatalogPage({ cluster }: { cluster: string }) {
         </div>
       </div>
 
-      <SplitPane
+      <DetailOverlay
         storageKey="periscope.detailWidth.v4"
         left={
           filtered.length === 0 ? (
@@ -305,6 +305,7 @@ export function EKSAddOnsCatalogPage({ cluster }: { cluster: string }) {
           )
         }
         right={detail}
+        onDismiss={selectedName ? () => setSelectedName(null) : undefined}
       />
 
       <InstallAddOnDialog

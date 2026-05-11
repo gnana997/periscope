@@ -5,7 +5,8 @@ import type { StatefulSet, StatefulSetList } from "../lib/types";
 import { ageFrom, nameMatches } from "../lib/format";
 import { PageHeader } from "../components/page/PageHeader";
 import { FilterStrip } from "../components/page/FilterStrip";
-import { SplitPane } from "../components/page/SplitPane";
+import { DetailOverlay } from "../components/page/DetailOverlay";
+import { buildOverlayNav } from "../components/page/detailOverlayHelpers";
 import {
   type Column,
   type RowTint,
@@ -116,6 +117,16 @@ export function StatefulSetsPage({ cluster }: { cluster: string }) {
   const editFlag = useEditorDirty(cluster, "statefulsets", selectedNs ?? undefined, selectedName);
   const confirmDiscard = useConfirmDiscard(editFlag.dirty);
 
+  const overlayNav = buildOverlayNav({
+    rows: filtered,
+    selectedKey,
+    keyOf: (r) => `${r.namespace}/${r.name}`,
+    navigateTo: (r) =>
+      confirmDiscard(() => setMany({ sel: r.name, selNs: r.namespace, tab: activeTab })),
+    dismiss: () =>
+      confirmDiscard(() => setMany({ sel: null, selNs: null, tab: null })),
+  });
+
   const detail =
     selectedNs && selectedName ? (
       <DetailPane
@@ -163,7 +174,7 @@ export function StatefulSetsPage({ cluster }: { cluster: string }) {
         resultCount={filtered.length}
         totalCount={all.length}
       />
-      <SplitPane
+      <DetailOverlay {...overlayNav}
         storageKey="periscope.detailWidth.v4"
         left={
           query.isLoading ? (

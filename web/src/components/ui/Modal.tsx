@@ -17,6 +17,7 @@
 //   - `z` controls the stacking layer (default 50; takeovers may want 60).
 
 import { useEffect, useRef, type ReactNode } from "react";
+import { notifyModalClose, notifyModalOpen } from "./modalRegistry";
 import { cn } from "../../lib/cn";
 
 interface ModalProps {
@@ -62,6 +63,14 @@ export function Modal({
       returnFocusRef.current?.focus?.();
       returnFocusRef.current = null;
     };
+  }, [open]);
+
+  // Register with the modal registry so DetailOverlay's Esc
+  // handler yields while a modal is open over it.
+  useEffect(() => {
+    if (!open) return;
+    notifyModalOpen();
+    return () => notifyModalClose();
   }, [open]);
 
   useEffect(() => {

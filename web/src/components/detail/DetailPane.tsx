@@ -46,7 +46,7 @@ export function DetailPane({
   const active = tabs.find((t) => t.id === activeTab && t.ready);
 
   return (
-    // min-w-0 here is load-bearing: the SplitPane's right pane has a
+    // min-w-0 here is load-bearing: the DetailOverlay's right pane has a
     // fixed pixel width and is itself min-w-0, but every nested flex
     // container needs to opt-in (default is min-width: auto = intrinsic
     // content width) for `truncate` to clip in title rows. Without it,
@@ -174,7 +174,7 @@ export function DetailPane({
         component using `truncate` inside a nested flex container
         relies on min-width: 0 propagation from this parent.
 
-        Width is governed by SplitPane (640px default); describe
+        Width is governed by DetailOverlay (640px default); describe
         components use flex-wrap / grid auto-fit internally and
         naturally fill whatever width they're given.
       */}
