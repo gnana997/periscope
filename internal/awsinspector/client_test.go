@@ -315,3 +315,82 @@ func itoa(n int) string {
 	}
 	return string(digits)
 }
+
+func TestProjectFinding_OperatorActionableFields(t *testing.T) {
+	arn := "arn:test"
+	hash := "sha256:imagehash"
+	desc := "Buffer overflow in libfoo lets a remote attacker crash the process."
+	remText := "Upgrade libfoo to >= 1.2.5"
+	remURL := "https://nvd.nist.gov/vuln/detail/CVE-2026-9999"
+	resources := []itypes.Resource{{
+		Type: itypes.ResourceTypeAwsEcrContainerImage,
+		Id:   &hash,
+		Details: &itypes.ResourceDetails{
+			AwsEcrContainerImage: &itypes.AwsEcrContainerImageDetails{ImageHash: &hash},
+		},
+	}}
+	got := projectFinding(itypes.Finding{
+		FindingArn:       &arn,
+		Severity:         itypes.SeverityHigh,
+		Description:      &desc,
+		Remediation:      &itypes.Remediation{Recommendation: &itypes.Recommendation{Text: &remText, Url: &remURL}},
+		Epss:             &itypes.EpssDetails{Score: 0.87},
+		ExploitAvailable: itypes.ExploitAvailableYes,
+		FixAvailable:     itypes.FixAvailableYes,
+		Resources:        resources,
+	}, "us-east-1")
+	if len(got) != 1 {
+		t.Fatalf("want 1 projection, got %d", len(got))
+	}
+	f := got[0]
+	if f.Description != desc {
+		t.Errorf("description: got %q", f.Description)
+	}
+	if f.Remediation != remText {
+		t.Errorf("remediation text: got %q", f.Remediation)
+	}
+	if f.RemediationURL != remURL {
+		t.Errorf("remediation url: got %q", f.RemediationURL)
+	}
+	if f.EPSSScore != 0.87 {
+		t.Errorf("epss: got %v", f.EPSSScore)
+	}
+	if f.ExploitAvailable != string(itypes.ExploitAvailableYes) {
+		t.Errorf("exploit: got %q", f.ExploitAvailable)
+	}
+	if f.FixAvailable != string(itypes.FixAvailableYes) {
+		t.Errorf("fix: got %q", f.FixAvailable)
+	}
+}
+
+func TestProjectFinding_OptionalFieldsSafeOnNil(t *testing.T) {
+	// SDK guarantees Description/Remediation/Resources are required
+	// on real findings, but we still defend against nil pointers so
+	// future SDK changes or fuzz inputs can't panic projectFinding.
+	arn := "arn:test"
+	hash := "sha256:safe"
+	got := projectFinding(itypes.Finding{
+		FindingArn: &arn,
+		Severity:   itypes.SeverityLow,
+		Resources: []itypes.Resource{{
+			Type: itypes.ResourceTypeAwsEcrContainerImage,
+			Id:   &hash,
+			Details: &itypes.ResourceDetails{
+				AwsEcrContainerImage: &itypes.AwsEcrContainerImageDetails{ImageHash: &hash},
+			},
+		}},
+	}, "us-east-1")
+	if len(got) != 1 {
+		t.Fatalf("want 1 projection, got %d", len(got))
+	}
+	f := got[0]
+	if f.Description != "" || f.Remediation != "" || f.RemediationURL != "" {
+		t.Errorf("missing optional fields should be empty strings, got %+v", f)
+	}
+	if f.EPSSScore != 0 {
+		t.Errorf("missing EPSS should be 0, got %v", f.EPSSScore)
+	}
+	if f.ExploitAvailable != "" || f.FixAvailable != "" {
+		t.Errorf("missing enums should be empty, got exploit=%q fix=%q", f.ExploitAvailable, f.FixAvailable)
+	}
+}
