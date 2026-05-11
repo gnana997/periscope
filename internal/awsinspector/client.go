@@ -15,6 +15,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -32,12 +33,23 @@ const BatchSize = 50
 
 // Finding is the flat CVE record the CVE store keeps in memory. It is
 // the package's public DTO; callers should never touch the SDK types
-// directly. One Inspector finding may legitimately cover multiple
-// vulnerable packages — we keep the first one's name+version+fix to
-// avoid combinatorial explosion in the store; the API layer (#165) can
-// re-fetch full detail via BatchGetFindingDetails if a drill-down view
-// is needed in v1.2.
+// directly.
+//
+// ResourceID is the join key the cve store uses to bucket findings
+// into per-resource entries: the EC2 instance ID (i-…) for instance
+// findings, the bare ECR image hash (sha256:…) for image findings.
+// Without it, every entry would receive every finding (the very bug
+// the v1.1 review caught).
+//
+// PackageName / PackageVersion / FixedVersion summarise the
+// VulnerablePackages slice on the SDK finding. When a single finding
+// covers more than one package (e.g. openssl + libcrypto), package
+// names are concatenated with a comma so the chip surface does not
+// silently under-report; PackageVersion / FixedVersion track the
+// first package's values so the existing detail-drawer copy keeps
+// working.
 type Finding struct {
+	ResourceID      string
 	ARN             string
 	Title           string
 	CVE             string
@@ -101,29 +113,40 @@ func (c *Client) IsEnabled(ctx context.Context) (bool, error) {
 	return true, nil
 }
 
-// ListFindingsByInstance returns findings keyed on EC2 instance ID.
+// ListFindingsByInstance returns findings grouped by EC2 instance ID.
 // Inputs are deduped and batched into BatchSize-sized chunks; each
-// chunk is paginated end-to-end before the next chunk starts. The
-// returned slice is the union of every page from every chunk.
-func (c *Client) ListFindingsByInstance(ctx context.Context, instanceIDs []string) ([]Finding, error) {
-	return c.listByIDs(ctx, dedup(instanceIDs), filterByInstance)
+// chunk is paginated end-to-end before the next chunk starts. Every
+// requested ID is present in the result map (with an empty slice
+// when Inspector returned no findings for it) so callers can iterate
+// the input list and trust the lookup.
+func (c *Client) ListFindingsByInstance(ctx context.Context, instanceIDs []string) (map[string][]Finding, error) {
+	ids := dedup(instanceIDs)
+	out, err := c.listByIDs(ctx, ids, filterByInstance)
+	ensureKeys(out, ids)
+	return out, err
 }
 
-// ListFindingsByImageDigest returns findings keyed on ECR image
-// digest (the sha256:... hash, not the docker-pullable:// URI). The
-// caller is responsible for stripping the prefix before calling —
-// see (k8s/imageid).Normalize.
-func (c *Client) ListFindingsByImageDigest(ctx context.Context, digests []string) ([]Finding, error) {
-	return c.listByIDs(ctx, dedup(digests), filterByDigest)
+// ListFindingsByImageDigest returns findings grouped by ECR image
+// digest (the bare sha256:... hash, not the docker-pullable:// URI).
+// The caller is responsible for stripping the prefix before calling
+// — see (cve).normalizeImageID. Same per-key guarantee as
+// ListFindingsByInstance.
+func (c *Client) ListFindingsByImageDigest(ctx context.Context, digests []string) (map[string][]Finding, error) {
+	ids := dedup(digests)
+	out, err := c.listByIDs(ctx, ids, filterByDigest)
+	ensureKeys(out, ids)
+	return out, err
 }
 
 // listByIDs is the shared batching + pagination loop. mkFilter builds
-// the FilterCriteria for a chunk of IDs.
-func (c *Client) listByIDs(ctx context.Context, ids []string, mkFilter func([]string) *itypes.FilterCriteria) ([]Finding, error) {
+// the FilterCriteria for a chunk of IDs. Returns findings grouped by
+// their ResourceID (each SDK finding is fanned out across its
+// Resources[] entries, see projectFinding).
+func (c *Client) listByIDs(ctx context.Context, ids []string, mkFilter func([]string) *itypes.FilterCriteria) (map[string][]Finding, error) {
+	out := make(map[string][]Finding)
 	if len(ids) == 0 {
-		return nil, nil
+		return out, nil
 	}
-	var out []Finding
 	for chunk := range chunked(ids, BatchSize) {
 		input := &inspector2.ListFindingsInput{FilterCriteria: mkFilter(chunk)}
 		paginator := inspector2.NewListFindingsPaginator(c.api, input)
@@ -137,11 +160,25 @@ func (c *Client) listByIDs(ctx context.Context, ids []string, mkFilter func([]st
 				return out, fmt.Errorf("inspector list findings: %w", err)
 			}
 			for i := range page.Findings {
-				out = append(out, projectFinding(page.Findings[i], c.region))
+				for _, f := range projectFinding(page.Findings[i], c.region) {
+					out[f.ResourceID] = append(out[f.ResourceID], f)
+				}
 			}
 		}
 	}
 	return out, nil
+}
+
+// ensureKeys guarantees every requested ID is present in m, with an
+// empty slice when Inspector returned no findings. Callers iterating
+// the input list (for upserts) can then trust m[id] without a nil
+// check.
+func ensureKeys(m map[string][]Finding, ids []string) {
+	for _, id := range ids {
+		if _, ok := m[id]; !ok {
+			m[id] = nil
+		}
+	}
 }
 
 // filterByInstance builds a FilterCriteria matching findings whose
@@ -174,47 +211,90 @@ func filterByDigest(digests []string) *itypes.FilterCriteria {
 	return &itypes.FilterCriteria{EcrImageHash: filters}
 }
 
-// projectFinding flattens an Inspector v2 SDK finding into our DTO.
-// Missing optional fields collapse to zero-values — the store treats
-// them as "unknown" without special-casing.
-func projectFinding(f itypes.Finding, region string) Finding {
-	out := Finding{
+// projectFinding flattens an Inspector v2 SDK finding into our DTOs,
+// returning ONE Finding per Resources[] entry on the source. A
+// finding with two resources (rare, but happens when a CVE matches
+// the same package on two co-scanned images) yields two store rows
+// with the shared CVE metadata and per-resource ResourceID. Findings
+// with zero recognisable resources are skipped — the store has no
+// meaningful key to file them under.
+func projectFinding(f itypes.Finding, region string) []Finding {
+	if len(f.Resources) == 0 {
+		return nil
+	}
+	base := Finding{
 		ARN:      deref(f.FindingArn),
 		Title:    deref(f.Title),
 		Severity: string(f.Severity),
 	}
 	if f.FirstObservedAt != nil {
-		out.FirstObservedAt = *f.FirstObservedAt
+		base.FirstObservedAt = *f.FirstObservedAt
 	}
 	if f.LastObservedAt != nil {
-		out.LastObservedAt = *f.LastObservedAt
+		base.LastObservedAt = *f.LastObservedAt
 	}
 	if vd := f.PackageVulnerabilityDetails; vd != nil {
-		out.CVE = deref(vd.VulnerabilityId)
-		if len(vd.Cvss) > 0 {
-			// Pick the highest score across reported sources so the
-			// store keeps the worst case — operators want the chip
-			// to reflect "how bad is this", not "what does NVD think
-			// specifically". Source-attribution lives on the detail
-			// drawer in v1.2.
-			for _, s := range vd.Cvss {
-				if s.BaseScore == nil {
-					continue
-				}
-				if *s.BaseScore > out.CVSSv3Score {
-					out.CVSSv3Score = *s.BaseScore
-				}
+		base.CVE = deref(vd.VulnerabilityId)
+		// Pick the highest score across reported sources so the
+		// store keeps the worst case — operators want the chip to
+		// reflect "how bad is this", not "what does NVD think
+		// specifically". Source-attribution lives on the detail
+		// drawer in v1.2.
+		for _, s := range vd.Cvss {
+			if s.BaseScore == nil {
+				continue
+			}
+			if *s.BaseScore > base.CVSSv3Score {
+				base.CVSSv3Score = *s.BaseScore
 			}
 		}
+		// One finding can list multiple vulnerable packages; concat
+		// names with a comma so the chip surface doesn't silently
+		// hide co-vulnerable libs (e.g. openssl + libcrypto). Keep
+		// the first package's version + fix on the flat fields so
+		// the existing single-package UI still renders.
 		if len(vd.VulnerablePackages) > 0 {
-			p := vd.VulnerablePackages[0]
-			out.PackageName = deref(p.Name)
-			out.PackageVersion = deref(p.Version)
-			out.FixedVersion = deref(p.FixedInVersion)
+			names := make([]string, 0, len(vd.VulnerablePackages))
+			for _, p := range vd.VulnerablePackages {
+				if n := deref(p.Name); n != "" {
+					names = append(names, n)
+				}
+			}
+			base.PackageName = strings.Join(names, ", ")
+			first := vd.VulnerablePackages[0]
+			base.PackageVersion = deref(first.Version)
+			base.FixedVersion = deref(first.FixedInVersion)
 		}
 	}
-	out.InspectorURL = buildConsoleURL(region, deref(f.FindingArn))
+	base.InspectorURL = buildConsoleURL(region, deref(f.FindingArn))
+
+	out := make([]Finding, 0, len(f.Resources))
+	for _, r := range f.Resources {
+		id := resourceJoinKey(r)
+		if id == "" {
+			continue
+		}
+		c := base
+		c.ResourceID = id
+		out = append(out, c)
+	}
 	return out
+}
+
+// resourceJoinKey returns the cve-store join key for an Inspector
+// resource entry: instance ID for EC2, bare image hash for ECR,
+// empty otherwise (caller skips). Mirrors the Resource.Type → store
+// bucket the cve module already uses.
+func resourceJoinKey(r itypes.Resource) string {
+	switch r.Type {
+	case itypes.ResourceTypeAwsEcrContainerImage:
+		if r.Details != nil && r.Details.AwsEcrContainerImage != nil {
+			return deref(r.Details.AwsEcrContainerImage.ImageHash)
+		}
+	case itypes.ResourceTypeAwsEc2Instance:
+		return deref(r.Id)
+	}
+	return ""
 }
 
 // buildConsoleURL produces an AWS console deep-link to the finding.

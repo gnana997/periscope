@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"sort"
 	"sync"
 	"time"
 
@@ -17,11 +18,14 @@ import (
 
 // InspectorAPI is the subset of awsinspector.Client the manager needs.
 // Defined here so tests can substitute a stub without depending on the
-// SDK.
+// SDK. The map-keyed return shape is the load-bearing contract: each
+// requested ID must appear in the result so the caller can iterate
+// the input list and trust the lookup (see ensureKeys in
+// awsinspector).
 type InspectorAPI interface {
 	IsEnabled(ctx context.Context) (bool, error)
-	ListFindingsByInstance(ctx context.Context, instanceIDs []string) ([]Finding, error)
-	ListFindingsByImageDigest(ctx context.Context, digests []string) ([]Finding, error)
+	ListFindingsByInstance(ctx context.Context, instanceIDs []string) (map[string][]Finding, error)
+	ListFindingsByImageDigest(ctx context.Context, digests []string) (map[string][]Finding, error)
 }
 
 // EC2API is the subset of awsec2.Client the manager needs.
@@ -57,19 +61,26 @@ type Config struct {
 	// TickInterval governs how often the TTL/eviction loops wake up.
 	// Exposed for tests; production code leaves it zero and the
 	// manager defaults to 1 minute (TTL) / 5 minutes (eviction).
-	TTLScanInterval     time.Duration
+	TTLScanInterval      time.Duration
 	EvictionScanInterval time.Duration
+
+	// MaxConcurrentDeltaFetches caps the goroutine count for
+	// watch-driven async refreshes. A rolling deploy of a 200-pod
+	// workload could otherwise spawn hundreds of goroutines, each
+	// holding an Inspector socket. Default 8.
+	MaxConcurrentDeltaFetches int
 }
 
 // DefaultConfig returns the production defaults. Mirrors the issue's
 // spec; main.go fills any unset field with these values.
 func DefaultConfig() Config {
 	return Config{
-		RefreshInterval:      6 * time.Hour,
-		EvictAfter:           24 * time.Hour,
-		HydrateBatchSize:     50,
-		TTLScanInterval:      1 * time.Minute,
-		EvictionScanInterval: 5 * time.Minute,
+		RefreshInterval:           6 * time.Hour,
+		EvictAfter:                24 * time.Hour,
+		HydrateBatchSize:          50,
+		TTLScanInterval:           1 * time.Minute,
+		EvictionScanInterval:      5 * time.Minute,
+		MaxConcurrentDeltaFetches: 8,
 	}
 }
 
@@ -77,11 +88,11 @@ func DefaultConfig() Config {
 // once gates the cold hydrate; podInformerCancel stops the long-lived
 // pod informer when the manager is shut down.
 type clusterState struct {
-	store               *Store
-	once                sync.Once
-	hydrateErr          error
-	podInformerCancel   context.CancelFunc
-	clusterRef          clusters.Cluster
+	store             *Store
+	once              sync.Once
+	hydrateErr        error
+	podInformerCancel context.CancelFunc
+	clusterRef        clusters.Cluster
 }
 
 // Manager owns one Store per cluster plus the background TTL +
@@ -98,7 +109,15 @@ type Manager struct {
 	mu       sync.Mutex
 	clusters map[string]*clusterState
 
+	// sf collapses concurrent fetches of the same digest / instance
+	// batch into a single Inspector call. Inspector data is account-
+	// scoped, not cluster-scoped, so the keys deliberately omit the
+	// cluster name — a digest seen in cluster A's TTL scan and
+	// cluster B's manual refresh resolves to the same Inspector call.
 	sf singleflight.Group
+
+	// deltaSem caps concurrent watch-driven async refreshes.
+	deltaSem chan struct{}
 
 	stopOnce sync.Once
 	cancel   context.CancelFunc
@@ -130,6 +149,9 @@ func NewManager(inspector InspectorAPI, ec2 EC2API, clientFor ClientFactory, clo
 	if cfg.EvictionScanInterval == 0 {
 		cfg.EvictionScanInterval = DefaultConfig().EvictionScanInterval
 	}
+	if cfg.MaxConcurrentDeltaFetches <= 0 {
+		cfg.MaxConcurrentDeltaFetches = DefaultConfig().MaxConcurrentDeltaFetches
+	}
 	return &Manager{
 		inspector: inspector,
 		ec2:       ec2,
@@ -138,6 +160,7 @@ func NewManager(inspector InspectorAPI, ec2 EC2API, clientFor ClientFactory, clo
 		cfg:       cfg,
 		log:       log,
 		clusters:  map[string]*clusterState{},
+		deltaSem:  make(chan struct{}, cfg.MaxConcurrentDeltaFetches),
 		doneCh:    make(chan struct{}),
 	}
 }
@@ -229,23 +252,21 @@ func (m *Manager) Get(cluster string) *Store {
 // concurrent watch-hook fetch of the same digest will share the
 // in-flight call rather than firing a second Inspector request.
 func (m *Manager) Refresh(ctx context.Context, cluster clusters.Cluster, digests []string, instanceIDs []string) error {
-	st, err := m.EnsureHydrated(ctx, cluster)
+	store, err := m.EnsureHydrated(ctx, cluster)
 	if err != nil {
 		return err
 	}
-	if st.Disabled() {
+	if store.Disabled() {
 		return nil
 	}
 	var firstErr error
-	for _, d := range digests {
-		if err := m.fetchDigest(ctx, cluster, st, d); err != nil && firstErr == nil {
+	if len(digests) > 0 {
+		if err := m.fetchDigests(ctx, m.stateFor(cluster), digests); err != nil && firstErr == nil {
 			firstErr = err
 		}
 	}
 	if len(instanceIDs) > 0 {
-		// Instance fetches are batched, not per-id like digests, so
-		// the single-flight key is the sorted list of IDs joined.
-		if err := m.fetchInstances(ctx, cluster, st, instanceIDs); err != nil && firstErr == nil {
+		if err := m.fetchInstances(ctx, m.stateFor(cluster), instanceIDs); err != nil && firstErr == nil {
 			firstErr = err
 		}
 	}
@@ -292,9 +313,10 @@ func (m *Manager) runLoops(ctx context.Context) {
 }
 
 // scanTTL re-fetches any entry whose LastFetched is older than
-// RefreshInterval. Iterates per cluster, calling fetchDigest /
-// fetchInstances which are single-flight protected, so concurrent
-// manual refreshes won't double-fire.
+// RefreshInterval. Stale digests and instances are batched into one
+// Inspector call per cluster (chunked internally by awsinspector to
+// BatchSize); this keeps a 500-stale-digest cluster at ~10 Inspector
+// calls instead of 500.
 func (m *Manager) scanTTL(ctx context.Context) {
 	m.mu.Lock()
 	snapshot := make([]*clusterState, 0, len(m.clusters))
@@ -309,14 +331,14 @@ func (m *Manager) scanTTL(ctx context.Context) {
 	for _, st := range snapshot {
 		now := m.clock.Now()
 		digests, instances := st.store.IterStale(now, m.cfg.RefreshInterval)
-		for _, d := range digests {
-			if err := m.fetchDigest(ctx, st.clusterRef, st.store, d); err != nil {
-				m.log.Debug("cve ttl digest refresh", "cluster", st.clusterRef.Name, "digest", d, "err", err)
+		if len(digests) > 0 {
+			if err := m.fetchDigests(ctx, st, digests); err != nil {
+				m.log.Debug("cve ttl digest refresh", "cluster", st.clusterRef.Name, "n", len(digests), "err", err)
 			}
 		}
 		if len(instances) > 0 {
-			if err := m.fetchInstances(ctx, st.clusterRef, st.store, instances); err != nil {
-				m.log.Debug("cve ttl instance refresh", "cluster", st.clusterRef.Name, "err", err)
+			if err := m.fetchInstances(ctx, st, instances); err != nil {
+				m.log.Debug("cve ttl instance refresh", "cluster", st.clusterRef.Name, "n", len(instances), "err", err)
 			}
 		}
 	}
@@ -353,57 +375,55 @@ func (m *Manager) scanEvict() {
 	}
 }
 
-// fetchDigest fetches a single digest via single-flight. The
-// single-flight key namespaces digests under "d:" so a digest that
-// happens to share a string with an instance ID can't collide.
-func (m *Manager) fetchDigest(ctx context.Context, cluster clusters.Cluster, store *Store, digest string) error {
-	if digest == "" {
+// fetchDigests batches a digest set into one Inspector call (further
+// chunked by awsinspector.BatchSize). Single-flight collapsing keys
+// off the sorted-and-joined ID list so two concurrent callers asking
+// for the same set share the result. Inspector data is account-
+// scoped, so the cluster name is intentionally NOT in the key.
+func (m *Manager) fetchDigests(ctx context.Context, st *clusterState, digests []string) error {
+	if len(digests) == 0 || st.store.Disabled() {
 		return nil
 	}
-	if store.Disabled() {
+	keys := dedupSorted(digests)
+	if len(keys) == 0 {
 		return nil
 	}
-	key := "d:" + cluster.Name + ":" + digest
-	_, err, _ := m.sf.Do(key, func() (any, error) {
-		findings, err := m.inspector.ListFindingsByImageDigest(ctx, []string{digest})
+	sfKey := "d:" + joinKey(keys)
+	_, err, _ := m.sf.Do(sfKey, func() (any, error) {
+		grouped, err := m.inspector.ListFindingsByImageDigest(ctx, keys)
 		if err != nil {
 			return nil, err
 		}
-		store.UpsertDigest(digest, findings, m.clock.Now())
+		now := m.clock.Now()
+		for _, d := range keys {
+			st.store.UpsertDigest(d, grouped[d], now)
+		}
 		return nil, nil
 	})
 	return err
 }
 
-// fetchInstances re-fetches a set of instance entries in one
-// Inspector call. Owner classification is preserved across the
-// upsert (we read the existing entry first); a fresh cold-path
-// hydrate is the only branch that reassigns OwnerKind/Name.
-func (m *Manager) fetchInstances(ctx context.Context, cluster clusters.Cluster, store *Store, ids []string) error {
-	if len(ids) == 0 || store.Disabled() {
+// fetchInstances batches an instance set into one Inspector call.
+// Owner classification is preserved across the upsert (the existing
+// entry's OwnerKind/Name carries through); only the cold-path
+// hydrate reassigns ownership.
+func (m *Manager) fetchInstances(ctx context.Context, st *clusterState, ids []string) error {
+	if len(ids) == 0 || st.store.Disabled() {
 		return nil
 	}
-	key := fmt.Sprintf("i:%s:%d:%s", cluster.Name, len(ids), ids[0])
-	_, err, _ := m.sf.Do(key, func() (any, error) {
-		findings, err := m.inspector.ListFindingsByInstance(ctx, ids)
+	keys := dedupSorted(ids)
+	if len(keys) == 0 {
+		return nil
+	}
+	sfKey := "i:" + joinKey(keys)
+	_, err, _ := m.sf.Do(sfKey, func() (any, error) {
+		grouped, err := m.inspector.ListFindingsByInstance(ctx, keys)
 		if err != nil {
 			return nil, err
 		}
-		// Group findings by instance ID. Inspector returns a flat
-		// finding list with the resource ID embedded; we need to
-		// re-bucket here so each instance's row gets the right
-		// subset. The SDK's awsinspector.Finding doesn't expose the
-		// resource ID directly because the cve.Finding DTO is
-		// intentionally flat — see the trade-off note in
-		// awsinspector/client.go projectFinding. For now we bulk-
-		// assign the same finding list to every requested instance
-		// and let the API layer (#165) filter by resource on read.
-		// TODO(#165): teach awsinspector.Finding to carry the
-		// originating resource ID so per-instance assignment is
-		// exact.
 		now := m.clock.Now()
-		for _, id := range ids {
-			existing := store.GetInstance(id)
+		for _, id := range keys {
+			existing := st.store.GetInstance(id)
 			var kind OwnerKind
 			var name string
 			if existing != nil {
@@ -412,9 +432,67 @@ func (m *Manager) fetchInstances(ctx context.Context, cluster clusters.Cluster, 
 			} else {
 				kind = OwnerUnmanaged
 			}
-			store.UpsertInstance(id, findings, kind, name, now)
+			st.store.UpsertInstance(id, grouped[id], kind, name, now)
 		}
 		return nil, nil
 	})
 	return err
+}
+
+// runDelta executes fn under the delta-fetch semaphore so a
+// rolling-deploy storm doesn't spawn unbounded goroutines, each with
+// an Inspector socket. Drops the work (logs at debug) if ctx is
+// cancelled while waiting for a slot.
+func (m *Manager) runDelta(ctx context.Context, fn func()) {
+	select {
+	case m.deltaSem <- struct{}{}:
+		defer func() { <-m.deltaSem }()
+		fn()
+	case <-ctx.Done():
+		return
+	}
+}
+
+// dedupSorted returns the input deduped + sorted. Used for stable
+// singleflight keys.
+func dedupSorted(in []string) []string {
+	if len(in) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(in))
+	out := make([]string, 0, len(in))
+	for _, s := range in {
+		if s == "" {
+			continue
+		}
+		if _, ok := seen[s]; ok {
+			continue
+		}
+		seen[s] = struct{}{}
+		out = append(out, s)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// joinKey produces a stable singleflight key from a deduped+sorted ID
+// list. The leading length+`:` byte makes "ab","c" and "a","bc"
+// collisions impossible.
+func joinKey(sorted []string) string {
+	return fmt.Sprintf("%d:", len(sorted)) + sortedJoin(sorted)
+}
+
+// sortedJoin is strings.Join with a separator that cannot appear in
+// either ECR digests (sha256:hex) or EC2 instance IDs (i-hex).
+func sortedJoin(sorted []string) string {
+	if len(sorted) == 0 {
+		return ""
+	}
+	// '\x1f' is the ASCII unit separator; not present in any
+	// Inspector resource ID we accept.
+	out := sorted[0]
+	for _, s := range sorted[1:] {
+		out += "\x1f" + s
+	}
+	return out
 }

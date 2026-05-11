@@ -75,6 +75,7 @@ func (m *Manager) startPodInformer(parent context.Context, cluster clusters.Clus
 // replay of pods the cold-path hydrate already counted, so the Add
 // handler must NOT bump refs again.
 type podHook struct {
+	state    *clusterState
 	ctx      context.Context
 	mgr      *Manager
 	cluster  clusters.Cluster
@@ -83,7 +84,7 @@ type podHook struct {
 }
 
 func newPodHook(ctx context.Context, mgr *Manager, cluster clusters.Cluster, st *clusterState) *podHook {
-	return &podHook{ctx: ctx, mgr: mgr, cluster: cluster, store: st.store}
+	return &podHook{ctx: ctx, mgr: mgr, cluster: cluster, store: st.store, state: st}
 }
 
 // onAdd: every container's imageID gets a Ref bump and an async
@@ -153,14 +154,17 @@ func (h *podHook) onDelete(obj any) {
 	}
 }
 
-// enqueueDigest fires an async Refresh for a single digest. Errors
-// are logged and swallowed — the TTL loop will retry eventually.
+// enqueueDigest fires an async refresh for a single digest. Runs
+// under the manager-wide delta semaphore so a rolling deploy of
+// many pods does not spawn unbounded goroutines, each with an
+// Inspector socket. Errors are logged and swallowed — the TTL
+// loop will retry eventually.
 func (h *podHook) enqueueDigest(d string) {
-	go func() {
-		if err := h.mgr.fetchDigest(h.ctx, h.cluster, h.store, d); err != nil {
+	go h.mgr.runDelta(h.ctx, func() {
+		if err := h.mgr.fetchDigests(h.ctx, h.state, []string{d}); err != nil {
 			h.mgr.log.Debug("cve delta refresh", "cluster", h.cluster.Name, "digest", d, "err", err)
 		}
-	}()
+	})
 }
 
 func digestSet(in []string) map[string]struct{} {
