@@ -19,9 +19,9 @@ import (
 // --- stub clients shared across tests ---
 
 type stubInspector struct {
-	enabled      bool
-	enabledErr   error
-	digestCalls  atomic.Int32
+	enabled       bool
+	enabledErr    error
+	digestCalls   atomic.Int32
 	instanceCalls atomic.Int32
 
 	digestFindings   map[string][]Finding

@@ -11,6 +11,8 @@ import (
 	"github.com/jonboulle/clockwork"
 	"golang.org/x/sync/singleflight"
 	"k8s.io/client-go/kubernetes"
+	corelisters "k8s.io/client-go/listers/core/v1"
+	appslisters "k8s.io/client-go/listers/apps/v1"
 
 	"github.com/gnana997/periscope/internal/awsec2"
 	"github.com/gnana997/periscope/internal/clusters"
@@ -92,6 +94,8 @@ type clusterState struct {
 	once              sync.Once
 	hydrateErr        error
 	podInformerCancel context.CancelFunc
+	podLister         corelisters.PodLister
+	rsLister          appslisters.ReplicaSetLister
 	clusterRef        clusters.Cluster
 }
 
@@ -426,13 +430,15 @@ func (m *Manager) fetchInstances(ctx context.Context, st *clusterState, ids []st
 			existing := st.store.GetInstance(id)
 			var kind OwnerKind
 			var name string
+			var ami string
 			if existing != nil {
 				kind = existing.OwnerKind
 				name = existing.OwnerName
+				ami = existing.AMI
 			} else {
 				kind = OwnerUnmanaged
 			}
-			st.store.UpsertInstance(id, grouped[id], kind, name, now)
+			st.store.UpsertInstance(id, grouped[id], kind, name, ami, now)
 		}
 		return nil, nil
 	})
@@ -495,4 +501,39 @@ func sortedJoin(sorted []string) string {
 		out += "\x1f" + s
 	}
 	return out
+}
+
+// PodLister returns the lister backing the long-lived pod informer
+// for cluster, or nil if the informer has not started yet (the
+// cluster has never been hydrated, or hydrate failed before the
+// informer came up). The API layer (#165) uses this to power
+// /cve/pods without a fresh apiserver list per request.
+//
+// Returns the interface, not the concrete implementation, so the
+// manager can swap the informer machinery without breaking callers.
+func (m *Manager) PodLister(cluster string) corelisters.PodLister {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if st, ok := m.clusters[cluster]; ok {
+		return st.podLister
+	}
+	return nil
+}
+
+// ReplicaSetLister returns the lister backing the long-lived
+// ReplicaSet informer for cluster, or nil if the informer has not
+// started yet. Used by the /cve/by-workload handler to walk the
+// Pod → ReplicaSet → Deployment ownerRef chain (Pods only ever
+// reference their direct owner, so a separate lister is needed to
+// resolve the two-hop Deployment case).
+//
+// Returns the interface, not the concrete implementation, so the
+// manager can swap informer machinery without breaking callers.
+func (m *Manager) ReplicaSetLister(cluster string) appslisters.ReplicaSetLister {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if st, ok := m.clusters[cluster]; ok {
+		return st.rsLister
+	}
+	return nil
 }

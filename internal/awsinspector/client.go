@@ -48,19 +48,31 @@ const BatchSize = 50
 // silently under-report; PackageVersion / FixedVersion track the
 // first package's values so the existing detail-drawer copy keeps
 // working.
+//
+// Description / Remediation / EPSSScore / ExploitAvailable / FixAvailable
+// carry the operator-actionable detail Inspector ships beyond the chip
+// surface — surfaced by the drill-down endpoints (#165) so the SPA can
+// render "what is this CVE" + "how do I fix it" inline without a second
+// Inspector round-trip.
 type Finding struct {
-	ResourceID      string
-	ARN             string
-	Title           string
-	CVE             string
-	Severity        string
-	CVSSv3Score     float64
-	PackageName     string
-	PackageVersion  string
-	FixedVersion    string
-	FirstObservedAt time.Time
-	LastObservedAt  time.Time
-	InspectorURL    string
+	ResourceID      string    `json:"resourceId"`
+	ARN             string    `json:"arn"`
+	Title           string    `json:"title"`
+	CVE             string    `json:"cve"`
+	Severity        string    `json:"severity"`
+	CVSSv3Score     float64   `json:"cvssV3Score"`
+	PackageName     string    `json:"packageName"`
+	PackageVersion  string    `json:"packageVersion"`
+	FixedVersion    string    `json:"fixedVersion"`
+	FirstObservedAt time.Time `json:"firstObservedAt"`
+	LastObservedAt  time.Time `json:"lastObservedAt"`
+	Description     string    `json:"description,omitempty"`
+	Remediation     string    `json:"remediation,omitempty"`     // Inspector recommendation text
+	RemediationURL  string    `json:"remediationUrl,omitempty"`  // CVE vendor / NVD link
+	EPSSScore       float64   `json:"epssScore,omitempty"`       // Exploit Prediction Scoring System probability
+	ExploitAvailable string   `json:"exploitAvailable,omitempty"` // YES / NO / empty
+	FixAvailable    string    `json:"fixAvailable,omitempty"`    // YES / NO / PARTIAL / empty
+	InspectorURL    string    `json:"inspectorUrl"`
 }
 
 // API is the subset of the Inspector v2 client surface this package
@@ -267,6 +279,18 @@ func projectFinding(f itypes.Finding, region string) []Finding {
 		}
 	}
 	base.InspectorURL = buildConsoleURL(region, deref(f.FindingArn))
+
+	// Operator-actionable detail beyond the chip surface.
+	base.Description = deref(f.Description)
+	if f.Remediation != nil && f.Remediation.Recommendation != nil {
+		base.Remediation = deref(f.Remediation.Recommendation.Text)
+		base.RemediationURL = deref(f.Remediation.Recommendation.Url)
+	}
+	if f.Epss != nil {
+		base.EPSSScore = f.Epss.Score
+	}
+	base.ExploitAvailable = string(f.ExploitAvailable)
+	base.FixAvailable = string(f.FixAvailable)
 
 	out := make([]Finding, 0, len(f.Resources))
 	for _, r := range f.Resources {
