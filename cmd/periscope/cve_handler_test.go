@@ -487,26 +487,6 @@ func cvePodWithOwners(ns, name, image, digest string, owners ...metav1.OwnerRefe
 	return p
 }
 
-// addReplicaSetToFixture seeds a ReplicaSet onto the manager's
-// ReplicaSet informer indexer so the owner walker can resolve a
-// two-hop Deployment lookup. Returns after waiting for the lister
-// to expose the RS.
-func addReplicaSetToFixture(t *testing.T, mgr *cve.Manager, cluster, ns, name, deploymentName string) {
-	t.Helper()
-	// The cve.Manager exposes the lister but not the underlying
-	// informer; tests reach into the lister-backing indexer via a
-	// known-shape approach: build the lister we want by populating
-	// the same fake clientset's ReplicaSet store before hydrate.
-	// In practice we ask the test author to seed it BEFORE
-	// buildCveFixture by extending fixtureOpts; see the test below.
-	_ = mgr
-	_ = cluster
-	_ = ns
-	_ = name
-	_ = deploymentName
-	// Body intentionally a no-op — tests use the rsFixtures field on
-	// cveFixtureOpts (added below) to seed the clientset directly.
-}
 
 func TestCveByWorkload_StatefulSet_DirectMatch(t *testing.T) {
 	reg := testRegistry(t)
