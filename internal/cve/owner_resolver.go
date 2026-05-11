@@ -37,7 +37,6 @@ import (
 // returns OwnerKarpenter with an empty OwnerName rather than failing
 // the whole hydrate.
 type OwnerResolver struct {
-	ec2    *awsec2.Client
 	listFn func(ctx context.Context, cs kubernetes.Interface) ([]nodeClaimRef, error) // overridable for tests
 	getCS  func(ctx context.Context) (kubernetes.Interface, error)
 }
@@ -56,9 +55,8 @@ type nodeClaimRef struct {
 // client. getCS returns a K8s clientset for the cluster being
 // resolved; the resolver calls it lazily, and only when a Karpenter
 // instance is detected.
-func NewOwnerResolver(ec2 *awsec2.Client, getCS func(ctx context.Context) (kubernetes.Interface, error)) *OwnerResolver {
+func NewOwnerResolver(getCS func(ctx context.Context) (kubernetes.Interface, error)) *OwnerResolver {
 	return &OwnerResolver{
-		ec2:    ec2,
 		getCS:  getCS,
 		listFn: listKarpenterNodeClaims,
 	}

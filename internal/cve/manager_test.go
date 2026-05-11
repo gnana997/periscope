@@ -35,20 +35,20 @@ func (s *stubInspector) IsEnabled(_ context.Context) (bool, error) {
 	return s.enabled, nil
 }
 
-func (s *stubInspector) ListFindingsByInstance(_ context.Context, ids []string) ([]Finding, error) {
+func (s *stubInspector) ListFindingsByInstance(_ context.Context, ids []string) (map[string][]Finding, error) {
 	s.instanceCalls.Add(1)
-	var out []Finding
+	out := make(map[string][]Finding, len(ids))
 	for _, id := range ids {
-		out = append(out, s.instanceFindings[id]...)
+		out[id] = append(out[id], s.instanceFindings[id]...)
 	}
 	return out, nil
 }
 
-func (s *stubInspector) ListFindingsByImageDigest(_ context.Context, digests []string) ([]Finding, error) {
+func (s *stubInspector) ListFindingsByImageDigest(_ context.Context, digests []string) (map[string][]Finding, error) {
 	s.digestCalls.Add(1)
-	var out []Finding
+	out := make(map[string][]Finding, len(digests))
 	for _, d := range digests {
-		out = append(out, s.digestFindings[d]...)
+		out[d] = append(out[d], s.digestFindings[d]...)
 	}
 	return out, nil
 }
