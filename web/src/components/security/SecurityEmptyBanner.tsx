@@ -12,6 +12,7 @@
 import { useState } from "react";
 import { useCveStatus } from "../../hooks/useCve";
 import { cn } from "../../lib/cn";
+import { isBannerVisible } from "../../lib/cve";
 
 interface Props {
   cluster: string;
@@ -28,8 +29,7 @@ export function SecurityEmptyBanner({ cluster, className }: Props) {
   const [, bump] = useState(0);
   const dismissed = isDismissed(cluster);
 
-  if (!cluster || dismissed) return null;
-  if (!data || data.inspectorEnabled) return null;
+  if (!isBannerVisible({ cluster, status: data, dismissed })) return null;
 
   return (
     <div

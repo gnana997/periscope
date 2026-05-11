@@ -26,6 +26,7 @@ import type { EditorSource } from "../../lib/customResources";
 import { queryKeys } from "../../lib/queryKeys";
 import { cn } from "../../lib/cn";
 import { SecurityTab } from "../security/SecurityTab";
+import { extractInstanceId } from "../../lib/cve";
 
 interface Props {
   cluster: string;
@@ -126,7 +127,7 @@ export function KarpenterDetailPane({ cluster, kind, name, providerID, onClose }
                   <SecurityTab
                     kind="instance"
                     cluster={cluster}
-                    instanceId={extractInstanceIdFromProviderID(providerID)}
+                    instanceId={extractInstanceId(providerID)}
                   />
                 ),
               },
@@ -135,12 +136,6 @@ export function KarpenterDetailPane({ cluster, kind, name, providerID, onClose }
       ]}
     />
   );
-}
-
-function extractInstanceIdFromProviderID(providerID?: string): string {
-  if (!providerID) return "";
-  const m = providerID.match(/\/(i-[a-f0-9]+)$/);
-  return m ? m[1] : "";
 }
 
 interface EventsProps {

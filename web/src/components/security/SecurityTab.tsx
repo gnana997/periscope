@@ -26,10 +26,18 @@ import { queryKeys } from "../../lib/queryKeys";
 import type {
   CveContainerRow,
   CveFinding,
-  CvePodRow,
   CveScanCoverage,
 } from "../../lib/types";
-import { combineCounts, type ScanState } from "../../lib/severity";
+import { type ScanState } from "../../lib/severity";
+import {
+  collectDigests,
+  collectDigestsAcrossPods,
+  containerScanState,
+  countSeverities,
+  coverageToState,
+  dedupContainersByDigest,
+  humanizeAge,
+} from "../../lib/cve";
 import { cn } from "../../lib/cn";
 import { DetailEmpty, DetailError, DetailLoading } from "../detail/states";
 import { SectionTitle } from "../detail/describe/shared";
@@ -429,115 +437,6 @@ function FindingsList({ findings }: { findings: CveFinding[] }) {
   );
 }
 
-// ── helpers ────────────────────────────────────────────────────────
-
-function collectDigests(containers: CveContainerRow[]): string[] {
-  const set = new Set<string>();
-  for (const c of containers) {
-    if (c.digest) set.add(c.digest);
-  }
-  return Array.from(set);
-}
-
-function collectDigestsAcrossPods(pods: CvePodRow[]): string[] {
-  const set = new Set<string>();
-  for (const p of pods) {
-    for (const c of p.containers) {
-      if (c.digest) set.add(c.digest);
-    }
-  }
-  return Array.from(set);
-}
-
-function countSeverities(findings: CveFinding[]) {
-  const c = { critical: 0, high: 0, medium: 0, low: 0, informational: 0 };
-  for (const f of findings) {
-    const s = (f.severity ?? "").toUpperCase();
-    if (s === "CRITICAL") c.critical++;
-    else if (s === "HIGH") c.high++;
-    else if (s === "MEDIUM") c.medium++;
-    else if (s === "LOW") c.low++;
-    else if (s === "INFORMATIONAL" || s === "INFO") c.informational++;
-  }
-  return c;
-}
-
-function coverageToState(c: CveScanCoverage): ScanState {
-  switch (c) {
-    case "full":
-      return "has-findings"; // The chip will downshift to "clean" if counts==0
-    case "partial":
-      return "partial";
-    case "none":
-      return "non-ecr";
-  }
-}
-
-function containerScanState(c: CveContainerRow): ScanState {
-  if (c.scanState === "non-ecr") return "non-ecr";
-  if (c.scanState === "pending") return "pending";
-  // scanned — let the chip decide clean vs has-findings from counts.
-  if (
-    c.severityCounts &&
-    c.severityCounts.critical +
-      c.severityCounts.high +
-      c.severityCounts.medium +
-      c.severityCounts.low >
-      0
-  ) {
-    return "has-findings";
-  }
-  return "clean";
-}
-
-/** dedupContainersByDigest collapses replica containers in a
- *  WorkloadCveResp.pods into one row per (container name, digest).
- *  Returns the container row + the number of pods it appeared in.
- *
- *  Two containers in different pods with the same NAME but different
- *  digests (mid-rollout) are kept separate so the operator sees both
- *  digest's findings. */
-function dedupContainersByDigest(
-  pods: CvePodRow[],
-): { row: CveContainerRow; podCount: number; name: string; digest?: string }[] {
-  type Key = string;
-  const byKey = new Map<Key, { row: CveContainerRow; podCount: number }>();
-  for (const p of pods) {
-    for (const c of p.containers) {
-      const key: Key = `${c.name}|${c.digest ?? c.image}`;
-      const entry = byKey.get(key);
-      if (entry) {
-        entry.podCount++;
-      } else {
-        byKey.set(key, { row: c, podCount: 1 });
-      }
-    }
-  }
-  return Array.from(byKey.values()).map((e) => ({
-    row: e.row,
-    podCount: e.podCount,
-    name: e.row.name,
-    digest: e.row.digest,
-  }));
-}
-
-/** humanizeAge returns "Xm ago" / "Xh ago" / "Xd ago" for an ISO
- *  timestamp. Inline so the header doesn't need to import a 50-line
- *  formatter from elsewhere. */
-function humanizeAge(iso: string): string {
-  try {
-    const then = new Date(iso).getTime();
-    const now = Date.now();
-    const diffSec = Math.max(0, Math.floor((now - then) / 1000));
-    if (diffSec < 60) return `${diffSec}s ago`;
-    if (diffSec < 3600) return `${Math.floor(diffSec / 60)}m ago`;
-    if (diffSec < 86400) return `${Math.floor(diffSec / 3600)}h ago`;
-    return `${Math.floor(diffSec / 86400)}d ago`;
-  } catch {
-    return iso;
-  }
-}
-
 /** useCveContainerFindings — placeholder for v1.1: the per-container
  *  findings come from the parent CvePodDetail response (we don't
  *  re-fetch by digest). When `kind === "workload"` and only the
@@ -565,7 +464,3 @@ function useCveContainerFindings(_c: CveContainerRow): {
   return { isLoading: false, list: [] };
 }
 
-// noop — we intentionally don't import combineCounts here; it's
-// re-exported only via the severity module. Suppresses the unused
-// warning for the imported helper when this file is consumed.
-void combineCounts;

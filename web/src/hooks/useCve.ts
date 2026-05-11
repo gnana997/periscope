@@ -6,17 +6,10 @@
 // the hot path. Mutations (refresh) invalidate the affected subtree.
 //
 // The chip-column hook (useCvePodSummaries) walks all /cve/pods
-// pages in parallel via one outer useQuery — the call graph is:
-//
-//   useCvePodSummaries(cluster)
-//     queryFn = async () => {
-//       const cursors: (string|undefined)[] = await pageWalk(...)
-//       return Map<podKey, CvePodSummary>
-//     }
-//
-// Sequential pages parallelised with Promise.all in batches of 4 so
-// a 5000-pod cluster (50 pages) lands in ~10s instead of one-by-one.
-// See plan: "Pods column read strategy" decision.
+// pages inside one outer useQuery and folds them with
+// `accumulatePodSummaries` from lib/cve.ts. Splitting the reducer
+// out keeps the page-walk loop testable without standing up a fake
+// TanStack QueryClient — see lib/cve.test.ts.
 
 import {
   skipToken,
@@ -26,6 +19,11 @@ import {
 } from "@tanstack/react-query";
 import { ApiError, api } from "../lib/api";
 import { queryKeys } from "../lib/queryKeys";
+import {
+  accumulatePodSummaries,
+  isInspectorDisabled,
+  podKey,
+} from "../lib/cve";
 import type {
   CveByWorkloadResp,
   CveFindingsResp,
@@ -36,6 +34,11 @@ import type {
   CveRefreshRequest,
   CveStatusResp,
 } from "../lib/types";
+
+// Re-export the pure helpers callers used to import from this module
+// before they moved to `lib/cve.ts`. Keeps the existing page-level
+// imports working without a sweep.
+export { isInspectorDisabled, podKey };
 
 const STALE_MS = 5 * 60_000;
 
@@ -124,63 +127,34 @@ export function useCveByWorkload(
  *  and returns a Map<ns/name, CvePodSummary>. The chip column on the
  *  Pods page reads from this map; misses render the chip as `unscanned`.
  *
- *  Why one outer query: TanStack Query doesn't natively orchestrate a
- *  page-walk fan-out, and `useInfiniteQuery` returns pages as separate
- *  data slices the caller would still have to flatten + re-merge. The
- *  single-query form makes the column accessor trivially synchronous
- *  once the query resolves.
+ *  The accumulation step (per-row → Map) is `accumulatePodSummaries`
+ *  in lib/cve.ts so the chip-column reducer can be unit tested.
  *
- *  Concurrency: walk pages in batches of 4 so a 5000-pod cluster
- *  (~50 pages) lands in roughly 13 requests of round-trip latency
- *  instead of 50 sequential ones. The backend serves each page from
- *  the in-memory store so per-page response time is single-digit ms;
- *  the 4-wide fan-out is plenty. */
+ *  Concurrency: sequential — the response carries the next cursor,
+ *  so pages chain. Parallelism comes from TanStack Query deduping
+ *  the outer key across mounted pages. If the sequential walk turns
+ *  out to be too slow on a real 5000-pod cluster, the follow-up move
+ *  is the /cve/pods/summary bulk endpoint tracked in the plan's
+ *  Out-of-Scope. */
 export function useCvePodSummaries(cluster: string) {
   return useQuery<Map<string, CvePodSummary>>({
     queryKey: queryKeys.cluster(cluster).cve.podSummariesAll(),
     queryFn: cluster
       ? async ({ signal }) => {
-          const out = new Map<string, CvePodSummary>();
+          const pages: CvePodsResp[] = [];
           let cursor: string | undefined = undefined;
-          // Walk pages sequentially — the response carries the next
-          // cursor, so they fundamentally chain. Parallelism happens
-          // when the caller mounts the hook on multiple pages
-          // (TanStack Query dedupes within the same key) and inside
-          // the backend (the store is in-memory).
-          //
-          // If sequential turns out to be too slow on a real 5000-
-          // pod cluster, the follow-up move is the /cve/pods/summary
-          // bulk endpoint tracked in the plan's Out-of-Scope.
           for (let i = 0; i < 200; i++) {
-            const page: CvePodsResp = await api.cvePodsPage(
-              cluster,
-              cursor,
-              signal,
-            );
-            for (const p of page.pods) {
-              const key = podKey(p.namespace, p.name);
-              out.set(key, {
-                namespace: p.namespace,
-                name: p.name,
-                counts: p.rolledUpSeverityCounts,
-                coverage: p.scanCoverage,
-              });
-            }
+            const page = await api.cvePodsPage(cluster, cursor, signal);
+            pages.push(page);
             if (!page.next) break;
             cursor = page.next;
           }
-          return out;
+          return accumulatePodSummaries(pages);
         }
       : skipToken,
     staleTime: STALE_MS,
     retry: cveRetry,
   });
-}
-
-/** podKey is the lookup key the column reads. Kept here so the
- *  column accessor and the page-walker can't drift. */
-export function podKey(ns: string, name: string): string {
-  return `${ns}/${name}`;
 }
 
 /** useCveRefresh — POST /cve/refresh mutation. Caller passes the
@@ -222,19 +196,4 @@ export function useCveRefresh(cluster: string) {
       }
     },
   });
-}
-
-/** True when an ApiError is the inspector-disabled empty-state
- *  signal. Used by SecurityTab callers to render the empty state
- *  instead of an error banner. Mirrors isBackendNotEKS in shape. */
-export function isInspectorDisabled(err: unknown): boolean {
-  if (!(err instanceof ApiError)) return false;
-  // The backend uses HTTP 200 + inspectorEnabled:false rather than a
-  // 4xx code for this case, so a thrown ApiError is genuinely an
-  // error (network / 5xx) and not the empty-state signal. The hook
-  // returns the typed response; the caller branches on
-  // response.inspectorEnabled === false. This helper is kept as a
-  // place to land future signals (e.g. a 412 if the backend ever
-  // adopts one) without changing call sites.
-  return false;
 }

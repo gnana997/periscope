@@ -10,8 +10,8 @@
 
 import { useState } from "react";
 import type { NodeClaimView, CveSeverityCounts } from "../../lib/types";
+import { aggregateClaimSeverity, extractInstanceId } from "../../lib/cve";
 import { SeverityChip } from "../security/SeverityChip";
-import { combineCounts } from "../../lib/severity";
 import { cn } from "../../lib/cn";
 
 interface Props {
@@ -188,7 +188,7 @@ function ClaimRow({
         </span>
       ) : null}
       {(() => {
-        const id = claim.providerID && claim.providerID.match(/\/(i-[a-f0-9]+)$/)?.[1];
+        const id = extractInstanceId(claim.providerID);
         if (!id || !cveByInstance) return null;
         const s = cveByInstance.get(id);
         if (!s) return null;
@@ -222,17 +222,3 @@ function provisioningHint(claim: NodeClaimView): string {
   return "";
 }
 
-function aggregateClaimSeverity(
-  claims: NodeClaimView[],
-  cveByInstance: Map<string, CveSeverityCounts>,
-): CveSeverityCounts {
-  const slices: CveSeverityCounts[] = [];
-  for (const c of claims) {
-    const m = c.providerID?.match(/\/(i-[a-f0-9]+)$/);
-    const id = m ? m[1] : "";
-    if (!id) continue;
-    const s = cveByInstance.get(id);
-    if (s) slices.push(s);
-  }
-  return combineCounts(...slices);
-}

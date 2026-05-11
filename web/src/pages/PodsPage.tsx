@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useResource } from "../hooks/useResource";
-import type { Pod, PodList, CveSeverityCounts } from "../lib/types";
+import type { Pod, PodList } from "../lib/types";
 import { ageFrom, nameMatches } from "../lib/format";
 import { PageHeader } from "../components/page/PageHeader";
 import { FilterStrip } from "../components/page/FilterStrip";
@@ -33,23 +33,11 @@ import { PodLogsTab } from "../components/logs/PodLogsTab";
 import { NamespacePicker } from "../components/shell/NamespacePicker";
 import { SecurityTab } from "../components/security/SecurityTab";
 import { SecurityEmptyBanner } from "../components/security/SecurityEmptyBanner";
-import { useCvePodSummaries, podKey } from "../hooks/useCve";
+import { useCvePodSummaries } from "../hooks/useCve";
+import { countVulnerable, podKey } from "../lib/cve";
 import { SeverityChip } from "../components/security/SeverityChip";
 
 import { cn } from "../lib/cn";
-
-function countVulnerable(
-  pods: Pod[],
-  map: Map<string, { counts: CveSeverityCounts }> | undefined,
-): number {
-  if (!map) return 0;
-  let n = 0;
-  for (const p of pods) {
-    const s = map.get(`${p.namespace}/${p.name}`);
-    if (s && (s.counts.critical > 0 || s.counts.high > 0)) n++;
-  }
-  return n;
-}
 
 export function PodsPage({ cluster }: { cluster: string }) {
   const [params, setParams] = useSearchParams();

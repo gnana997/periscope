@@ -26,14 +26,9 @@ import { SecurityTab } from "../components/security/SecurityTab";
 import { SecurityEmptyBanner } from "../components/security/SecurityEmptyBanner";
 import { SeverityChip } from "../components/security/SeverityChip";
 import { useCveByInstance } from "../hooks/useCve";
+import { extractInstanceId } from "../lib/cve";
 import { cn } from "../lib/cn";
 
-function extractInstanceId(providerID?: string): string {
-  if (!providerID) return "";
-  // Karpenter / EKS providerID shape: aws:///us-east-1a/i-0abc...
-  const m = providerID.match(/\/(i-[a-f0-9]+)$/);
-  return m ? m[1] : "";
-}
 
 function nodeByName(name: string | null, all: Node[]): Node | undefined {
   if (!name) return undefined;
