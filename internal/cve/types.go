@@ -19,16 +19,12 @@ type WireSeverityCounts struct {
 	Informational int `json:"informational"`
 }
 
-// WireSeverity returns a WireSeverityCounts copy of c for direct
-// JSON encoding.
+// WireSeverity returns a WireSeverityCounts view of c for direct JSON
+// encoding. The two types share field layout — they intentionally do, so
+// the wire shape can pick up its JSON tags without the aggregator having
+// to know about them — so a plain conversion is sufficient.
 func WireSeverity(c SeverityCounts) WireSeverityCounts {
-	return WireSeverityCounts{
-		Critical:      c.Critical,
-		High:          c.High,
-		Medium:        c.Medium,
-		Low:           c.Low,
-		Informational: c.Informational,
-	}
+	return WireSeverityCounts(c)
 }
 
 // OwnerRef is the projection of (OwnerKind, OwnerName) used on the
