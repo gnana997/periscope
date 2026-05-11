@@ -130,23 +130,28 @@ func loggingMiddleware(next http.Handler) http.Handler {
 
 // logBootDiagnostic logs one INFO line at startup with the resolved
 // in-cluster config — apiserver URL, CA fingerprint, SA token presence
-// + parsed expiry. Called once after rest.InClusterConfig() succeeds.
+// + parsed expiry, cluster name. Called once after rest.InClusterConfig()
+// succeeds.
 //
 // Lets operators confirm at a glance that:
 //  1. The agent loaded the CA bundle (ca_bundle_len > 0)
 //  2. The agent has an SA token (sa_token_present: true)
 //  3. The token has reasonable lifetime ahead (sa_token_expires_in_seconds)
 //  4. The apiserver URL is what they expect
+//  5. The cluster name (from PERISCOPE_CLUSTER_NAME) matches the
+//     server-side registration — same string that gets stamped into
+//     proxy.upstream_error JSON bodies.
 //
 // Critical for debugging "why did auth start failing 60 minutes after
 // install" — projected SA tokens default to 1-hour TTL with auto-
 // rotation, and if rotation breaks, this line in the boot dump shows
 // the expiry timestamp so the failure window is predictable.
-func logBootDiagnostic(inClusterCfg *rest.Config) {
+func logBootDiagnostic(inClusterCfg *rest.Config, clusterName string) {
 	caFP := caFingerprint(inClusterCfg.CAData)
 	expiry := saTokenExpiresInSeconds(inClusterCfg.BearerToken)
 
 	slog.Info("agent.boot_diagnostic",
+		"cluster", clusterName,
 		"apiserver_url", inClusterCfg.Host,
 		"ca_bundle_len", len(inClusterCfg.CAData),
 		"ca_fingerprint", caFP,

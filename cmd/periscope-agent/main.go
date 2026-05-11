@@ -91,7 +91,7 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("in-cluster config: %w", err)
 	}
-	logBootDiagnostic(inClusterCfg)
+	logBootDiagnostic(inClusterCfg, cfg.ClusterName)
 	kc, err := kubernetes.NewForConfig(inClusterCfg)
 	if err != nil {
 		return fmt.Errorf("kube client: %w", err)
@@ -117,7 +117,7 @@ func run() error {
 	// See proxy.go for the proxy implementation.
 	const apiProxyAddr = "127.0.0.1:7443"
 	go func() {
-		if err := startAPIProxy(inClusterCfg, apiProxyAddr); err != nil {
+		if err := startAPIProxy(inClusterCfg, cfg.ClusterName, apiProxyAddr); err != nil {
 			// startAPIProxy returns nil on graceful shutdown, error on
 			// fatal startup failure. Log + exit so the pod restarts and
 			// the operator notices via the kubelet probe.
