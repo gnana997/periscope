@@ -200,6 +200,15 @@ const (
 	// are torn down with the addon.
 	VerbEKSAddonDeleteIntent Verb = "eks_addon_delete_intent"
 	VerbEKSAddonDelete       Verb = "eks_addon_delete"
+	// VerbCveRefresh records an operator-initiated CVE cache refresh
+	// (POST /api/clusters/{cluster}/cve/refresh, #165). Reads of the
+	// cache itself do NOT emit audit rows — they are internal metadata
+	// reads, with AWS CloudTrail covering the underlying Inspector
+	// calls under the periscope-server role. The refresh action is the
+	// one operator-initiated mutation in the CVE surface, so it lands
+	// in the audit log so a reviewer can see who forced a re-scan and
+	// what they targeted. Extra carries `digests` and `instanceIds`.
+	VerbCveRefresh Verb = "cve_refresh"
 )
 
 // Outcome is the result classification.

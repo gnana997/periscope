@@ -34,7 +34,9 @@ func (m *Manager) startPodInformer(parent context.Context, cluster clusters.Clus
 	st.podInformerCancel = cancel
 
 	factory := informers.NewSharedInformerFactory(cs, podInformerResyncPeriod)
-	podInformer := factory.Core().V1().Pods().Informer()
+	podIface := factory.Core().V1().Pods()
+	lister := podIface.Lister()
+	podInformer := podIface.Informer()
 
 	hook := newPodHook(ctx, m, cluster, st)
 	_, err := podInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
@@ -48,6 +50,9 @@ func (m *Manager) startPodInformer(parent context.Context, cluster clusters.Clus
 		return err
 	}
 
+	m.mu.Lock()
+	st.podLister = lister
+	m.mu.Unlock()
 	factory.Start(ctx.Done())
 	// Cold-path hydrate already populated digest entries + ref
 	// counts from a direct pod list. The informer's initial sync

@@ -49,6 +49,7 @@ type InstanceEntry struct {
 	LastFetched time.Time
 	NodeRefs    int
 	OwnerKind   OwnerKind
+	AMI         string
 	OwnerName   string
 }
 
@@ -70,7 +71,8 @@ type Store struct {
 	digests   map[string]*DigestEntry
 	instances map[string]*InstanceEntry
 
-	hydrated  bool
+	hydrated    bool
+	lastHydrate time.Time
 	hydrating chan struct{} // closed when hydrate completes
 	disabled  bool
 }
@@ -109,12 +111,13 @@ func (s *Store) WaitHydrated(ctx context.Context) error {
 // MarkHydrated flips the store to ready state and unblocks waiters.
 // Idempotent so a re-hydrate (e.g. cluster reconnect) doesn't panic
 // on a double-close.
-func (s *Store) MarkHydrated() {
+func (s *Store) MarkHydrated(now time.Time) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.hydrated {
 		return
 	}
+	s.lastHydrate = now
 	s.hydrated = true
 	close(s.hydrating)
 }
@@ -122,13 +125,14 @@ func (s *Store) MarkHydrated() {
 // MarkDisabled flips the store to "Inspector v2 not enabled" and
 // unblocks waiters with disabled=true. Same idempotency guarantee as
 // MarkHydrated.
-func (s *Store) MarkDisabled() {
+func (s *Store) MarkDisabled(now time.Time) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.hydrated {
 		return
 	}
 	s.disabled = true
+	s.lastHydrate = now
 	s.hydrated = true
 	close(s.hydrating)
 }
@@ -168,7 +172,7 @@ func (s *Store) UpsertDigest(digest string, findings []Finding, now time.Time) {
 
 // UpsertInstance stores findings + owner for an instance. NodeRefs
 // is preserved across upserts.
-func (s *Store) UpsertInstance(instanceID string, findings []Finding, ownerKind OwnerKind, ownerName string, now time.Time) {
+func (s *Store) UpsertInstance(instanceID string, findings []Finding, ownerKind OwnerKind, ownerName string, ami string, now time.Time) {
 	if instanceID == "" {
 		return
 	}
@@ -183,6 +187,7 @@ func (s *Store) UpsertInstance(instanceID string, findings []Finding, ownerKind 
 	e.LastFetched = now
 	e.OwnerKind = ownerKind
 	e.OwnerName = ownerName
+	e.AMI = ami
 }
 
 // GetDigest returns the entry for a digest, or nil if absent. The
@@ -349,4 +354,23 @@ func (s *Store) Snapshot() (digests map[string]*DigestEntry, instances map[strin
 		instances[k] = &c
 	}
 	return digests, instances
+}
+
+// LastHydrate returns the time of the most recent MarkHydrated /
+// MarkDisabled call. Zero before the first hydrate completes.
+// Surfaced on the `/cve/status` endpoint and used as the ETag base
+// for read endpoints.
+func (s *Store) LastHydrate() time.Time {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.lastHydrate
+}
+
+// EntryCounts returns the current number of digest + instance cache
+// entries. Surfaced on `/cve/status` and used as the ETag basis for
+// read endpoints.
+func (s *Store) EntryCounts() (digests, instances int) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return len(s.digests), len(s.instances)
 }

@@ -438,6 +438,27 @@ func main() {
 	router.Delete("/api/clusters/{cluster}/eks/addons/{name}", credentials.Wrap(factory,
 		eksAddonDeleteHandler(registry, eksAddonsC, auditEmitter)))
 
+	// --- CVE / Inspector v2 surface (#165) ---
+	//
+	// Seven endpoints. Reads serve from the per-cluster cve.Store;
+	// /refresh emits an audit row. cveMgr is nil when Helm has
+	// inspector.enabled=false — handlers short-circuit to the
+	// empty-state envelope in that case.
+	router.Get("/api/clusters/{cluster}/cve/status",
+		credentials.Wrap(factory, cveStatusHandler(registry, cveMgr)))
+	router.Get("/api/clusters/{cluster}/cve/by-instance",
+		credentials.Wrap(factory, cveByInstanceHandler(registry, cveMgr)))
+	router.Get("/api/clusters/{cluster}/cve/by-instance/{instanceID}",
+		credentials.Wrap(factory, cveByInstanceOneHandler(registry, cveMgr)))
+	router.Get("/api/clusters/{cluster}/cve/by-digest/{digest}",
+		credentials.Wrap(factory, cveByDigestHandler(registry, cveMgr)))
+	router.Get("/api/clusters/{cluster}/cve/pods",
+		credentials.Wrap(factory, cvePodsHandler(registry, cveMgr)))
+	router.Get("/api/clusters/{cluster}/cve/pods/{namespace}/{pod}",
+		credentials.Wrap(factory, cvePodsOneHandler(registry, cveMgr)))
+	router.Post("/api/clusters/{cluster}/cve/refresh",
+		credentials.Wrap(factory, cveRefreshHandler(registry, cveMgr, auditEmitter)))
+
 	// --- Overview / dashboard ---
 
 	router.Get("/api/clusters/{cluster}/dashboard", credentials.Wrap(factory,

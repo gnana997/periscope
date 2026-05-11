@@ -51,8 +51,8 @@ func TestStore_IterStale(t *testing.T) {
 	fresh := time.Now()
 	s.UpsertDigest("old-d", nil, old)
 	s.UpsertDigest("fresh-d", nil, fresh)
-	s.UpsertInstance("old-i", nil, OwnerUnmanaged, "", old)
-	s.UpsertInstance("fresh-i", nil, OwnerUnmanaged, "", fresh)
+	s.UpsertInstance("old-i", nil, OwnerUnmanaged, "", "", old)
+	s.UpsertInstance("fresh-i", nil, OwnerUnmanaged, "", "", fresh)
 	d, i := s.IterStale(time.Now(), 1*time.Hour)
 	if len(d) != 1 || d[0] != "old-d" {
 		t.Errorf("stale digests: %v", d)
@@ -84,12 +84,12 @@ func TestStore_DisabledState(t *testing.T) {
 	if s.Hydrated() || s.Disabled() {
 		t.Fatal("fresh store should be neither hydrated nor disabled")
 	}
-	s.MarkDisabled()
+	s.MarkDisabled(time.Now())
 	if !s.Hydrated() || !s.Disabled() {
 		t.Fatal("after MarkDisabled: want hydrated && disabled")
 	}
 	// Idempotent: a second call must not panic.
-	s.MarkDisabled()
+	s.MarkDisabled(time.Now())
 }
 
 func TestStore_WaitHydratedUnblocks(t *testing.T) {
@@ -100,7 +100,7 @@ func TestStore_WaitHydratedUnblocks(t *testing.T) {
 	go func() { done <- s.WaitHydrated(ctx) }()
 	// Give the goroutine a moment to enter the select.
 	time.Sleep(10 * time.Millisecond)
-	s.MarkHydrated()
+	s.MarkHydrated(time.Now())
 	select {
 	case err := <-done:
 		if err != nil {
@@ -113,7 +113,7 @@ func TestStore_WaitHydratedUnblocks(t *testing.T) {
 
 func TestStore_WaitHydrated_AlreadyHydrated(t *testing.T) {
 	s := NewStore()
-	s.MarkHydrated()
+	s.MarkHydrated(time.Now())
 	if err := s.WaitHydrated(context.Background()); err != nil {
 		t.Fatalf("WaitHydrated: %v", err)
 	}
