@@ -13,7 +13,24 @@ tag.
 
 ## [Unreleased]
 
-### Added
+### Fixed
+
+- Apply YAML: dialog footer now shows a clear "✓ applied N" confirmation
+  when every doc in a batch lands successfully, and the apply button is
+  replaced with a primary close button so the operator gets an obvious
+  exit. Partial outcomes (any conflict / failure) surface a red "M
+  applied · K conflict · L failed" line and disable re-apply until the
+  YAML buffer is edited. Editing the YAML resets the prior outcome so
+  the banner cannot survive into the next batch (#175).
+
+- Auth: explicit logout no longer loops back through silent SSO when
+  the IdP session is still valid. The SPA bundle is now served outside
+  the chi router so the auth middleware's "redirect HTML browser
+  navigations to `/api/auth/login`" fallback can't run on the
+  post-logout `/` load. Logout handlers redirect to `/?signedOut=1`;
+  the SPA's AuthProvider strips the flag after reading and stays on
+  the login screen instead of re-authenticating against Auth0's still-
+  valid session (#98).
 
 - **Amazon Inspector v2 CVE surfacing** (epic [#163](https://github.com/gnana997/periscope/issues/163) — sub-issues [#164](https://github.com/gnana997/periscope/issues/164), [#165](https://github.com/gnana997/periscope/issues/165), [#166](https://github.com/gnana997/periscope/issues/166)). Inline severity chips on Pods / Nodes / Karpenter list pages, a new **Security** detail-pane tab on Pod / Node / Deployment / StatefulSet / DaemonSet / Karpenter NodeClaim, entity-scoped manual `↻ refresh` (emits one `cve_refresh` audit row per click), 6h TTL background refresh, and an Inspector-disabled empty-state banner. Per-cluster local cache, lazy-hydrated on first activation; reads are O(1) after first activation. Opt-in via Helm `inspector.enabled: true`. Full guide: [`docs/usage/cve.md`](docs/usage/cve.md). API surface: [`docs/api.md`](docs/api.md#apiclustersclustercve--inspector-v2-cve-surface-v11).
 
