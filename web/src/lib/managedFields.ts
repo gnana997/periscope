@@ -47,7 +47,7 @@ export interface FieldOwner {
  * input (missing prefixes, non-object values) — returns whatever it
  * could parse.
  */
-function walkFieldsV1(
+export function walkFieldsV1(
   node: unknown,
   prefix: string,
   out: string[],

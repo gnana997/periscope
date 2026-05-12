@@ -6,12 +6,15 @@
 // patched (some pages derive filter chips from labels and rebuilding
 // those derivations correctly in the optimistic phase is fragile).
 
-import { ApiError, type YamlKind } from "../../lib/api";
+import { ApiError, api, type YamlKind } from "../../lib/api";
 import { KIND_REGISTRY } from "../../lib/k8sKinds";
 import { queryKeys } from "../../lib/queryKeys";
-import { buildMinimalSSA, type Identity } from "../../lib/yamlPatch";
+import { type Identity, type Op } from "../../lib/yamlPatch";
 import { useOptimisticMutation } from "./_useOptimistic";
-import { applyWithLenientConflict } from "./_applyWithLenientConflict";
+import {
+  applyWithLenientConflictRetained,
+  fetchCurrentYamlForKind,
+} from "./_applyWithLenientConflict";
 
 interface EditLabelsArgs {
   cluster: string;
@@ -63,18 +66,28 @@ export function useEditLabels(args: EditLabelsArgs) {
     rollback: (qc, snap) => {
       qc.setQueryData(detailKey, snap.detail);
     },
-    mutationFn: (vars) => {
+    mutationFn: async (vars) => {
       const identity: Identity = {
         apiVersion: meta.group ? `${meta.group}/${meta.version}` : meta.version,
         kind: meta.kind,
         name: args.name,
         namespace: args.namespace || undefined,
       };
-      const yaml = buildMinimalSSA(
-        [{ op: "replace", path: ["metadata", "labels"], value: vars.labels }],
-        identity,
-      );
-      return applyWithLenientConflict(
+      const ops: Op[] = [
+        { op: "replace", path: ["metadata", "labels"], value: vars.labels },
+      ];
+      const [current, resourceMeta] = await Promise.all([
+        fetchCurrentYamlForKind(args.cluster, args.kind, args.namespace, args.name),
+        api.getMeta({
+          cluster: args.cluster,
+          group: meta.group,
+          version: meta.version,
+          resource: meta.resource,
+          namespace: args.namespace || undefined,
+          name: args.name,
+        }),
+      ]);
+      return applyWithLenientConflictRetained(
         {
           cluster: args.cluster,
           group: meta.group,
@@ -82,7 +95,10 @@ export function useEditLabels(args: EditLabelsArgs) {
           resource: meta.resource,
           namespace: args.namespace || undefined,
           name: args.name,
-          yaml,
+          identity,
+          ops,
+          current,
+          managedFields: resourceMeta.managedFields,
         },
         "update labels",
       );

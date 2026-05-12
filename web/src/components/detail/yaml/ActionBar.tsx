@@ -27,12 +27,39 @@ interface ActionBarProps {
   applyState: ApplyState;
   schemaLabel?: string;
   schemaState?: "loading" | "loaded" | "missing" | "failed";
+  /**
+   * True while `useResourceMeta` hasn't returned yet. Apply / dry-run
+   * gate on this because the retained-ownership body builder (#181)
+   * needs managedFields to decide which paths to re-assert.
+   */
+  metaPending?: boolean;
+  /**
+   * Hide the diff toggle button. Form mode passes this because it has
+   * no Monaco surface to overlay a diff on — the structured patch view
+   * (which IS visible in form mode) carries the same semantic info.
+   */
+  hideDiff?: boolean;
+  /**
+   * Hide the "errors N" indicator + the "fix N schema errors first"
+   * apply gate. Form mode doesn't surface monaco-style markers; its
+   * own validation lives inside the form component and gates the
+   * apply button differently.
+   */
+  hideErrors?: boolean;
   onCancel: () => void;
   onTogglePatch: () => void;
   onDryRun: () => void;
-  onToggleDiff: () => void;
+  /**
+   * Optional in form mode (no diff button → never invoked). Required
+   * in YAML mode.
+   */
+  onToggleDiff?: () => void;
   onApply: () => void;
-  onJumpToError: () => void;
+  /**
+   * Optional in form mode (errors indicator hidden → never invoked).
+   * Required in YAML mode.
+   */
+  onJumpToError?: () => void;
 }
 
 export function ActionBar({
@@ -43,6 +70,9 @@ export function ActionBar({
   applyState,
   schemaLabel,
   schemaState,
+  metaPending,
+  hideDiff,
+  hideErrors,
   onCancel,
   onTogglePatch,
   onDryRun,
@@ -67,17 +97,20 @@ export function ActionBar({
 
   const noEdits = "make a change first";
   const busyMsg = applyState.kind === "dryRunning" ? "dry-run in progress…" : "apply in progress…";
+  const metaMsg = "loading ownership info…";
 
   const patchReason = busy ? busyMsg : !dirty ? noEdits : null;
-  const dryRunReason = busy ? busyMsg : !dirty ? noEdits : null;
+  const dryRunReason = busy ? busyMsg : metaPending ? metaMsg : !dirty ? noEdits : null;
   const diffReason = busy ? busyMsg : !dirty ? noEdits : null;
   const applyReason = busy
     ? busyMsg
-    : !dirty
-      ? noEdits
-      : errorCount > 0
-        ? `fix ${errorCount} schema error${errorCount === 1 ? "" : "s"} first`
-        : null;
+    : metaPending
+      ? metaMsg
+      : !dirty
+        ? noEdits
+        : !hideErrors && errorCount > 0
+          ? `fix ${errorCount} schema error${errorCount === 1 ? "" : "s"} first`
+          : null;
 
   return (
     <div className="flex h-9 shrink-0 items-center gap-4 border-t border-border bg-surface px-3 font-mono text-[11px]">
@@ -89,13 +122,15 @@ export function ActionBar({
           value={String(opsCount)}
           className={dirty ? "text-accent" : "text-ink-faint"}
         />
-        <SegmentButton
-          label="errors"
-          value={String(errorCount)}
-          className={errorCount > 0 ? "text-red" : "text-green"}
-          onClick={errorCount > 0 ? onJumpToError : undefined}
-          tabular
-        />
+        {!hideErrors && (
+          <SegmentButton
+            label="errors"
+            value={String(errorCount)}
+            className={errorCount > 0 ? "text-red" : "text-green"}
+            onClick={errorCount > 0 ? onJumpToError : undefined}
+            tabular
+          />
+        )}
         {schemaLabel && (
           <SchemaPill label={schemaLabel} state={schemaState ?? "loading"} />
         )}
@@ -126,14 +161,16 @@ export function ActionBar({
         >
           {applyState.kind === "dryRunning" ? "dry-running…" : "dry-run"}
         </BarButton>
-        <BarButton
-          onClick={guarded(onToggleDiff, diffReason)}
-          softDisabled={diffReason !== null}
-          active={mode === "diff"}
-          title={diffReason ?? undefined}
-        >
-          diff
-        </BarButton>
+        {!hideDiff && (
+          <BarButton
+            onClick={guarded(onToggleDiff ?? (() => undefined), diffReason)}
+            softDisabled={diffReason !== null}
+            active={mode === "diff"}
+            title={diffReason ?? undefined}
+          >
+            diff
+          </BarButton>
+        )}
         <button
           type="button"
           onClick={guarded(onApply, applyReason)}

@@ -21,13 +21,13 @@
 // YAML mode (now without losing their edits) for the full
 // ConflictResolutionView machinery.
 
-import { lazy, Suspense, useCallback, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { usePublishEditorDirty } from "../../hooks/useEditorDirty";
 import type { EditorSource } from "../../lib/customResources";
 import type { ResourceRef } from "../../lib/api";
 import type { SupportedKind } from "../../lib/schemaForm/k8sAllowlist";
-import { useEditorYaml } from "../../hooks/useResource";
+import { useEditorYaml, useOpenAPISchema, useResourceMeta } from "../../hooks/useResource";
 import { DetailLoading, DetailError } from "../detail/states";
 import { ConfigMapForm } from "./ConfigMapForm";
 import { SecretForm } from "./SecretForm";
@@ -36,6 +36,10 @@ import { IngressForm } from "./IngressForm";
 import { DeploymentForm } from "./DeploymentForm";
 import { StatefulSetForm } from "./StatefulSetForm";
 import { useApplySubmit } from "./useApplySubmit";
+import { ActionBar } from "../detail/yaml/ActionBar";
+import { PatchPreviewDrawer } from "../detail/yaml/PatchPreviewDrawer";
+import { computeOps } from "../../lib/yamlPatch";
+import { findSchemaForGVK, parseIdentityFromYaml } from "../../lib/k8sSchema";
 
 const YamlEditor = lazy(() =>
   import("../detail/yaml").then((m) => ({ default: m.YamlEditor })),
@@ -125,6 +129,114 @@ function BufferedEditor({
   const [baselineYaml, setBaselineYaml] = useState(pristineYaml);
   const submit = useApplySubmit(source, resource);
 
+  // Live cluster YAML + managedFields — same react-query cache keys
+  // as the parent's queries, so these are free reads (no extra round
+  // trip). Threaded into submit() so the retained-ownership builder
+  // (#181) can extract current values for fields periscope-spa
+  // already claimed but the user hasn't touched.
+  const liveYamlQuery = useEditorYaml(
+    source,
+    cluster,
+    resource.namespace ?? "",
+    resource.name,
+    true,
+  );
+  const metaQuery = useResourceMeta(
+    cluster,
+    {
+      group: resource.group,
+      version: resource.version,
+      resource: resource.resource,
+      namespace: resource.namespace,
+      name: resource.name,
+    },
+    true,
+  );
+
+  // ----- Form-mode action-bar state -----
+  // Mirror of the affordances YamlEditor's ActionBar surfaces (ops
+  // count, patch preview, dry-run, schema status) so form-mode
+  // operators get the same pre-apply visibility. Diff and errors are
+  // intentionally hidden — see hideDiff / hideErrors below.
+  const opsForBar = useMemo(() => {
+    if (draftYaml === baselineYaml) return [];
+    try {
+      return computeOps(baselineYaml, draftYaml);
+    } catch {
+      return [];
+    }
+  }, [baselineYaml, draftYaml]);
+
+  const identityForBar = useMemo(
+    () => parseIdentityFromYaml(draftYaml),
+    [draftYaml],
+  );
+
+  // Schema query gives ActionBar the right pill state (loading /
+  // loaded / missing). Same cache key the form components use under
+  // the hood, so this is a free read. `kind` (SupportedKind) is the
+  // PascalCase K8s kind name; `resource.group/version` come from the
+  // SPA's resolved ResourceRef.
+  const schemaQuery = useOpenAPISchema(
+    cluster,
+    resource.group,
+    resource.version,
+    true,
+  );
+  const schemaLabel = `${resource.group ? resource.group + "/" : ""}${resource.version} ${kind}`;
+  const schemaState: "loading" | "loaded" | "missing" | "failed" =
+    schemaQuery.isError
+      ? "failed"
+      : !schemaQuery.data
+        ? "loading"
+        : findSchemaForGVK(schemaQuery.data, {
+              group: resource.group,
+              version: resource.version,
+              kind,
+            })
+          ? "loaded"
+          : "missing";
+
+  // PatchPreviewDrawer state — mirror of YamlEditor.tsx. Width
+  // persists via the same localStorage key so users get a single
+  // remembered width across YAML / form modes.
+  const [showPatch, setShowPatch] = useState(false);
+  const [patchDrawerWidth, setPatchDrawerWidth] = useState<number>(() => {
+    if (typeof window === "undefined") return 420;
+    const stored = window.localStorage.getItem("periscope.patchDrawerWidth");
+    const n = stored ? parseInt(stored, 10) : NaN;
+    return Number.isFinite(n) && n >= 280 && n <= 800 ? n : 420;
+  });
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem("periscope.patchDrawerWidth", String(patchDrawerWidth));
+  }, [patchDrawerWidth]);
+
+  const onPatchResizeStart = useCallback(
+    (e: React.MouseEvent) => {
+      e.preventDefault();
+      const startX = e.clientX;
+      const startWidth = patchDrawerWidth;
+      document.body.style.cursor = "col-resize";
+      document.body.style.userSelect = "none";
+      const onMove = (ev: MouseEvent) => {
+        // Drawer is on the right edge — drag LEFT widens it (subtract
+        // current clientX from start). Clamp 280…800 to match YAML mode.
+        const dx = startX - ev.clientX;
+        setPatchDrawerWidth(Math.min(800, Math.max(280, startWidth + dx)));
+      };
+      const onUp = () => {
+        document.body.style.cursor = "";
+        document.body.style.userSelect = "";
+        window.removeEventListener("mousemove", onMove);
+        window.removeEventListener("mouseup", onUp);
+      };
+      window.addEventListener("mousemove", onMove);
+      window.addEventListener("mouseup", onUp);
+    },
+    [patchDrawerWidth],
+  );
+
   const dirty = draftYaml !== baselineYaml;
 
   // Publish dirty to the page-level useEditorDirty cache so the
@@ -169,7 +281,15 @@ function BufferedEditor({
   }, [dirty, setParams]);
 
   const onApply = useCallback(async () => {
-    const ok = await submit.submit(draftYaml);
+    const ok = await submit.submit({
+      baseline: baselineYaml,
+      draft: draftYaml,
+      // Fall back to baseline if the live query hasn't (re)resolved
+      // yet — same anchor the editor was mounted against. Worse case
+      // we miss a drift update; we never apply with `current = ""`.
+      current: liveYamlQuery.data ?? baselineYaml,
+      meta: metaQuery.data ?? null,
+    });
     if (ok) {
       // Reset baseline to the just-applied YAML so the form clears
       // dirty. The react-query invalidation kicked off in submit
@@ -177,7 +297,16 @@ function BufferedEditor({
       // as the new baseline.
       setBaselineYaml(draftYaml);
     }
-  }, [draftYaml, submit]);
+  }, [baselineYaml, draftYaml, liveYamlQuery.data, metaQuery.data, submit]);
+
+  const onDryRun = useCallback(() => {
+    void submit.dryRun({
+      baseline: baselineYaml,
+      draft: draftYaml,
+      current: liveYamlQuery.data ?? baselineYaml,
+      meta: metaQuery.data ?? null,
+    });
+  }, [baselineYaml, draftYaml, liveYamlQuery.data, metaQuery.data, submit]);
 
   const onValuesYamlChange = useCallback(
     (next: string) => {
@@ -215,69 +344,122 @@ function BufferedEditor({
         </Suspense>
       ) : (
         <div className="flex flex-1 flex-col overflow-hidden">
-          <div className="flex-1 overflow-auto px-3 py-3">
-            {kind === "ConfigMap" && (
-              <ConfigMapForm
-                cluster={cluster}
-                valuesYaml={draftYaml}
-                onValuesYamlChange={onValuesYamlChange}
-                mode="edit"
-              />
-            )}
-            {kind === "Secret" && (
-              <SecretForm
-                cluster={cluster}
-                valuesYaml={draftYaml}
-                onValuesYamlChange={onValuesYamlChange}
-                mode="edit"
-              />
-            )}
-            {kind === "Service" && (
-              <ServiceForm
-                cluster={cluster}
-                valuesYaml={draftYaml}
-                onValuesYamlChange={onValuesYamlChange}
-                mode="edit"
-              />
-            )}
-            {kind === "Ingress" && (
-              <IngressForm
-                cluster={cluster}
-                valuesYaml={draftYaml}
-                onValuesYamlChange={onValuesYamlChange}
-                mode="edit"
-              />
-            )}
-            {kind === "Deployment" && (
-              <DeploymentForm
-                cluster={cluster}
-                valuesYaml={draftYaml}
-                onValuesYamlChange={onValuesYamlChange}
-                mode="edit"
-              />
-            )}
-            {kind === "StatefulSet" && (
-              <StatefulSetForm
-                cluster={cluster}
-                valuesYaml={draftYaml}
-                onValuesYamlChange={onValuesYamlChange}
-                mode="edit"
-              />
-            )}
-            {submit.state.kind === "error" && (
-              <SubmitErrorBanner
-                message={submit.state.message}
-                isConflict={submit.state.isConflict}
-                onSwitchToYaml={() => onSetMode("yaml")}
-                onDismiss={() => submit.reset()}
-              />
+          {/*
+           * Form scroll area + PatchPreviewDrawer share a flex row so
+           * the drawer pushes (not overlays) the form. Same layout
+           * YamlEditor uses for the Monaco editor + drawer pair.
+           */}
+          <div className="flex min-h-0 flex-1 flex-row">
+            <div className="flex-1 overflow-auto px-3 py-3">
+              {kind === "ConfigMap" && (
+                <ConfigMapForm
+                  cluster={cluster}
+                  valuesYaml={draftYaml}
+                  onValuesYamlChange={onValuesYamlChange}
+                  mode="edit"
+                />
+              )}
+              {kind === "Secret" && (
+                <SecretForm
+                  cluster={cluster}
+                  valuesYaml={draftYaml}
+                  onValuesYamlChange={onValuesYamlChange}
+                  mode="edit"
+                />
+              )}
+              {kind === "Service" && (
+                <ServiceForm
+                  cluster={cluster}
+                  valuesYaml={draftYaml}
+                  onValuesYamlChange={onValuesYamlChange}
+                  mode="edit"
+                />
+              )}
+              {kind === "Ingress" && (
+                <IngressForm
+                  cluster={cluster}
+                  valuesYaml={draftYaml}
+                  onValuesYamlChange={onValuesYamlChange}
+                  mode="edit"
+                />
+              )}
+              {kind === "Deployment" && (
+                <DeploymentForm
+                  cluster={cluster}
+                  valuesYaml={draftYaml}
+                  onValuesYamlChange={onValuesYamlChange}
+                  mode="edit"
+                />
+              )}
+              {kind === "StatefulSet" && (
+                <StatefulSetForm
+                  cluster={cluster}
+                  valuesYaml={draftYaml}
+                  onValuesYamlChange={onValuesYamlChange}
+                  mode="edit"
+                />
+              )}
+            </div>
+            {showPatch && (
+              <>
+                <div
+                  className="w-1 cursor-col-resize bg-border hover:bg-accent"
+                  onMouseDown={onPatchResizeStart}
+                  role="separator"
+                  aria-orientation="vertical"
+                />
+                <PatchPreviewDrawer
+                  width={patchDrawerWidth}
+                  ops={opsForBar}
+                  identity={identityForBar}
+                  cluster={resource.cluster}
+                  group={resource.group}
+                  version={resource.version}
+                  resource={resource.resource}
+                  namespace={resource.namespace}
+                  name={resource.name}
+                  onClose={() => setShowPatch(false)}
+                />
+              </>
             )}
           </div>
-          <FormActionBar
+          {/*
+           * SubmitErrorBanner intentionally lives OUTSIDE the form's
+           * overflow-auto scroll area so it stays visible regardless
+           * of how tall the form is. The previous placement (inside
+           * the scroll div, below every form section) buried errors
+           * for non-trivial resources — operators had to scroll to
+           * the bottom to discover that their apply had failed. This
+           * mirrors YamlEditor's ApplyErrorBanner placement (right
+           * above ActionBar, sibling of the scrollable editor).
+           */}
+          {submit.state.kind === "error" && (
+            <SubmitErrorBanner
+              message={submit.state.message}
+              isConflict={submit.state.isConflict}
+              onSwitchToYaml={() => onSetMode("yaml")}
+              onDismiss={() => submit.reset()}
+            />
+          )}
+          <ActionBar
+            mode="edit"
+            opsCount={opsForBar.length}
+            // hideErrors below suppresses both the indicator and the
+            // "fix N schema errors first" apply gate — form-mode
+            // validation is handled inside the form components and
+            // doesn't surface a count up here.
+            errorCount={0}
             dirty={dirty}
-            busy={submit.state.kind === "dryRunning" || submit.state.kind === "applying"}
-            onApply={onApply}
+            applyState={submit.state}
+            schemaLabel={schemaLabel}
+            schemaState={schemaState}
+            metaPending={metaQuery.isPending}
+            hideDiff
+            hideErrors
             onCancel={onCancel}
+            onTogglePatch={() => setShowPatch((s) => !s)}
+            onDryRun={onDryRun}
+            onApply={onApply}
           />
         </div>
       )}
@@ -337,39 +519,6 @@ function ToggleButton({
     >
       {children}
     </button>
-  );
-}
-
-function FormActionBar({
-  dirty,
-  busy,
-  onApply,
-  onCancel,
-}: {
-  dirty: boolean;
-  busy: boolean;
-  onApply: () => void;
-  onCancel: () => void;
-}) {
-  return (
-    <div className="flex items-center justify-end gap-2 border-t border-border bg-surface px-3 py-2">
-      <button
-        type="button"
-        onClick={onCancel}
-        disabled={busy}
-        className="rounded-sm border border-border bg-bg px-3 py-1 font-mono text-[12px] text-ink hover:border-ink-faint disabled:opacity-50"
-      >
-        cancel
-      </button>
-      <button
-        type="button"
-        onClick={onApply}
-        disabled={!dirty || busy}
-        className="rounded-sm border border-accent bg-accent px-3 py-1 font-mono text-[12px] text-bg hover:opacity-90 disabled:opacity-50"
-      >
-        {busy ? "applying…" : "apply changes"}
-      </button>
-    </div>
   );
 }
 
