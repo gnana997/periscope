@@ -1,0 +1,84 @@
+{{- /*
+  inspector-rbac.yaml — auto-rendered ClusterRole + binding granting
+  the periscope-server's ServiceAccount cluster-scope read access on
+  the resources that background workers need when at least one
+  registered cluster is the SERVER'S OWN cluster (backend: in-cluster).
+
+  Why this exists:
+
+  - Inspector hydrate (internal/cve/hydrate.go) calls Nodes().List()
+    against the local apiserver using the pod's SA token — not the
+    impersonated user's identity, because hydrate is a background
+    task with no human in the loop. Without a node read grant on the
+    SA it 403s on every cluster activation and the SPA shows empty
+    CVE severity chips.
+  - Karpenter detection lists `customresourcedefinitions` at cluster
+    scope to discover whether karpenter.sh resources are present.
+    Same in-cluster RBAC gap — same silent 403 on every activation.
+  - Image-digest collection watches pods cluster-wide to keep the
+    per-image findings cache fresh.
+
+  For agent-backed clusters this is a non-issue: the agent chart's
+  own ClusterRole already grants `get/list/watch` on `*` resources
+  (see deploy/helm/periscope-agent/templates/clusterrole.yaml), so
+  the agent's bridge SA covers it. Only the in-cluster backend
+  needs the server's own SA to have these verbs locally.
+
+  Render gates:
+    - `.Values.inspector.enabled` — the operator has opted into the
+      Inspector feature. When false, no background scans run, so
+      no RBAC is needed.
+    - any `.Values.clusters[*].backend == "in-cluster"` — at least
+      one managed cluster IS the local apiserver. When all clusters
+      are agent-backed, the local SA never makes these calls.
+
+  Operators who prefer to manage RBAC out-of-band (e.g. a separate
+  Terraform module) can override by deleting the template or setting
+  `inspector.enabled` to false and applying their own equivalent.
+*/}}
+{{- $hasInCluster := false -}}
+{{- range .Values.clusters }}
+  {{- if eq .backend "in-cluster" }}
+    {{- $hasInCluster = true -}}
+  {{- end }}
+{{- end }}
+{{- if and .Values.inspector.enabled $hasInCluster -}}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: periscope-inspector
+  labels:
+    {{- include "periscope.labels" . | nindent 4 }}
+rules:
+  # Inspector hydrate reads cluster nodes for EC2-instance-owner
+  # attribution (managed nodegroup / Karpenter NodeClaim / unmanaged).
+  # See internal/cve/hydrate.go.
+  - apiGroups: [""]
+    resources: ["nodes", "nodes/status"]
+    verbs: ["get", "list", "watch"]
+  # Image-digest watch — feeds the per-pod severity chip cache.
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch"]
+  # Karpenter detection lists CRDs at cluster scope to discover
+  # whether karpenter.sh resources are installed.
+  - apiGroups: ["apiextensions.k8s.io"]
+    resources: ["customresourcedefinitions"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: periscope-inspector
+  labels:
+    {{- include "periscope.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: periscope-inspector
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "periscope.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
+{{- end }}

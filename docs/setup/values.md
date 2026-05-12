@@ -356,6 +356,8 @@ Surfaces Inspector v2 findings inline on the Nodes / Pods / Workloads pages.
 2. Grant the periscope-server's Pod Identity / IRSA role the four `inspector2:*` permissions listed in [`cluster-rbac.md`](./cluster-rbac.md#aws-inspector-v2-optional-v11).
 3. Set `inspector.enabled: true` in your Helm values.
 
+When at least one entry in `clusters[]` uses `backend: in-cluster`, the chart **auto-renders** a `periscope-inspector` ClusterRole + ClusterRoleBinding granting the server's ServiceAccount the K8s reads (`nodes`, `pods`, `customresourcedefinitions`) the background hydrate / image-digest watch / karpenter detect need. See [`cluster-rbac.md`  K8s RBAC for in-cluster backend](./cluster-rbac.md#k8s-rbac-for-in-cluster-backend-auto-rendered) for the full rationale. Agent-backed clusters cover this via the agent chart's own ClusterRole.
+
 | Value | Type | Default | Description |
 |---|---|---|---|
 | `inspector.enabled` | bool | `false` | Master switch. Renders no env vars (and no goroutines run) when false. |
