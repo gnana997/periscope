@@ -204,3 +204,57 @@ describe("emptyForDescriptor", () => {
     })).toBeNull();
   });
 });
+
+// Primitive-branched discriminators (Service.targetPort string-or-
+// integer, Probe.timeoutSeconds wrapped, CRDs with int-or-string
+// shapes). The branch's value IS the scalar — there's no object to
+// seed required keys into, so seedBranchValue produces a type-
+// appropriate scalar empty.
+describe("seedBranchValue — primitive branches", () => {
+  function primitiveBranch(
+    type: "string" | "integer" | "number" | "boolean",
+  ): DiscriminatorBranch {
+    return {
+      label: type,
+      schema: { type } as JSONSchema,
+      descriptors: [],
+    };
+  }
+
+  it("seeds an empty string for a string branch", () => {
+    expect(seedBranchValue(primitiveBranch("string"))).toBe("");
+  });
+
+  it("seeds 0 for integer and number branches", () => {
+    expect(seedBranchValue(primitiveBranch("integer"))).toBe(0);
+    expect(seedBranchValue(primitiveBranch("number"))).toBe(0);
+  });
+
+  it("seeds false for a boolean branch", () => {
+    expect(seedBranchValue(primitiveBranch("boolean"))).toBe(false);
+  });
+
+  it("primitive seeding short-circuits the object required-key path", () => {
+    // Even if a primitive-typed branch has a leftover `required` array
+    // (defensive — shouldn't happen for clean schemas), the primitive
+    // short-circuit wins. Otherwise we'd produce `{}` again.
+    const b: DiscriminatorBranch = {
+      label: "string",
+      schema: { type: "string", required: ["foo"] } as JSONSchema,
+      descriptors: [],
+    };
+    expect(seedBranchValue(b)).toBe("");
+  });
+
+  it("non-primitive types (object/array) fall through to required-key seeding", () => {
+    // Sanity: object-typed branches still go through the old path.
+    const b: DiscriminatorBranch = {
+      label: "acme",
+      schema: { type: "object", required: ["email"] } as JSONSchema,
+      descriptors: [
+        { path: ["email"], label: "email", type: "string", required: true },
+      ],
+    };
+    expect(seedBranchValue(b)).toEqual({ email: "" });
+  });
+});

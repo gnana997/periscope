@@ -41,11 +41,32 @@ import type {
  * the component is a bigger refactor.
  */
 export function seedBranchValue(branch: DiscriminatorBranch): unknown {
+  // Primitive-branched discriminator (Service.targetPort string-or-
+  // integer, Probe.timeoutSeconds, etc.). The branch's "value" is a
+  // scalar, not an object — so a type-appropriate scalar empty is
+  // the right seed. Object-shape required-key seeding doesn't apply
+  // here; the active-branch detector matches by `typeof value`.
+  const primitive = primitiveEmptyFor(branch.schema.type);
+  if (primitive !== undefined) {
+    return primitive;
+  }
+
   const inner = seedRequiredKeys(branch);
   if (branch.discriminatorKey) {
     return { [branch.discriminatorKey]: inner };
   }
   return inner;
+}
+
+/**
+ * Empty value for a primitive JSON-Schema type. Returns `undefined`
+ * for non-primitive types (caller falls through to object handling).
+ */
+function primitiveEmptyFor(type: unknown): unknown {
+  if (type === "string") return "";
+  if (type === "integer" || type === "number") return 0;
+  if (type === "boolean") return false;
+  return undefined;
 }
 
 function seedRequiredKeys(

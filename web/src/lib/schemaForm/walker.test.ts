@@ -413,6 +413,50 @@ describe("walker — oneOf discriminator (#132)", () => {
     const x = ds.find((d) => d.path.join(".") === "x");
     expect(x?.type).toBe("unsupported");
   });
+
+  // Service.spec.ports[].targetPort style — primitive-branched oneOf
+  // where each branch's schema is `{type: "string"}` or
+  // `{type: "integer"}`. Pre-fix branchLabelFor fell through to
+  // "option 1 / option 2"; now it surfaces the type name itself.
+  it("labels primitive-typed branches by their type when no title is set", () => {
+    const schema: JSONSchema = {
+      type: "object",
+      properties: {
+        targetPort: {
+          oneOf: [{ type: "string" }, { type: "integer" }],
+        },
+      },
+    };
+    const ds = buildFieldDescriptors(schema, {
+      allowOneOfDiscriminator: true,
+    });
+    const tp = ds.find((d) => d.path.join(".") === "targetPort");
+    expect(tp?.type).toBe("discriminator");
+    expect(tp?.branches?.[0].label).toBe("string");
+    expect(tp?.branches?.[1].label).toBe("integer");
+  });
+
+  it("respects an explicit title even on primitive-typed branches", () => {
+    // Some CRDs label primitive branches with friendlier names. Title
+    // still wins so we don't downgrade those to bare type names.
+    const schema: JSONSchema = {
+      type: "object",
+      properties: {
+        targetPort: {
+          oneOf: [
+            { type: "string", title: "by name" },
+            { type: "integer", title: "by number" },
+          ],
+        },
+      },
+    };
+    const ds = buildFieldDescriptors(schema, {
+      allowOneOfDiscriminator: true,
+    });
+    const tp = ds.find((d) => d.path.join(".") === "targetPort");
+    expect(tp?.branches?.[0].label).toBe("by name");
+    expect(tp?.branches?.[1].label).toBe("by number");
+  });
 });
 
 describe("walker — allOf merging (#132)", () => {

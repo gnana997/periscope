@@ -618,6 +618,19 @@ function branchLabelFor(
     if (keys.length === 1) return keys[0];
     if (keys.length > 0 && keys.length <= 3) return keys.join(" + ");
   }
+  // Primitive-typed branch (Service.targetPort string-or-integer):
+  // the schema declares a primitive type with no title / properties.
+  // Use the type name itself — "string" / "number" / "integer" /
+  // "boolean" — which is honest and matches what the operator will
+  // type into the resulting input.
+  if (
+    sub.type === "string" ||
+    sub.type === "number" ||
+    sub.type === "integer" ||
+    sub.type === "boolean"
+  ) {
+    return String(sub.type);
+  }
   // Last resort. Operators editing CRDs with poorly-titled schemas
   // see "option N" — imperfect but better than yaml-only.
   return `option ${(fallbackIdx ?? 0) + 1}`;
