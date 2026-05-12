@@ -79,13 +79,8 @@ func ListRoles(ctx context.Context, p credentials.Provider, args ListRolesArgs) 
 		return RoleList{}, fmt.Errorf("list roles: %w", err)
 	}
 	out := RoleList{Roles: make([]Role, 0, len(raw.Items))}
-	for _, r := range raw.Items {
-		out.Roles = append(out.Roles, Role{
-			Name:      r.Name,
-			Namespace: r.Namespace,
-			RuleCount: len(r.Rules),
-			CreatedAt: r.CreationTimestamp.Time,
-		})
+	for i := range raw.Items {
+		out.Roles = append(out.Roles, roleSummary(&raw.Items[i]))
 	}
 	return out, nil
 }
@@ -100,12 +95,8 @@ func ListClusterRoles(ctx context.Context, p credentials.Provider, args ListClus
 		return ClusterRoleList{}, fmt.Errorf("list clusterroles: %w", err)
 	}
 	out := ClusterRoleList{ClusterRoles: make([]ClusterRole, 0, len(raw.Items))}
-	for _, r := range raw.Items {
-		out.ClusterRoles = append(out.ClusterRoles, ClusterRole{
-			Name:      r.Name,
-			RuleCount: len(r.Rules),
-			CreatedAt: r.CreationTimestamp.Time,
-		})
+	for i := range raw.Items {
+		out.ClusterRoles = append(out.ClusterRoles, clusterRoleSummary(&raw.Items[i]))
 	}
 	return out, nil
 }
@@ -120,14 +111,8 @@ func ListRoleBindings(ctx context.Context, p credentials.Provider, args ListRole
 		return RoleBindingList{}, fmt.Errorf("list rolebindings: %w", err)
 	}
 	out := RoleBindingList{RoleBindings: make([]RoleBinding, 0, len(raw.Items))}
-	for _, rb := range raw.Items {
-		out.RoleBindings = append(out.RoleBindings, RoleBinding{
-			Name:         rb.Name,
-			Namespace:    rb.Namespace,
-			RoleRef:      rb.RoleRef.Kind + "/" + rb.RoleRef.Name,
-			SubjectCount: len(rb.Subjects),
-			CreatedAt:    rb.CreationTimestamp.Time,
-		})
+	for i := range raw.Items {
+		out.RoleBindings = append(out.RoleBindings, roleBindingSummary(&raw.Items[i]))
 	}
 	return out, nil
 }
@@ -142,15 +127,52 @@ func ListClusterRoleBindings(ctx context.Context, p credentials.Provider, args L
 		return ClusterRoleBindingList{}, fmt.Errorf("list clusterrolebindings: %w", err)
 	}
 	out := ClusterRoleBindingList{ClusterRoleBindings: make([]ClusterRoleBinding, 0, len(raw.Items))}
-	for _, crb := range raw.Items {
-		out.ClusterRoleBindings = append(out.ClusterRoleBindings, ClusterRoleBinding{
-			Name:         crb.Name,
-			RoleRef:      crb.RoleRef.Kind + "/" + crb.RoleRef.Name,
-			SubjectCount: len(crb.Subjects),
-			CreatedAt:    crb.CreationTimestamp.Time,
-		})
+	for i := range raw.Items {
+		out.ClusterRoleBindings = append(out.ClusterRoleBindings, clusterRoleBindingSummary(&raw.Items[i]))
 	}
 	return out, nil
+}
+
+// Summary projections shared by the List / Watch paths. Keeping them
+// as separate helpers (rather than inline in List) means the watch
+// snapshot + per-event deltas push shape-identical DTOs through —
+// the SPA's react-query cache patches against the exact same object
+// shape the initial list returned.
+
+func roleSummary(r *rbacv1.Role) Role {
+	return Role{
+		Name:      r.Name,
+		Namespace: r.Namespace,
+		RuleCount: len(r.Rules),
+		CreatedAt: r.CreationTimestamp.Time,
+	}
+}
+
+func clusterRoleSummary(r *rbacv1.ClusterRole) ClusterRole {
+	return ClusterRole{
+		Name:      r.Name,
+		RuleCount: len(r.Rules),
+		CreatedAt: r.CreationTimestamp.Time,
+	}
+}
+
+func roleBindingSummary(rb *rbacv1.RoleBinding) RoleBinding {
+	return RoleBinding{
+		Name:         rb.Name,
+		Namespace:    rb.Namespace,
+		RoleRef:      rb.RoleRef.Kind + "/" + rb.RoleRef.Name,
+		SubjectCount: len(rb.Subjects),
+		CreatedAt:    rb.CreationTimestamp.Time,
+	}
+}
+
+func clusterRoleBindingSummary(crb *rbacv1.ClusterRoleBinding) ClusterRoleBinding {
+	return ClusterRoleBinding{
+		Name:         crb.Name,
+		RoleRef:      crb.RoleRef.Kind + "/" + crb.RoleRef.Name,
+		SubjectCount: len(crb.Subjects),
+		CreatedAt:    crb.CreationTimestamp.Time,
+	}
 }
 
 func ListServiceAccounts(ctx context.Context, p credentials.Provider, args ListServiceAccountsArgs) (ServiceAccountList, error) {

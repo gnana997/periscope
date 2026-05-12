@@ -58,16 +58,19 @@ The `kinds` value accepts:
 | `"core,workloads"` | Multiple groups, one token each |
 | `"pods,workloads"` | Mixed kinds and groups |
 
-Per-kind tokens (current registry): `pods`, `events`, `configmaps`, `resourcequotas`, `limitranges`, `serviceaccounts`, `deployments`, `statefulsets`, `daemonsets`, `replicasets`, `jobs`, `cronjobs`, `horizontalpodautoscalers`, `poddisruptionbudgets`, `services`, `ingresses`, `networkpolicies`, `endpointslices`, `ingressclasses`, `pvs`, `pvcs`, `storageclasses`, `nodes`, `namespaces`, `priorityclasses`, `runtimeclasses`.
+Per-kind tokens (current registry): `pods`, `events`, `configmaps`, `resourcequotas`, `limitranges`, `serviceaccounts`, `secrets`, `deployments`, `statefulsets`, `daemonsets`, `replicasets`, `jobs`, `cronjobs`, `horizontalpodautoscalers`, `poddisruptionbudgets`, `services`, `ingresses`, `networkpolicies`, `endpointslices`, `ingressclasses`, `pvs`, `pvcs`, `storageclasses`, `nodes`, `namespaces`, `priorityclasses`, `runtimeclasses`, `roles`, `rolebindings`, `clusterroles`, `clusterrolebindings`.
+
+Note: `secrets` streams the same redacted summary the list endpoint returns (`name`, `namespace`, `type`, `keyCount`, `tlsExpiresAt`, `createdAt`). The raw `Data` map is never on the wire — the watch DTO is structurally identical to the list-page DTO.
 
 Group aliases (current registry):
 
 - `core` = `pods`, `events`
-- `config` = `configmaps`, `resourcequotas`, `limitranges`, `serviceaccounts`
+- `config` = `configmaps`, `resourcequotas`, `limitranges`, `serviceaccounts`, `secrets`
 - `workloads` = `deployments`, `statefulsets`, `daemonsets`, `replicasets`, `jobs`, `cronjobs`, `horizontalpodautoscalers`, `poddisruptionbudgets`
 - `networking` = `services`, `ingresses`, `networkpolicies`, `endpointslices`, `ingressclasses`
 - `storage` = `pvs`, `pvcs`, `storageclasses`
 - `cluster` = `nodes`, `namespaces`, `priorityclasses`, `runtimeclasses`
+- `rbac` = `roles`, `rolebindings`, `clusterroles`, `clusterrolebindings`
 
 Groups expand as new kinds register; the chart schema is updated
 alongside the server registry.

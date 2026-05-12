@@ -46,6 +46,7 @@ same DTO shape, so feature parity is automatic.
 | ResourceQuotas | `/api/clusters/{cluster}/resourcequotas/watch` | `ResourceQuota` | `internal/k8s/watch.go: WatchResourceQuotas` |
 | LimitRanges | `/api/clusters/{cluster}/limitranges/watch` | `LimitRange` | `internal/k8s/watch.go: WatchLimitRanges` |
 | ServiceAccounts | `/api/clusters/{cluster}/serviceaccounts/watch` | `ServiceAccount` | `internal/k8s/watch.go: WatchServiceAccounts` |
+| Secrets | `/api/clusters/{cluster}/secrets/watch` | `Secret` (redacted summary — no `Data`) | `internal/k8s/watch.go: WatchSecrets` |
 | Deployments | `/api/clusters/{cluster}/deployments/watch` | `Deployment` | `internal/k8s/watch.go: WatchDeployments` |
 | StatefulSets | `/api/clusters/{cluster}/statefulsets/watch` | `StatefulSet` | `internal/k8s/watch.go: WatchStatefulSets` |
 | DaemonSets | `/api/clusters/{cluster}/daemonsets/watch` | `DaemonSet` | `internal/k8s/watch.go: WatchDaemonSets` |
@@ -66,9 +67,17 @@ same DTO shape, so feature parity is automatic.
 | Namespaces | `/api/clusters/{cluster}/namespaces/watch` | `Namespace` | `internal/k8s/watch.go: WatchNamespaces` |
 | PriorityClasses | `/api/clusters/{cluster}/priorityclasses/watch` | `PriorityClass` | `internal/k8s/watch.go: WatchPriorityClasses` |
 | RuntimeClasses | `/api/clusters/{cluster}/runtimeclasses/watch` | `RuntimeClass` | `internal/k8s/watch.go: WatchRuntimeClasses` |
+| Roles | `/api/clusters/{cluster}/roles/watch` | `Role` | `internal/k8s/watch.go: WatchRoles` |
+| RoleBindings | `/api/clusters/{cluster}/rolebindings/watch` | `RoleBinding` | `internal/k8s/watch.go: WatchRoleBindings` |
+| ClusterRoles | `/api/clusters/{cluster}/clusterroles/watch` | `ClusterRole` | `internal/k8s/watch.go: WatchClusterRoles` |
+| ClusterRoleBindings | `/api/clusters/{cluster}/clusterrolebindings/watch` | `ClusterRoleBinding` | `internal/k8s/watch.go: WatchClusterRoleBindings` |
 
 Each is a thin wrapper around the generic `watchKind[T, S]` primitive,
 registered in the `watchKinds` slice in `cmd/periscope/main.go`.
+
+The four RBAC kinds share a new `rbac` group alias in the registry;
+the `secrets` kind joins the existing `config` group alongside
+configmaps, resourcequotas, limitranges, and serviceaccounts.
 
 ---
 

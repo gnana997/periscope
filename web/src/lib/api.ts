@@ -281,6 +281,7 @@ export type WatchStreamKind =
   | "resourcequotas"
   | "limitranges"
   | "serviceaccounts"
+  | "secrets"
   | "deployments"
   | "statefulsets"
   | "daemonsets"
@@ -300,7 +301,11 @@ export type WatchStreamKind =
   | "nodes"
   | "namespaces"
   | "priorityclasses"
-  | "runtimeclasses";
+  | "runtimeclasses"
+  | "roles"
+  | "rolebindings"
+  | "clusterroles"
+  | "clusterrolebindings";
 
 // Features describes server-side capability flags. Fetched once at app
 // boot via api.features and consumed by useResource (Phase 6) to choose
