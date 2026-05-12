@@ -65,17 +65,24 @@ import {
 import { useOpenAPISchema, useResourceMeta, useEditorYaml } from "../../../hooks/useResource";
 import { usePublishEditorDirty } from "../../../hooks/useEditorDirty";
 import {
-  buildMinimalSSA,
   computeOps,
   MultiDocumentError,
+  YamlParseError,
   type Identity,
   type Op,
 } from "../../../lib/yamlPatch";
+import {
+  buildRetainedOwnershipBody,
+  buildRetainedOwnershipBodyFromOps,
+  ManagedFieldsUnavailableError,
+} from "../../../lib/applyBodyBuilder";
 import { ActionBar, type ApplyState } from "./ActionBar";
 import { ProblemsStrip } from "./ProblemsStrip";
 import { ApplyErrorBanner } from "./ApplyErrorBanner";
 import { SchemaMissingBanner } from "./SchemaMissingBanner";
 import { DriftBanner } from "./DriftBanner";
+import { CoManagementBanner, type OtherOwnerSummary } from "./CoManagementBanner";
+import { useDismissed } from "../../../hooks/useDismissed";
 import { DriftDiffOverlay } from "./DriftDiffOverlay";
 import { showToast } from "../../../lib/toastBus";
 import { ConflictResolutionView, type FieldConflict, type Resolution } from "./ConflictResolutionView";
@@ -734,10 +741,29 @@ function Editor({
 
       let body: string;
       try {
-        body = buildMinimalSSA(ops, identity);
+        // pristineLocked is reused as `current`: on a clean buffer the
+        // pristine-swap effect keeps it pinned to the latest server
+        // YAML; on a dirty buffer the user has explicitly chosen to
+        // ignore drift, so re-asserting whatever they last had is the
+        // safest behavior. A dedicated current-state query is a
+        // deferrable optimization (#181).
+        ({ yaml: body } = buildRetainedOwnershipBody({
+          baseline: pristineLocked,
+          draft: currentYaml,
+          current: pristineLocked,
+          identity,
+          managedFields: metaQuery.data?.managedFields ?? null,
+        }));
       } catch (e) {
-        if (e instanceof MultiDocumentError) {
-          setApplyState({ kind: "error", message: e.message });
+        if (e instanceof ManagedFieldsUnavailableError) {
+          setApplyState({
+            kind: "error",
+            message: "Ownership info is still loading — try again in a moment.",
+          });
+          return;
+        }
+        if (e instanceof MultiDocumentError || e instanceof YamlParseError) {
+          setApplyState({ kind: "error", message: (e as Error).message });
           return;
         }
         throw e;
@@ -799,7 +825,7 @@ function Editor({
     // ops captured intentionally — we want the snapshot at apply time, not
     // the latest after the user edits while waiting for the response
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [identity, opsForCurrentBuffer, resource, cluster, source, qc, setParams, parseConflictCauses, ops],
+    [identity, opsForCurrentBuffer, resource, cluster, source, qc, setParams, parseConflictCauses, ops, pristineLocked, currentYaml, metaQuery.data],
   );
 
   // Apply with per-field resolutions from ConflictResolutionView. Filter
@@ -838,8 +864,26 @@ function Editor({
 
     let body: string;
     try {
-      body = buildMinimalSSA(filteredOps, identity);
+      // FromOps variant: we've already filtered the user-edit ops by
+      // `resolutions` above, so we don't want the builder to redo the
+      // baseline/draft diff. excludePriorOwned mirrors the same revert
+      // semantics on the retained-ownership side — paths the operator
+      // released stay released across both ops.
+      ({ yaml: body } = buildRetainedOwnershipBodyFromOps({
+        ops: filteredOps,
+        current: pristineLocked,
+        identity,
+        managedFields: metaQuery.data?.managedFields ?? null,
+        excludePriorOwned: (p) => resolutions.get(p) === "revert",
+      }));
     } catch (e) {
+      if (e instanceof ManagedFieldsUnavailableError) {
+        setApplyState({
+          kind: "error",
+          message: "Ownership info is still loading — try again in a moment.",
+        });
+        return;
+      }
       setApplyState({ kind: "error", message: (e as Error).message });
       return;
     }
@@ -879,7 +923,7 @@ function Editor({
       setApplyState({ kind: "error", message });
       setShowTakeover(false);
     }
-  }, [identity, opsForCurrentBuffer, resolutions, opPathToString, resource, source, qc, setParams, onCancel]);
+  }, [identity, opsForCurrentBuffer, resolutions, opPathToString, resource, source, qc, setParams, onCancel, pristineLocked, metaQuery.data]);
 
   // Standalone dry-run (the "dry-run" button in ActionBar). Same 409
   // handling as runApply — if the dry-run hits a field-manager
@@ -892,8 +936,21 @@ function Editor({
     if (currentOps.length === 0) return;
     let body: string;
     try {
-      body = buildMinimalSSA(currentOps, identity);
+      ({ yaml: body } = buildRetainedOwnershipBody({
+        baseline: pristineLocked,
+        draft: currentYaml,
+        current: pristineLocked,
+        identity,
+        managedFields: metaQuery.data?.managedFields ?? null,
+      }));
     } catch (e) {
+      if (e instanceof ManagedFieldsUnavailableError) {
+        setApplyState({
+          kind: "error",
+          message: "Ownership info is still loading — try again in a moment.",
+        });
+        return;
+      }
       setApplyState({ kind: "error", message: (e as Error).message });
       return;
     }
@@ -934,7 +991,7 @@ function Editor({
       }
       setApplyState({ kind: "error", message });
     }
-  }, [identity, opsForCurrentBuffer, resource, parseConflictCauses]);
+  }, [identity, opsForCurrentBuffer, resource, parseConflictCauses, pristineLocked, currentYaml, metaQuery.data]);
 
 
 
@@ -1040,6 +1097,36 @@ function Editor({
     ? `${gvk.group ? gvk.group + "/" : ""}${gvk.version} ${gvk.kind}`
     : undefined;
 
+  // Co-management summary derived from managedFields. Other managers
+  // (non-periscope-spa, any operation type) → grouped by manager name
+  // and ranked by path count. periscope-spa Apply paths feed the
+  // "retained" count in the banner copy.
+  const coManagement = useMemo(() => {
+    const entries = metaQuery.data?.managedFields;
+    if (!entries) return { selfOwnedCount: 0, otherOwners: [] as OtherOwnerSummary[] };
+    const owners = parseManagedFields(entries);
+    const otherCounts = new Map<string, number>();
+    let selfOwnedCount = 0;
+    for (const o of owners) {
+      if (o.manager === "periscope-spa") {
+        if (o.operation === "Apply") selfOwnedCount++;
+        continue;
+      }
+      otherCounts.set(o.manager, (otherCounts.get(o.manager) ?? 0) + 1);
+    }
+    const otherOwners: OtherOwnerSummary[] = [...otherCounts.entries()]
+      .map(([manager, pathCount]) => ({ manager, pathCount }))
+      .sort((a, b) => b.pathCount - a.pathCount);
+    return { selfOwnedCount, otherOwners };
+  }, [metaQuery.data]);
+
+  const coManagementDismissKey = `periscope.coMgmtDismissed:${cluster}:${resource.group}/${resource.version}:${resource.resource}:${resource.namespace ?? ""}:${resource.name}`;
+  const [coManagementDismissed, dismissCoManagement] = useDismissed(coManagementDismissKey);
+  const showCoManagementBanner =
+    mode === "edit" &&
+    !coManagementDismissed &&
+    coManagement.otherOwners.length > 0;
+
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-col">
       {mode === "conflict" ? (
@@ -1131,6 +1218,14 @@ function Editor({
         />
       )}
 
+      {showCoManagementBanner && (
+        <CoManagementBanner
+          selfOwnedCount={coManagement.selfOwnedCount}
+          otherOwners={coManagement.otherOwners}
+          onDismiss={dismissCoManagement}
+        />
+      )}
+
       {showDriftDiff && (
         <DriftDiffOverlay
           source={source}
@@ -1167,6 +1262,7 @@ function Editor({
         applyState={applyState}
         schemaLabel={schemaLabel}
         schemaState={schemaState}
+        metaPending={metaQuery.isPending}
         onCancel={onCancel}
         onTogglePatch={() => setShowPatch((s) => !s)}
         onDryRun={() => void runDryRun()}

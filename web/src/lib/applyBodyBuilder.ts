@@ -111,6 +111,12 @@ export interface BuildBodyFromOpsInput {
   identity: Identity;
   managedFields: ManagedFieldsEntry[] | null | undefined;
   selfManager?: string;
+  /**
+   * See `BuildBodyInput.excludePriorOwned`. Used by `runApplyResolved`
+   * in YamlEditor to drop paths the operator chose to revert in the
+   * field-manager conflict view.
+   */
+  excludePriorOwned?: (path: string) => boolean;
 }
 
 export interface BuildBodyFromOpsResult {
@@ -165,6 +171,7 @@ export function buildRetainedOwnershipBodyFromOps(
     identity,
     managedFields,
     selfManager = DEFAULT_SELF_MANAGER,
+    excludePriorOwned,
   } = input;
 
   assertManagedFieldsPresent(managedFields);
@@ -175,6 +182,7 @@ export function buildRetainedOwnershipBodyFromOps(
     identity,
     managedFields: managedFields as ManagedFieldsEntry[],
     selfManager,
+    excludePriorOwned,
   });
 }
 

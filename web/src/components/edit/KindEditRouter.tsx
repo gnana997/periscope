@@ -27,7 +27,7 @@ import { usePublishEditorDirty } from "../../hooks/useEditorDirty";
 import type { EditorSource } from "../../lib/customResources";
 import type { ResourceRef } from "../../lib/api";
 import type { SupportedKind } from "../../lib/schemaForm/k8sAllowlist";
-import { useEditorYaml } from "../../hooks/useResource";
+import { useEditorYaml, useResourceMeta } from "../../hooks/useResource";
 import { DetailLoading, DetailError } from "../detail/states";
 import { ConfigMapForm } from "./ConfigMapForm";
 import { SecretForm } from "./SecretForm";
@@ -125,6 +125,30 @@ function BufferedEditor({
   const [baselineYaml, setBaselineYaml] = useState(pristineYaml);
   const submit = useApplySubmit(source, resource);
 
+  // Live cluster YAML + managedFields — same react-query cache keys
+  // as the parent's queries, so these are free reads (no extra round
+  // trip). Threaded into submit() so the retained-ownership builder
+  // (#181) can extract current values for fields periscope-spa
+  // already claimed but the user hasn't touched.
+  const liveYamlQuery = useEditorYaml(
+    source,
+    cluster,
+    resource.namespace ?? "",
+    resource.name,
+    true,
+  );
+  const metaQuery = useResourceMeta(
+    cluster,
+    {
+      group: resource.group,
+      version: resource.version,
+      resource: resource.resource,
+      namespace: resource.namespace,
+      name: resource.name,
+    },
+    true,
+  );
+
   const dirty = draftYaml !== baselineYaml;
 
   // Publish dirty to the page-level useEditorDirty cache so the
@@ -169,7 +193,15 @@ function BufferedEditor({
   }, [dirty, setParams]);
 
   const onApply = useCallback(async () => {
-    const ok = await submit.submit(draftYaml);
+    const ok = await submit.submit({
+      baseline: baselineYaml,
+      draft: draftYaml,
+      // Fall back to baseline if the live query hasn't (re)resolved
+      // yet — same anchor the editor was mounted against. Worse case
+      // we miss a drift update; we never apply with `current = ""`.
+      current: liveYamlQuery.data ?? baselineYaml,
+      meta: metaQuery.data ?? null,
+    });
     if (ok) {
       // Reset baseline to the just-applied YAML so the form clears
       // dirty. The react-query invalidation kicked off in submit
@@ -177,7 +209,7 @@ function BufferedEditor({
       // as the new baseline.
       setBaselineYaml(draftYaml);
     }
-  }, [draftYaml, submit]);
+  }, [baselineYaml, draftYaml, liveYamlQuery.data, metaQuery.data, submit]);
 
   const onValuesYamlChange = useCallback(
     (next: string) => {
@@ -275,7 +307,15 @@ function BufferedEditor({
           </div>
           <FormActionBar
             dirty={dirty}
-            busy={submit.state.kind === "dryRunning" || submit.state.kind === "applying"}
+            // Pending meta == we don't yet know what periscope-spa
+            // owns; firing Apply now would degenerate to a first-apply
+            // body and silently release prior ownership. Gate the
+            // button until the 15s meta poll lands.
+            busy={
+              submit.state.kind === "dryRunning" ||
+              submit.state.kind === "applying" ||
+              metaQuery.isPending
+            }
             onApply={onApply}
             onCancel={onCancel}
           />

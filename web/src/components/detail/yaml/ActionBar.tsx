@@ -27,6 +27,12 @@ interface ActionBarProps {
   applyState: ApplyState;
   schemaLabel?: string;
   schemaState?: "loading" | "loaded" | "missing" | "failed";
+  /**
+   * True while `useResourceMeta` hasn't returned yet. Apply / dry-run
+   * gate on this because the retained-ownership body builder (#181)
+   * needs managedFields to decide which paths to re-assert.
+   */
+  metaPending?: boolean;
   onCancel: () => void;
   onTogglePatch: () => void;
   onDryRun: () => void;
@@ -43,6 +49,7 @@ export function ActionBar({
   applyState,
   schemaLabel,
   schemaState,
+  metaPending,
   onCancel,
   onTogglePatch,
   onDryRun,
@@ -67,17 +74,20 @@ export function ActionBar({
 
   const noEdits = "make a change first";
   const busyMsg = applyState.kind === "dryRunning" ? "dry-run in progress…" : "apply in progress…";
+  const metaMsg = "loading ownership info…";
 
   const patchReason = busy ? busyMsg : !dirty ? noEdits : null;
-  const dryRunReason = busy ? busyMsg : !dirty ? noEdits : null;
+  const dryRunReason = busy ? busyMsg : metaPending ? metaMsg : !dirty ? noEdits : null;
   const diffReason = busy ? busyMsg : !dirty ? noEdits : null;
   const applyReason = busy
     ? busyMsg
-    : !dirty
-      ? noEdits
-      : errorCount > 0
-        ? `fix ${errorCount} schema error${errorCount === 1 ? "" : "s"} first`
-        : null;
+    : metaPending
+      ? metaMsg
+      : !dirty
+        ? noEdits
+        : errorCount > 0
+          ? `fix ${errorCount} schema error${errorCount === 1 ? "" : "s"} first`
+          : null;
 
   return (
     <div className="flex h-9 shrink-0 items-center gap-4 border-t border-border bg-surface px-3 font-mono text-[11px]">
