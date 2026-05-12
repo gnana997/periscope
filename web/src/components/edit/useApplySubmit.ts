@@ -88,6 +88,14 @@ export interface SubmitInput {
 export interface UseApplySubmit {
   state: SubmitState;
   submit: (input: SubmitInput) => Promise<boolean>;
+  /**
+   * Run the L4 dry-run only — no L5 commit, no auto-takeover. Toasts
+   * via SubmitState transitions: dryRunning → success (auto-clears to
+   * idle after 1500ms) on success, or error on failure. Useful for the
+   * "dry-run" button in the form-mode ActionBar so operators can
+   * pre-flight admission webhooks / PSA / schema before committing.
+   */
+  dryRun: (input: SubmitInput) => Promise<boolean>;
   reset: () => void;
 }
 
@@ -207,7 +215,87 @@ export function useApplySubmit(
     [qc, resource, source],
   );
 
+  const dryRun = useCallback(
+    async ({ baseline, draft, current, meta }: SubmitInput): Promise<boolean> => {
+      if (abortRef.current) abortRef.current.abort();
+      const ac = new AbortController();
+      abortRef.current = ac;
+
+      const identity = parseIdentityFromYaml(draft);
+      if (!identity) {
+        setState({
+          kind: "error",
+          message: "Could not parse apiVersion/kind/metadata.name from the buffer.",
+          isConflict: false,
+        });
+        return false;
+      }
+      if (!meta) {
+        setState({
+          kind: "error",
+          message: "Ownership info is still loading — try again in a moment.",
+          isConflict: false,
+        });
+        return false;
+      }
+
+      let yaml: string;
+      try {
+        ({ yaml } = buildRetainedOwnershipBody({
+          baseline,
+          draft,
+          current,
+          identity,
+          managedFields: meta.managedFields,
+        }));
+      } catch (e) {
+        const classified = classifyBuildError(e);
+        if (classified) {
+          setState(classified);
+          return false;
+        }
+        throw e;
+      }
+
+      try {
+        setState({ kind: "dryRunning" });
+        await api.applyResource(
+          {
+            cluster: resource.cluster,
+            group: resource.group,
+            version: resource.version,
+            resource: resource.resource,
+            namespace: resource.namespace,
+            name: resource.name,
+            yaml,
+            dryRun: true,
+          },
+          ac.signal,
+        );
+        // Toast-style success: flash, then return to idle so the
+        // button label / state machine resets for the next click.
+        // Matches YamlEditor.runDryRun's behaviour.
+        setState({ kind: "success" });
+        setTimeout(() => {
+          if (!ac.signal.aborted) setState({ kind: "idle" });
+        }, 1500);
+        return true;
+      } catch (e) {
+        if (ac.signal.aborted) return false;
+        const isApiError = e instanceof ApiError;
+        const status = isApiError ? e.status : undefined;
+        const isConflict = status === 409;
+        const message =
+          (isApiError ? e.bodyText : undefined) ||
+          (e instanceof Error ? e.message : "dry-run failed");
+        setState({ kind: "error", message, status, isConflict });
+        return false;
+      }
+    },
+    [resource],
+  );
+
   const reset = useCallback(() => setState({ kind: "idle" }), []);
 
-  return { state, submit, reset };
+  return { state, submit, dryRun, reset };
 }

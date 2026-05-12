@@ -21,13 +21,13 @@
 // YAML mode (now without losing their edits) for the full
 // ConflictResolutionView machinery.
 
-import { lazy, Suspense, useCallback, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { usePublishEditorDirty } from "../../hooks/useEditorDirty";
 import type { EditorSource } from "../../lib/customResources";
 import type { ResourceRef } from "../../lib/api";
 import type { SupportedKind } from "../../lib/schemaForm/k8sAllowlist";
-import { useEditorYaml, useResourceMeta } from "../../hooks/useResource";
+import { useEditorYaml, useOpenAPISchema, useResourceMeta } from "../../hooks/useResource";
 import { DetailLoading, DetailError } from "../detail/states";
 import { ConfigMapForm } from "./ConfigMapForm";
 import { SecretForm } from "./SecretForm";
@@ -36,6 +36,10 @@ import { IngressForm } from "./IngressForm";
 import { DeploymentForm } from "./DeploymentForm";
 import { StatefulSetForm } from "./StatefulSetForm";
 import { useApplySubmit } from "./useApplySubmit";
+import { ActionBar } from "../detail/yaml/ActionBar";
+import { PatchPreviewDrawer } from "../detail/yaml/PatchPreviewDrawer";
+import { computeOps } from "../../lib/yamlPatch";
+import { findSchemaForGVK, parseIdentityFromYaml } from "../../lib/k8sSchema";
 
 const YamlEditor = lazy(() =>
   import("../detail/yaml").then((m) => ({ default: m.YamlEditor })),
@@ -149,6 +153,90 @@ function BufferedEditor({
     true,
   );
 
+  // ----- Form-mode action-bar state -----
+  // Mirror of the affordances YamlEditor's ActionBar surfaces (ops
+  // count, patch preview, dry-run, schema status) so form-mode
+  // operators get the same pre-apply visibility. Diff and errors are
+  // intentionally hidden — see hideDiff / hideErrors below.
+  const opsForBar = useMemo(() => {
+    if (draftYaml === baselineYaml) return [];
+    try {
+      return computeOps(baselineYaml, draftYaml);
+    } catch {
+      return [];
+    }
+  }, [baselineYaml, draftYaml]);
+
+  const identityForBar = useMemo(
+    () => parseIdentityFromYaml(draftYaml),
+    [draftYaml],
+  );
+
+  // Schema query gives ActionBar the right pill state (loading /
+  // loaded / missing). Same cache key the form components use under
+  // the hood, so this is a free read. `kind` (SupportedKind) is the
+  // PascalCase K8s kind name; `resource.group/version` come from the
+  // SPA's resolved ResourceRef.
+  const schemaQuery = useOpenAPISchema(
+    cluster,
+    resource.group,
+    resource.version,
+    true,
+  );
+  const schemaLabel = `${resource.group ? resource.group + "/" : ""}${resource.version} ${kind}`;
+  const schemaState: "loading" | "loaded" | "missing" | "failed" =
+    schemaQuery.isError
+      ? "failed"
+      : !schemaQuery.data
+        ? "loading"
+        : findSchemaForGVK(schemaQuery.data, {
+              group: resource.group,
+              version: resource.version,
+              kind,
+            })
+          ? "loaded"
+          : "missing";
+
+  // PatchPreviewDrawer state — mirror of YamlEditor.tsx. Width
+  // persists via the same localStorage key so users get a single
+  // remembered width across YAML / form modes.
+  const [showPatch, setShowPatch] = useState(false);
+  const [patchDrawerWidth, setPatchDrawerWidth] = useState<number>(() => {
+    if (typeof window === "undefined") return 420;
+    const stored = window.localStorage.getItem("periscope.patchDrawerWidth");
+    const n = stored ? parseInt(stored, 10) : NaN;
+    return Number.isFinite(n) && n >= 280 && n <= 800 ? n : 420;
+  });
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem("periscope.patchDrawerWidth", String(patchDrawerWidth));
+  }, [patchDrawerWidth]);
+
+  const onPatchResizeStart = useCallback(
+    (e: React.MouseEvent) => {
+      e.preventDefault();
+      const startX = e.clientX;
+      const startWidth = patchDrawerWidth;
+      document.body.style.cursor = "col-resize";
+      document.body.style.userSelect = "none";
+      const onMove = (ev: MouseEvent) => {
+        // Drawer is on the right edge — drag LEFT widens it (subtract
+        // current clientX from start). Clamp 280…800 to match YAML mode.
+        const dx = startX - ev.clientX;
+        setPatchDrawerWidth(Math.min(800, Math.max(280, startWidth + dx)));
+      };
+      const onUp = () => {
+        document.body.style.cursor = "";
+        document.body.style.userSelect = "";
+        window.removeEventListener("mousemove", onMove);
+        window.removeEventListener("mouseup", onUp);
+      };
+      window.addEventListener("mousemove", onMove);
+      window.addEventListener("mouseup", onUp);
+    },
+    [patchDrawerWidth],
+  );
+
   const dirty = draftYaml !== baselineYaml;
 
   // Publish dirty to the page-level useEditorDirty cache so the
@@ -211,6 +299,15 @@ function BufferedEditor({
     }
   }, [baselineYaml, draftYaml, liveYamlQuery.data, metaQuery.data, submit]);
 
+  const onDryRun = useCallback(() => {
+    void submit.dryRun({
+      baseline: baselineYaml,
+      draft: draftYaml,
+      current: liveYamlQuery.data ?? baselineYaml,
+      meta: metaQuery.data ?? null,
+    });
+  }, [baselineYaml, draftYaml, liveYamlQuery.data, metaQuery.data, submit]);
+
   const onValuesYamlChange = useCallback(
     (next: string) => {
       setDraftYaml(next);
@@ -247,54 +344,83 @@ function BufferedEditor({
         </Suspense>
       ) : (
         <div className="flex flex-1 flex-col overflow-hidden">
-          <div className="flex-1 overflow-auto px-3 py-3">
-            {kind === "ConfigMap" && (
-              <ConfigMapForm
-                cluster={cluster}
-                valuesYaml={draftYaml}
-                onValuesYamlChange={onValuesYamlChange}
-                mode="edit"
-              />
-            )}
-            {kind === "Secret" && (
-              <SecretForm
-                cluster={cluster}
-                valuesYaml={draftYaml}
-                onValuesYamlChange={onValuesYamlChange}
-                mode="edit"
-              />
-            )}
-            {kind === "Service" && (
-              <ServiceForm
-                cluster={cluster}
-                valuesYaml={draftYaml}
-                onValuesYamlChange={onValuesYamlChange}
-                mode="edit"
-              />
-            )}
-            {kind === "Ingress" && (
-              <IngressForm
-                cluster={cluster}
-                valuesYaml={draftYaml}
-                onValuesYamlChange={onValuesYamlChange}
-                mode="edit"
-              />
-            )}
-            {kind === "Deployment" && (
-              <DeploymentForm
-                cluster={cluster}
-                valuesYaml={draftYaml}
-                onValuesYamlChange={onValuesYamlChange}
-                mode="edit"
-              />
-            )}
-            {kind === "StatefulSet" && (
-              <StatefulSetForm
-                cluster={cluster}
-                valuesYaml={draftYaml}
-                onValuesYamlChange={onValuesYamlChange}
-                mode="edit"
-              />
+          {/*
+           * Form scroll area + PatchPreviewDrawer share a flex row so
+           * the drawer pushes (not overlays) the form. Same layout
+           * YamlEditor uses for the Monaco editor + drawer pair.
+           */}
+          <div className="flex min-h-0 flex-1 flex-row">
+            <div className="flex-1 overflow-auto px-3 py-3">
+              {kind === "ConfigMap" && (
+                <ConfigMapForm
+                  cluster={cluster}
+                  valuesYaml={draftYaml}
+                  onValuesYamlChange={onValuesYamlChange}
+                  mode="edit"
+                />
+              )}
+              {kind === "Secret" && (
+                <SecretForm
+                  cluster={cluster}
+                  valuesYaml={draftYaml}
+                  onValuesYamlChange={onValuesYamlChange}
+                  mode="edit"
+                />
+              )}
+              {kind === "Service" && (
+                <ServiceForm
+                  cluster={cluster}
+                  valuesYaml={draftYaml}
+                  onValuesYamlChange={onValuesYamlChange}
+                  mode="edit"
+                />
+              )}
+              {kind === "Ingress" && (
+                <IngressForm
+                  cluster={cluster}
+                  valuesYaml={draftYaml}
+                  onValuesYamlChange={onValuesYamlChange}
+                  mode="edit"
+                />
+              )}
+              {kind === "Deployment" && (
+                <DeploymentForm
+                  cluster={cluster}
+                  valuesYaml={draftYaml}
+                  onValuesYamlChange={onValuesYamlChange}
+                  mode="edit"
+                />
+              )}
+              {kind === "StatefulSet" && (
+                <StatefulSetForm
+                  cluster={cluster}
+                  valuesYaml={draftYaml}
+                  onValuesYamlChange={onValuesYamlChange}
+                  mode="edit"
+                />
+              )}
+            </div>
+            {showPatch && (
+              <>
+                <div
+                  className="w-1 cursor-col-resize bg-border hover:bg-accent"
+                  onMouseDown={onPatchResizeStart}
+                  role="separator"
+                  aria-orientation="vertical"
+                />
+                <PatchPreviewDrawer
+                  width={patchDrawerWidth}
+                  ops={opsForBar}
+                  identity={identityForBar}
+                  cluster={resource.cluster}
+                  group={resource.group}
+                  version={resource.version}
+                  resource={resource.resource}
+                  namespace={resource.namespace}
+                  name={resource.name}
+                  onClose={() => setShowPatch(false)}
+                />
+              </>
             )}
           </div>
           {/*
@@ -315,19 +441,25 @@ function BufferedEditor({
               onDismiss={() => submit.reset()}
             />
           )}
-          <FormActionBar
+          <ActionBar
+            mode="edit"
+            opsCount={opsForBar.length}
+            // hideErrors below suppresses both the indicator and the
+            // "fix N schema errors first" apply gate — form-mode
+            // validation is handled inside the form components and
+            // doesn't surface a count up here.
+            errorCount={0}
             dirty={dirty}
-            // Pending meta == we don't yet know what periscope-spa
-            // owns; firing Apply now would degenerate to a first-apply
-            // body and silently release prior ownership. Gate the
-            // button until the 15s meta poll lands.
-            busy={
-              submit.state.kind === "dryRunning" ||
-              submit.state.kind === "applying" ||
-              metaQuery.isPending
-            }
-            onApply={onApply}
+            applyState={submit.state}
+            schemaLabel={schemaLabel}
+            schemaState={schemaState}
+            metaPending={metaQuery.isPending}
+            hideDiff
+            hideErrors
             onCancel={onCancel}
+            onTogglePatch={() => setShowPatch((s) => !s)}
+            onDryRun={onDryRun}
+            onApply={onApply}
           />
         </div>
       )}
@@ -387,39 +519,6 @@ function ToggleButton({
     >
       {children}
     </button>
-  );
-}
-
-function FormActionBar({
-  dirty,
-  busy,
-  onApply,
-  onCancel,
-}: {
-  dirty: boolean;
-  busy: boolean;
-  onApply: () => void;
-  onCancel: () => void;
-}) {
-  return (
-    <div className="flex items-center justify-end gap-2 border-t border-border bg-surface px-3 py-2">
-      <button
-        type="button"
-        onClick={onCancel}
-        disabled={busy}
-        className="rounded-sm border border-border bg-bg px-3 py-1 font-mono text-[12px] text-ink hover:border-ink-faint disabled:opacity-50"
-      >
-        cancel
-      </button>
-      <button
-        type="button"
-        onClick={onApply}
-        disabled={!dirty || busy}
-        className="rounded-sm border border-accent bg-accent px-3 py-1 font-mono text-[12px] text-bg hover:opacity-90 disabled:opacity-50"
-      >
-        {busy ? "applying…" : "apply changes"}
-      </button>
-    </div>
   );
 }
 

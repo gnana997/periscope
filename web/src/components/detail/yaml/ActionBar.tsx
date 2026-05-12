@@ -33,12 +33,33 @@ interface ActionBarProps {
    * needs managedFields to decide which paths to re-assert.
    */
   metaPending?: boolean;
+  /**
+   * Hide the diff toggle button. Form mode passes this because it has
+   * no Monaco surface to overlay a diff on — the structured patch view
+   * (which IS visible in form mode) carries the same semantic info.
+   */
+  hideDiff?: boolean;
+  /**
+   * Hide the "errors N" indicator + the "fix N schema errors first"
+   * apply gate. Form mode doesn't surface monaco-style markers; its
+   * own validation lives inside the form component and gates the
+   * apply button differently.
+   */
+  hideErrors?: boolean;
   onCancel: () => void;
   onTogglePatch: () => void;
   onDryRun: () => void;
-  onToggleDiff: () => void;
+  /**
+   * Optional in form mode (no diff button → never invoked). Required
+   * in YAML mode.
+   */
+  onToggleDiff?: () => void;
   onApply: () => void;
-  onJumpToError: () => void;
+  /**
+   * Optional in form mode (errors indicator hidden → never invoked).
+   * Required in YAML mode.
+   */
+  onJumpToError?: () => void;
 }
 
 export function ActionBar({
@@ -50,6 +71,8 @@ export function ActionBar({
   schemaLabel,
   schemaState,
   metaPending,
+  hideDiff,
+  hideErrors,
   onCancel,
   onTogglePatch,
   onDryRun,
@@ -85,7 +108,7 @@ export function ActionBar({
       ? metaMsg
       : !dirty
         ? noEdits
-        : errorCount > 0
+        : !hideErrors && errorCount > 0
           ? `fix ${errorCount} schema error${errorCount === 1 ? "" : "s"} first`
           : null;
 
@@ -99,13 +122,15 @@ export function ActionBar({
           value={String(opsCount)}
           className={dirty ? "text-accent" : "text-ink-faint"}
         />
-        <SegmentButton
-          label="errors"
-          value={String(errorCount)}
-          className={errorCount > 0 ? "text-red" : "text-green"}
-          onClick={errorCount > 0 ? onJumpToError : undefined}
-          tabular
-        />
+        {!hideErrors && (
+          <SegmentButton
+            label="errors"
+            value={String(errorCount)}
+            className={errorCount > 0 ? "text-red" : "text-green"}
+            onClick={errorCount > 0 ? onJumpToError : undefined}
+            tabular
+          />
+        )}
         {schemaLabel && (
           <SchemaPill label={schemaLabel} state={schemaState ?? "loading"} />
         )}
@@ -136,14 +161,16 @@ export function ActionBar({
         >
           {applyState.kind === "dryRunning" ? "dry-running…" : "dry-run"}
         </BarButton>
-        <BarButton
-          onClick={guarded(onToggleDiff, diffReason)}
-          softDisabled={diffReason !== null}
-          active={mode === "diff"}
-          title={diffReason ?? undefined}
-        >
-          diff
-        </BarButton>
+        {!hideDiff && (
+          <BarButton
+            onClick={guarded(onToggleDiff ?? (() => undefined), diffReason)}
+            softDisabled={diffReason !== null}
+            active={mode === "diff"}
+            title={diffReason ?? undefined}
+          >
+            diff
+          </BarButton>
+        )}
         <button
           type="button"
           onClick={guarded(onApply, applyReason)}
