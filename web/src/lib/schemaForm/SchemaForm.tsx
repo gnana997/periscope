@@ -37,6 +37,7 @@ import type {
   ValidationIssue,
 } from "./types";
 import { Tooltip } from "../../components/Tooltip";
+import { seedBranchValue } from "./discriminatorSeed";
 
 // InfoTip — tiny "(i)" affordance next to a label that opens a
 // tooltip with the field's description on hover/focus. Used in
@@ -842,15 +843,15 @@ function DiscriminatorInput({
       );
       if (!ok) return;
     }
-    // Seed an empty value of the new branch's shape. Shape B needs
-    // {[discriminatorKey]: {}}; Shape A needs whatever shape the
-    // branch schema describes — empty object covers most cases
-    // since branches with primitive value (Service.targetPort etc.)
-    // expect the operator to type the primitive directly.
-    const next: unknown = branches[idx].discriminatorKey
-      ? { [branches[idx].discriminatorKey as string]: {} }
-      : {};
-    onChange(next);
+    // Seed the branch with its top-level required keys populated
+    // (#180). Without this, Shape A's active-branch detector — which
+    // checks key-presence against the branch's `required` array —
+    // never matches and the BranchSubForm doesn't render, leaving the
+    // operator staring at the same picker buttons with a stray `{}`
+    // already serialized into the YAML buffer. seedBranchValue puts
+    // type-appropriate empties at each required key so the detector
+    // matches on the very next render.
+    onChange(seedBranchValue(branches[idx]));
   };
 
   return (
