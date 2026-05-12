@@ -736,3 +736,45 @@ serves subsequent reads in under a millisecond and refreshes every
 Audit note: Inspector reads are internal metadata fetches, not user
 actions — they do not emit audit rows. AWS CloudTrail records the
 underlying API calls against the periscope-server's role.
+
+### K8s RBAC for in-cluster backend (auto-rendered)
+
+When `inspector.enabled: true` AND at least one entry in `clusters[]`
+uses `backend: in-cluster`, the chart auto-renders a
+`periscope-inspector` ClusterRole + ClusterRoleBinding that grant
+the periscope-server's ServiceAccount cluster-scope
+`get / list / watch` on three resources:
+
+| Resource | Why |
+|---|---|
+| `nodes` (+ `/status`) | Inspector hydrate ([`internal/cve/hydrate.go`](../../internal/cve/hydrate.go)) lists nodes to extract EC2 instance IDs from `Spec.ProviderID` and classify each instance as managed-nodegroup / Karpenter NodeClaim / unmanaged. |
+| `pods` | Image-digest watch keeps the per-pod severity-chip cache fresh — without it the chips render stale or empty until a manual refresh. |
+| `customresourcedefinitions` (`apiextensions.k8s.io`) | Karpenter detection lists CRDs at cluster scope to discover whether `karpenter.sh` resources are installed; otherwise periscope logs a 403 on every cluster activation. |
+
+These reads are used by **background workers** (no human in the loop),
+so they go through the pod's SA directly — not through the
+impersonated user identity that user-driven UI reads use. The
+existing `periscope-impersonator` ClusterRole only grants `impersonate`
+verbs, which is why the chart needs to add this extra grant when the
+in-cluster backend is in play.
+
+**Agent-backed clusters do not need this** — the
+[`periscope-agent` chart](../../deploy/helm/periscope-agent/templates/clusterrole.yaml)
+already grants `get / list / watch` on `*` resources to the agent's
+own SA, so background reads through the tunnel are covered there.
+The auto-rendered ClusterRole on the server side is only emitted
+when at least one cluster in `.Values.clusters` has
+`backend: in-cluster`.
+
+Operators who manage RBAC out-of-band (e.g. a separate Terraform
+module) can override by either keeping `inspector.enabled: false` and
+applying equivalent RBAC themselves, or by deleting the rendered
+template post-`helm template`.
+
+To inspect what would be applied:
+
+```bash
+helm template periscope deploy/helm/periscope \
+  --values my-values.yaml \
+  --show-only templates/inspector-rbac.yaml
+```
