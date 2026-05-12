@@ -299,3 +299,81 @@ func TestApplyResource_EmptyBodyRejected(t *testing.T) {
 		t.Fatalf("expected 'apply: ' prefixed error, got %v", err)
 	}
 }
+
+// TestApplyResource_RetainsCoOwnedAnnotations is the backend half of
+// the issue #181 regression. The SPA's retained-ownership builder
+// (web/src/lib/applyBodyBuilder.ts) now re-asserts every path
+// periscope-spa already claimed alongside the user's edit. This test
+// proves the apply handler doesn't strip those re-asserted paths on
+// the way to the dynamic client: a Deployment body containing kubectl-
+// owned annotations + a periscope-spa scale edit must round-trip
+// through ApplyResource without the annotations being filtered.
+//
+// (The fake dynamic client's reactor doesn't model real SSA field-
+// manager merge — that requires a real apiserver. What this test
+// guards against is regressions in stripDisallowedMetadata or
+// elsewhere in apply.go that would silently strip metadata.annotations
+// before the dynamic client sees it.)
+func TestApplyResource_RetainsCoOwnedAnnotations(t *testing.T) {
+	const retainedBody = `apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nginx
+  namespace: prod
+  annotations:
+    deployment.kubernetes.io/revision: "1"
+    kubectl.kubernetes.io/restartedAt: "2026-05-01T00:00:00Z"
+spec:
+  replicas: 3
+`
+	// Seed the tracker so the reactor's Update branch fires (mirrors
+	// the production case where the resource pre-exists).
+	existing := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "apps/v1",
+			"kind":       "Deployment",
+			"metadata": map[string]interface{}{
+				"name":      "nginx",
+				"namespace": "prod",
+			},
+			"spec": map[string]interface{}{"replicas": int64(1)},
+		},
+	}
+	fake := fakeDynamicWithApplyReactor(t, nil, existing)
+	installFakeDynamicClient(t, fake)
+
+	args := ApplyResourceArgs{
+		Cluster:   applyTestCluster,
+		Group:     "apps",
+		Version:   "v1",
+		Resource:  "deployments",
+		Namespace: "prod",
+		Name:      "nginx",
+		Body:      []byte(retainedBody),
+		DryRun:    false,
+	}
+	if _, err := ApplyResource(context.Background(), stubProvider{}, args); err != nil {
+		t.Fatalf("ApplyResource: %v", err)
+	}
+
+	stored, err := fake.Tracker().Get(deploymentGVR, "prod", "nginx")
+	if err != nil {
+		t.Fatalf("tracker Get: %v", err)
+	}
+	u := stored.(*unstructured.Unstructured)
+	annotations, found, err := unstructured.NestedStringMap(u.Object, "metadata", "annotations")
+	if err != nil {
+		t.Fatalf("NestedStringMap: %v", err)
+	}
+	if !found {
+		t.Fatalf("metadata.annotations missing from stored object — apply handler stripped them")
+	}
+	for _, key := range []string{
+		"deployment.kubernetes.io/revision",
+		"kubectl.kubernetes.io/restartedAt",
+	} {
+		if _, ok := annotations[key]; !ok {
+			t.Errorf("annotation %q missing from stored object — handler stripped it from the patch body", key)
+		}
+	}
+}

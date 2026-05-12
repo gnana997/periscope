@@ -10,12 +10,15 @@
 // counts as the rollout progresses; the existing list-poll picks up
 // the cascade pod churn within ~15s (issue #4).
 
-import { ApiError, type YamlKind } from "../../lib/api";
+import { ApiError, api, type YamlKind } from "../../lib/api";
 import { KIND_REGISTRY } from "../../lib/k8sKinds";
 import { queryKeys } from "../../lib/queryKeys";
-import { buildMinimalSSA, type Identity } from "../../lib/yamlPatch";
+import { type Identity, type Op } from "../../lib/yamlPatch";
 import { useOptimisticMutation } from "./_useOptimistic";
-import { applyWithLenientConflict } from "./_applyWithLenientConflict";
+import {
+  applyWithLenientConflictRetained,
+  fetchCurrentYamlForKind,
+} from "./_applyWithLenientConflict";
 
 export type RestartableKind = "deployments" | "statefulsets" | "daemonsets";
 
@@ -66,37 +69,45 @@ export function useRolloutRestart(args: RestartArgs) {
     rollback: (qc, snap) => {
       qc.setQueryData(detailKey, snap.detail);
     },
-    mutationFn: () => {
+    mutationFn: async () => {
       const identity: Identity = {
         apiVersion: meta.group ? `${meta.group}/${meta.version}` : meta.version,
         kind: meta.kind,
         name: args.name,
         namespace: args.namespace,
       };
-      const yaml = buildMinimalSSA(
-        [
-          {
-            op: "replace",
-            path: [
-              "spec",
-              "template",
-              "metadata",
-              "annotations",
-              "kubectl.kubernetes.io/restartedAt",
-            ],
-            // ISO-8601 timestamp matches kubectl's format and is what
-            // controllers/operators expect to see in the field.
-            value: new Date().toISOString(),
-          },
-        ],
-        identity,
-      );
+      const ops: Op[] = [
+        {
+          op: "replace",
+          path: [
+            "spec",
+            "template",
+            "metadata",
+            "annotations",
+            "kubectl.kubernetes.io/restartedAt",
+          ],
+          // ISO-8601 timestamp matches kubectl's format and is what
+          // controllers/operators expect to see in the field.
+          value: new Date().toISOString(),
+        },
+      ];
+      const [current, resourceMeta] = await Promise.all([
+        fetchCurrentYamlForKind(args.cluster, args.kind, args.namespace, args.name),
+        api.getMeta({
+          cluster: args.cluster,
+          group: meta.group,
+          version: meta.version,
+          resource: meta.resource,
+          namespace: args.namespace,
+          name: args.name,
+        }),
+      ]);
       // Lenient SSA — kubectl-rollout (HUMAN) commonly owns this
       // annotation; the wrapper auto-takes-over on the second attempt.
       // GitOps-managed workloads now surface a classified error
       // ("Flux will revert in <5 min") instead of writing the
       // annotation only for it to be silently reverted on reconcile.
-      return applyWithLenientConflict(
+      return applyWithLenientConflictRetained(
         {
           cluster: args.cluster,
           group: meta.group,
@@ -104,7 +115,10 @@ export function useRolloutRestart(args: RestartArgs) {
           resource: meta.resource,
           namespace: args.namespace,
           name: args.name,
-          yaml,
+          identity,
+          ops,
+          current,
+          managedFields: resourceMeta.managedFields,
         },
         "rollout restart",
       );

@@ -128,6 +128,12 @@ export function useApplyYamlState(): UseApplyYamlState {
       const gvr = gvrFromApiVersionAndKind(doc.apiVersion, doc.kind);
       updateResult(doc.id, { state: "pending" });
       try {
+        // Multi-doc Apply-YAML dialog: each doc has no baseline (this is
+        // a create-or-upsert flow, not an edit of a known resource), so
+        // there are no prior-owned paths to retain — we send the user's
+        // full intent as-is. The retained-ownership builder in
+        // lib/applyBodyBuilder.ts (see issue #181) is specifically for
+        // editor paths where a baseline + managedFields are available.
         const response = await api.applyResource(
           {
             cluster,
@@ -177,6 +183,9 @@ export function useApplyYamlState(): UseApplyYamlState {
       const ctrl = new AbortController();
       updateResult(doc.id, { state: "pending" });
       try {
+        // Force-apply path of the multi-doc dialog — same create-or-
+        // upsert semantics as runOne above, so we send doc.raw as-is
+        // rather than the retained-ownership minimal patch. See #181.
         await api.applyResource(
           {
             cluster,

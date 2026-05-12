@@ -4,15 +4,18 @@
 // completes; both the detail cache and any loaded list caches are
 // updated.
 
-import { ApiError } from "../../lib/api";
+import { ApiError, api } from "../../lib/api";
 import { KIND_REGISTRY } from "../../lib/k8sKinds";
 import { queryKeys } from "../../lib/queryKeys";
-import { buildMinimalSSA, type Identity } from "../../lib/yamlPatch";
+import { type Identity, type Op } from "../../lib/yamlPatch";
 import { patchRowInList } from "../../lib/listShape";
 import type { ResourceListResponse } from "../../lib/types";
 import type { QueryKey } from "@tanstack/react-query";
 import { useOptimisticMutation } from "./_useOptimistic";
-import { applyWithLenientConflict } from "./_applyWithLenientConflict";
+import {
+  applyWithLenientConflictRetained,
+  fetchCurrentYamlForKind,
+} from "./_applyWithLenientConflict";
 
 interface ToggleSuspendArgs {
   cluster: string;
@@ -79,18 +82,28 @@ export function useToggleSuspend(args: ToggleSuspendArgs) {
       qc.setQueryData(detailKey, snap.detail);
       for (const [key, data] of snap.lists) qc.setQueryData(key, data);
     },
-    mutationFn: (vars) => {
+    mutationFn: async (vars) => {
       const identity: Identity = {
         apiVersion: `${meta.group}/${meta.version}`,
         kind: meta.kind,
         name: args.name,
         namespace: args.namespace,
       };
-      const yaml = buildMinimalSSA(
-        [{ op: "replace", path: ["spec", "suspend"], value: vars.suspend }],
-        identity,
-      );
-      return applyWithLenientConflict(
+      const ops: Op[] = [
+        { op: "replace", path: ["spec", "suspend"], value: vars.suspend },
+      ];
+      const [current, resourceMeta] = await Promise.all([
+        fetchCurrentYamlForKind(args.cluster, "cronjobs", args.namespace, args.name),
+        api.getMeta({
+          cluster: args.cluster,
+          group: meta.group,
+          version: meta.version,
+          resource: meta.resource,
+          namespace: args.namespace,
+          name: args.name,
+        }),
+      ]);
+      return applyWithLenientConflictRetained(
         {
           cluster: args.cluster,
           group: meta.group,
@@ -98,7 +111,10 @@ export function useToggleSuspend(args: ToggleSuspendArgs) {
           resource: meta.resource,
           namespace: args.namespace,
           name: args.name,
-          yaml,
+          identity,
+          ops,
+          current,
+          managedFields: resourceMeta.managedFields,
         },
         "suspend toggle",
       );
