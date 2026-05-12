@@ -140,6 +140,7 @@ func (m *Manager) hydratePods(ctx context.Context, cluster clusters.Cluster, cs 
 	if err != nil {
 		return fmt.Errorf("list pods: %w", err)
 	}
+	m.log.Info("cve hydratePods listed", "cluster", cluster.Name, "pod_count", len(pods.Items), "list_err", err)
 
 	// First pass: count refs and collect the unique digest set.
 	seenDigest := make(map[string]struct{}, len(pods.Items))
@@ -153,6 +154,7 @@ func (m *Manager) hydratePods(ctx context.Context, cluster clusters.Cluster, cs 
 			}
 		}
 	}
+	m.log.Info("cve hydratePods digests", "cluster", cluster.Name, "unique_digests", len(digestList))
 	if len(digestList) == 0 {
 		return nil
 	}
