@@ -176,11 +176,27 @@
     },
     "clusterRBAC": {
       "type": "object",
-      "description": "Auto-create the ClusterRoleBindings that map periscope-tier:* groups to K8s built-in roles (read→view, write→edit, admin→cluster-admin) plus the custom triage + maintain ClusterRoles. Without these bindings, requests reaching this managed cluster get 403 Forbidden — see Issue 2.5 in deployment-journey.md. Default true so deployment-out-of-the-box works; disable if you want to ship a tighter custom set.",
+      "description": "Auto-create the ClusterRoleBindings that map periscope-tier:* groups to K8s built-in roles (read→view, write→edit) plus the custom triage + maintain ClusterRoles. The admin tier → cluster-admin binding is now opt-in via adminTier.enabled (#84). Without these bindings, requests reaching this managed cluster get 403 Forbidden — see Issue 2.5 in deployment-journey.md. Default enabled=true so deployment-out-of-the-box works; disable if you want to ship a tighter custom set.",
       "properties": {
         "enabled": {
           "type": "boolean",
-          "description": "When true, the chart installs ClusterRoleBindings for all five tier groups + the triage/maintain custom ClusterRoles. Set false to manage tier bindings yourself."
+          "description": "When true, the chart installs ClusterRoleBindings for the read / triage / write / maintain tier groups + the triage/maintain custom ClusterRoles. The admin tier binding is gated separately by adminTier.enabled."
+        },
+        "adminTier": {
+          "type": "object",
+          "description": "Issue #84: cluster-admin tier binding is opt-in. Default install does not render the periscope-tier:admin ClusterRoleBinding so CIS 5.1.1 / AWS Guardrails pass out of the box.",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "description": "Render the periscope-tier:admin ClusterRoleBinding on this managed cluster. Default false."
+            },
+            "clusterRoleName": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Target ClusterRole for the admin tier. Defaults to `cluster-admin`. Operators who want a tighter posture can point at a custom role they ship out-of-band."
+            }
+          },
+          "additionalProperties": false
         }
       },
       "additionalProperties": false

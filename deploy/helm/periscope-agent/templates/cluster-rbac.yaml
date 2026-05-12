@@ -53,7 +53,12 @@ subjects:
   - kind: Group
     name: periscope-tier:write
     apiGroup: rbac.authorization.k8s.io
+{{- if and .Values.clusterRBAC.adminTier .Values.clusterRBAC.adminTier.enabled }}
 ---
+# Issue #84 — opt-in cluster-admin binding for the admin tier.
+# Default `clusterRoleName: cluster-admin` preserves v1.0.x behaviour
+# when adminTier.enabled=true; operators can repoint at a tighter
+# custom ClusterRole via clusterRBAC.adminTier.clusterRoleName.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
@@ -63,11 +68,12 @@ metadata:
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
-  name: cluster-admin
+  name: {{ .Values.clusterRBAC.adminTier.clusterRoleName | default "cluster-admin" }}
 subjects:
   - kind: Group
     name: periscope-tier:admin
     apiGroup: rbac.authorization.k8s.io
+{{- end }}
 
 ---
 # 2a. Triage tier — view + debug verbs, no spec mutation.

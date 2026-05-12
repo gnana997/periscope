@@ -10,6 +10,27 @@
     {{- $hasInCluster = true -}}
   {{- end }}
 {{- end }}
+
+{{- /*
+  Issue #84 migration guard. The default cluster-admin ClusterRoleBinding
+  is now opt-in via clusterRBAC.adminTier.enabled. If the operator left
+  it off but explicitly mapped at least one IdP group to the admin tier,
+  their impersonated admins would land on zero matching RBAC at apiserver
+  evaluation time — a silent 403 storm in the dashboard. Fail loudly at
+  template time with the migration recipe instead.
+*/}}
+{{- $adminTierEnabled := false -}}
+{{- if .Values.clusterRBAC.adminTier }}
+  {{- $adminTierEnabled = .Values.clusterRBAC.adminTier.enabled -}}
+{{- end }}
+{{- if and (not $adminTierEnabled) (eq .Values.auth.authorization.mode "tier") }}
+  {{- range $group, $tier := .Values.auth.authorization.groupTiers }}
+    {{- if eq $tier "admin" }}
+      {{- fail (printf "auth.authorization.groupTiers maps %q to the admin tier, but clusterRBAC.adminTier.enabled is false. Either set clusterRBAC.adminTier.enabled=true (restores v1.0.x behaviour — renders the cluster-admin ClusterRoleBinding), or remap %q to a non-admin tier (read|triage|write|maintain). See CHANGELOG.md and docs/setup/cluster-rbac.md for the v1.x admin-tier opt-in note (#84)." $group $group) }}
+    {{- end }}
+  {{- end }}
+{{- end }}
+
 {{- if or .Values.clusterRBAC.enabled $hasInCluster -}}
 {{- /*
   cluster-rbac.yaml — per-cluster RBAC manifests for tier-mode
@@ -104,7 +125,12 @@ subjects:
   - kind: Group
     name: periscope-tier:write
     apiGroup: rbac.authorization.k8s.io
+{{- if and .Values.clusterRBAC.adminTier .Values.clusterRBAC.adminTier.enabled }}
 ---
+# Issue #84 — opt-in cluster-admin binding for the admin tier.
+# Default `clusterRoleName: cluster-admin` preserves v1.0.x behaviour
+# when adminTier.enabled=true; operators can repoint at a tighter
+# custom ClusterRole via clusterRBAC.adminTier.clusterRoleName.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
@@ -114,11 +140,12 @@ metadata:
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
-  name: cluster-admin
+  name: {{ .Values.clusterRBAC.adminTier.clusterRoleName | default "cluster-admin" }}
 subjects:
   - kind: Group
     name: periscope-tier:admin
     apiGroup: rbac.authorization.k8s.io
+{{- end }}
 
 ---
 # 3a. Triage tier — view + debug verbs, no spec mutation.
@@ -296,4 +323,31 @@ subjects:
   - kind: Group
     name: periscope-tier:maintain
     apiGroup: rbac.authorization.k8s.io
+
+{{- /*
+  Issue #142: shared authz mode + in-cluster backend.
+  When the server's own SA is the apiserver caller (no impersonation
+  chain), the chart auto-renders this ClusterRoleBinding so the
+  dashboard's list / detail / overview calls don't 403 silently. The
+  read-only `view` default is safe; flip clusterRBAC.sharedRoleName
+  to `edit` or `cluster-admin` for eval / dev setups, or to "" to
+  suppress entirely (operators who manage RBAC out-of-band).
+*/}}
+{{- if and $hasInCluster (eq .Values.auth.authorization.mode "shared") (ne (.Values.clusterRBAC.sharedRoleName | default "") "") }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: periscope-shared
+  labels:
+    {{- include "periscope.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ .Values.clusterRBAC.sharedRoleName }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "periscope.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
+{{- end }}
 {{- end }}

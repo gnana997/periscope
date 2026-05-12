@@ -35,18 +35,21 @@ auth:
     clientID: ""
     clientSecret: ""              # not used in dev mode
   authorization:
-    mode: tier
-    groupTiers:
-      # dev@local resolves to admin tier so the impersonation chain
-      # in the chart's cluster-rbac.yaml grants cluster-admin via
-      # the periscope-tier:admin ClusterRoleBinding. Required for the
-      # dev user to actually see resources in the SPA — shared mode
-      # left the SA with no RBAC and every list-call returned 403.
-      periscope-users: admin
+    # Shared mode is the simplest path for local kind: the periscope
+    # SA hits its own apiserver directly (no impersonation chain).
+    # Chart auto-renders a `periscope-shared` ClusterRoleBinding
+    # pointing the SA at the role named in clusterRBAC.sharedRoleName
+    # (default `view`, raised below to `edit` so the apply flow works).
+    # Before #142 the SA had zero RBAC in this mode and every
+    # list-call returned 403 — the workaround was to switch to tier
+    # mode with admin-mapped groups (which then renders cluster-admin,
+    # tripping CIS 5.1.1). Both broken paths are fixed; this file
+    # demonstrates the clean default.
+    mode: shared
   dev:
     subject: dev@local
     email:   dev@local
-    groups:  [periscope-users]    # matches a typical default-tier admin group
+    groups:  [periscope-users]    # purely an audit identity in shared mode
 
 # ─── Secret ──────────────────────────────────────────────────────────
 # `plain` mode with empty value → chart renders an empty Secret so the
@@ -64,6 +67,13 @@ secrets:
 clusters:
   - name: kind-local
     backend: in-cluster
+
+# ─── Cluster RBAC — shared-mode role override ────────────────────────
+# Bump from the default `view` (read-only) to `edit` so the dashboard's
+# apply / scale / restart flows work on the local cluster. Stays well
+# clear of cluster-admin — CIS 5.1.1 / AWS Guardrails still pass.
+clusterRBAC:
+  sharedRoleName: edit
 
 # ─── Resource limits — sized for a single-node kind/k3d cluster ──────
 resources:

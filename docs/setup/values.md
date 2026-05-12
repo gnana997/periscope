@@ -253,6 +253,9 @@ Tier-mode RBAC manifests rendered for the central cluster. See
 |---|---|---|---|
 | `clusterRBAC.enabled` | bool | `false` | Render the periscope-tier ClusterRoles + bindings. |
 | `clusterRBAC.bridgeGroup` | string | `periscope-bridge` | K8s group your EKS Access Entry binds the pod principal to. |
+| `clusterRBAC.adminTier.enabled` | bool | `false` | **(#84)** Render the `periscope-tier:admin` ClusterRoleBinding. OFF by default so CIS 5.1.1 / AWS Guardrails pass. Set true to restore v1.0.x behaviour. |
+| `clusterRBAC.adminTier.clusterRoleName` | string | `cluster-admin` | Target ClusterRole for the admin tier when enabled. Repoint at a tighter custom role for a less-permissive admin tier. |
+| `clusterRBAC.sharedRoleName` | string | `view` | **(#142)** When `auth.authorization.mode: shared` and any `clusters[].backend: in-cluster`, the chart auto-renders a `periscope-shared` ClusterRoleBinding pointing the SA at this ClusterRole. Default `view` is read-only. Use `edit` for write access, or empty `""` to suppress entirely. |
 
 ## agent
 
@@ -318,7 +321,9 @@ topology decision matrix.
 | Value | Type | Default | Notes |
 |---|---|---|---|
 | `clusterRole.enabled` | bool | `true` | Bind the agent SA to a ClusterRole granting `get/list/watch` on every kind + `impersonate` on users/groups/SAs. |
-| `clusterRBAC.enabled` | bool | `true` | Install tier ClusterRoleBindings on the managed cluster (`periscope-tier-read/write/admin/triage/maintain`). Required for impersonation to actually authorize. |
+| `clusterRBAC.enabled` | bool | `true` | Install tier ClusterRoleBindings on the managed cluster (`periscope-tier-read/write/triage/maintain` (the admin binding is opt-in — see below)). Required for impersonation to actually authorize. |
+| `clusterRBAC.adminTier.enabled` | bool | `false` | **(#84)** Render the `periscope-tier:admin` ClusterRoleBinding on the managed cluster. OFF by default so CIS 5.1.1 / AWS Guardrails pass. Set true to restore v1.0.x behaviour. |
+| `clusterRBAC.adminTier.clusterRoleName` | string | `cluster-admin` | Target ClusterRole for the admin tier when enabled. Repoint at a tighter custom role you ship out-of-band. |
 
 ## resources / security context
 

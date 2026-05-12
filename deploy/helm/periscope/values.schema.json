@@ -189,7 +189,31 @@
     "clusterRBAC": {
       "type": "object",
       "properties": {
-        "enabled": { "type": "boolean" }
+        "enabled": { "type": "boolean" },
+        "bridgeGroup": {
+          "type": "string",
+          "description": "K8s group the EKS Access Entry binds Periscope's pod principal to on each managed cluster. Referenced by the periscope-impersonator ClusterRoleBinding."
+        },
+        "adminTier": {
+          "type": "object",
+          "description": "Issue #84: cluster-admin tier binding is opt-in. Default install does not render the periscope-tier:admin ClusterRoleBinding so CIS 5.1.1 / AWS Guardrails pass out of the box.",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "description": "Render the periscope-tier:admin ClusterRoleBinding. Default false."
+            },
+            "clusterRoleName": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Target ClusterRole for the admin tier. Defaults to `cluster-admin`. Operators who want a tighter posture can point at a custom role (e.g. `cluster-admin-no-rbac` they ship out-of-band)."
+            }
+          },
+          "additionalProperties": false
+        },
+        "sharedRoleName": {
+          "type": "string",
+          "description": "Issue #142: when auth.authorization.mode is `shared` and any clusters[].backend is `in-cluster`, the chart renders a periscope-shared ClusterRoleBinding pointing the periscope SA at this ClusterRole. Default `view` (read-only, safe). Set to empty string to suppress."
+        }
       }
     },
     "podIdentity": {
