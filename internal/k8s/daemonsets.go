@@ -3,6 +3,7 @@ package k8s
 import (
 	"context"
 	"fmt"
+	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -113,5 +114,6 @@ func daemonSetSummary(d *appsv1.DaemonSet) DaemonSet {
 		Image:                  firstImage,
 		ImageCount:             imageCount,
 		CreatedAt:              d.CreationTimestamp.Time,
+		Stuck:                  DetectDaemonSetStuck(d, time.Now()),
 	}
 }

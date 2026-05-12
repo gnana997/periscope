@@ -192,6 +192,7 @@ type Deployment struct {
 	Image      string `json:"image,omitempty"`
 	ImageCount int    `json:"imageCount,omitempty"`
 	CreatedAt         time.Time `json:"createdAt"`
+	Stuck             *StuckState `json:"stuck,omitempty"`
 }
 
 type DeploymentList struct {
@@ -316,6 +317,7 @@ type StatefulSet struct {
 	Image      string `json:"image,omitempty"`
 	ImageCount int    `json:"imageCount,omitempty"`
 	CreatedAt       time.Time `json:"createdAt"`
+	Stuck             *StuckState `json:"stuck,omitempty"`
 }
 
 type StatefulSetList struct {
@@ -349,6 +351,7 @@ type DaemonSet struct {
 	Image      string `json:"image,omitempty"`
 	ImageCount int    `json:"imageCount,omitempty"`
 	CreatedAt              time.Time `json:"createdAt"`
+	Stuck             *StuckState `json:"stuck,omitempty"`
 }
 
 type DaemonSetList struct {

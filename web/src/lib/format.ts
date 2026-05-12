@@ -19,6 +19,22 @@ export function ageFrom(iso: string, now: Date = new Date()): string {
   return `${d}d`;
 }
 
+/**
+ * Convert a millisecond duration into the same kubectl-style age
+ * string ageFrom emits (47s / 12m / 4h / 2d). Used wherever the
+ * backend hands us a precomputed "since" delta in ms.
+ */
+export function formatDurationMs(ms: number): string {
+  const sec = Math.max(0, Math.floor(ms / 1000));
+  if (sec < 60) return `${sec}s`;
+  const min = Math.floor(sec / 60);
+  if (min < 60) return `${min}m`;
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return `${hr}h`;
+  const d = Math.floor(hr / 24);
+  return `${d}d`;
+}
+
 /** Lowercase substring match. */
 export function nameMatches(name: string, query: string): boolean {
   if (!query) return true;

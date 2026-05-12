@@ -186,6 +186,18 @@ export interface PodDetail extends Pod {
   annotations?: Record<string, string>;
 }
 
+// --- Stuck rollout (cross-kind) ---
+
+/** StuckReason mirrors internal/k8s/stuck.go StuckReason constants. */
+export type StuckReason = "progress-deadline-exceeded" | "stalled";
+
+/** StuckState — backend-computed signal that a rollout is wedged.
+ *  Pointer-valued on the backend; absent here means healthy. */
+export interface StuckState {
+  reason: StuckReason;
+  sinceMs: number;
+}
+
 // --- Deployment ---
 
 export interface Deployment {
@@ -199,6 +211,8 @@ export interface Deployment {
   image?: string;
   imageCount?: number;
   createdAt: string;
+  /** Backend-computed; absent when healthy. */
+  stuck?: StuckState;
 }
 
 export interface DeploymentList {
@@ -240,6 +254,8 @@ export interface StatefulSet {
   image?: string;
   imageCount?: number;
   createdAt: string;
+  /** Backend-computed; absent when healthy. */
+  stuck?: StuckState;
 }
 
 export interface StatefulSetList {
@@ -271,6 +287,8 @@ export interface DaemonSet {
   image?: string;
   imageCount?: number;
   createdAt: string;
+  /** Backend-computed; absent when healthy. */
+  stuck?: StuckState;
 }
 
 export interface DaemonSetList {

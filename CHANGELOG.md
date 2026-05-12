@@ -13,6 +13,20 @@ tag.
 
 ## [Unreleased]
 
+## [1.0.7] - 2026-05-12
+
+### Added
+
+- Workloads: stuck-rollout badge + detail-pane banner on Deployment /
+  StatefulSet / DaemonSet rows. Backend-side detector (Go) flags
+  workloads whose `Progressing` condition has tripped
+  `ProgressDeadlineExceeded`, or whose `updatedReplicas <
+  desiredReplicas` (`updatedNumberScheduled < desiredNumberScheduled`
+  for DaemonSets) has not changed for ≥10 minutes. The wire shape
+  is a small `stuck?: { reason, sinceMs }` field, computed by
+  internal/k8s/stuck.go and consumed dumbly by the SPA — same
+  primitive the future MCP / agent tool layer will reuse (#177).
+
 ### Fixed
 
 - Apply YAML: dialog footer now shows a clear "✓ applied N" confirmation
