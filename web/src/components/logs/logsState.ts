@@ -30,7 +30,12 @@ export const DEFAULT_LOGS_STATE: LogsViewState = {
   previous: false,
   follow: true,
   timestamps: true,
-  wrap: false,
+  // Default wrap ON — log lines are usually wider than the pane, and
+  // truncated lines force operators to horizontal-scroll just to see
+  // the end of a stack trace. Switched from default-off after the
+  // teammate request. Mirrors the `follow` / `timestamps` URL pattern:
+  // the param is only present when the operator has opted out.
+  wrap: true,
   search: "",
   podFilter: [],
 };
@@ -44,7 +49,7 @@ export function stateToParams(state: LogsViewState): URLSearchParams {
   if (state.previous) p.set("previous", "true");
   if (!state.follow) p.set("follow", "false");
   if (!state.timestamps) p.set("ts", "false");
-  if (state.wrap) p.set("wrap", "true");
+  if (!state.wrap) p.set("wrap", "false");
   if (state.search) p.set("q", state.search);
   if (state.podFilter.length > 0) p.set("pf", state.podFilter.join(","));
   return p;
@@ -62,7 +67,7 @@ export function paramsToState(params: URLSearchParams): LogsViewState {
     previous: params.get("previous") === "true",
     follow: params.get("follow") !== "false",
     timestamps: params.get("ts") !== "false",
-    wrap: params.get("wrap") === "true",
+    wrap: params.get("wrap") !== "false",
     search: params.get("q") ?? "",
     podFilter: (params.get("pf") ?? "").split(",").filter(Boolean),
   };

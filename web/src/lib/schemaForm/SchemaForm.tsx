@@ -37,6 +37,7 @@ import type {
   ValidationIssue,
 } from "./types";
 import { Tooltip } from "../../components/Tooltip";
+import { seedBranchValue } from "./discriminatorSeed";
 
 // InfoTip — tiny "(i)" affordance next to a label that opens a
 // tooltip with the field's description on hover/focus. Used in
@@ -830,6 +831,25 @@ function DiscriminatorInput({
       }
     }
   }
+  if (active < 0 && !isObjectValue && value !== undefined && value !== null) {
+    // Primitive-branched discriminator (Service.targetPort string-or-
+    // integer style). The value IS a scalar; match the branch whose
+    // schema declares the same primitive type. Order matters — first
+    // branch whose type accepts the runtime value wins, which mirrors
+    // how the apiserver evaluates the oneOf.
+    const valueType = typeof value;
+    for (let i = 0; i < branches.length; i++) {
+      const t = branches[i].schema.type;
+      if (
+        (t === "string" && valueType === "string") ||
+        ((t === "integer" || t === "number") && valueType === "number") ||
+        (t === "boolean" && valueType === "boolean")
+      ) {
+        active = i;
+        break;
+      }
+    }
+  }
 
   const activeBranch = active >= 0 ? branches[active] : null;
   const valueIsEmpty = !value || (isObjectValue && Object.keys(valueObj).length === 0);
@@ -842,15 +862,15 @@ function DiscriminatorInput({
       );
       if (!ok) return;
     }
-    // Seed an empty value of the new branch's shape. Shape B needs
-    // {[discriminatorKey]: {}}; Shape A needs whatever shape the
-    // branch schema describes — empty object covers most cases
-    // since branches with primitive value (Service.targetPort etc.)
-    // expect the operator to type the primitive directly.
-    const next: unknown = branches[idx].discriminatorKey
-      ? { [branches[idx].discriminatorKey as string]: {} }
-      : {};
-    onChange(next);
+    // Seed the branch with its top-level required keys populated
+    // (#180). Without this, Shape A's active-branch detector — which
+    // checks key-presence against the branch's `required` array —
+    // never matches and the BranchSubForm doesn't render, leaving the
+    // operator staring at the same picker buttons with a stray `{}`
+    // already serialized into the YAML buffer. seedBranchValue puts
+    // type-appropriate empties at each required key so the detector
+    // matches on the very next render.
+    onChange(seedBranchValue(branches[idx]));
   };
 
   return (
@@ -877,7 +897,10 @@ function DiscriminatorInput({
       {activeBranch ? (
         <BranchSubForm
           branch={activeBranch}
-          value={valueObj}
+          // Pass `value` (not `valueObj`) so primitive-branched
+          // discriminators see the scalar verbatim. BranchSubForm
+          // narrows to a record internally for object branches.
+          value={value}
           onChange={onChange}
           readOnly={readOnly ?? false}
         />
@@ -902,10 +925,33 @@ function BranchSubForm({
   readOnly,
 }: {
   branch: NonNullable<FieldDescriptor["branches"]>[number];
-  value: Record<string, unknown>;
+  value: unknown;
   onChange: (next: unknown) => void;
   readOnly: boolean;
 }) {
+  // Primitive-branched discriminator (Service.targetPort string-or-
+  // integer style). The branch's "value" is a scalar, so we render
+  // one direct input bound to the discriminator's root path. onChange
+  // here takes the new scalar value directly — the parent's setAtPath
+  // wires it into the resource tree.
+  const primitive = primitiveBranchType(branch.schema.type);
+  if (primitive) {
+    return (
+      <PrimitiveBranchInput
+        type={primitive}
+        value={value}
+        onChange={onChange}
+        readOnly={readOnly}
+      />
+    );
+  }
+
+  // Object-branched from here. Narrow the unknown value into a record.
+  const valueObj =
+    value !== null && typeof value === "object" && !Array.isArray(value)
+      ? (value as Record<string, unknown>)
+      : {};
+
   // Empty branch (Shape B "marker" branch where the schema is just
   // `{type: object, properties: {}}` — operator selecting it just
   // sets `{[key]: {}}`). Render a friendly status line.
@@ -928,7 +974,7 @@ function BranchSubForm({
           <FieldRow
             key={child.path.join(".")}
             descriptor={child}
-            values={value}
+            values={valueObj}
             issues={[]}
             mode={readOnly ? "edit" : "edit"}
             onChange={onChange}
@@ -937,6 +983,57 @@ function BranchSubForm({
       </div>
     </fieldset>
   );
+}
+
+// PrimitiveBranchInput — renders one direct input for a primitive-
+// branched discriminator (Service.targetPort string-or-integer, etc.).
+// The value at the discriminator's path IS the scalar, so the input's
+// onChange is bound directly to the discriminator-level onChange that
+// BranchSubForm received.
+function PrimitiveBranchInput({
+  type,
+  value,
+  onChange,
+  readOnly,
+}: {
+  type: "string" | "number" | "integer" | "boolean";
+  value: unknown;
+  onChange: (next: unknown) => void;
+  readOnly: boolean;
+}) {
+  const id = useId();
+  // Synthesize a minimal FieldDescriptor so we can reuse the existing
+  // FieldInput dispatch (handles boolean as checkbox, number as
+  // <input type=number>, string as <input type=text>, etc.).
+  const descriptor: FieldDescriptor = {
+    path: [],
+    label: type,
+    type,
+    required: false,
+  };
+  return (
+    <FieldInput
+      id={id}
+      descriptor={descriptor}
+      value={value}
+      onChange={onChange}
+      readOnly={readOnly}
+    />
+  );
+}
+
+// primitiveBranchType maps a JSON-Schema `type` to the FieldDescriptor
+// primitive types we know how to render. Returns null for object /
+// array / unknown types so the caller falls through to object-branch
+// handling.
+function primitiveBranchType(
+  t: unknown,
+): "string" | "number" | "integer" | "boolean" | null {
+  if (t === "string") return "string";
+  if (t === "number") return "number";
+  if (t === "integer") return "integer";
+  if (t === "boolean") return "boolean";
+  return null;
 }
 
 // ArrayRow — single-row container for an array-of-objects descriptor's

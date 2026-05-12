@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { buildFieldDescriptors } from "./walker";
+import { buildFieldDescriptors, walkRequiredUnsupported } from "./walker";
 import { buildRefResolver, findSchemaByGVK } from "./refResolver";
 import { filterSchemaForKind, getCreateOnlyPaths, getSectionResolver } from "./k8sAllowlist";
-import type { JSONSchema } from "./types";
+import type { FieldDescriptor, JSONSchema } from "./types";
 import type { OpenAPIDoc } from "../api";
 
 // Helper: build an OpenAPIDoc with a components.schemas bundle
@@ -413,6 +413,50 @@ describe("walker — oneOf discriminator (#132)", () => {
     const x = ds.find((d) => d.path.join(".") === "x");
     expect(x?.type).toBe("unsupported");
   });
+
+  // Service.spec.ports[].targetPort style — primitive-branched oneOf
+  // where each branch's schema is `{type: "string"}` or
+  // `{type: "integer"}`. Pre-fix branchLabelFor fell through to
+  // "option 1 / option 2"; now it surfaces the type name itself.
+  it("labels primitive-typed branches by their type when no title is set", () => {
+    const schema: JSONSchema = {
+      type: "object",
+      properties: {
+        targetPort: {
+          oneOf: [{ type: "string" }, { type: "integer" }],
+        },
+      },
+    };
+    const ds = buildFieldDescriptors(schema, {
+      allowOneOfDiscriminator: true,
+    });
+    const tp = ds.find((d) => d.path.join(".") === "targetPort");
+    expect(tp?.type).toBe("discriminator");
+    expect(tp?.branches?.[0].label).toBe("string");
+    expect(tp?.branches?.[1].label).toBe("integer");
+  });
+
+  it("respects an explicit title even on primitive-typed branches", () => {
+    // Some CRDs label primitive branches with friendlier names. Title
+    // still wins so we don't downgrade those to bare type names.
+    const schema: JSONSchema = {
+      type: "object",
+      properties: {
+        targetPort: {
+          oneOf: [
+            { type: "string", title: "by name" },
+            { type: "integer", title: "by number" },
+          ],
+        },
+      },
+    };
+    const ds = buildFieldDescriptors(schema, {
+      allowOneOfDiscriminator: true,
+    });
+    const tp = ds.find((d) => d.path.join(".") === "targetPort");
+    expect(tp?.branches?.[0].label).toBe("by name");
+    expect(tp?.branches?.[1].label).toBe("by number");
+  });
 });
 
 describe("walker — allOf merging (#132)", () => {
@@ -710,5 +754,167 @@ describe("walker — array-of-objects row child sub-section stamping (#136)", ()
       ?.children?.find((c) => c.path.join(".") === "spec.template.spec")
       ?.children?.find((c) => c.path.join(".") === "spec.template.spec.containers");
     expect(containers?.rowSubSections).toBeUndefined();
+  });
+});
+
+// walkRequiredUnsupported — depth fix (see #180 follow-up).
+// Pre-fix, this only descended through `type === "object"` children,
+// so hasRequiredUnsupportedField missed required+unsupported fields
+// nested inside array-of-objects rows or discriminator branches —
+// dropping the operator into form mode only to hit a wall mid-form.
+describe("walkRequiredUnsupported — deep traversal", () => {
+  function leaf(
+    type: FieldDescriptor["type"],
+    extras: Partial<FieldDescriptor> = {},
+  ): FieldDescriptor {
+    return {
+      path: ["x"],
+      label: "x",
+      type,
+      required: false,
+      ...extras,
+    };
+  }
+  function obj(
+    children: FieldDescriptor[],
+    extras: Partial<FieldDescriptor> = {},
+  ): FieldDescriptor {
+    return {
+      path: ["o"],
+      label: "o",
+      type: "object",
+      required: false,
+      children,
+      ...extras,
+    };
+  }
+
+  it("returns false for a tree with no unsupported nodes", () => {
+    expect(walkRequiredUnsupported(leaf("string"))).toBe(false);
+    expect(walkRequiredUnsupported(obj([leaf("integer"), leaf("boolean")]))).toBe(
+      false,
+    );
+  });
+
+  it("returns true for a top-level required + unsupported", () => {
+    expect(
+      walkRequiredUnsupported(leaf("unsupported", { required: true })),
+    ).toBe(true);
+  });
+
+  it("returns false for unsupported that is NOT required (optional)", () => {
+    // The form can render around an optional unsupported field by
+    // pointing the operator at YAML mode for that one field — but
+    // shouldn't preemptively force YAML mode for the whole resource.
+    expect(walkRequiredUnsupported(leaf("unsupported"))).toBe(false);
+  });
+
+  it("descends through object.children (pre-fix behaviour, kept)", () => {
+    expect(
+      walkRequiredUnsupported(
+        obj([leaf("unsupported", { required: true })]),
+      ),
+    ).toBe(true);
+  });
+
+  it("descends through array-of-objects row children (NEW)", () => {
+    // Real-world: an array-of-objects item with a required field
+    // shaped as a JSON-Patch op (anyOf without allowOneOfDiscriminator
+    // → unsupported). The walker would mark the row required-but-
+    // unsupported; the form auto-default check needs to see this.
+    const rowChild = leaf("unsupported", { required: true });
+    const arrayOfObjects: FieldDescriptor = {
+      path: ["rules"],
+      label: "rules",
+      type: "array-of-objects",
+      required: false,
+      children: [rowChild],
+    };
+    expect(walkRequiredUnsupported(arrayOfObjects)).toBe(true);
+  });
+
+  it("descends through discriminator branches (NEW)", () => {
+    // cert-manager Issuer style: the branch descriptors carry their
+    // own sub-tree; the previous walker never reached them.
+    const branchChild = leaf("unsupported", { required: true });
+    const disc: FieldDescriptor = {
+      path: ["spec"],
+      label: "spec",
+      type: "discriminator",
+      required: false,
+      branches: [
+        {
+          label: "acme",
+          schema: {} as JSONSchema,
+          descriptors: [branchChild],
+        },
+      ],
+    };
+    expect(walkRequiredUnsupported(disc)).toBe(true);
+  });
+
+  it("descends through discriminator sharedChildren (NEW)", () => {
+    // Probe-style hinted shape: thresholds (initialDelaySeconds etc.)
+    // live alongside the branch picker as sharedChildren. They're
+    // also a place where required+unsupported can hide.
+    const shared = leaf("unsupported", { required: true });
+    const disc: FieldDescriptor = {
+      path: ["probe"],
+      label: "probe",
+      type: "discriminator",
+      required: false,
+      branches: [],
+      sharedChildren: [shared],
+    };
+    expect(walkRequiredUnsupported(disc)).toBe(true);
+  });
+
+  it("returns false for a discriminator with only optional unsupported branch fields", () => {
+    const branchChild = leaf("unsupported"); // required: false
+    const disc: FieldDescriptor = {
+      path: ["spec"],
+      label: "spec",
+      type: "discriminator",
+      required: false,
+      branches: [
+        {
+          label: "acme",
+          schema: {} as JSONSchema,
+          descriptors: [branchChild],
+        },
+      ],
+    };
+    expect(walkRequiredUnsupported(disc)).toBe(false);
+  });
+
+  it("walks the deepest unsupported through stacked containers", () => {
+    // array-of-objects → object → discriminator branch → unsupported.
+    // Pre-fix this returned false because the discriminator hop alone
+    // was a dead end; now the recursion threads through all three.
+    const deep = leaf("unsupported", { required: true });
+    const tree: FieldDescriptor = {
+      path: ["templates"],
+      label: "templates",
+      type: "array-of-objects",
+      required: false,
+      children: [
+        obj([
+          {
+            path: ["templates", "config"],
+            label: "config",
+            type: "discriminator",
+            required: false,
+            branches: [
+              {
+                label: "scheme-a",
+                schema: {} as JSONSchema,
+                descriptors: [deep],
+              },
+            ],
+          },
+        ]),
+      ],
+    };
+    expect(walkRequiredUnsupported(tree)).toBe(true);
   });
 });
