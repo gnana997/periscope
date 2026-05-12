@@ -296,15 +296,25 @@ function BufferedEditor({
                 mode="edit"
               />
             )}
-            {submit.state.kind === "error" && (
-              <SubmitErrorBanner
-                message={submit.state.message}
-                isConflict={submit.state.isConflict}
-                onSwitchToYaml={() => onSetMode("yaml")}
-                onDismiss={() => submit.reset()}
-              />
-            )}
           </div>
+          {/*
+           * SubmitErrorBanner intentionally lives OUTSIDE the form's
+           * overflow-auto scroll area so it stays visible regardless
+           * of how tall the form is. The previous placement (inside
+           * the scroll div, below every form section) buried errors
+           * for non-trivial resources — operators had to scroll to
+           * the bottom to discover that their apply had failed. This
+           * mirrors YamlEditor's ApplyErrorBanner placement (right
+           * above ActionBar, sibling of the scrollable editor).
+           */}
+          {submit.state.kind === "error" && (
+            <SubmitErrorBanner
+              message={submit.state.message}
+              isConflict={submit.state.isConflict}
+              onSwitchToYaml={() => onSetMode("yaml")}
+              onDismiss={() => submit.reset()}
+            />
+          )}
           <FormActionBar
             dirty={dirty}
             // Pending meta == we don't yet know what periscope-spa

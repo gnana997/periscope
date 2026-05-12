@@ -3,20 +3,21 @@
 // page re-fetches the live object. Errors surface as a banner the
 // caller renders.
 //
-// This is intentionally narrower than YamlEditor's apply
-// orchestration: no field-conflict resolution view (#116 form mode
-// links operators to the YAML editor for that), no drift overlay,
-// no patch preview. The backend pipeline behind `api.applyResource`
-// is identical, so SSA semantics, the per-doc SelfSubjectAccessReview
-// pre-flight (PR #100), and audit-log emission all still happen.
-// Operators who hit a 409 conflict are routed to YAML mode where
-// the full ConflictResolutionView is available.
-//
 // As of #181 this hook routes through `buildRetainedOwnershipBody`,
 // the same retained-ownership minimal-patch builder YamlEditor uses,
 // so form-mode applies no longer claim ownership of every field in
 // the resource — they only claim what the user actually edited plus
 // what periscope-spa already owned.
+//
+// The commit path also routes through `applyWithLenientConflictRetained`
+// (same wrapper the row-action mutation hooks use). This means:
+//   - HUMAN-class conflicts (kubectl-*, Rancher, unclassified) silently
+//     auto-takeover on a second attempt — same UX as scale / labels /
+//     suspend / restart / cordon.
+//   - GITOPS / HELM / CONTROLLER conflicts surface a classified
+//     "blocked by X" message instead of the raw apiserver 409 body.
+// Dry-run stays on the raw `api.applyResource` call (the wrapper is
+// commit-only — dry-runs can't conflict).
 
 import { useCallback, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
@@ -29,8 +30,9 @@ import {
   invalidateAfterApply,
   type EditorSource,
 } from "../../lib/customResources";
+import { applyWithLenientConflictRetained } from "../../hooks/mutations/_applyWithLenientConflict";
 import { parseIdentityFromYaml } from "../../lib/k8sSchema";
-import { MultiDocumentError, YamlParseError } from "../../lib/yamlPatch";
+import { MultiDocumentError, YamlParseError, computeOps } from "../../lib/yamlPatch";
 
 export type SubmitState =
   | { kind: "idle" }
@@ -117,6 +119,21 @@ export function useApplySubmit(
         return false;
       }
 
+      // Defensive meta gate at the top so we don't reach the lenient
+      // wrapper with managedFields=null (which would otherwise throw
+      // an internal "fetch api.getMeta first" error). The builder also
+      // throws ManagedFieldsUnavailableError, but checking here keeps
+      // both this check and the lenient wrapper's call below in the
+      // same code path with a single, user-friendly message.
+      if (!meta) {
+        setState({
+          kind: "error",
+          message: "Ownership info is still loading — try again in a moment.",
+          isConflict: false,
+        });
+        return false;
+      }
+
       let yaml: string;
       try {
         ({ yaml } = buildRetainedOwnershipBody({
@@ -135,20 +152,43 @@ export function useApplySubmit(
         throw e;
       }
 
-      const args = {
+      // ops here are the *user-edit* ops (computeOps over baseline/draft).
+      // The retained-ownership body the apiserver sees was already built
+      // above; the wrapper needs the same ops shape to reconstruct an
+      // equivalent body via buildRetainedOwnershipBodyFromOps. Passing
+      // them avoids re-parsing baseline/draft twice.
+      const ops = computeOps(baseline, draft);
+
+      const baseArgs = {
         cluster: resource.cluster,
         group: resource.group,
         version: resource.version,
         resource: resource.resource,
         namespace: resource.namespace,
         name: resource.name,
-        yaml,
       };
       try {
+        // L4 dry-run via the raw client. The wrapper is commit-only
+        // (auto-takeover doesn't make sense for dry-run since the
+        // apiserver never mutates state). We still want pre-flight
+        // validation surface (PSA, webhooks, schema) before claiming
+        // ownership of anything.
         setState({ kind: "dryRunning" });
-        await api.applyResource({ ...args, dryRun: true }, ac.signal);
+        await api.applyResource({ ...baseArgs, yaml, dryRun: true }, ac.signal);
+
+        // L5 commit through the lenient retain wrapper — same auto-
+        // takeover + classified-error behaviour the row actions get.
         setState({ kind: "applying" });
-        await api.applyResource({ ...args, dryRun: false }, ac.signal);
+        await applyWithLenientConflictRetained(
+          {
+            ...baseArgs,
+            identity,
+            ops,
+            current,
+            managedFields: meta.managedFields,
+          },
+          "apply",
+        );
         await invalidateAfterApply(qc, source, resource);
         setState({ kind: "success" });
         return true;
