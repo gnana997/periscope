@@ -144,13 +144,24 @@ clusterRole:
 # When enabled, the chart installs:
 #   ClusterRoleBinding periscope-tier-read    → view
 #   ClusterRoleBinding periscope-tier-write   → edit
-#   ClusterRoleBinding periscope-tier-admin   → cluster-admin
+#   ClusterRoleBinding periscope-tier-admin   → cluster-admin (OPT-IN, #84)
 #   ClusterRoleBinding periscope-tier-triage  → periscope-triage (custom)
 #   ClusterRoleBinding periscope-tier-maintain→ periscope-maintain (custom)
 # plus the two custom ClusterRoles. Identical tier semantics to the
 # server chart's clusterRBAC.
 clusterRBAC:
   enabled: true
+
+  # cluster-admin tier binding — OPT-IN (#84).
+  #
+  # The default install no longer renders the periscope-tier:admin →
+  # cluster-admin ClusterRoleBinding. AWS Guardrails and CIS Kubernetes
+  # Benchmark 5.1.1 both flag this binding on its YAML alone. Opt in by
+  # setting adminTier.enabled=true; optionally redirect to a tighter
+  # custom ClusterRole via adminTier.clusterRoleName.
+  adminTier:
+    enabled: false
+    clusterRoleName: cluster-admin
 
 resources:
   requests:

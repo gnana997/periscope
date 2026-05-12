@@ -134,6 +134,32 @@ matters, use `tier` or `raw`.
 
 ---
 
+### Single-cluster shorthand (in-cluster backend)
+
+When `auth.authorization.mode: shared` AND any `clusters[].backend: in-cluster`, you don't need the Access Entry / external bridge binding above. The chart **auto-renders** a `periscope-shared` ClusterRoleBinding pointing the periscope ServiceAccount at the ClusterRole you name in `clusterRBAC.sharedRoleName` (default `view`).
+
+```yaml
+auth:
+  authorization:
+    mode: shared      # default
+clusterRBAC:
+  sharedRoleName: view  # default — read-only, safe. Use `edit` for write access.
+clusters:
+  - name: local
+    backend: in-cluster
+```
+
+Choose the role that matches "everyone hitting the dashboard":
+
+| `sharedRoleName` | Reads | Writes | Use case |
+|---|---|---|---|
+| `view` (default) | yes | no | Production "look-only" dashboards |
+| `edit` | yes | namespaced | Most dev / staging / lab clusters |
+| `cluster-admin` | yes | all (incl. RBAC) | Local kind / single-operator demos. Note: trips CIS 5.1.1 / AWS Guardrails. |
+| `""` | n/a | n/a | Suppress the auto-binding; manage RBAC out-of-band. |
+
+Before [#142] this auto-binding didn't exist, and shared + in-cluster left the SA with zero RBAC — every list call returned 403 and the SPA's overview page crashed on `.length` of `null`. The fix is the chart change; this section is the new contract.
+
 ## Mode 2: `tier` (recommended once you've outgrown shared)
 
 Five built-in tiers; map your existing IdP groups to one of them.
@@ -181,6 +207,23 @@ broaden per cluster.
    - `ClusterRoleBinding/periscope-tier-admin` → `cluster-admin`
    - `ClusterRole/periscope-triage` + `ClusterRoleBinding/periscope-tier-triage`
    - `ClusterRole/periscope-maintain` + `ClusterRoleBinding/periscope-tier-maintain`
+
+   > **`admin` tier is opt-in as of v1.1 (#84).** The
+   > `ClusterRoleBinding/periscope-tier-admin → cluster-admin` line in
+   > the list above renders only when you set
+   > `clusterRBAC.adminTier.enabled: true` in values. AWS Guardrails
+   > and CIS Kubernetes Benchmark 5.1.1 flag the `cluster-admin`
+   > binding's YAML alone (the scanners cannot see the gating chain),
+   > so default-off keeps the default install clean.
+   >
+   > - To preserve v1.0.x behaviour on upgrade: set
+   >   `clusterRBAC.adminTier.enabled: true`.
+   > - To run the admin tier against a tighter custom role: set
+   >   `clusterRBAC.adminTier.clusterRoleName: <my-role>`.
+   > - If `auth.authorization.groupTiers` maps any group to `admin`
+   >   but `adminTier.enabled` is false, `helm template` fails with
+   >   the migration recipe — silent 403s are not allowed to slip
+   >   through.
 
 3. **Map IdP groups to tiers** in `values.yaml`:
 

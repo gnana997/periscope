@@ -586,6 +586,40 @@ clusterRBAC:
   # ClusterRoleBinding for periscope-impersonator references this name.
   bridgeGroup: periscope-bridge
 
+  # cluster-admin tier binding — OPT-IN (#84).
+  #
+  # The default install no longer renders the periscope-tier:admin →
+  # cluster-admin ClusterRoleBinding. AWS Guardrails and CIS Kubernetes
+  # Benchmark 5.1.1 both flag this binding on its YAML alone (the
+  # scanners cannot see the gating chain that requires tier mode AND
+  # an admin-mapped IdP group). Opt in by setting adminTier.enabled=true
+  # below; optionally redirect to a tighter ClusterRole via
+  # adminTier.clusterRoleName.
+  #
+  # Migration: if your release was on v1.0.x with tier mode AND any
+  # auth.authorization.groupTiers value resolving to `admin`, set
+  # adminTier.enabled=true on upgrade to preserve current behaviour.
+  # Otherwise the operators with admin-tier mapping will see a
+  # template-time `helm` failure flagging the misconfiguration.
+  adminTier:
+    enabled: false
+    clusterRoleName: cluster-admin
+
+  # Shared authz mode — periscope SA needs direct RBAC (#142).
+  #
+  # When auth.authorization.mode is "shared" and at least one
+  # clusters[] entry is `backend: in-cluster`, the periscope SA
+  # calls the local apiserver directly (no impersonation). The chart
+  # renders a periscope-shared ClusterRoleBinding pointing the SA at
+  # this ClusterRole so the dashboard "just works" out of the box.
+  #
+  # Default `view` is read-only and safe — sufficient for the SPA's
+  # list / detail / overview pages. Flip to `edit` or `cluster-admin`
+  # for eval / dev setups where everyone hitting the dashboard should
+  # have write access. Set to "" to suppress the binding entirely
+  # (operators who manage RBAC out-of-band).
+  sharedRoleName: view
+
 # -----------------------------------------------------------------------------
 # Agent backend (#42) — per-cluster periscope-agent that dials out to
 # the central server over a long-lived WebSocket. Enabling this:
