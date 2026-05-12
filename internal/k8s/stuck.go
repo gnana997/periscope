@@ -181,7 +181,7 @@ func sinceMs(since, now time.Time) int64 {
 func latestDeploymentConditionTime(conds []appsv1.DeploymentCondition) time.Time {
 	var latest time.Time
 	for _, c := range conds {
-		if c.LastTransitionTime.Time.After(latest) {
+		if c.LastTransitionTime.After(latest) {
 			latest = c.LastTransitionTime.Time
 		}
 	}
@@ -192,7 +192,7 @@ func latestDeploymentConditionTime(conds []appsv1.DeploymentCondition) time.Time
 func latestStatefulSetConditionTime(conds []appsv1.StatefulSetCondition) time.Time {
 	var latest time.Time
 	for _, c := range conds {
-		if c.LastTransitionTime.Time.After(latest) {
+		if c.LastTransitionTime.After(latest) {
 			latest = c.LastTransitionTime.Time
 		}
 	}
@@ -203,7 +203,7 @@ func latestStatefulSetConditionTime(conds []appsv1.StatefulSetCondition) time.Ti
 func latestDaemonSetConditionTime(conds []appsv1.DaemonSetCondition) time.Time {
 	var latest time.Time
 	for _, c := range conds {
-		if c.LastTransitionTime.Time.After(latest) {
+		if c.LastTransitionTime.After(latest) {
 			latest = c.LastTransitionTime.Time
 		}
 	}
