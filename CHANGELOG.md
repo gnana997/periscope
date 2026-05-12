@@ -13,6 +13,8 @@ tag.
 
 ## [Unreleased]
 
+## [1.0.7] - 2026-05-12
+
 ### Added
 
 - Workloads: stuck-rollout badge + detail-pane banner on Deployment /
