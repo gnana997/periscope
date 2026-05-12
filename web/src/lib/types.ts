@@ -50,6 +50,11 @@ export interface Node {
   memoryCapacity: string;
   createdAt: string;
   unschedulable: boolean;
+  /** Cloud-provider instance handle, e.g. "aws:///us-east-1a/i-0abc12345".
+   *  Empty on bare-metal / kind / pre-Initialized nodes. The SPA extracts
+   *  the EC2 instance id from this to join Node rows against the CVE
+   *  per-instance API (#166). */
+  providerID?: string;
 }
 
 export interface NodeList {
@@ -181,6 +186,18 @@ export interface PodDetail extends Pod {
   annotations?: Record<string, string>;
 }
 
+// --- Stuck rollout (cross-kind) ---
+
+/** StuckReason mirrors internal/k8s/stuck.go StuckReason constants. */
+export type StuckReason = "progress-deadline-exceeded" | "stalled";
+
+/** StuckState — backend-computed signal that a rollout is wedged.
+ *  Pointer-valued on the backend; absent here means healthy. */
+export interface StuckState {
+  reason: StuckReason;
+  sinceMs: number;
+}
+
 // --- Deployment ---
 
 export interface Deployment {
@@ -194,6 +211,8 @@ export interface Deployment {
   image?: string;
   imageCount?: number;
   createdAt: string;
+  /** Backend-computed; absent when healthy. */
+  stuck?: StuckState;
 }
 
 export interface DeploymentList {
@@ -235,6 +254,8 @@ export interface StatefulSet {
   image?: string;
   imageCount?: number;
   createdAt: string;
+  /** Backend-computed; absent when healthy. */
+  stuck?: StuckState;
 }
 
 export interface StatefulSetList {
@@ -266,6 +287,8 @@ export interface DaemonSet {
   image?: string;
   imageCount?: number;
   createdAt: string;
+  /** Backend-computed; absent when healthy. */
+  stuck?: StuckState;
 }
 
 export interface DaemonSetList {
@@ -2095,4 +2118,160 @@ export interface PendingPodView {
 export interface NodePoolIncompat {
   nodepool: string;
   reason: string;
+}
+
+// ── CVE / Inspector v2 (#165 + #166) ─────────────────────────────────
+//
+// Wire shapes that mirror internal/cve/types.go on the backend. JSON
+// tags on the Go side are camelCase (see PR #168), so these types
+// match field-for-field. The SeverityCounts / ScanState helpers in
+// `web/src/lib/severity.ts` operate on these shapes directly.
+
+export interface CveSeverityCounts {
+  critical: number;
+  high: number;
+  medium: number;
+  low: number;
+  informational: number;
+}
+
+export interface CveOwnerRef {
+  /** `managed-nodegroup` | `karpenter-nodeclaim` | `unmanaged` */
+  kind: string;
+  name?: string;
+}
+
+export interface CveInstanceRow {
+  instanceId: string;
+  owner: CveOwnerRef;
+  ami?: string;
+  severityCounts: CveSeverityCounts;
+  lastFetchedAt: string;
+}
+
+export interface CveInstancesResp {
+  instances: CveInstanceRow[];
+  inspectorEnabled: boolean;
+  hydrated: boolean;
+}
+
+/** Single finding row — matches awsinspector.Finding on the backend
+ *  (PR #168). The operator-actionable fields (description, remediation,
+ *  epssScore, exploitAvailable, fixAvailable) drive the expandable row
+ *  in SecurityTab. */
+export interface CveFinding {
+  resourceId: string;
+  arn?: string;
+  title?: string;
+  cve?: string;
+  severity?: string;
+  cvssV3Score?: number;
+  packageName?: string;
+  packageVersion?: string;
+  fixedVersion?: string;
+  firstObservedAt?: string;
+  lastObservedAt?: string;
+  description?: string;
+  remediation?: string;
+  remediationUrl?: string;
+  epssScore?: number;
+  /** "YES" | "NO" | "" — Inspector exploit-availability flag */
+  exploitAvailable?: string;
+  /** "YES" | "NO" | "PARTIAL" | "" — categorical fix flag (the
+   *  concrete version is on `fixedVersion`). */
+  fixAvailable?: string;
+  inspectorUrl: string;
+}
+
+export interface CveFindingsResp {
+  findings: CveFinding[];
+  lastFetchedAt: string;
+  inspectorEnabled: boolean;
+  hydrated: boolean;
+}
+
+export type CveScanState = "scanned" | "non-ecr" | "pending";
+export type CveScanCoverage = "full" | "partial" | "none";
+
+/** CvePackageGroup is one entry per (container, package) — the
+ *  server-side grouped + prioritized projection of raw findings.
+ *  Backend sorts by triage priority (exploits first, then severity
+ *  desc, then CVSS desc); SPA renders as-is. Shared shape with the
+ *  future MCP / AI-agent tool layer. */
+export interface CvePackageGroup {
+  packageName: string;
+  currentVersion?: string;
+  /** Highest fixedVersion across the group. Upgrading to this
+   *  closes every CVE in the group. Empty when no fix exists. */
+  suggestedFix?: string;
+  findings: CveFinding[];
+  counts: CveSeverityCounts;
+  exploitCount: number;
+  fixableCount: number;
+}
+
+export interface CveContainerRow {
+  name: string;
+  image: string;
+  digest?: string;
+  scanState: CveScanState;
+  severityCounts?: CveSeverityCounts;
+  packages?: CvePackageGroup[];
+}
+
+export interface CvePodRow {
+  namespace: string;
+  name: string;
+  containers: CveContainerRow[];
+  rolledUpSeverityCounts: CveSeverityCounts;
+  scanCoverage: CveScanCoverage;
+}
+
+export interface CvePodsResp {
+  pods: CvePodRow[];
+  next?: string;
+  inspectorEnabled: boolean;
+  hydrated: boolean;
+}
+
+export interface CveWorkloadRef {
+  kind: string; // "Deployment" | "StatefulSet" | "DaemonSet" | "ReplicaSet" | "Job"
+  namespace: string;
+  name: string;
+}
+
+export interface CveByWorkloadResp {
+  workload: CveWorkloadRef;
+  pods: CvePodRow[];
+  rolledUpSeverityCounts: CveSeverityCounts;
+  scanCoverage: CveScanCoverage;
+  inspectorEnabled: boolean;
+  hydrated: boolean;
+}
+
+export interface CveEntryCounts {
+  digests: number;
+  instances: number;
+}
+
+export interface CveStatusResp {
+  inspectorEnabled: boolean;
+  hydrated: boolean;
+  /** Zero / missing before the first hydrate completes. */
+  lastHydrate?: string;
+  entryCounts: CveEntryCounts;
+}
+
+/** Per-pod summary derived by the SPA from CvePodsResp pages.
+ *  Not a backend type — it's the lookup row the Pods column reads. */
+export interface CvePodSummary {
+  namespace: string;
+  name: string;
+  counts: CveSeverityCounts;
+  coverage: CveScanCoverage;
+}
+
+export interface CveRefreshRequest {
+  digests?: string[];
+  instanceIds?: string[];
 }

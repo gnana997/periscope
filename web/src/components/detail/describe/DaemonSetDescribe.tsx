@@ -1,5 +1,6 @@
 import { useDaemonSetDetail } from "../../../hooks/useResource";
 import { ageFrom } from "../../../lib/format";
+import { formatStuckTooltip } from "../../workload/stuckTooltip";
 import { DetailError, DetailLoading } from "../states";
 import {
   ConditionList,
@@ -67,6 +68,16 @@ export function DaemonSetDescribe({
       />
 
       <div className="px-5 py-4">
+        {data.stuck && (
+          <div className="mb-3 rounded-md border border-red/40 bg-red-soft px-3 py-2 text-[12px] text-red">
+            <span className="font-medium">
+              {data.stuck.reason === "progress-deadline-exceeded"
+                ? "Rollout exceeded progress deadline"
+                : "Rollout stalled"}
+            </span>
+            <span className="ml-1 text-ink-muted">· {formatStuckTooltip(data.stuck)}</span>
+          </div>
+        )}
         {data.numberMisscheduled > 0 && (
           <div className="mb-3 rounded-md border border-yellow/40 bg-yellow-soft px-3 py-2 text-[12px] text-yellow">
             <span className="font-medium">

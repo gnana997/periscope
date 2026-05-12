@@ -7,6 +7,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/config v1.32.17
 	github.com/aws/aws-sdk-go-v2/service/ec2 v1.301.0
 	github.com/aws/aws-sdk-go-v2/service/eks v1.83.0
+	github.com/aws/aws-sdk-go-v2/service/inspector2 v1.47.6
 	github.com/aws/aws-sdk-go-v2/service/secretsmanager v1.41.7
 	github.com/aws/aws-sdk-go-v2/service/ssm v1.68.6
 	github.com/aws/smithy-go v1.25.1
@@ -17,12 +18,14 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/websocket v1.5.4-0.20250319132907-e064f32e3674
 	github.com/homeport/dyff v1.12.0
+	github.com/jonboulle/clockwork v0.5.0
 	github.com/opencontainers/image-spec v1.1.1
 	github.com/rancher/remotedialer v0.6.1
 	go.uber.org/goleak v1.3.0
 	go.yaml.in/yaml/v3 v3.0.4
 	golang.org/x/mod v0.36.0
 	golang.org/x/oauth2 v0.36.0
+	golang.org/x/sync v0.20.0
 	gopkg.in/yaml.v3 v3.0.1
 	helm.sh/helm/v3 v3.20.2
 	k8s.io/api v0.36.0
@@ -144,7 +147,6 @@ require (
 	go.yaml.in/yaml/v2 v2.4.4 // indirect
 	golang.org/x/crypto v0.50.0 // indirect
 	golang.org/x/net v0.53.0 // indirect
-	golang.org/x/sync v0.20.0 // indirect
 	golang.org/x/sys v0.43.0 // indirect
 	golang.org/x/term v0.42.0 // indirect
 	golang.org/x/text v0.36.0 // indirect

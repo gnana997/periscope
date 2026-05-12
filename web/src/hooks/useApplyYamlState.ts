@@ -41,6 +41,13 @@ export interface DocResult {
 
 export type DialogBusy = "idle" | "dry-run" | "apply";
 
+/** Which kind of batch most recently ran to completion. Lets the
+ *  dialog distinguish "results populated from a dry-run" (no
+ *  applied-banner) from "...from a real apply" (show the banner).
+ *  Reset to "none" when the operator edits the YAML buffer so a
+ *  stale banner cannot survive into the next batch. */
+export type LastBatchKind = "none" | "dry-run" | "apply";
+
 export interface UseApplyYamlState {
   yamlText: string;
   setYamlText: (next: string) => void;
@@ -49,6 +56,8 @@ export interface UseApplyYamlState {
   busy: DialogBusy;
   /** Cancel any in-flight orchestration. No-op when idle. */
   cancel: () => void;
+  /** Kind of the most recently completed batch. */
+  lastBatchKind: LastBatchKind;
   /** Reset everything. Called when the dialog closes or operator clears. */
   reset: () => void;
   /** Run dry-run for every valid doc; populates results.diff per doc. */
@@ -62,6 +71,7 @@ export interface UseApplyYamlState {
 export function useApplyYamlState(): UseApplyYamlState {
   const [yamlText, setYamlText] = useState("");
   const [busy, setBusy] = useState<DialogBusy>("idle");
+  const [lastBatchKind, setLastBatchKind] = useState<LastBatchKind>("none");
   const [results, setResults] = useState<Map<string, DocResult>>(
     () => new Map(),
   );
@@ -69,12 +79,30 @@ export function useApplyYamlState(): UseApplyYamlState {
 
   const docs = useMemo(() => parseMultiDocYaml(yamlText), [yamlText]);
 
+  // Editing the YAML buffer invalidates the previous batch's outcome
+  // — a stale "✓ applied N" banner would be misleading next to fresh
+  // docs the operator hasn't yet run. Drop both the kind flag and the
+  // per-doc results on any text mutation.
+  const setYamlTextAndResetOutcome = useCallback(
+    (next: string) => {
+      setYamlText((prev) => {
+        if (prev !== next) {
+          setResults(new Map());
+          setLastBatchKind("none");
+        }
+        return next;
+      });
+    },
+    [],
+  );
+
   const reset = useCallback(() => {
     abortRef.current?.abort();
     abortRef.current = null;
     setYamlText("");
     setResults(new Map());
     setBusy("idle");
+    setLastBatchKind("none");
   }, []);
 
   const cancel = useCallback(() => {
@@ -205,6 +233,7 @@ export function useApplyYamlState(): UseApplyYamlState {
       } finally {
         if (abortRef.current === ctrl) abortRef.current = null;
         setBusy("idle");
+        setLastBatchKind(dryRun ? "dry-run" : "apply");
       }
     },
     [busy, docs, runOne],
@@ -221,10 +250,11 @@ export function useApplyYamlState(): UseApplyYamlState {
 
   return {
     yamlText,
-    setYamlText,
+    setYamlText: setYamlTextAndResetOutcome,
     docs,
     results,
     busy,
+    lastBatchKind,
     cancel,
     reset,
     runDryRun,

@@ -11,7 +11,8 @@ import { ageFrom, nameMatches } from "../lib/format";
 import { cn } from "../lib/cn";
 import { queryKeys } from "../lib/queryKeys";
 import { PageHeader } from "../components/page/PageHeader";
-import { SplitPane } from "../components/page/SplitPane";
+import { DetailOverlay } from "../components/page/DetailOverlay";
+import { buildOverlayNav } from "../components/page/detailOverlayHelpers";
 import { type Column } from "../components/table/DataTable";
 import { SelectableDataTable } from "../components/table/SelectableDataTable";
 import { api } from "../lib/api";
@@ -198,6 +199,22 @@ export function CustomResourcesPage({ cluster }: { cluster: string }) {
   );
   const confirmDiscard = useConfirmDiscard(editFlag.dirty);
 
+  const overlayNav = buildOverlayNav({
+    rows: filtered,
+    selectedKey,
+    keyOf: (r) => `${isClusterScoped ? "" : r.namespace ?? ""}/${r.name}`,
+    navigateTo: (r) =>
+      confirmDiscard(() =>
+        setMany({
+          sel: r.name,
+          selNs: isClusterScoped ? null : r.namespace ?? "",
+          tab: activeTab,
+        }),
+      ),
+    dismiss: () =>
+      confirmDiscard(() => setMany({ sel: null, selNs: null, tab: null })),
+  });
+
   const detailNs = isClusterScoped ? null : selectedNs ?? null;
 
   const detail =
@@ -320,7 +337,7 @@ export function CustomResourcesPage({ cluster }: { cluster: string }) {
         </span>
       </div>
 
-      <SplitPane
+      <DetailOverlay {...overlayNav}
         storageKey="periscope.detailWidth.v4"
         left={
           listQuery.isLoading || crdsQuery.isLoading ? (

@@ -1,5 +1,6 @@
 import { useDeploymentDetail } from "../../../hooks/useResource";
 import { ageFrom } from "../../../lib/format";
+import { formatStuckTooltip } from "../../workload/stuckTooltip";
 import { DetailError, DetailLoading } from "../states";
 import {
   ConditionList,
@@ -65,6 +66,16 @@ export function DeploymentDescribe({
       />
 
       <div className="px-5 py-4">
+        {data.stuck && (
+          <div className="mb-3 rounded-md border border-red/40 bg-red-soft px-3 py-2 text-[12px] text-red">
+            <span className="font-medium">
+              {data.stuck.reason === "progress-deadline-exceeded"
+                ? "Rollout exceeded progress deadline"
+                : "Rollout stalled"}
+            </span>
+            <span className="ml-1 text-ink-muted">· {formatStuckTooltip(data.stuck)}</span>
+          </div>
+        )}
         <dl className="space-y-2">
           <KV label="Strategy">{data.strategy}</KV>
         </dl>

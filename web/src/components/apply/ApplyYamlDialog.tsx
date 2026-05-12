@@ -5,10 +5,6 @@
 // is the "what" — paste, parse, dry-run, apply, render results. The
 // "where" (button placement, Cmd+K palette) lives in #54 and mounts
 // this dialog with `open` / `onClose`.
-//
-// Scaffold commit — wires the modal shell + footer skeleton. Subsequent
-// commits add the YAML input (Monaco + drag-drop), parser, dry-run
-// orchestration, and results panel.
 
 import { useId } from "react";
 import { Modal } from "../ui/Modal";
@@ -16,6 +12,7 @@ import { ApplyYamlInput } from "./ApplyYamlInput";
 import { DocPreviewList } from "./DocPreviewList";
 import { useApplyYamlState } from "../../hooks/useApplyYamlState";
 import { useApplyPreFlight } from "../../hooks/useApplyPreFlight";
+import { deriveApplyOutcome, type ApplyOutcome } from "./applyOutcome";
 
 export interface ApplyYamlDialogProps {
   open: boolean;
@@ -31,6 +28,13 @@ export function ApplyYamlDialog({ open, onClose, cluster }: ApplyYamlDialogProps
 
   const validCount = state.docs.filter((d) => d.valid).length;
   const invalidCount = state.docs.length - validCount;
+
+  const outcome = deriveApplyOutcome({
+    busy: state.busy,
+    lastBatchKind: state.lastBatchKind,
+    results: state.results,
+    validCount,
+  });
 
   // The dialog itself controls the close path — child components emit
   // events (clear, cancel, apply-success) that route here so reset
@@ -72,21 +76,29 @@ export function ApplyYamlDialog({ open, onClose, cluster }: ApplyYamlDialogProps
 
         {/* ── Footer ────────────────────────────────────────────── */}
         <footer className="flex items-center justify-between gap-2 border-t border-border px-6 py-4">
-          <p className="font-mono text-[11px] text-ink-muted">
-            {state.busy === "dry-run" && "running dry-run…"}
-            {state.busy === "apply" && "applying…"}
-            {state.busy === "idle" && validCount > 0 && (
-              <>{validCount} valid {validCount === 1 ? "doc" : "docs"} ready{invalidCount > 0 && `, ${invalidCount} skipped`}{preFlight.deniedCount > 0 && `, ${preFlight.deniedCount} denied`}</>
-            )}
-          </p>
+          <FooterStatus
+            outcome={outcome}
+            busy={state.busy}
+            invalidCount={invalidCount}
+            deniedCount={preFlight.deniedCount}
+          />
           <div className="flex items-center gap-2">
-            {state.busy !== "idle" ? (
+            {outcome.kind === "running" ? (
               <button
                 type="button"
                 onClick={state.cancel}
                 className="rounded-sm border border-border-strong px-4 py-1.5 font-mono text-sm lowercase text-ink transition-colors hover:bg-surface-2"
               >
                 cancel run
+              </button>
+            ) : outcome.kind === "success" ? (
+              <button
+                type="button"
+                onClick={handleClose}
+                autoFocus
+                className="rounded-sm border border-accent bg-accent px-4 py-1.5 font-mono text-sm lowercase text-accent-ink transition-[filter] hover:brightness-105"
+              >
+                close
               </button>
             ) : (
               <>
@@ -95,12 +107,12 @@ export function ApplyYamlDialog({ open, onClose, cluster }: ApplyYamlDialogProps
                   onClick={handleClose}
                   className="rounded-sm border border-border-strong px-4 py-1.5 font-mono text-sm lowercase text-ink transition-colors hover:bg-surface-2"
                 >
-                  cancel
+                  {outcome.kind === "partial" ? "close" : "cancel"}
                 </button>
                 <button
                   type="button"
                   onClick={() => { void state.runDryRun(cluster); }}
-                  disabled={validCount === 0}
+                  disabled={validCount === 0 || outcome.kind === "partial"}
                   className="rounded-sm border border-border-strong px-4 py-1.5 font-mono text-sm lowercase text-ink transition-colors hover:bg-surface-2 disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   dry-run
@@ -108,7 +120,11 @@ export function ApplyYamlDialog({ open, onClose, cluster }: ApplyYamlDialogProps
                 <button
                   type="button"
                   onClick={() => { void state.runApply(cluster); }}
-                  disabled={validCount === 0 || preFlight.deniedCount > 0}
+                  disabled={
+                    validCount === 0 ||
+                    preFlight.deniedCount > 0 ||
+                    outcome.kind === "partial"
+                  }
                   className="rounded-sm border border-accent bg-accent px-4 py-1.5 font-mono text-sm lowercase text-accent-ink transition-[filter] hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   apply {validCount > 0 ? validCount : ""}
@@ -120,4 +136,54 @@ export function ApplyYamlDialog({ open, onClose, cluster }: ApplyYamlDialogProps
       </div>
     </Modal>
   );
+}
+
+interface FooterStatusProps {
+  outcome: ApplyOutcome;
+  busy: "idle" | "dry-run" | "apply";
+  invalidCount: number;
+  deniedCount: number;
+}
+
+function FooterStatus({ outcome, busy, invalidCount, deniedCount }: FooterStatusProps) {
+  if (outcome.kind === "running") {
+    return (
+      <p className="font-mono text-[11px] text-ink-muted">
+        {busy === "dry-run" ? "running dry-run…" : "applying…"}
+      </p>
+    );
+  }
+
+  if (outcome.kind === "success") {
+    return (
+      <p className="font-mono text-[11px] text-data">
+        ✓ applied {outcome.successCount} {outcome.successCount === 1 ? "resource" : "resources"} — edit yaml to start another batch
+      </p>
+    );
+  }
+
+  if (outcome.kind === "partial") {
+    const parts: string[] = [];
+    parts.push(`${outcome.successCount} applied`);
+    if (outcome.conflictCount > 0) parts.push(`${outcome.conflictCount} conflict`);
+    if (outcome.failureCount > 0) parts.push(`${outcome.failureCount} failed`);
+    return (
+      <p className="font-mono text-[11px] text-red">
+        {parts.join(" · ")} — review rows above
+      </p>
+    );
+  }
+
+  if (outcome.kind === "pre-apply") {
+    const total = outcome.totalCount;
+    return (
+      <p className="font-mono text-[11px] text-ink-muted">
+        {total} valid {total === 1 ? "doc" : "docs"} ready
+        {invalidCount > 0 && `, ${invalidCount} skipped`}
+        {deniedCount > 0 && `, ${deniedCount} denied`}
+      </p>
+    );
+  }
+
+  return null;
 }

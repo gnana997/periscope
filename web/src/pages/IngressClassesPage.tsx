@@ -5,7 +5,8 @@ import type { IngressClass, IngressClassList } from "../lib/types";
 import { ageFrom, nameMatches } from "../lib/format";
 import { cn } from "../lib/cn";
 import { PageHeader } from "../components/page/PageHeader";
-import { SplitPane } from "../components/page/SplitPane";
+import { DetailOverlay } from "../components/page/DetailOverlay";
+import { buildOverlayNav } from "../components/page/detailOverlayHelpers";
 import { type Column } from "../components/table/DataTable";
 import { SelectableDataTable } from "../components/table/SelectableDataTable";
 import { api } from "../lib/api";
@@ -67,6 +68,16 @@ export function IngressClassesPage({ cluster }: { cluster: string }) {
   const editFlag = useEditorDirty(cluster, "ingressclasses", undefined, selectedName);
   const confirmDiscard = useConfirmDiscard(editFlag.dirty);
 
+  const overlayNav = buildOverlayNav({
+    rows: filtered,
+    selectedKey: selectedName,
+    keyOf: (r) => r.name,
+    navigateTo: (r) =>
+      confirmDiscard(() => setMany({ sel: r.name, tab: activeTab })),
+    dismiss: () =>
+      confirmDiscard(() => setMany({ sel: null, tab: null })),
+  });
+
   const detail = selectedName ? (
     <DetailPane
       title={selectedName}
@@ -113,7 +124,7 @@ export function IngressClassesPage({ cluster }: { cluster: string }) {
           {filtered.length}<span className="text-ink-faint"> / </span>{all.length}
         </div>
       </div>
-      <SplitPane
+      <DetailOverlay {...overlayNav}
         storageKey="periscope.detailWidth.v4"
         left={
           query.isLoading ? <LoadingState resource="ingressclasses" /> :

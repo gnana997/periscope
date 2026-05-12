@@ -5,7 +5,8 @@ import type { StatefulSet, StatefulSetList } from "../lib/types";
 import { ageFrom, nameMatches } from "../lib/format";
 import { PageHeader } from "../components/page/PageHeader";
 import { FilterStrip } from "../components/page/FilterStrip";
-import { SplitPane } from "../components/page/SplitPane";
+import { DetailOverlay } from "../components/page/DetailOverlay";
+import { buildOverlayNav } from "../components/page/detailOverlayHelpers";
 import {
   type Column,
   type RowTint,
@@ -20,6 +21,8 @@ import {
 } from "../components/table/states";
 import { isForbidden } from "../components/table/isForbidden";
 import { DetailPane } from "../components/detail/DetailPane";
+import { SecurityTab } from "../components/security/SecurityTab";
+import { SecurityEmptyBanner } from "../components/security/SecurityEmptyBanner";
 import { StatefulSetDescribe } from "../components/detail/describe/StatefulSetDescribe";
 import { YamlView } from "../components/detail/YamlView";
 import { useEditorDirty } from "../hooks/useEditorDirty";
@@ -29,6 +32,7 @@ import { EventsView } from "../components/detail/EventsView";
 import { WorkloadLogsTab } from "../components/logs/WorkloadLogsTab";
 import { NamespacePicker } from "../components/shell/NamespacePicker";
 import { cn } from "../lib/cn";
+import { StuckBadge } from "../components/workload/StuckBadge";
 
 export function StatefulSetsPage({ cluster }: { cluster: string }) {
   const [params, setParams] = useSearchParams();
@@ -100,12 +104,14 @@ export function StatefulSetsPage({ cluster }: { cluster: string }) {
         </span>
       ),
     },
+    { key: "stuck", header: "", weight: 0.4, align: "left", accessor: (s) => (s.stuck ? <StuckBadge stuck={s.stuck} /> : null) },
     { key: "updated", header: "updated", weight: 0.7, align: "right", cellClassName: "font-mono text-ink-muted", accessor: (s) => s.updatedReplicas },
     { key: "current", header: "current", weight: 0.7, align: "right", cellClassName: "font-mono text-ink-muted", accessor: (s) => s.currentReplicas },
     { key: "age", header: "age", weight: 0.5, align: "right", cellClassName: "font-mono text-ink-muted", accessor: (s) => ageFrom(s.createdAt) },
   ];
 
   const rowTint = (s: StatefulSet): RowTint => {
+    if (s.stuck) return "red";
     if (s.replicas > 0 && s.readyReplicas === 0) return "red";
     if (s.readyReplicas < s.replicas) return "yellow";
     return null;
@@ -113,6 +119,16 @@ export function StatefulSetsPage({ cluster }: { cluster: string }) {
 
   const editFlag = useEditorDirty(cluster, "statefulsets", selectedNs ?? undefined, selectedName);
   const confirmDiscard = useConfirmDiscard(editFlag.dirty);
+
+  const overlayNav = buildOverlayNav({
+    rows: filtered,
+    selectedKey,
+    keyOf: (r) => `${r.namespace}/${r.name}`,
+    navigateTo: (r) =>
+      confirmDiscard(() => setMany({ sel: r.name, selNs: r.namespace, tab: activeTab })),
+    dismiss: () =>
+      confirmDiscard(() => setMany({ sel: null, selNs: null, tab: null })),
+  });
 
   const detail =
     selectedNs && selectedName ? (
@@ -127,6 +143,7 @@ export function StatefulSetsPage({ cluster }: { cluster: string }) {
           { id: "yaml", label: "yaml", ready: true, content: <YamlView cluster={cluster} source={{ kind: "builtin", yamlKind: "statefulsets" }} ns={selectedNs} name={selectedName} />, dirty: editFlag.dirty },
           { id: "events", label: "events", ready: true, content: <EventsView cluster={cluster} kind="statefulsets" ns={selectedNs} name={selectedName} /> },
           { id: "logs", label: "logs", ready: true, content: <WorkloadLogsTab kind="statefulset" cluster={cluster} ns={selectedNs} name={selectedName} /> },
+          { id: "security", label: "security", ready: true, content: <SecurityTab kind="workload" workloadKind="StatefulSet" cluster={cluster} ns={selectedNs} name={selectedName} /> },
         ]}
         actions={
           <ResourceActions
@@ -153,13 +170,14 @@ export function StatefulSetsPage({ cluster }: { cluster: string }) {
         }
         trailing={<NamespacePicker />}
       />
+      <SecurityEmptyBanner cluster={cluster} />
       <FilterStrip
         search={search}
         onSearch={(v) => setParam("q", v)}
         resultCount={filtered.length}
         totalCount={all.length}
       />
-      <SplitPane
+      <DetailOverlay {...overlayNav}
         storageKey="periscope.detailWidth.v4"
         left={
           query.isLoading ? (

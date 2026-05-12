@@ -474,6 +474,50 @@ watchStreams:
   perUserLimit: 60
 
 # -----------------------------------------------------------------------------
+# AWS Inspector v2 — container + AMI CVE surfacing (v1.1+)
+#
+# Periscope can surface AWS Inspector v2 findings inline on the Nodes
+# / Pods / Workloads pages: per-pod severity chips computed from the
+# union of every container image's digest findings, and per-instance
+# severity counts joined to the instance's owner (managed nodegroup,
+# Karpenter NodeClaim, or unmanaged).
+#
+# Default: DISABLED. Upgrades from v1.0.x do not have the new
+# `inspector2:*` IAM permissions yet; turning this on without the IAM
+# update would log a noisy AccessDeniedException on every cluster
+# activation. Set `enabled: true` after you have:
+#
+#   1. Granted the periscope-server's Pod Identity / IRSA role the
+#      `inspector2:ListFindings`, `inspector2:ListCoverage`,
+#      `inspector2:GetFindings`, `inspector2:BatchGetFindingDetails`
+#      permissions. See docs/setup/cluster-rbac.md.
+#   2. Enabled Inspector v2 in the AWS account you want scanned.
+#      Inspector is billed per scan; this is the operator's call.
+#
+# Scope: account-level (NOT per-cluster). One IAM grant covers every
+# cluster reachable from the periscope-server pod's role.
+#
+# When enabled, Periscope hydrates a per-cluster in-memory CVE cache
+# lazily on first activation (~10-30s scan), keeps it fresh via the
+# pod watch hook + a 6h TTL, and serves reads at <1ms thereafter. The
+# SPA never calls Inspector directly.
+# -----------------------------------------------------------------------------
+inspector:
+  # Opt-in. Set to true only after IAM + account enablement above.
+  enabled: false
+  # Per-entry TTL: cache entries older than this are re-fetched by
+  # the background loop. Catches newly-published CVEs against
+  # unchanged digests.
+  refreshInterval: 6h
+  # Cooldown before a zero-ref entry is dropped from the cache.
+  # Keeps recently-deleted pods' digests warm so a scale-up doesn't
+  # have to wait for a fresh fetch.
+  evictAfter: 24h
+  # Inspector ListFindings batch size during cold-path hydrate.
+  # Capped at 50 (the SDK BatchGet limit) regardless of what you set.
+  hydrateBatchSize: 50
+
+# -----------------------------------------------------------------------------
 # Pod Disruption Budget
 #
 # v1 is single-replica (in-memory session store) so a node drain takes

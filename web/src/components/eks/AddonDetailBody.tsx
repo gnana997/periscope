@@ -1,5 +1,5 @@
 // AddonDetailBody — body of the installed-add-on detail surface.
-// Rendered inside AddonDetailPane (right-edge SplitPane). Held in
+// Rendered inside AddonDetailPane (right-edge DetailOverlay). Held in
 // its own file so the next EKS surface that wants the same
 // "Field / Section" atoms can import them from one place rather
 // than re-deriving the layout.

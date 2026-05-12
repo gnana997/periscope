@@ -3,6 +3,7 @@ package k8s
 import (
 	"context"
 	"fmt"
+	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -115,5 +116,6 @@ func deploymentSummary(d *appsv1.Deployment) Deployment {
 		Image:             firstImage,
 		ImageCount:        imageCount,
 		CreatedAt:         d.CreationTimestamp.Time,
+		Stuck:             DetectDeploymentStuck(d, time.Now()),
 	}
 }

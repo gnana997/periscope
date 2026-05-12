@@ -13,7 +13,29 @@ tag.
 
 ## [Unreleased]
 
+## [1.0.7] - 2026-05-12
+
+### Added
+
+- Workloads: stuck-rollout badge + detail-pane banner on Deployment /
+  StatefulSet / DaemonSet rows. Backend-side detector (Go) flags
+  workloads whose `Progressing` condition has tripped
+  `ProgressDeadlineExceeded`, or whose `updatedReplicas <
+  desiredReplicas` (`updatedNumberScheduled < desiredNumberScheduled`
+  for DaemonSets) has not changed for ≥10 minutes. The wire shape
+  is a small `stuck?: { reason, sinceMs }` field, computed by
+  internal/k8s/stuck.go and consumed dumbly by the SPA — same
+  primitive the future MCP / agent tool layer will reuse (#177).
+
 ### Fixed
+
+- Apply YAML: dialog footer now shows a clear "✓ applied N" confirmation
+  when every doc in a batch lands successfully, and the apply button is
+  replaced with a primary close button so the operator gets an obvious
+  exit. Partial outcomes (any conflict / failure) surface a red "M
+  applied · K conflict · L failed" line and disable re-apply until the
+  YAML buffer is edited. Editing the YAML resets the prior outcome so
+  the banner cannot survive into the next batch (#175).
 
 - Auth: explicit logout no longer loops back through silent SSO when
   the IdP session is still valid. The SPA bundle is now served outside
@@ -24,22 +46,11 @@ tag.
   the login screen instead of re-authenticating against Auth0's still-
   valid session (#98).
 
-### Changed
+- **Amazon Inspector v2 CVE surfacing** (epic [#163](https://github.com/gnana997/periscope/issues/163) — sub-issues [#164](https://github.com/gnana997/periscope/issues/164), [#165](https://github.com/gnana997/periscope/issues/165), [#166](https://github.com/gnana997/periscope/issues/166)). Inline severity chips on Pods / Nodes / Karpenter list pages, a new **Security** detail-pane tab on Pod / Node / Deployment / StatefulSet / DaemonSet / Karpenter NodeClaim, entity-scoped manual `↻ refresh` (emits one `cve_refresh` audit row per click), 6h TTL background refresh, and an Inspector-disabled empty-state banner. Per-cluster local cache, lazy-hydrated on first activation; reads are O(1) after first activation. Opt-in via Helm `inspector.enabled: true`. Full guide: [`docs/usage/cve.md`](docs/usage/cve.md). API surface: [`docs/api.md`](docs/api.md#apiclustersclustercve--inspector-v2-cve-surface-v11).
 
-- Auth: when `auth.groupsClaim` is configured but absent from BOTH the
-  ID token and the access token at callback time, login now hard-fails
-  with `401 Unauthorized` and a "your IdP did not return a groups
-  claim" message. Previously the user was silently funneled to
-  `defaultTier`, masking IdP misconfiguration. Operators upgrading from
-  v1.0 with conditional / per-app group enrichment must verify the
-  configured claim is present on every login path before this lands.
-  Claim **present-but-empty** (`"groups": []`) still resolves cleanly
-  to zero groups — only an absent claim is refused (#98).
-- Auth: `/api/auth/whoami` now always emits `"groups": []` for users
-  with zero groups, never `null`. The wire shape is now stable across
-  all session states — the SPA's UserMenu can drop its null-guard.
-  
-### Added
+- **Server-side package grouping for the Security tab.** Raw Inspector findings (typical: 200+ per scanned container) collapse to ~5-20 `PackageGroup` entries pre-sorted by triage priority (exploits → severity → CVSS → EPSS), each carrying the suggested upgrade target (`maxVersion(fixedVersion)`). One `internal/cve/findings_group.go` implementation feeds the SPA today and the future MCP / AI-agent tool layer (v1.2 epic #151) tomorrow — no second representation. Surfaced on `/cve/pods/{ns}/{name}` and `/cve/by-workload/{kind}/{ns}/{name}`; gated off the `/cve/pods` paged listing to keep that payload compact.
+
+- **Filter chips on every Security tab** — severity (critical / high / medium / low), `exploits N`, `fixable only`, with a live `X / Y shown` counter. Client-side filter (no backend roundtrip on toggle).
 
 - Karpenter dashboard (#118). Curated read-only view at
   `/clusters/{c}/karpenter` that auto-detects via the
@@ -182,9 +193,42 @@ tag.
   slot. Soft-deprecates `web/src/lib/helmSchema.ts` to a re-export
   shim — drop in v1.2.
 
+### Fixed
+
+- `inspector2:ListFindings` aborted the per-pod hydrate on clusters with > 10 distinct ECR digests in use. Inspector v2 caps the `EcrImageHash` filter at 10 entries (stricter than `ResourceId`'s 100); the previous `BatchSize = 50` was correct for the instance-side filter but too high for the digest-side, producing a 400 `ValidationException` that left the per-pod store empty. Split `listByIDs` to accept a per-filter chunk size: `BatchSize = 50` stays for the `ResourceId` path; new `DigestBatchSize = 10` covers `EcrImageHash`. Regression tests pin the 11-digest boundary.
+
+- Pod informer's `WaitForCacheSync` never returned `true` because the informer's context was tied to the HTTP request that triggered `EnsureHydrated`. When the request completed, the informer's goroutines exited mid-sync; `lister.List()` always returned 0 and the Pod / Workload Security tab showed empty / 404 for every entity. Manager now stores a long-lived `bgCtx` in `Start()`; `startPodInformer` derives the factory's context from `bgCtx` instead of the per-request `parent` so the informer outlives the triggering request.
+
+- `ContainerRow` returned per-container `severityCounts` but never the underlying `findings` array — the Security tab UI rendered counts only, no CVE list. Backend now populates `Findings` (and now `Packages`, see Added above) when called from the detail / by-workload endpoints; the listing endpoint stays compact via a `withFindings` flag on `buildPodRow`.
+
+- Auth: explicit logout no longer loops back through silent SSO when
+  the IdP session is still valid. The SPA bundle is now served outside
+  the chi router so the auth middleware's "redirect HTML browser
+  navigations to `/api/auth/login`" fallback can't run on the
+  post-logout `/` load. Logout handlers redirect to `/?signedOut=1`;
+  the SPA's AuthProvider strips the flag after reading and stays on
+  the login screen instead of re-authenticating against Auth0's still-
+  valid session (#98).
+
+### Changed
+
+- Inspector v2 IAM block in [`docs/setup/cluster-rbac.md`](docs/setup/cluster-rbac.md#aws-inspector-v2-optional-v11) expanded with three additional `inspector2:*` actions (`BatchGetAccountStatus`, `ListCoverageStatistics`, `DescribeOrganizationConfiguration`) and three EC2 read actions (`DescribeInstances`, `DescribeInstanceTypes`, `DescribeTags`) — discovered as missing during the v1.0.7-rc2 smoke run. Existing deployments need to refresh the role policy to keep CVE hydrate working.
+
+- Auth: when `auth.groupsClaim` is configured but absent from BOTH the
+  ID token and the access token at callback time, login now hard-fails
+  with `401 Unauthorized` and a "your IdP did not return a groups
+  claim" message. Previously the user was silently funneled to
+  `defaultTier`, masking IdP misconfiguration. Operators upgrading from
+  v1.0 with conditional / per-app group enrichment must verify the
+  configured claim is present on every login path before this lands.
+  Claim **present-but-empty** (`"groups": []`) still resolves cleanly
+  to zero groups — only an absent claim is refused (#98).
+- Auth: `/api/auth/whoami` now always emits `"groups": []` for users
+  with zero groups, never `null`. The wire shape is now stable across
+  all session states — the SPA's UserMenu can drop its null-guard.
+  
 ## [1.0.4] - 2026-05-07
 
-### Added
 
 - EKS add-on detail pane: configurationValues + Pod Identity, plus
   state-stickiness fixes (#128). New `describe` / `config` tab strip
@@ -434,7 +478,6 @@ tag.
   disabled stubs — those backends are sibling issues under the
   epic. Rendering only; no install/upgrade actions yet.
 
-### Security
 
 - Helm chart fetch endpoints reject SSRF attempts at dial time
   (#73). The HTTP / OCI clients now run a `net.Dialer.Control`
@@ -449,7 +492,6 @@ tag.
     pod to reach localhost).
   Caught by CodeQL on PR #106 before merge.
 
-### Fixed
 
 - IAM policy snippet in `docs/setup/deploy.md` 4.1 and
   `docs/setup/eks-upgrade-readiness.md` was incomplete: it grouped
@@ -480,7 +522,6 @@ tag.
 
 ## [1.0.3-rc1] - 2026-05-06
 
-### Added
 
 - **Apply YAML — multi-doc paste / upload, dry-run, server-side apply,
   per-doc RBAC pre-flight, audit** (#53, #54, #55). New SPA dialog
@@ -535,7 +576,6 @@ tag.
 - SSE watch streams for ConfigMaps, ResourceQuotas, LimitRanges, and
   ServiceAccounts (#17).
 
-### Changed
 
 - AWS SDK errors are now classified by `smithy.APIError` code and
   surfaced with meaningful HTTP statuses + stable error codes
@@ -550,7 +590,6 @@ tag.
   `watchStreams.kinds`; deployments with typos that previously
   silently dropped now fail at helm install time.
 
-### Fixed
 
 - NamespacePicker dropdown was anchored to the button's left edge and
   clipped off the right of the viewport when used in the page
@@ -566,7 +605,6 @@ tag.
   `min(70vh, 520px)` so larger lists no longer require dozens of
   scrolls. (#111)
 
-### Upgrading
 
 If you plan to use the new EKS Upgrade Insights or Node Groups
 features, extend Periscope's AWS role with the following IAM actions
@@ -586,7 +624,6 @@ continue to work without these additions.
 
 Initial stable release.
 
-### Added
 
 - **Authentication & access**
   - OIDC user authentication (Auth0 and Okta tested) with PKCE,
@@ -689,7 +726,6 @@ Initial stable release.
     filesystem, all capabilities dropped, `RuntimeDefault`
     seccomp profile in the Helm chart.
 
-### Fixed
 
 - LogStream component no longer hits an infinite render loop when
   toggling wrap mode (#66).
@@ -703,7 +739,6 @@ Initial stable release.
 - Fixed stale `PERISCOPE_WATCH_PER_USER_LIMIT` default in
   `docs/architecture/watch-streams.md` (was 30, code is 60).
 
-### Security
 
 - OIDC session and PKCE/state generation now propagate `crypto/rand`
   failures as errors instead of panicking the pod (#35). Login
@@ -711,7 +746,6 @@ Initial stable release.
   rather than crashing the process and dropping every active
   session on the same replica.
 
-### Documentation
 
 - Added [`docs/architecture/README.md`](docs/architecture/README.md) —
   top-level architecture overview: component map, source-tree

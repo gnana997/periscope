@@ -166,6 +166,17 @@ Both signed (cosign keyless) and discoverable on [Artifact Hub](https://artifact
 - Resizable detail pane on row click for describe / yaml / events without leaving the dashboard
 - Graceful degradation: missing `/metrics` or events list failures degrade individual panels without failing the whole response
 
+**Security & CVE surfacing**
+- Inline severity chips on Pods / Nodes / Karpenter list pages — at-a-glance `2C · 5H · 12M` per row, sourced from Amazon Inspector v2
+- New `security` detail-pane tab on Pod / Node / Deployment / StatefulSet / DaemonSet / Karpenter NodeClaim — findings grouped **by package** server-side (a typical 200-finding container collapses to ~10 package groups with per-group "upgrade `1.16.1 → 1.26.3` fixes all" hints), pre-sorted by triage priority (exploits → severity → CVSS → EPSS)
+- Filter chips on every Security tab — `critical / high / medium / low`, `exploits N`, `fixable only` with live `X / Y shown` indicator. Toggling stays client-side (no backend roundtrip)
+- Per-cluster local cache, lazily hydrated on first activation; reads are O(1) thereafter, with 6h TTL background refresh and an entity-scoped manual `↻ refresh` button (one `cve_refresh` audit row per click)
+- Per-finding detail surface — description, remediation text + vendor advisory link, EPSS score, exploit-availability flag, fix-availability pill, first / last observed timestamps, Inspector console deep-link
+- Empty-state contract: when Inspector v2 is disabled or the IAM grant is missing, every CVE-aware page renders an unobtrusive once-per-cluster hairline banner instead of erroring out
+- Same wire shape feeds the SPA and the future MCP / AI-agent tool layer (v1.2) — one source of truth for "what to fix first" prioritization
+- Opt-in via Helm (`inspector.enabled: true`) — see [usage guide](docs/usage/cve.md) for IAM, audit, cost
+
+**Audit & observability**
 **Audit & observability**
 - Every privileged action signed by the human user — apply, delete, exec, secret reveal, log open, cronjob trigger
 - Persistent audit log: SQLite (single-replica), with retention and size caps
@@ -194,6 +205,7 @@ Both signed (cosign keyless) and discoverable on [Artifact Hub](https://artifact
 
 **Usage**
 - [Karpenter dashboard](docs/usage/karpenter-view.md) — NodePool/$/hr/Drift/pending-pods walkthrough + cost-RBAC sample
+- [CVE surfacing (Inspector v2)](docs/usage/cve.md) — chip column + Security tab walkthrough, enablement, audit + cost
 
 **Architecture**
 - [Architecture overview](docs/architecture/README.md) — component map, source-tree guide, reading order for new contributors

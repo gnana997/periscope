@@ -4,7 +4,8 @@ import { useResource } from "../hooks/useResource";
 import type { Node, NodeList } from "../lib/types";
 import { ageFrom, nameMatches } from "../lib/format";
 import { PageHeader } from "../components/page/PageHeader";
-import { SplitPane } from "../components/page/SplitPane";
+import { DetailOverlay } from "../components/page/DetailOverlay";
+import { buildOverlayNav } from "../components/page/detailOverlayHelpers";
 import {
   type Column,
   type RowTint,
@@ -22,7 +23,18 @@ import { isForbidden } from "../components/table/isForbidden";
 import { DetailPane } from "../components/detail/DetailPane";
 import { NodeDescribe } from "../components/detail/describe/NodeDescribe";
 import { ResourceActions } from "../components/edit/ResourceActions";
+import { SecurityTab } from "../components/security/SecurityTab";
+import { SecurityEmptyBanner } from "../components/security/SecurityEmptyBanner";
+import { SeverityChip } from "../components/security/SeverityChip";
+import { useCveByInstance } from "../hooks/useCve";
+import { extractInstanceId } from "../lib/cve";
 import { cn } from "../lib/cn";
+
+
+function nodeByName(name: string | null, all: Node[]): Node | undefined {
+  if (!name) return undefined;
+  return all.find((n) => n.name === name);
+}
 
 function NodeStatusTag({
   status,
@@ -61,6 +73,8 @@ export function NodesPage({ cluster }: { cluster: string }) {
   const [params, setParams] = useSearchParams();
   const search = params.get("q") ?? "";
   const selectedName = params.get("sel");
+  const activeTab = params.get("tab") ?? "describe";
+  const vulnOnly = params.get("vuln") === "1";
 
   const setParam = (key: string, value: string | null) => {
     const next = new URLSearchParams(params);
@@ -79,11 +93,51 @@ export function NodesPage({ cluster }: { cluster: string }) {
   };
 
   const query = useResource({ cluster, resource: "nodes" });
+  const cveInstances = useCveByInstance(cluster);
+  const cveByInstance = useMemo(() => {
+    const m = new Map<string, { counts: import("../lib/types").CveSeverityCounts; lastFetchedAt: string }>();
+    if (cveInstances.data) {
+      for (const inst of cveInstances.data.instances) {
+        m.set(inst.instanceId, { counts: inst.severityCounts, lastFetchedAt: inst.lastFetchedAt });
+      }
+    }
+    return m;
+  }, [cveInstances.data]);
   const all = useMemo<Node[]>(() => (query.data as NodeList | undefined)?.nodes ?? [], [query.data]);
-  const filtered = useMemo(
-    () => (search ? all.filter((n) => nameMatches(n.name, search)) : all),
-    [all, search],
-  );
+  const vulnerable = useMemo(() => {
+    if (!cveByInstance.size) return 0;
+    let n = 0;
+    for (const node of all) {
+      const id = extractInstanceId(node.providerID);
+      if (!id) continue;
+      const s = cveByInstance.get(id);
+      if (s && (s.counts.critical > 0 || s.counts.high > 0)) n++;
+    }
+    return n;
+  }, [all, cveByInstance]);
+  const filtered = useMemo(() => {
+    let r = search ? all.filter((n) => nameMatches(n.name, search)) : all;
+    if (vulnOnly) {
+      r = r.filter((n) => {
+        const id = extractInstanceId(n.providerID);
+        if (!id) return false;
+        const s = cveByInstance.get(id);
+        return !!s && (s.counts.critical > 0 || s.counts.high > 0);
+      });
+    }
+    return r;
+  }, [all, search, vulnOnly, cveByInstance]);
+
+  // NodesPage has no useEditorDirty/useConfirmDiscard — nodes
+  // are not editable from the SPA today. Cycling and dismiss
+  // call setMany directly without a confirm gate.
+  const overlayNav = buildOverlayNav({
+    rows: filtered,
+    selectedKey: selectedName,
+    keyOf: (n) => n.name,
+    navigateTo: (n) => setMany({ sel: n.name, tab: activeTab }),
+    dismiss: () => setMany({ sel: null, tab: null }),
+  });
 
   const columns: Column<Node>[] = [
     {
@@ -162,6 +216,43 @@ export function NodesPage({ cluster }: { cluster: string }) {
       accessor: (n) => n.memoryCapacity,
     },
     {
+      key: "vuln",
+      header: "vulnerabilities",
+      weight: 1.4,
+      cellClassName: "font-mono",
+      accessor: (n) => {
+        const id = extractInstanceId(n.providerID);
+        if (!id) {
+          return (
+            <SeverityChip
+              mode="compact"
+              counts={{ critical: 0, high: 0, medium: 0, low: 0, informational: 0 }}
+              state="unscanned"
+            />
+          );
+        }
+        const s = cveByInstance.get(id);
+        if (!s) {
+          return (
+            <SeverityChip
+              mode="compact"
+              counts={{ critical: 0, high: 0, medium: 0, low: 0, informational: 0 }}
+              state="unscanned"
+            />
+          );
+        }
+        const isClean =
+          s.counts.critical + s.counts.high + s.counts.medium + s.counts.low === 0;
+        return (
+          <SeverityChip
+            mode="compact"
+            counts={s.counts}
+            state={isClean ? "clean" : "has-findings"}
+          />
+        );
+      },
+    },
+    {
       key: "age",
       header: "age",
       weight: 0.5,
@@ -184,9 +275,9 @@ export function NodesPage({ cluster }: { cluster: string }) {
     <DetailPane
       title={selectedName}
       subtitle="cluster-scoped"
-      activeTab="describe"
-      onTabChange={() => {}}
-      onClose={() => setMany({ sel: null })}
+      activeTab={activeTab}
+      onTabChange={(id) => setParam("tab", id)}
+      onClose={() => setMany({ sel: null, tab: null })}
       actions={
         <ResourceActions
           cluster={cluster}
@@ -203,6 +294,18 @@ export function NodesPage({ cluster }: { cluster: string }) {
           ready: true,
           content: <NodeDescribe cluster={cluster} name={selectedName} />,
         },
+        {
+          id: "security",
+          label: "security",
+          ready: true,
+          content: (
+            <SecurityTab
+              kind="instance"
+              cluster={cluster}
+              instanceId={extractInstanceId(nodeByName(selectedName, all)?.providerID)}
+            />
+          ),
+        },
       ]}
     />
   ) : null;
@@ -211,12 +314,26 @@ export function NodesPage({ cluster }: { cluster: string }) {
     <div className="flex h-full min-h-0 flex-col">
       <PageHeader
         title="Nodes"
+        chips={
+          vulnerable > 0 || vulnOnly
+            ? [
+                {
+                  label: "vulnerable",
+                  count: vulnerable,
+                  tone: "red" as const,
+                  active: vulnOnly,
+                  onClick: () => setParam("vuln", vulnOnly ? null : "1"),
+                },
+              ]
+            : undefined
+        }
         subtitle={
           query.isSuccess
             ? `${all.length} ${all.length === 1 ? "node" : "nodes"}`
             : undefined
         }
       />
+      <SecurityEmptyBanner cluster={cluster} />
       <div className="flex items-center gap-2 border-b border-border bg-bg px-6 py-2.5">
         <div className="flex min-w-[240px] flex-1 items-center gap-2 rounded-md border border-border bg-surface px-3 py-1.5 text-[12.5px] focus-within:border-border-strong">
           <svg width="13" height="13" viewBox="0 0 13 13" className="text-ink-faint" aria-hidden>
@@ -236,7 +353,7 @@ export function NodesPage({ cluster }: { cluster: string }) {
           {all.length}
         </div>
       </div>
-      <SplitPane
+      <DetailOverlay {...overlayNav}
         storageKey="periscope.detailWidth.v4"
         left={
           query.isLoading ? (

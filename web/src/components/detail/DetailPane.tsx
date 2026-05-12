@@ -12,6 +12,11 @@ export interface DetailTab {
   /** When true the tab label gets an accent dot prefix — used by
    *  the YAML tab to flag unsaved edits ("yaml*"). */
   dirty?: boolean;
+  /** Severity-coloured leading dot (#166). `critical` = red,
+   *  `high` = amber. Absent means no dot. Used by the security
+   *  tab to signal the entity has CVEs without forcing a colour
+   *  on the tab text itself. */
+  indicator?: "critical" | "high";
 }
 
 interface DetailPaneProps {
@@ -41,7 +46,7 @@ export function DetailPane({
   const active = tabs.find((t) => t.id === activeTab && t.ready);
 
   return (
-    // min-w-0 here is load-bearing: the SplitPane's right pane has a
+    // min-w-0 here is load-bearing: the DetailOverlay's right pane has a
     // fixed pixel width and is itself min-w-0, but every nested flex
     // container needs to opt-in (default is min-width: auto = intrinsic
     // content width) for `truncate` to clip in title rows. Without it,
@@ -52,7 +57,7 @@ export function DetailPane({
     // appears to grow with each pod selection.
     <div className="flex h-full min-h-0 min-w-0 flex-col">
       {/* Tab strip */}
-      <div className="flex h-9 shrink-0 items-center gap-1 border-b border-border bg-surface px-3">
+      <div className="flex h-9 shrink-0 items-center gap-1 overflow-x-auto border-b border-border bg-surface px-3">
         {tabs.map((t) => (
           <button
             key={t.id}
@@ -66,6 +71,18 @@ export function DetailPane({
               t.ready && activeTab !== t.id && "text-ink-muted hover:text-ink",
             )}
           >
+            {t.indicator === "critical" && (
+              <span
+                className="size-1.5 rounded-full bg-red"
+                aria-label="critical findings"
+              />
+            )}
+            {t.indicator === "high" && (
+              <span
+                className="size-1.5 rounded-full bg-yellow"
+                aria-label="high-severity findings"
+              />
+            )}
             {t.dirty && (
               <span className="size-1.5 rounded-full bg-accent" aria-hidden />
             )}
@@ -157,7 +174,7 @@ export function DetailPane({
         component using `truncate` inside a nested flex container
         relies on min-width: 0 propagation from this parent.
 
-        Width is governed by SplitPane (640px default); describe
+        Width is governed by DetailOverlay (640px default); describe
         components use flex-wrap / grid auto-fit internally and
         naturally fill whatever width they're given.
       */}

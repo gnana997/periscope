@@ -5,7 +5,8 @@ import { ageFrom, nameMatches } from "../lib/format";
 import type { PV, PVList } from "../lib/types";
 import { PageHeader } from "../components/page/PageHeader";
 import { FilterStrip } from "../components/page/FilterStrip";
-import { SplitPane } from "../components/page/SplitPane";
+import { DetailOverlay } from "../components/page/DetailOverlay";
+import { buildOverlayNav } from "../components/page/detailOverlayHelpers";
 import { type Column } from "../components/table/DataTable";
 import { SelectableDataTable } from "../components/table/SelectableDataTable";
 import { api } from "../lib/api";
@@ -74,6 +75,16 @@ export function PVsPage({ cluster }: { cluster: string }) {
   const editFlag = useEditorDirty(cluster, "pvs", undefined, selectedName);
   const confirmDiscard = useConfirmDiscard(editFlag.dirty);
 
+  const overlayNav = buildOverlayNav({
+    rows: filtered,
+    selectedKey: selectedName,
+    keyOf: (r) => r.name,
+    navigateTo: (r) =>
+      confirmDiscard(() => setMany({ sel: r.name, tab: activeTab })),
+    dismiss: () =>
+      confirmDiscard(() => setMany({ sel: null, tab: null })),
+  });
+
   const detail = selectedName ? (
     <DetailPane
       title={selectedName}
@@ -121,7 +132,7 @@ export function PVsPage({ cluster }: { cluster: string }) {
         resultCount={filtered.length}
         totalCount={all.length}
       />
-      <SplitPane
+      <DetailOverlay {...overlayNav}
         storageKey="periscope.detailWidth.v4"
         left={
           query.isLoading ? (

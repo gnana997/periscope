@@ -32,6 +32,12 @@ type Node struct {
 	// a "cordoned" badge in the list and detail without a second
 	// fetch. Renamed from the K8s field to be SPA-friendly JSON.
 	Unschedulable bool `json:"unschedulable"`
+	// ProviderID is the cloud-provider instance handle (e.g.
+	// "aws:///us-east-1a/i-0abc12345"). Surfaced so the SPA can join
+	// node rows to the per-instance CVE API (#166) by extracting the
+	// EC2 instance id. Empty on bare-metal / kind / pre-Initialized
+	// nodes — the SPA renders "no scan possible" rather than erroring.
+	ProviderID string `json:"providerID,omitempty"`
 }
 
 type NodeList struct {
@@ -186,6 +192,7 @@ type Deployment struct {
 	Image      string `json:"image,omitempty"`
 	ImageCount int    `json:"imageCount,omitempty"`
 	CreatedAt         time.Time `json:"createdAt"`
+	Stuck             *StuckState `json:"stuck,omitempty"`
 }
 
 type DeploymentList struct {
@@ -310,6 +317,7 @@ type StatefulSet struct {
 	Image      string `json:"image,omitempty"`
 	ImageCount int    `json:"imageCount,omitempty"`
 	CreatedAt       time.Time `json:"createdAt"`
+	Stuck             *StuckState `json:"stuck,omitempty"`
 }
 
 type StatefulSetList struct {
@@ -343,6 +351,7 @@ type DaemonSet struct {
 	Image      string `json:"image,omitempty"`
 	ImageCount int    `json:"imageCount,omitempty"`
 	CreatedAt              time.Time `json:"createdAt"`
+	Stuck             *StuckState `json:"stuck,omitempty"`
 }
 
 type DaemonSetList struct {

@@ -148,6 +148,32 @@
         }
       }
     },
+    "inspector": {
+      "type": "object",
+      "description": "AWS Inspector v2 CVE surfacing (v1.1+). Opt-in. See docs/setup/values.md and docs/setup/cluster-rbac.md for the required IAM grants.",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Master switch. Default false; existing v1.0.x deployments stay unchanged."
+        },
+        "refreshInterval": {
+          "type": "string",
+          "pattern": "^[0-9]+(ns|us|µs|ms|s|m|h)$",
+          "description": "Per-entry TTL as a Go duration (e.g. '6h', '30m')."
+        },
+        "evictAfter": {
+          "type": "string",
+          "pattern": "^[0-9]+(ns|us|µs|ms|s|m|h)$",
+          "description": "Cooldown before a zero-ref entry is dropped from the cache."
+        },
+        "hydrateBatchSize": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 50,
+          "description": "Inspector ListFindings batch size during cold-path hydrate. Capped at 50 (SDK BatchGet limit)."
+        }
+      }
+    },
     "pdb": {
       "type": "object",
       "properties": {

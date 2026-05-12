@@ -5,7 +5,8 @@ import type { Pod, PodList } from "../lib/types";
 import { ageFrom, nameMatches } from "../lib/format";
 import { PageHeader } from "../components/page/PageHeader";
 import { FilterStrip } from "../components/page/FilterStrip";
-import { SplitPane } from "../components/page/SplitPane";
+import { DetailOverlay } from "../components/page/DetailOverlay";
+import { buildOverlayNav } from "../components/page/detailOverlayHelpers";
 import {
   type Column,
   type RowTint,
@@ -31,6 +32,12 @@ import { ResourceActions } from "../components/edit/ResourceActions";
 import { EventsView } from "../components/detail/EventsView";
 import { PodLogsTab } from "../components/logs/PodLogsTab";
 import { NamespacePicker } from "../components/shell/NamespacePicker";
+import { SecurityTab } from "../components/security/SecurityTab";
+import { SecurityEmptyBanner } from "../components/security/SecurityEmptyBanner";
+import { useCvePodSummaries } from "../hooks/useCve";
+import { countVulnerable, podKey } from "../lib/cve";
+import { SeverityChip } from "../components/security/SeverityChip";
+
 import { cn } from "../lib/cn";
 
 export function PodsPage({ cluster }: { cluster: string }) {
@@ -41,6 +48,7 @@ export function PodsPage({ cluster }: { cluster: string }) {
   const selectedNs = params.get("selNs");
   const selectedName = params.get("sel");
   const activeTab = params.get("tab") ?? "describe";
+  const vulnOnly = params.get("vuln") === "1";
 
   const setParam = (key: string, value: string | null) => {
     const next = new URLSearchParams(params);
@@ -64,6 +72,9 @@ export function PodsPage({ cluster }: { cluster: string }) {
     namespace: namespace ?? undefined,
   });
 
+  const cveSummaries = useCvePodSummaries(cluster);
+  const cveByPod = cveSummaries.data;
+
   const allPods = useMemo<Pod[]>(
     () => (podsQuery.data as PodList | undefined)?.pods ?? [],
     [podsQuery.data],
@@ -81,6 +92,7 @@ export function PodsPage({ cluster }: { cluster: string }) {
     [allPods],
   );
 
+  const vulnerable = useMemo(() => countVulnerable(allPods, cveByPod), [allPods, cveByPod]);
   const filtered = useMemo(() => {
     let r = allPods;
     if (search) r = r.filter((p) => nameMatches(p.name, search));
@@ -89,8 +101,14 @@ export function PodsPage({ cluster }: { cluster: string }) {
         phaseTone(p.phase) === "red",
       );
     else if (status === "Running") r = r.filter((p) => phaseTone(p.phase) === "green");
+    if (vulnOnly && cveByPod) {
+      r = r.filter((p) => {
+        const s = cveByPod.get(podKey(p.namespace, p.name));
+        return !!s && (s.counts.critical > 0 || s.counts.high > 0);
+      });
+    }
     return r;
-  }, [allPods, search, status]);
+  }, [allPods, search, status, vulnOnly, cveByPod]);
 
   const selectedKey =
     selectedNs && selectedName ? `${selectedNs}/${selectedName}` : null;
@@ -157,6 +175,41 @@ export function PodsPage({ cluster }: { cluster: string }) {
         return <span className={tone}>{p.qos.toLowerCase()}</span>;
       },
     },
+    {
+      key: "vuln",
+      header: "vulnerabilities",
+      weight: 1.4,
+      cellClassName: "font-mono",
+      accessor: (p) => {
+        const s = cveByPod?.get(podKey(p.namespace, p.name));
+        if (!s) {
+          return (
+            <SeverityChip
+              mode="compact"
+              counts={{ critical: 0, high: 0, medium: 0, low: 0, informational: 0 }}
+              state="unscanned"
+            />
+          );
+        }
+        const isClean =
+          s.counts.critical + s.counts.high + s.counts.medium + s.counts.low === 0;
+        return (
+          <SeverityChip
+            mode="compact"
+            counts={s.counts}
+            state={
+              isClean
+                ? s.coverage === "none"
+                  ? "non-ecr"
+                  : s.coverage === "partial"
+                    ? "partial"
+                    : "clean"
+                : "has-findings"
+            }
+          />
+        );
+      },
+    },
     { key: "node", header: "node", weight: 1.6, cellClassName: "font-mono text-ink-muted", accessor: (p) => p.nodeName ?? "—" },
     { key: "ip", header: "pod ip", weight: 1.1, cellClassName: "font-mono text-ink-muted", accessor: (p) => p.podIP ?? "—" },
     { key: "age", header: "age", weight: 0.6, align: "right", cellClassName: "font-mono text-ink-muted", accessor: (p) => ageFrom(p.createdAt) },
@@ -171,6 +224,16 @@ export function PodsPage({ cluster }: { cluster: string }) {
   const editFlag = useEditorDirty(cluster, "pods", selectedNs ?? undefined, selectedName);
   const confirmDiscard = useConfirmDiscard(editFlag.dirty);
 
+
+  const overlayNav = buildOverlayNav<Pod>({
+    rows: filtered,
+    selectedKey,
+    keyOf: (p) => `${p.namespace}/${p.name}`,
+    navigateTo: (p) =>
+      confirmDiscard(() => setMany({ sel: p.name, selNs: p.namespace, tab: activeTab })),
+    dismiss: () =>
+      confirmDiscard(() => setMany({ sel: null, selNs: null, tab: null })),
+  });
   const detail =
     selectedNs && selectedName ? (
       <DetailPane
@@ -204,6 +267,19 @@ export function PodsPage({ cluster }: { cluster: string }) {
             label: "logs",
             ready: true,
             content: <PodLogsTab cluster={cluster} ns={selectedNs} name={selectedName} />,
+          },
+          {
+            id: "security",
+            label: "security",
+            ready: true,
+            content: (
+              <SecurityTab
+                kind="pod"
+                cluster={cluster}
+                ns={selectedNs}
+                name={selectedName}
+              />
+            ),
           },
         ]}
         actions={
@@ -239,10 +315,18 @@ export function PodsPage({ cluster }: { cluster: string }) {
         chips={[
           { label: "failing", count: failing, tone: "red", active: status === "Failed", onClick: () => setParam("status", status === "Failed" ? null : "Failed") },
           { label: "pending", count: pending, tone: "yellow", active: status === "Pending", onClick: () => setParam("status", status === "Pending" ? null : "Pending") },
+          {
+            label: "vulnerable",
+            count: vulnerable,
+            tone: "red",
+            active: vulnOnly,
+            onClick: () => setParam("vuln", vulnOnly ? null : "1"),
+          },
         ]}
         streamStatus={podsQuery.streamStatus}
         trailing={<NamespacePicker />}
       />
+      <SecurityEmptyBanner cluster={cluster} />
       <FilterStrip
         search={search}
         onSearch={(v) => setParam("q", v)}
@@ -252,7 +336,7 @@ export function PodsPage({ cluster }: { cluster: string }) {
         resultCount={filtered.length}
         totalCount={allPods.length}
       />
-      <SplitPane
+      <DetailOverlay {...overlayNav}
         storageKey="periscope.detailWidth.v4"
         left={
           podsQuery.isLoading ? (

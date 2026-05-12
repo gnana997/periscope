@@ -255,7 +255,48 @@ ceiling.
 
 ---
 
-## 7. Development and debug
+## 7. AWS Inspector v2 (v1.1+)
+
+CVE surfacing on the Nodes / Pods / Workloads pages. Opt-in;
+default-disabled to avoid AccessDenied alarms on v1.0.x → v1.1
+upgrades that have not yet granted the new `inspector2:*` IAM.
+
+### `PERISCOPE_INSPECTOR_ENABLED`
+
+`true` / `false`. When `false` (default) no goroutines start and
+no Inspector calls are made — Periscope behaves identically to
+v1.0.x. When `true` the CVE manager hydrates per-cluster on first
+activation and keeps a 6h TTL'd in-memory cache.
+
+Helm rendering: `inspector.enabled: true`.
+
+### `PERISCOPE_INSPECTOR_REFRESH_INTERVAL`
+
+Go duration (e.g. `6h`, `30m`). Per-entry TTL — entries older than
+this are re-fetched by a background loop so newly-published CVEs
+against unchanged digests get picked up. Default `6h`.
+
+Helm rendering: `inspector.refreshInterval`.
+
+### `PERISCOPE_INSPECTOR_EVICT_AFTER`
+
+Go duration. Cooldown before a zero-ref cache entry is dropped.
+Keeps recently-deleted pod digests warm so a scale-up doesn't have
+to refetch. Default `24h`.
+
+Helm rendering: `inspector.evictAfter`.
+
+### `PERISCOPE_INSPECTOR_HYDRATE_BATCH_SIZE`
+
+Inspector ListFindings batch size during cold-path hydrate. Hard
+capped at 50 (the SDK BatchGet limit) regardless of the operator-
+supplied value. Default `50`.
+
+Helm rendering: `inspector.hydrateBatchSize`.
+
+---
+
+## 8. Development and debug
 
 These exist for development convenience and are **not** part of the
 v1.0 public configuration surface — treat them as breakable.

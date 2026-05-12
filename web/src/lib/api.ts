@@ -103,6 +103,13 @@ import type {
   AddonConfigurationResponse,
   AddonInstallRequest,
   AddonUpgradeRequest,
+  CveStatusResp,
+  CveInstancesResp,
+  CveFindingsResp,
+  CvePodsResp,
+  CvePodRow,
+  CveByWorkloadResp,
+  CveRefreshRequest,
 } from "./types";
 
 class ApiError extends Error {
@@ -1203,6 +1210,93 @@ export const api = {
       signal,
     );
   },
+  /** CVE \/ Inspector v2 surface (#165 + #166).
+   *  Read endpoints serve from the per-cluster local store; the SPA
+   *  never hits Inspector directly. Cold-start hydrate blocks the
+   *  first read 10-30s. Empty-state contract: when inspector is
+   *  disabled (Helm or AWS account), responses still return HTTP 200
+   *  with inspectorEnabled:false — branch on the flag, not a status
+   *  code, to render the empty-state banner. */
+  cveStatus: (cluster: string, signal?: AbortSignal) =>
+    getJSON<CveStatusResp>(
+      `/api/clusters/${enc(cluster)}/cve/status`,
+      signal,
+    ),
+
+  cveByInstance: (cluster: string, signal?: AbortSignal) =>
+    getJSON<CveInstancesResp>(
+      `/api/clusters/${enc(cluster)}/cve/by-instance`,
+      signal,
+    ),
+
+  cveByInstanceOne: (
+    cluster: string,
+    instanceId: string,
+    signal?: AbortSignal,
+  ) =>
+    getJSON<CveFindingsResp>(
+      `/api/clusters/${enc(cluster)}/cve/by-instance/${enc(instanceId)}`,
+      signal,
+    ),
+
+  cveByDigest: (cluster: string, digest: string, signal?: AbortSignal) =>
+    getJSON<CveFindingsResp>(
+      `/api/clusters/${enc(cluster)}/cve/by-digest/${enc(digest)}`,
+      signal,
+    ),
+
+  /** Paginated; pass the previous response.next as cursor to fetch
+   *  the next page. Empty cursor on the first call. */
+  cvePodsPage: (
+    cluster: string,
+    cursor: string | undefined,
+    signal?: AbortSignal,
+  ) => {
+    const q = cursor ? `?cursor=${enc(cursor)}` : "";
+    return getJSON<CvePodsResp>(
+      `/api/clusters/${enc(cluster)}/cve/pods${q}`,
+      signal,
+    );
+  },
+
+  cvePodDetail: (
+    cluster: string,
+    namespace: string,
+    name: string,
+    signal?: AbortSignal,
+  ) =>
+    getJSON<CvePodRow>(
+      `/api/clusters/${enc(cluster)}/cve/pods/${enc(namespace)}/${enc(name)}`,
+      signal,
+    ),
+
+  cveByWorkload: (
+    cluster: string,
+    kind: string,
+    namespace: string,
+    name: string,
+    signal?: AbortSignal,
+  ) =>
+    getJSON<CveByWorkloadResp>(
+      `/api/clusters/${enc(cluster)}/cve/by-workload/${enc(kind)}/${enc(namespace)}/${enc(name)}`,
+      signal,
+    ),
+
+  /** Force refresh — emits one cve_refresh audit row. Both fields
+   *  optional; empty body still records the intent. Returns 202 when
+   *  hydrate is in flight (callers can ignore the body and poll
+   *  cveStatus until hydrated:true). */
+  cveRefresh: (
+    cluster: string,
+    body: CveRefreshRequest,
+    signal?: AbortSignal,
+  ) =>
+    postJSON<unknown>(
+      `/api/clusters/${enc(cluster)}/cve/refresh`,
+      body,
+      signal,
+    ),
+
 };
 
 /** Workload kinds that have apiserver-native rollout history. */
