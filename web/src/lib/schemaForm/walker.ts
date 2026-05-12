@@ -103,10 +103,26 @@ export function hasRequiredUnsupportedField(
   return buildFieldDescriptors(schema, options).some(walkRequiredUnsupported);
 }
 
-function walkRequiredUnsupported(d: FieldDescriptor): boolean {
+export function walkRequiredUnsupported(d: FieldDescriptor): boolean {
   if (d.type === "unsupported" && d.required) return true;
-  if (d.type === "object" && d.children) {
-    return d.children.some(walkRequiredUnsupported);
+  // Recurse into every container shape that can carry nested
+  // descriptors. The previous version only descended through `object`,
+  // so deeply-nested unsupported requireds inside array-of-objects
+  // rows or discriminator branches slipped past
+  // hasRequiredUnsupportedField and dropped operators into form mode
+  // only to hit a wall mid-form (matrix volume mounts, CRD JSON-patch
+  // ops, cert-manager Issuer branch internals, etc.).
+  if (
+    (d.type === "object" || d.type === "array-of-objects") &&
+    d.children
+  ) {
+    if (d.children.some(walkRequiredUnsupported)) return true;
+  }
+  if (d.type === "discriminator") {
+    if (d.sharedChildren?.some(walkRequiredUnsupported)) return true;
+    for (const b of d.branches ?? []) {
+      if (b.descriptors.some(walkRequiredUnsupported)) return true;
+    }
   }
   return false;
 }
