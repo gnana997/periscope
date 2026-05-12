@@ -32,6 +32,7 @@ import { EventsView } from "../components/detail/EventsView";
 import { WorkloadLogsTab } from "../components/logs/WorkloadLogsTab";
 import { NamespacePicker } from "../components/shell/NamespacePicker";
 import { cn } from "../lib/cn";
+import { StuckBadge } from "../components/workload/StuckBadge";
 
 export function StatefulSetsPage({ cluster }: { cluster: string }) {
   const [params, setParams] = useSearchParams();
@@ -103,12 +104,14 @@ export function StatefulSetsPage({ cluster }: { cluster: string }) {
         </span>
       ),
     },
+    { key: "stuck", header: "", weight: 0.4, align: "left", accessor: (s) => (s.stuck ? <StuckBadge stuck={s.stuck} /> : null) },
     { key: "updated", header: "updated", weight: 0.7, align: "right", cellClassName: "font-mono text-ink-muted", accessor: (s) => s.updatedReplicas },
     { key: "current", header: "current", weight: 0.7, align: "right", cellClassName: "font-mono text-ink-muted", accessor: (s) => s.currentReplicas },
     { key: "age", header: "age", weight: 0.5, align: "right", cellClassName: "font-mono text-ink-muted", accessor: (s) => ageFrom(s.createdAt) },
   ];
 
   const rowTint = (s: StatefulSet): RowTint => {
+    if (s.stuck) return "red";
     if (s.replicas > 0 && s.readyReplicas === 0) return "red";
     if (s.readyReplicas < s.replicas) return "yellow";
     return null;

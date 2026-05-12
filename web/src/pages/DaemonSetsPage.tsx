@@ -32,6 +32,7 @@ import { EventsView } from "../components/detail/EventsView";
 import { WorkloadLogsTab } from "../components/logs/WorkloadLogsTab";
 import { NamespacePicker } from "../components/shell/NamespacePicker";
 import { cn } from "../lib/cn";
+import { StuckBadge } from "../components/workload/StuckBadge";
 
 export function DaemonSetsPage({ cluster }: { cluster: string }) {
   const [params, setParams] = useSearchParams();
@@ -103,6 +104,7 @@ export function DaemonSetsPage({ cluster }: { cluster: string }) {
         </span>
       ),
     },
+    { key: "stuck", header: "", weight: 0.4, align: "left", accessor: (d) => (d.stuck ? <StuckBadge stuck={d.stuck} /> : null) },
     { key: "updated", header: "up-to-date", weight: 0.8, align: "right", cellClassName: "font-mono text-ink-muted", accessor: (d) => d.updatedNumberScheduled },
     { key: "available", header: "available", weight: 0.8, align: "right", cellClassName: "font-mono text-ink-muted", accessor: (d) => d.numberAvailable },
     {
@@ -121,6 +123,7 @@ export function DaemonSetsPage({ cluster }: { cluster: string }) {
   ];
 
   const rowTint = (d: DaemonSet): RowTint => {
+    if (d.stuck) return "red";
     if (d.desiredNumberScheduled > 0 && d.numberReady === 0) return "red";
     if (d.numberReady < d.desiredNumberScheduled) return "yellow";
     if (d.numberMisscheduled > 0) return "yellow";

@@ -3,6 +3,7 @@ package k8s
 import (
 	"context"
 	"fmt"
+	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -116,5 +117,6 @@ func statefulSetSummary(s *appsv1.StatefulSet) StatefulSet {
 		Image:           firstImage,
 		ImageCount:      imageCount,
 		CreatedAt:       s.CreationTimestamp.Time,
+		Stuck:           DetectStatefulSetStuck(s, time.Now()),
 	}
 }
