@@ -14,6 +14,7 @@ import (
 	networkingv1 "k8s.io/api/networking/v1"
 	nodev1 "k8s.io/api/node/v1"
 	policyv1 "k8s.io/api/policy/v1"
+	rbacv1 "k8s.io/api/rbac/v1"
 	schedulingv1 "k8s.io/api/scheduling/v1"
 	storagev1 "k8s.io/api/storage/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -914,5 +915,140 @@ func WatchRuntimeClasses(ctx context.Context, p credentials.Provider, args Watch
 			return cs.NodeV1().RuntimeClasses().Watch(ctx, opts)
 		},
 		Summary: runtimeClassSummary,
+	}, args.ResumeFrom, sink)
+}
+
+// ============================================================
+// Secrets — namespaced.
+//
+// Snapshot + delta DTO is the redacted secretSummary (Name, Namespace,
+// Type, KeyCount, TLSExpiresAt, CreatedAt). The raw `Data` map is NEVER
+// in the watch payload — same projection ListSecrets has used since
+// the secret list page shipped, so no secret material crosses the SSE
+// wire even though the watch is live.
+// ============================================================
+
+// WatchSecrets streams a snapshot of secrets + per-event deltas in the
+// given namespace. See watchKind for lifecycle details.
+func WatchSecrets(ctx context.Context, p credentials.Provider, args WatchArgs, sink WatchSink) error {
+	cs, err := newClientFn(ctx, p, args.Cluster)
+	if err != nil {
+		return fmt.Errorf("build clientset: %w", err)
+	}
+	return watchKind(ctx, watchSpec[corev1.Secret, Secret]{
+		Kind: "secrets",
+		List: func(ctx context.Context, opts metav1.ListOptions) ([]corev1.Secret, string, error) {
+			list, err := cs.CoreV1().Secrets(args.Namespace).List(ctx, opts)
+			if err != nil {
+				return nil, "", err
+			}
+			return list.Items, list.ResourceVersion, nil
+		},
+		Watch: func(ctx context.Context, opts metav1.ListOptions) (watch.Interface, error) {
+			return cs.CoreV1().Secrets(args.Namespace).Watch(ctx, opts)
+		},
+		Summary: secretSummary,
+	}, args.ResumeFrom, sink)
+}
+
+// ============================================================
+// RBAC — Roles, ClusterRoles, RoleBindings, ClusterRoleBindings.
+//
+// All four projections drop spec rules / subjects to a count and surface
+// only what the list page renders (name, namespace where applicable,
+// ruleCount / roleRef / subjectCount, createdAt). Wraps the existing
+// summary helpers in rbac.go so List and Watch emit shape-identical
+// DTOs.
+// ============================================================
+
+// WatchRoles streams a snapshot of roles + per-event deltas in the
+// given namespace. See watchKind for lifecycle details.
+func WatchRoles(ctx context.Context, p credentials.Provider, args WatchArgs, sink WatchSink) error {
+	cs, err := newClientFn(ctx, p, args.Cluster)
+	if err != nil {
+		return fmt.Errorf("build clientset: %w", err)
+	}
+	return watchKind(ctx, watchSpec[rbacv1.Role, Role]{
+		Kind: "roles",
+		List: func(ctx context.Context, opts metav1.ListOptions) ([]rbacv1.Role, string, error) {
+			list, err := cs.RbacV1().Roles(args.Namespace).List(ctx, opts)
+			if err != nil {
+				return nil, "", err
+			}
+			return list.Items, list.ResourceVersion, nil
+		},
+		Watch: func(ctx context.Context, opts metav1.ListOptions) (watch.Interface, error) {
+			return cs.RbacV1().Roles(args.Namespace).Watch(ctx, opts)
+		},
+		Summary: roleSummary,
+	}, args.ResumeFrom, sink)
+}
+
+// WatchClusterRoles streams a snapshot of cluster-roles + per-event
+// deltas. Cluster-scoped. See watchKind for lifecycle.
+func WatchClusterRoles(ctx context.Context, p credentials.Provider, args WatchArgs, sink WatchSink) error {
+	cs, err := newClientFn(ctx, p, args.Cluster)
+	if err != nil {
+		return fmt.Errorf("build clientset: %w", err)
+	}
+	return watchKind(ctx, watchSpec[rbacv1.ClusterRole, ClusterRole]{
+		Kind: "clusterroles",
+		List: func(ctx context.Context, opts metav1.ListOptions) ([]rbacv1.ClusterRole, string, error) {
+			list, err := cs.RbacV1().ClusterRoles().List(ctx, opts)
+			if err != nil {
+				return nil, "", err
+			}
+			return list.Items, list.ResourceVersion, nil
+		},
+		Watch: func(ctx context.Context, opts metav1.ListOptions) (watch.Interface, error) {
+			return cs.RbacV1().ClusterRoles().Watch(ctx, opts)
+		},
+		Summary: clusterRoleSummary,
+	}, args.ResumeFrom, sink)
+}
+
+// WatchRoleBindings streams a snapshot of role bindings + per-event
+// deltas in the given namespace. See watchKind for lifecycle.
+func WatchRoleBindings(ctx context.Context, p credentials.Provider, args WatchArgs, sink WatchSink) error {
+	cs, err := newClientFn(ctx, p, args.Cluster)
+	if err != nil {
+		return fmt.Errorf("build clientset: %w", err)
+	}
+	return watchKind(ctx, watchSpec[rbacv1.RoleBinding, RoleBinding]{
+		Kind: "rolebindings",
+		List: func(ctx context.Context, opts metav1.ListOptions) ([]rbacv1.RoleBinding, string, error) {
+			list, err := cs.RbacV1().RoleBindings(args.Namespace).List(ctx, opts)
+			if err != nil {
+				return nil, "", err
+			}
+			return list.Items, list.ResourceVersion, nil
+		},
+		Watch: func(ctx context.Context, opts metav1.ListOptions) (watch.Interface, error) {
+			return cs.RbacV1().RoleBindings(args.Namespace).Watch(ctx, opts)
+		},
+		Summary: roleBindingSummary,
+	}, args.ResumeFrom, sink)
+}
+
+// WatchClusterRoleBindings streams a snapshot of cluster-role-bindings
+// + per-event deltas. Cluster-scoped. See watchKind for lifecycle.
+func WatchClusterRoleBindings(ctx context.Context, p credentials.Provider, args WatchArgs, sink WatchSink) error {
+	cs, err := newClientFn(ctx, p, args.Cluster)
+	if err != nil {
+		return fmt.Errorf("build clientset: %w", err)
+	}
+	return watchKind(ctx, watchSpec[rbacv1.ClusterRoleBinding, ClusterRoleBinding]{
+		Kind: "clusterrolebindings",
+		List: func(ctx context.Context, opts metav1.ListOptions) ([]rbacv1.ClusterRoleBinding, string, error) {
+			list, err := cs.RbacV1().ClusterRoleBindings().List(ctx, opts)
+			if err != nil {
+				return nil, "", err
+			}
+			return list.Items, list.ResourceVersion, nil
+		},
+		Watch: func(ctx context.Context, opts metav1.ListOptions) (watch.Interface, error) {
+			return cs.RbacV1().ClusterRoleBindings().Watch(ctx, opts)
+		},
+		Summary: clusterRoleBindingSummary,
 	}, args.ResumeFrom, sink)
 }

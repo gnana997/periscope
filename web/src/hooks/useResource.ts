@@ -72,6 +72,9 @@ const LIST_REFETCH_INTERVAL: Partial<Record<ResourceKind, number>> = {
   resourcequotas: 60_000,
   limitranges: 60_000,
   serviceaccounts: 60_000,
+  // Secrets rotate rarely outside of cert-manager scenarios; 60s
+  // polling is plenty when the watch stream falls back.
+  secrets: 60_000,
   deployments: 30_000,
   statefulsets: 30_000,
   daemonsets: 30_000,
@@ -102,6 +105,13 @@ const LIST_REFETCH_INTERVAL: Partial<Record<ResourceKind, number>> = {
   namespaces: 60_000,
   priorityclasses: 60_000,
   runtimeclasses: 60_000,
+  // RBAC — Roles / RoleBindings / ClusterRoles / ClusterRoleBindings
+  // change on deliberate operator action (rare). 60s matches the
+  // priorityclasses/runtimeclasses cadence.
+  roles: 60_000,
+  rolebindings: 60_000,
+  clusterroles: 60_000,
+  clusterrolebindings: 60_000,
 };
 
 // WATCH_STREAM_KINDS mirrors the WatchStreamKind union; lifted here so
@@ -113,6 +123,7 @@ const WATCH_STREAM_KINDS: ReadonlyArray<ResourceKind> = [
   "resourcequotas",
   "limitranges",
   "serviceaccounts",
+  "secrets",
   "deployments",
   "statefulsets",
   "daemonsets",
@@ -133,6 +144,10 @@ const WATCH_STREAM_KINDS: ReadonlyArray<ResourceKind> = [
   "namespaces",
   "priorityclasses",
   "runtimeclasses",
+  "roles",
+  "rolebindings",
+  "clusterroles",
+  "clusterrolebindings",
 ];
 
 function isWatchStreamKind(k: ResourceKind): k is WatchStreamKind {

@@ -16,6 +16,7 @@ import (
 	networkingv1 "k8s.io/api/networking/v1"
 	nodev1 "k8s.io/api/node/v1"
 	policyv1 "k8s.io/api/policy/v1"
+	rbacv1 "k8s.io/api/rbac/v1"
 	schedulingv1 "k8s.io/api/scheduling/v1"
 	storagev1 "k8s.io/api/storage/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -1817,5 +1818,324 @@ func TestWatchPods_ListErrorPropagates(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "apiserver-down") {
 		t.Errorf("err = %v, want it to contain 'apiserver-down'", err)
+	}
+}
+
+// ============================================================
+// Secrets — DTO redacts Data; only summary fields cross the wire.
+// ============================================================
+
+func TestWatchSecrets_SnapshotAndAdded(t *testing.T) {
+	sec := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: "sec-a", Namespace: "default", ResourceVersion: "1"},
+		Type:       corev1.SecretTypeOpaque,
+		// Sensitive data — proves the DTO redacts it.
+		Data: map[string][]byte{"password": []byte("hunter2"), "token": []byte("xxx")},
+	}
+	cs := fake.NewSimpleClientset(sec)
+	swapNewClientFn(t, cs)
+
+	sink := newTestSink(8)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go func() {
+		_ = WatchSecrets(ctx, stubProvider{}, WatchArgs{
+			Cluster:   clusters.Cluster{Name: "demo", Backend: clusters.BackendKubeconfig},
+			Namespace: "default",
+		}, sink)
+	}()
+
+	snap := awaitEvent(t, sink)
+	if snap.Type != WatchSnapshot {
+		t.Fatalf("first event = %v, want snapshot", snap.Type)
+	}
+	items, ok := snap.Items.([]Secret)
+	if !ok {
+		t.Fatalf("Items type = %T, want []Secret", snap.Items)
+	}
+	if len(items) != 1 || items[0].Name != "sec-a" {
+		t.Fatalf("snapshot items = %+v, want one sec-a", items)
+	}
+	if items[0].KeyCount != 2 {
+		t.Errorf("snapshot KeyCount = %d, want 2", items[0].KeyCount)
+	}
+	if items[0].Type != string(corev1.SecretTypeOpaque) {
+		t.Errorf("snapshot Type = %q, want Opaque", items[0].Type)
+	}
+
+	sec2 := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: "sec-b", Namespace: "default", ResourceVersion: "2"},
+		Type:       corev1.SecretTypeTLS,
+		Data:       map[string][]byte{"tls.crt": []byte("..."), "tls.key": []byte("...")},
+	}
+	if _, err := cs.CoreV1().Secrets("default").Create(ctx, sec2, metav1.CreateOptions{}); err != nil {
+		t.Fatalf("create secret: %v", err)
+	}
+
+	got := awaitEvent(t, sink)
+	if got.Type != WatchAdded {
+		t.Fatalf("event = %v, want added", got.Type)
+	}
+	secObj, ok := got.Object.(Secret)
+	if !ok {
+		t.Fatalf("Object type = %T, want Secret", got.Object)
+	}
+	if secObj.Name != "sec-b" {
+		t.Errorf("added secret name = %q, want sec-b", secObj.Name)
+	}
+	if secObj.KeyCount != 2 {
+		t.Errorf("added KeyCount = %d, want 2", secObj.KeyCount)
+	}
+	// secObj is a Secret DTO — proven structurally: the struct has no
+	// Data field, so secret material can't reach the SSE wire even if
+	// we wanted it to. KeyCount is the only quantity-of-data leak and
+	// matches what ListSecrets already returns.
+}
+
+// ============================================================
+// RBAC — Roles, ClusterRoles, RoleBindings, ClusterRoleBindings.
+// Each test follows the SnapshotAndAdded shape from the workload
+// kinds: seed one, open watch, assert snapshot; create another,
+// assert delta.
+// ============================================================
+
+func TestWatchRoles_SnapshotAndAdded(t *testing.T) {
+	r := &rbacv1.Role{
+		ObjectMeta: metav1.ObjectMeta{Name: "viewer", Namespace: "default", ResourceVersion: "1"},
+		Rules: []rbacv1.PolicyRule{
+			{APIGroups: []string{""}, Resources: []string{"pods"}, Verbs: []string{"get", "list"}},
+		},
+	}
+	cs := fake.NewSimpleClientset(r)
+	swapNewClientFn(t, cs)
+
+	sink := newTestSink(8)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go func() {
+		_ = WatchRoles(ctx, stubProvider{}, WatchArgs{
+			Cluster:   clusters.Cluster{Name: "demo", Backend: clusters.BackendKubeconfig},
+			Namespace: "default",
+		}, sink)
+	}()
+
+	snap := awaitEvent(t, sink)
+	if snap.Type != WatchSnapshot {
+		t.Fatalf("first event = %v, want snapshot", snap.Type)
+	}
+	items, ok := snap.Items.([]Role)
+	if !ok {
+		t.Fatalf("Items type = %T, want []Role", snap.Items)
+	}
+	if len(items) != 1 || items[0].Name != "viewer" {
+		t.Fatalf("snapshot items = %+v, want one viewer", items)
+	}
+	if items[0].RuleCount != 1 {
+		t.Errorf("RuleCount = %d, want 1", items[0].RuleCount)
+	}
+
+	r2 := &rbacv1.Role{
+		ObjectMeta: metav1.ObjectMeta{Name: "editor", Namespace: "default", ResourceVersion: "2"},
+		Rules: []rbacv1.PolicyRule{
+			{APIGroups: []string{""}, Resources: []string{"configmaps"}, Verbs: []string{"*"}},
+			{APIGroups: []string{"apps"}, Resources: []string{"deployments"}, Verbs: []string{"get", "list", "patch"}},
+		},
+	}
+	if _, err := cs.RbacV1().Roles("default").Create(ctx, r2, metav1.CreateOptions{}); err != nil {
+		t.Fatalf("create role: %v", err)
+	}
+
+	got := awaitEvent(t, sink)
+	if got.Type != WatchAdded {
+		t.Fatalf("event = %v, want added", got.Type)
+	}
+	rObj, ok := got.Object.(Role)
+	if !ok {
+		t.Fatalf("Object type = %T, want Role", got.Object)
+	}
+	if rObj.Name != "editor" || rObj.RuleCount != 2 {
+		t.Errorf("added role = %+v, want editor with RuleCount=2", rObj)
+	}
+}
+
+func TestWatchClusterRoles_SnapshotAndAdded(t *testing.T) {
+	cr := &rbacv1.ClusterRole{
+		ObjectMeta: metav1.ObjectMeta{Name: "view", ResourceVersion: "1"},
+		Rules: []rbacv1.PolicyRule{
+			{APIGroups: []string{""}, Resources: []string{"pods"}, Verbs: []string{"get", "list", "watch"}},
+		},
+	}
+	cs := fake.NewSimpleClientset(cr)
+	swapNewClientFn(t, cs)
+
+	sink := newTestSink(8)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go func() {
+		_ = WatchClusterRoles(ctx, stubProvider{}, WatchArgs{
+			Cluster: clusters.Cluster{Name: "demo", Backend: clusters.BackendKubeconfig},
+		}, sink)
+	}()
+
+	snap := awaitEvent(t, sink)
+	if snap.Type != WatchSnapshot {
+		t.Fatalf("first event = %v, want snapshot", snap.Type)
+	}
+	items, ok := snap.Items.([]ClusterRole)
+	if !ok {
+		t.Fatalf("Items type = %T, want []ClusterRole", snap.Items)
+	}
+	if len(items) != 1 || items[0].Name != "view" {
+		t.Fatalf("snapshot items = %+v, want one view", items)
+	}
+
+	cr2 := &rbacv1.ClusterRole{
+		ObjectMeta: metav1.ObjectMeta{Name: "edit", ResourceVersion: "2"},
+	}
+	if _, err := cs.RbacV1().ClusterRoles().Create(ctx, cr2, metav1.CreateOptions{}); err != nil {
+		t.Fatalf("create clusterrole: %v", err)
+	}
+
+	got := awaitEvent(t, sink)
+	if got.Type != WatchAdded {
+		t.Fatalf("event = %v, want added", got.Type)
+	}
+	crObj, ok := got.Object.(ClusterRole)
+	if !ok {
+		t.Fatalf("Object type = %T, want ClusterRole", got.Object)
+	}
+	if crObj.Name != "edit" {
+		t.Errorf("added clusterrole name = %q, want edit", crObj.Name)
+	}
+}
+
+func TestWatchRoleBindings_SnapshotAndAdded(t *testing.T) {
+	rb := &rbacv1.RoleBinding{
+		ObjectMeta: metav1.ObjectMeta{Name: "viewer-binding", Namespace: "default", ResourceVersion: "1"},
+		RoleRef:    rbacv1.RoleRef{APIGroup: "rbac.authorization.k8s.io", Kind: "Role", Name: "viewer"},
+		Subjects: []rbacv1.Subject{
+			{Kind: "User", Name: "alice@example.com"},
+			{Kind: "Group", Name: "viewers"},
+		},
+	}
+	cs := fake.NewSimpleClientset(rb)
+	swapNewClientFn(t, cs)
+
+	sink := newTestSink(8)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go func() {
+		_ = WatchRoleBindings(ctx, stubProvider{}, WatchArgs{
+			Cluster:   clusters.Cluster{Name: "demo", Backend: clusters.BackendKubeconfig},
+			Namespace: "default",
+		}, sink)
+	}()
+
+	snap := awaitEvent(t, sink)
+	if snap.Type != WatchSnapshot {
+		t.Fatalf("first event = %v, want snapshot", snap.Type)
+	}
+	items, ok := snap.Items.([]RoleBinding)
+	if !ok {
+		t.Fatalf("Items type = %T, want []RoleBinding", snap.Items)
+	}
+	if len(items) != 1 || items[0].Name != "viewer-binding" {
+		t.Fatalf("snapshot items = %+v, want one viewer-binding", items)
+	}
+	if items[0].SubjectCount != 2 {
+		t.Errorf("SubjectCount = %d, want 2", items[0].SubjectCount)
+	}
+	if items[0].RoleRef != "Role/viewer" {
+		t.Errorf("RoleRef = %q, want Role/viewer", items[0].RoleRef)
+	}
+
+	rb2 := &rbacv1.RoleBinding{
+		ObjectMeta: metav1.ObjectMeta{Name: "editor-binding", Namespace: "default", ResourceVersion: "2"},
+		RoleRef:    rbacv1.RoleRef{APIGroup: "rbac.authorization.k8s.io", Kind: "ClusterRole", Name: "edit"},
+		Subjects: []rbacv1.Subject{
+			{Kind: "ServiceAccount", Name: "deployer", Namespace: "default"},
+		},
+	}
+	if _, err := cs.RbacV1().RoleBindings("default").Create(ctx, rb2, metav1.CreateOptions{}); err != nil {
+		t.Fatalf("create rolebinding: %v", err)
+	}
+
+	got := awaitEvent(t, sink)
+	if got.Type != WatchAdded {
+		t.Fatalf("event = %v, want added", got.Type)
+	}
+	rbObj, ok := got.Object.(RoleBinding)
+	if !ok {
+		t.Fatalf("Object type = %T, want RoleBinding", got.Object)
+	}
+	if rbObj.Name != "editor-binding" {
+		t.Errorf("added rb name = %q, want editor-binding", rbObj.Name)
+	}
+	if rbObj.RoleRef != "ClusterRole/edit" {
+		t.Errorf("added rb RoleRef = %q, want ClusterRole/edit", rbObj.RoleRef)
+	}
+}
+
+func TestWatchClusterRoleBindings_SnapshotAndAdded(t *testing.T) {
+	crb := &rbacv1.ClusterRoleBinding{
+		ObjectMeta: metav1.ObjectMeta{Name: "cluster-admins", ResourceVersion: "1"},
+		RoleRef:    rbacv1.RoleRef{APIGroup: "rbac.authorization.k8s.io", Kind: "ClusterRole", Name: "cluster-admin"},
+		Subjects: []rbacv1.Subject{
+			{Kind: "Group", Name: "platform-team"},
+		},
+	}
+	cs := fake.NewSimpleClientset(crb)
+	swapNewClientFn(t, cs)
+
+	sink := newTestSink(8)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go func() {
+		_ = WatchClusterRoleBindings(ctx, stubProvider{}, WatchArgs{
+			Cluster: clusters.Cluster{Name: "demo", Backend: clusters.BackendKubeconfig},
+		}, sink)
+	}()
+
+	snap := awaitEvent(t, sink)
+	if snap.Type != WatchSnapshot {
+		t.Fatalf("first event = %v, want snapshot", snap.Type)
+	}
+	items, ok := snap.Items.([]ClusterRoleBinding)
+	if !ok {
+		t.Fatalf("Items type = %T, want []ClusterRoleBinding", snap.Items)
+	}
+	if len(items) != 1 || items[0].Name != "cluster-admins" {
+		t.Fatalf("snapshot items = %+v, want one cluster-admins", items)
+	}
+
+	crb2 := &rbacv1.ClusterRoleBinding{
+		ObjectMeta: metav1.ObjectMeta{Name: "view-everyone", ResourceVersion: "2"},
+		RoleRef:    rbacv1.RoleRef{APIGroup: "rbac.authorization.k8s.io", Kind: "ClusterRole", Name: "view"},
+		Subjects: []rbacv1.Subject{
+			{Kind: "Group", Name: "all-developers"},
+		},
+	}
+	if _, err := cs.RbacV1().ClusterRoleBindings().Create(ctx, crb2, metav1.CreateOptions{}); err != nil {
+		t.Fatalf("create clusterrolebinding: %v", err)
+	}
+
+	got := awaitEvent(t, sink)
+	if got.Type != WatchAdded {
+		t.Fatalf("event = %v, want added", got.Type)
+	}
+	crbObj, ok := got.Object.(ClusterRoleBinding)
+	if !ok {
+		t.Fatalf("Object type = %T, want ClusterRoleBinding", got.Object)
+	}
+	if crbObj.Name != "view-everyone" {
+		t.Errorf("added crb name = %q, want view-everyone", crbObj.Name)
+	}
+	if crbObj.RoleRef != "ClusterRole/view" {
+		t.Errorf("added crb RoleRef = %q, want ClusterRole/view", crbObj.RoleRef)
 	}
 }

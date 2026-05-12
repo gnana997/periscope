@@ -2869,6 +2869,7 @@ var watchKinds = []kindReg{
 	{Name: "resourcequotas", Group: "config", Watch: k8s.WatchResourceQuotas},
 	{Name: "limitranges", Group: "config", Watch: k8s.WatchLimitRanges},
 	{Name: "serviceaccounts", Group: "config", Watch: k8s.WatchServiceAccounts},
+	{Name: "secrets", Group: "config", Watch: k8s.WatchSecrets},
 	{Name: "deployments", Group: "workloads", Watch: k8s.WatchDeployments},
 	{Name: "statefulsets", Group: "workloads", Watch: k8s.WatchStatefulSets},
 	{Name: "daemonsets", Group: "workloads", Watch: k8s.WatchDaemonSets},
@@ -2889,6 +2890,10 @@ var watchKinds = []kindReg{
 	{Name: "namespaces", Group: "cluster", Watch: k8s.WatchNamespaces},
 	{Name: "priorityclasses", Group: "cluster", Watch: k8s.WatchPriorityClasses},
 	{Name: "runtimeclasses", Group: "cluster", Watch: k8s.WatchRuntimeClasses},
+	{Name: "roles", Group: "rbac", Watch: k8s.WatchRoles},
+	{Name: "rolebindings", Group: "rbac", Watch: k8s.WatchRoleBindings},
+	{Name: "clusterroles", Group: "rbac", Watch: k8s.WatchClusterRoles},
+	{Name: "clusterrolebindings", Group: "rbac", Watch: k8s.WatchClusterRoleBindings},
 }
 
 // resourceWatchHandler is the kind-agnostic SSE handler for resource
