@@ -31,6 +31,14 @@ import (
 // or generate a very large response payload).
 const BatchSize = 50
 
+// DigestBatchSize is the per-call ID chunk size for ECR-digest
+// filters. Inspector v2 caps EcrImageHash filter cardinality at 10
+// entries on ListFindings (stricter than ResourceId, which honors
+// BatchSize). Exceeding it returns 400 ValidationException and
+// aborts the per-pod hydrate. The v1.0.7-rc1 smoke run hit this on
+// a cluster with 19 distinct ECR digests in use.
+const DigestBatchSize = 10
+
 // Finding is the flat CVE record the CVE store keeps in memory. It is
 // the package's public DTO; callers should never touch the SDK types
 // directly.
@@ -133,7 +141,7 @@ func (c *Client) IsEnabled(ctx context.Context) (bool, error) {
 // the input list and trust the lookup.
 func (c *Client) ListFindingsByInstance(ctx context.Context, instanceIDs []string) (map[string][]Finding, error) {
 	ids := dedup(instanceIDs)
-	out, err := c.listByIDs(ctx, ids, filterByInstance)
+	out, err := c.listByIDs(ctx, ids, filterByInstance, BatchSize)
 	ensureKeys(out, ids)
 	return out, err
 }
@@ -145,7 +153,7 @@ func (c *Client) ListFindingsByInstance(ctx context.Context, instanceIDs []strin
 // ListFindingsByInstance.
 func (c *Client) ListFindingsByImageDigest(ctx context.Context, digests []string) (map[string][]Finding, error) {
 	ids := dedup(digests)
-	out, err := c.listByIDs(ctx, ids, filterByDigest)
+	out, err := c.listByIDs(ctx, ids, filterByDigest, DigestBatchSize)
 	ensureKeys(out, ids)
 	return out, err
 }
@@ -154,12 +162,12 @@ func (c *Client) ListFindingsByImageDigest(ctx context.Context, digests []string
 // the FilterCriteria for a chunk of IDs. Returns findings grouped by
 // their ResourceID (each SDK finding is fanned out across its
 // Resources[] entries, see projectFinding).
-func (c *Client) listByIDs(ctx context.Context, ids []string, mkFilter func([]string) *itypes.FilterCriteria) (map[string][]Finding, error) {
+func (c *Client) listByIDs(ctx context.Context, ids []string, mkFilter func([]string) *itypes.FilterCriteria, chunkSize int) (map[string][]Finding, error) {
 	out := make(map[string][]Finding)
 	if len(ids) == 0 {
 		return out, nil
 	}
-	for chunk := range chunked(ids, BatchSize) {
+	for chunk := range chunked(ids, chunkSize) {
 		input := &inspector2.ListFindingsInput{FilterCriteria: mkFilter(chunk)}
 		paginator := inspector2.NewListFindingsPaginator(c.api, input)
 		for paginator.HasMorePages() {

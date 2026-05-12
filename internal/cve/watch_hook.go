@@ -6,6 +6,7 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/cache"
@@ -30,6 +31,13 @@ const podInformerResyncPeriod = 30 * time.Minute
 // watches in internal/k8s/watch.go, which are scoped to a single
 // request.
 func (m *Manager) startPodInformer(parent context.Context, cluster clusters.Cluster, cs kubernetes.Interface, st *clusterState) error {
+	// The informer must outlive the triggering HTTP request. Use the
+	// manager-scope bgCtx (set in Start) so factory.Start and watch
+	// goroutines keep running after EnsureHydrated returns. Falls
+	// back to parent for tests that exercise hydrate without Start.
+	if m.bgCtx != nil {
+		parent = m.bgCtx
+	}
 	ctx, cancel := context.WithCancel(parent)
 	st.podInformerCancel = cancel
 
@@ -68,6 +76,8 @@ func (m *Manager) startPodInformer(parent context.Context, cluster clusters.Clus
 	go func() {
 		if cache.WaitForCacheSync(ctx.Done(), podInformer.HasSynced, rsInformer.HasSynced) {
 			hook.syncDone.Store(true)
+			items, _ := lister.List(labels.Everything())
+			m.log.Info("cve informer cache synced", "cluster", cluster.Name, "pod_count_in_cache", len(items))
 		}
 	}()
 

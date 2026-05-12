@@ -2193,12 +2193,30 @@ export interface CveFindingsResp {
 export type CveScanState = "scanned" | "non-ecr" | "pending";
 export type CveScanCoverage = "full" | "partial" | "none";
 
+/** CvePackageGroup is one entry per (container, package) — the
+ *  server-side grouped + prioritized projection of raw findings.
+ *  Backend sorts by triage priority (exploits first, then severity
+ *  desc, then CVSS desc); SPA renders as-is. Shared shape with the
+ *  future MCP / AI-agent tool layer. */
+export interface CvePackageGroup {
+  packageName: string;
+  currentVersion?: string;
+  /** Highest fixedVersion across the group. Upgrading to this
+   *  closes every CVE in the group. Empty when no fix exists. */
+  suggestedFix?: string;
+  findings: CveFinding[];
+  counts: CveSeverityCounts;
+  exploitCount: number;
+  fixableCount: number;
+}
+
 export interface CveContainerRow {
   name: string;
   image: string;
   digest?: string;
   scanState: CveScanState;
   severityCounts?: CveSeverityCounts;
+  packages?: CvePackageGroup[];
 }
 
 export interface CvePodRow {

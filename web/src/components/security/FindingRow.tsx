@@ -50,26 +50,6 @@ export function FindingRow({ finding }: Props) {
               exploit
             </span>
           )}
-          {finding.packageName && (
-            <span className="text-ink-faint">
-              · {finding.packageName}
-              {finding.packageVersion && ` ${finding.packageVersion}`}
-              {finding.fixedVersion && (
-                <>
-                  {" → "}
-                  <span className="text-ink-muted">{finding.fixedVersion}</span>
-                </>
-              )}
-            </span>
-          )}
-          {(finding.fixAvailable === "YES" ||
-            finding.fixAvailable === "PARTIAL") && (
-            <span className="rounded-sm border border-green/40 bg-green/10 px-1 text-[10px] uppercase tracking-[0.06em] text-green">
-              {finding.fixAvailable === "PARTIAL"
-                ? "partial fix"
-                : "fix avail"}
-            </span>
-          )}
         </span>
       </button>
 
