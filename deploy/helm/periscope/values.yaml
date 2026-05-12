@@ -501,6 +501,17 @@ watchStreams:
 # lazily on first activation (~10-30s scan), keeps it fresh via the
 # pod watch hook + a 6h TTL, and serves reads at <1ms thereafter. The
 # SPA never calls Inspector directly.
+#
+# K8s RBAC: when `inspector.enabled: true` AND at least one entry in
+# `clusters[]` is `backend: in-cluster`, the chart auto-renders a
+# `periscope-inspector` ClusterRole + binding granting the server's
+# ServiceAccount cluster-scope `get/list/watch` on nodes, pods, and
+# customresourcedefinitions. These reads are needed by the background
+# CVE hydrate (Nodes().List for instance-owner attribution), the
+# image-digest watch (pods), and karpenter detection (CRDs at cluster
+# scope). Agent-backed clusters cover this via the agent chart's own
+# ClusterRole, so the local RBAC is only required when in-cluster
+# backend is used. See templates/inspector-rbac.yaml.
 # -----------------------------------------------------------------------------
 inspector:
   # Opt-in. Set to true only after IAM + account enablement above.
