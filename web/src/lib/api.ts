@@ -111,6 +111,12 @@ import type {
   CveByWorkloadResp,
   CveRefreshRequest,
 } from "./types";
+import type {
+  AccessEntry,
+  AwsAuthDiffResponse,
+  PodIdentityResponse,
+  SARoleIndexEntry,
+} from "./identity";
 
 class ApiError extends Error {
   status: number;
@@ -1215,6 +1221,39 @@ export const api = {
       signal,
     );
   },
+  // --- AWS Identity (#178) ----------------------------------
+  //
+  // Four read-only endpoints powering the Identity page:
+  // access entries, aws-auth ↔ Access Entries diff, the
+  // unified SA↔Role index, and role-centric Pod Identity.
+  // Same 422 / 403 / 429 contract as upgrade-insights /
+  // nodegroups — callers branch on isBackendNotEKS /
+  // isAWSForbidden / isAWSThrottled.
+
+  identityAccessEntries: (cluster: string, signal?: AbortSignal) =>
+    getJSON<AccessEntry[]>(
+      `/api/clusters/${enc(cluster)}/identity/access-entries`,
+      signal,
+    ),
+
+  identityAwsAuthDiff: (cluster: string, signal?: AbortSignal) =>
+    getJSON<AwsAuthDiffResponse>(
+      `/api/clusters/${enc(cluster)}/identity/aws-auth-diff`,
+      signal,
+    ),
+
+  identitySARoles: (cluster: string, signal?: AbortSignal) =>
+    getJSON<SARoleIndexEntry[]>(
+      `/api/clusters/${enc(cluster)}/identity/sa-roles`,
+      signal,
+    ),
+
+  identityPodIdentity: (cluster: string, signal?: AbortSignal) =>
+    getJSON<PodIdentityResponse>(
+      `/api/clusters/${enc(cluster)}/identity/pod-identity`,
+      signal,
+    ),
+
   /** CVE \/ Inspector v2 surface (#165 + #166).
    *  Read endpoints serve from the per-cluster local store; the SPA
    *  never hits Inspector directly. Cold-start hydrate blocks the
