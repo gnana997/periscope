@@ -113,28 +113,28 @@ func normalizeStatement(rs rawStatement) (Statement, error) {
 
 	action, err := unmarshalStringOrStringArray(rs.Action)
 	if err != nil {
-		return Statement{}, fmt.Errorf("Action: %v", err)
+		return Statement{}, fmt.Errorf("field %q: %v", "Action", err)
 	}
 	notAction, err := unmarshalStringOrStringArray(rs.NotAction)
 	if err != nil {
-		return Statement{}, fmt.Errorf("NotAction: %v", err)
+		return Statement{}, fmt.Errorf("field %q: %v", "NotAction", err)
 	}
 	resource, err := unmarshalStringOrStringArray(rs.Resource)
 	if err != nil {
-		return Statement{}, fmt.Errorf("Resource: %v", err)
+		return Statement{}, fmt.Errorf("field %q: %v", "Resource", err)
 	}
 	notResource, err := unmarshalStringOrStringArray(rs.NotResource)
 	if err != nil {
-		return Statement{}, fmt.Errorf("NotResource: %v", err)
+		return Statement{}, fmt.Errorf("field %q: %v", "NotResource", err)
 	}
 
 	principal, err := unmarshalPrincipalBlock(rs.Principal)
 	if err != nil {
-		return Statement{}, fmt.Errorf("Principal: %v", err)
+		return Statement{}, fmt.Errorf("field %q: %v", "Principal", err)
 	}
 	notPrincipal, err := unmarshalPrincipalBlock(rs.NotPrincipal)
 	if err != nil {
-		return Statement{}, fmt.Errorf("NotPrincipal: %v", err)
+		return Statement{}, fmt.Errorf("field %q: %v", "NotPrincipal", err)
 	}
 
 	return Statement{
