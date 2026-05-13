@@ -1,0 +1,56 @@
+# Periscope IAM sensitive-permissions catalog.
+#
+# This is the locked list of IAM actions Periscope flags with a red
+# chip in the AWS Access tab and the reverse-lookup result table.
+# Operator-side customization (add / suppress entries) arrives in
+# v1.2; for v1.1 this is the source of truth.
+#
+# Entry keys are IAM action names, lower-cased on load. Values are
+# render categories (one chip colour per category). Entries ending
+# in "*" are pattern-matched (e.g. "s3:deleteobject*" matches
+# "s3:deleteobject", "s3:deleteobjectversion", etc.).
+#
+# The literal "*" action is handled in the matcher (sensitive.go's
+# Catalog.Classify) as a special case → SensitiveWildcard; do not
+# add it here.
+#
+# Bump `version` when entries change so operators can trace "why is
+# this flagged?" to a specific catalog version.
+
+version: "1.0.0"
+
+entries:
+  # Privilege escalation — the AWS-documented IAM-mutation paths.
+  # Any pod with these can elevate / persist / sideload identities.
+  "iam:PassRole": privilege-escalation
+  "iam:CreateAccessKey": privilege-escalation
+  "iam:AttachRolePolicy": privilege-escalation
+  "iam:PutRolePolicy": privilege-escalation
+  "iam:CreateRole": privilege-escalation
+  "iam:UpdateAssumeRolePolicy": privilege-escalation
+
+  # Data access — secret / credential / key reads. These actions
+  # surface what the pod can read; combined with broad resource ARNs
+  # they're often the root cause of incident-disclosed data scope.
+  "secretsmanager:GetSecretValue": data
+  "ssm:GetParameter*": data
+  "kms:Decrypt": data
+  "kms:GenerateDataKey": data
+
+  # Cross-account — the entry point for trust-chain pivots. v1.1
+  # surfaces the chip; v1.2 walks the chain and renders the target
+  # role(s).
+  "sts:AssumeRole": cross-account
+
+  # Destructive — irreversible data / infrastructure destruction.
+  # Worth flagging even when scoped because the blast radius from
+  # a compromised pod is high.
+  "s3:DeleteBucket": destructive
+  "s3:DeleteObject*": destructive
+  "ec2:TerminateInstances": destructive
+  "rds:DeleteDBInstance": destructive
+
+  # Cluster self-modify — the pod can rewrite the cluster it runs
+  # in. Always worth surfacing on the dashboard.
+  "eks:UpdateClusterConfig": cluster
+  "eks:DeleteCluster": cluster
