@@ -5,7 +5,6 @@ import (
 	"errors"
 	"net/http"
 	"sync"
-	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/go-chi/chi/v5"
@@ -24,10 +23,6 @@ import (
 // access entries; 8 keeps a misbehaving region from holding the
 // goroutine pool open without bursting EKS API rate limits.
 const identityFanoutLimit = 8
-
-// identityListMaxResults is the per-page cap for ListAccessEntries /
-// ListPodIdentityAssociations. EKS service quotas allow up to 100.
-const identityListMaxResults = 100
 
 // ── Per-AWS-call audit emission ──────────────────────────────────
 
@@ -312,17 +307,4 @@ func identityPodIdentityHandler(reg *clusters.Registry, awsCfg aws.Config, emitt
 	}
 }
 
-// identityHandlerDeadline caps each handler's total budget. Keeps a
-// misbehaving region from holding an SSE-adjacent route open.
-const identityHandlerDeadline = 20 * time.Second
-
-// withIdentityDeadline wraps r.Context() with a hard deadline. Used
-// when registering routes in main.go.
-func withIdentityDeadline(h func(http.ResponseWriter, *http.Request, credentials.Provider)) func(http.ResponseWriter, *http.Request, credentials.Provider) {
-	return func(w http.ResponseWriter, r *http.Request, p credentials.Provider) {
-		ctx, cancel := context.WithTimeout(r.Context(), identityHandlerDeadline)
-		defer cancel()
-		h(w, r.WithContext(ctx), p)
-	}
-}
 
