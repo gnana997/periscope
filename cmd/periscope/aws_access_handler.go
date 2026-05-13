@@ -36,12 +36,22 @@ const capabilitiesCacheTTL = 5 * time.Minute
 
 // awsAccessConfig is the operator-tunable knob set for #188. Loaded
 // once from env vars at handler-construction time and threaded
-// through to the capabilities probe.
+// through to route registration and the capabilities probe.
 //
-// Today only IAMProbe matters; reserved as a struct so future flags
-// (probe caller-arn override, cache TTL override) extend without a
-// signature churn.
+// Reserved as a struct so future flags (probe caller-arn override,
+// cache TTL override) extend without a signature churn.
 type awsAccessConfig struct {
+	// Enabled, when false, suppresses route registration for the
+	// three new #188 endpoints (/identity/workload-permissions,
+	// /identity/capabilities, /identity/sensitive-catalog) AND
+	// skips the Pod informer that drives PodsForSA enrichment for
+	// the reverse-lookup. The four already-shipped /identity/*
+	// endpoints from #178 and the /iam/* primitives from #187 stay
+	// on regardless — gating those would regress v1.0.7 installs.
+	//
+	// Default: true. Override with PERISCOPE_AWS_ACCESS_ENABLED=false.
+	Enabled bool
+
 	// IAMProbe, when true, asks the capabilities endpoint to call
 	// iam:SimulatePrincipalPolicy against the server's own caller
 	// identity for the five v1.1 IAM-read perms and emit
@@ -50,12 +60,16 @@ type awsAccessConfig struct {
 	// with a Note) and the first real /workload-permissions or
 	// /reverse-lookup call surfaces a 403 if a perm is missing.
 	//
-	// Default: true. Override with PERISCOPE_AWS_ACCESS_IAM_PROBE=false.
+	// Ignored when Enabled is false. Default: true. Override with
+	// PERISCOPE_AWS_ACCESS_IAM_PROBE=false.
 	IAMProbe bool
 }
 
 func loadAwsAccessConfig() awsAccessConfig {
-	cfg := awsAccessConfig{IAMProbe: true}
+	cfg := awsAccessConfig{Enabled: true, IAMProbe: true}
+	if v := strings.ToLower(strings.TrimSpace(os.Getenv("PERISCOPE_AWS_ACCESS_ENABLED"))); v != "" {
+		cfg.Enabled = !(v == "false" || v == "0" || v == "no" || v == "off")
+	}
 	if v := strings.ToLower(strings.TrimSpace(os.Getenv("PERISCOPE_AWS_ACCESS_IAM_PROBE"))); v != "" {
 		cfg.IAMProbe = !(v == "false" || v == "0" || v == "no" || v == "off")
 	}

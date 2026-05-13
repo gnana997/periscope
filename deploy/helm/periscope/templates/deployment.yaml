@@ -154,6 +154,25 @@ spec:
             {{- end }}
             {{- end }}
             {{- end }}
+            {{- /*
+              AWS Access surface (#188). Two knobs — the master
+              enable toggle and the iamProbe sub-knob. Both env vars
+              are only rendered when explicitly set, so v1.0.x values
+              files that omit the block inherit the binary's
+              defaults-true behaviour without forcing a re-template.
+            */}}
+            {{- with .Values.awsAccess }}
+            {{- if hasKey . "enabled" }}
+            - name: PERISCOPE_AWS_ACCESS_ENABLED
+              value: {{ ternary "true" "false" .enabled | quote }}
+            {{- end }}
+            {{- if hasKey . "iamProbe" }}
+            {{- if hasKey .iamProbe "enabled" }}
+            - name: PERISCOPE_AWS_ACCESS_IAM_PROBE
+              value: {{ ternary "true" "false" .iamProbe.enabled | quote }}
+            {{- end }}
+            {{- end }}
+            {{- end }}
             {{- if .Values.agent.enabled }}
             - name: PERISCOPE_AGENT_LISTEN_ADDR
               value: {{ .Values.agent.listenAddr | quote }}

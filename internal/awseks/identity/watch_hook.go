@@ -37,6 +37,33 @@ func podSAIndexKey(namespace, saName string) string {
 	return namespace + "/" + saName
 }
 
+// StartOptions controls which informers StartSAInformer attaches.
+// Default is "all on" (matches v1.1 behaviour when #188 is enabled);
+// callers thread WithPodInformer(false) when the operator has
+// disabled the AWS Access surface via PERISCOPE_AWS_ACCESS_ENABLED=false
+// so the Pod informer's overhead doesn't run.
+type StartOptions struct {
+	// PodInformer toggles the Pod informer + (namespace, saName)
+	// indexer that drives Manager.PodsForSA for #188 reverse-lookup
+	// pod enrichment and the workload-permissions AffectedPods
+	// surface. When false, PodsForSA permanently returns
+	// ErrPodListerNotReady — handlers gated on the AWS-Access
+	// feature flag never reach that code path.
+	PodInformer bool
+}
+
+// StartOption is the functional-options shape callers pass to
+// StartSAInformer.
+type StartOption func(*StartOptions)
+
+// WithPodInformer enables (default) or disables the Pod informer.
+// cmd/periscope passes WithPodInformer(awsAccess.Enabled) at
+// startup so the operator's helm value drives the resource
+// footprint.
+func WithPodInformer(enabled bool) StartOption {
+	return func(o *StartOptions) { o.PodInformer = enabled }
+}
+
 // StartSAInformer starts a long-lived ServiceAccount + Pod
 // informer pair for the cluster and wires both into the manager.
 // One shared informer factory hosts both — same cancel, same
@@ -68,7 +95,17 @@ func podSAIndexKey(namespace, saName string) string {
 // Manager.Ensure returns ErrIRSAListerNotReady; until Pod cache is
 // synced, Manager.PodsForSA returns ErrPodListerNotReady. Both map
 // to 503 with Retry-After at the handler layer.
-func StartSAInformer(ctx context.Context, cs kubernetes.Interface, m *Manager) (cancel context.CancelFunc, err error) {
+//
+// Options control which informers attach. WithPodInformer(false)
+// is the AWS-Access-disabled path: only the SA informer runs, no
+// Pod informer overhead, and PodsForSA returns ErrPodListerNotReady
+// indefinitely. The #178 / #190 surfaces work unchanged either way.
+func StartSAInformer(ctx context.Context, cs kubernetes.Interface, m *Manager, opts ...StartOption) (cancel context.CancelFunc, err error) {
+	options := StartOptions{PodInformer: true}
+	for _, opt := range opts {
+		opt(&options)
+	}
+
 	ctx, cancel = context.WithCancel(ctx)
 
 	factory := informers.NewSharedInformerFactory(cs, saInformerResyncPeriod)
@@ -87,20 +124,24 @@ func StartSAInformer(ctx context.Context, cs kubernetes.Interface, m *Manager) (
 		return nil, fmt.Errorf("attach SA event handler: %w", err)
 	}
 
-	podIface := factory.Core().V1().Pods()
-	podInformer := podIface.Informer()
-	podIndexer := podInformer.GetIndexer()
-	if err := podIndexer.AddIndexers(cache.Indexers{
-		podSAIndexName: func(obj any) ([]string, error) {
-			pod, ok := obj.(*corev1.Pod)
-			if !ok {
-				return nil, nil
-			}
-			return []string{podSAIndexKey(pod.Namespace, pod.Spec.ServiceAccountName)}, nil
-		},
-	}); err != nil {
-		cancel()
-		return nil, fmt.Errorf("attach pod SA indexer: %w", err)
+	var podInformer cache.SharedIndexInformer
+	var podIndexer cache.Indexer
+	if options.PodInformer {
+		podIface := factory.Core().V1().Pods()
+		podInformer = podIface.Informer()
+		podIndexer = podInformer.GetIndexer()
+		if err := podIndexer.AddIndexers(cache.Indexers{
+			podSAIndexName: func(obj any) ([]string, error) {
+				pod, ok := obj.(*corev1.Pod)
+				if !ok {
+					return nil, nil
+				}
+				return []string{podSAIndexKey(pod.Namespace, pod.Spec.ServiceAccountName)}, nil
+			},
+		}); err != nil {
+			cancel()
+			return nil, fmt.Errorf("attach pod SA indexer: %w", err)
+		}
 	}
 
 	factory.Start(ctx.Done())
@@ -115,43 +156,47 @@ func StartSAInformer(ctx context.Context, cs kubernetes.Interface, m *Manager) (
 		return listerIRSASnapshot(saLister)
 	})
 
-	// Wire the Pod lister synchronously with its own sync gate.
-	// Pod sync is independent of SA sync — either may complete
-	// first; surfaces that don't need pods (sa-roles index) won't
-	// block on pod sync.
-	m.SetPodLister(func(namespace, saName string) ([]PodRef, int, error) {
-		if !hook.podSyncDone.Load() {
-			return nil, 0, ErrPodListerNotReady
-		}
-		objs, err := podIndexer.ByIndex(podSAIndexName, podSAIndexKey(namespace, saName))
-		if err != nil {
-			return nil, 0, fmt.Errorf("pod indexer ByIndex: %w", err)
-		}
-		refs := make([]PodRef, 0, len(objs))
-		for _, obj := range objs {
-			pod, ok := obj.(*corev1.Pod)
-			if !ok {
-				continue
+	if options.PodInformer {
+		// Wire the Pod lister synchronously with its own sync gate.
+		// Pod sync is independent of SA sync — either may complete
+		// first; surfaces that don't need pods (sa-roles index) won't
+		// block on pod sync.
+		m.SetPodLister(func(namespace, saName string) ([]PodRef, int, error) {
+			if !hook.podSyncDone.Load() {
+				return nil, 0, ErrPodListerNotReady
 			}
-			refs = append(refs, PodRef{
-				Namespace: pod.Namespace,
-				Name:      pod.Name,
-				NodeName:  pod.Spec.NodeName,
-			})
-		}
-		return refs, len(refs), nil
-	})
+			objs, err := podIndexer.ByIndex(podSAIndexName, podSAIndexKey(namespace, saName))
+			if err != nil {
+				return nil, 0, fmt.Errorf("pod indexer ByIndex: %w", err)
+			}
+			refs := make([]PodRef, 0, len(objs))
+			for _, obj := range objs {
+				pod, ok := obj.(*corev1.Pod)
+				if !ok {
+					continue
+				}
+				refs = append(refs, PodRef{
+					Namespace: pod.Namespace,
+					Name:      pod.Name,
+					NodeName:  pod.Spec.NodeName,
+				})
+			}
+			return refs, len(refs), nil
+		})
+	}
 
 	go func() {
 		if cache.WaitForCacheSync(ctx.Done(), saInformer.HasSynced) {
 			hook.syncDone.Store(true)
 		}
 	}()
-	go func() {
-		if cache.WaitForCacheSync(ctx.Done(), podInformer.HasSynced) {
-			hook.podSyncDone.Store(true)
-		}
-	}()
+	if options.PodInformer {
+		go func() {
+			if cache.WaitForCacheSync(ctx.Done(), podInformer.HasSynced) {
+				hook.podSyncDone.Store(true)
+			}
+		}()
+	}
 
 	return cancel, nil
 }
