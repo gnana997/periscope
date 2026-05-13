@@ -55,10 +55,54 @@ func (f *fakeIdentityEKS) DescribePodIdentityAssociation(ctx context.Context, in
 // fakeIdentityIAM satisfies identity.IAMAPI.
 type fakeIdentityIAM struct {
 	getRole func(in *iam.GetRoleInput) (*iam.GetRoleOutput, error)
+
+	// Policy-fetch surface (#187). Most existing identity handler
+	// tests don't exercise these, so defaults return empty / error
+	// stubs that fail loudly if accidentally invoked.
+	listRolePolicies         func(*iam.ListRolePoliciesInput) (*iam.ListRolePoliciesOutput, error)
+	getRolePolicy            func(*iam.GetRolePolicyInput) (*iam.GetRolePolicyOutput, error)
+	listAttachedRolePolicies func(*iam.ListAttachedRolePoliciesInput) (*iam.ListAttachedRolePoliciesOutput, error)
+	getPolicy                func(*iam.GetPolicyInput) (*iam.GetPolicyOutput, error)
+	getPolicyVersion         func(*iam.GetPolicyVersionInput) (*iam.GetPolicyVersionOutput, error)
 }
 
 func (f *fakeIdentityIAM) GetRole(ctx context.Context, in *iam.GetRoleInput, _ ...func(*iam.Options)) (*iam.GetRoleOutput, error) {
 	return f.getRole(in)
+}
+
+func (f *fakeIdentityIAM) ListRolePolicies(ctx context.Context, in *iam.ListRolePoliciesInput, _ ...func(*iam.Options)) (*iam.ListRolePoliciesOutput, error) {
+	if f.listRolePolicies == nil {
+		return &iam.ListRolePoliciesOutput{}, nil
+	}
+	return f.listRolePolicies(in)
+}
+
+func (f *fakeIdentityIAM) GetRolePolicy(ctx context.Context, in *iam.GetRolePolicyInput, _ ...func(*iam.Options)) (*iam.GetRolePolicyOutput, error) {
+	if f.getRolePolicy == nil {
+		return nil, errors.New("stub: GetRolePolicy not configured")
+	}
+	return f.getRolePolicy(in)
+}
+
+func (f *fakeIdentityIAM) ListAttachedRolePolicies(ctx context.Context, in *iam.ListAttachedRolePoliciesInput, _ ...func(*iam.Options)) (*iam.ListAttachedRolePoliciesOutput, error) {
+	if f.listAttachedRolePolicies == nil {
+		return &iam.ListAttachedRolePoliciesOutput{}, nil
+	}
+	return f.listAttachedRolePolicies(in)
+}
+
+func (f *fakeIdentityIAM) GetPolicy(ctx context.Context, in *iam.GetPolicyInput, _ ...func(*iam.Options)) (*iam.GetPolicyOutput, error) {
+	if f.getPolicy == nil {
+		return nil, errors.New("stub: GetPolicy not configured")
+	}
+	return f.getPolicy(in)
+}
+
+func (f *fakeIdentityIAM) GetPolicyVersion(ctx context.Context, in *iam.GetPolicyVersionInput, _ ...func(*iam.Options)) (*iam.GetPolicyVersionOutput, error) {
+	if f.getPolicyVersion == nil {
+		return nil, errors.New("stub: GetPolicyVersion not configured")
+	}
+	return f.getPolicyVersion(in)
 }
 
 // withFakeIdentityClient swaps newIdentityClient to return a Client

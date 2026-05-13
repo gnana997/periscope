@@ -2,8 +2,10 @@ package identity
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"strings"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -11,6 +13,8 @@ import (
 	ekstypes "github.com/aws/aws-sdk-go-v2/service/eks/types"
 	"github.com/aws/aws-sdk-go-v2/service/iam"
 	iamtypes "github.com/aws/aws-sdk-go-v2/service/iam/types"
+
+	iamengine "github.com/gnana997/periscope/internal/awseks/iam"
 )
 
 // EKSAPI is the subset of the AWS EKS client used by this package.
@@ -24,8 +28,19 @@ type EKSAPI interface {
 }
 
 // IAMAPI is the subset of the AWS IAM client used by this package.
+// Stubbable for tests.
 type IAMAPI interface {
 	GetRole(ctx context.Context, in *iam.GetRoleInput, opts ...func(*iam.Options)) (*iam.GetRoleOutput, error)
+
+	// Policy-fetch surface — added in #187 so *Client satisfies
+	// iam.PolicyFetcher. Each call is paginated by AWS via Marker;
+	// the high-level methods on *Client below loop until truncation
+	// is exhausted.
+	ListRolePolicies(ctx context.Context, in *iam.ListRolePoliciesInput, opts ...func(*iam.Options)) (*iam.ListRolePoliciesOutput, error)
+	GetRolePolicy(ctx context.Context, in *iam.GetRolePolicyInput, opts ...func(*iam.Options)) (*iam.GetRolePolicyOutput, error)
+	ListAttachedRolePolicies(ctx context.Context, in *iam.ListAttachedRolePoliciesInput, opts ...func(*iam.Options)) (*iam.ListAttachedRolePoliciesOutput, error)
+	GetPolicy(ctx context.Context, in *iam.GetPolicyInput, opts ...func(*iam.Options)) (*iam.GetPolicyOutput, error)
+	GetPolicyVersion(ctx context.Context, in *iam.GetPolicyVersionInput, opts ...func(*iam.Options)) (*iam.GetPolicyVersionOutput, error)
 }
 
 // Client wraps the EKS + IAM SDK calls used by the Identity surface.
@@ -253,4 +268,140 @@ func podIdentityAssocFromSDK(a ekstypes.PodIdentityAssociation) PodIdentityAssoc
 		ServiceAccount: aws.ToString(a.ServiceAccount),
 		ClusterName:    aws.ToString(a.ClusterName),
 	}
+}
+
+// ── PolicyFetcher implementation (#187) ──────────────────────────
+//
+// *Client satisfies iam.PolicyFetcher. The compile-time assertion
+// in interface_assert.go enforces this — if any signature drifts,
+// the package won't build.
+
+// ListRolePolicies returns the names of every inline policy
+// attached to the role. Paginates via Marker until truncation is
+// exhausted. roleArn is extracted to the role name via
+// roleNameFromArn; unparseable ARNs return a typed error.
+func (c *Client) ListRolePolicies(ctx context.Context, roleArn string) ([]string, error) {
+	name, ok := roleNameFromArn(roleArn)
+	if !ok {
+		return nil, fmt.Errorf("iam:ListRolePolicies: unparseable role ARN %q", roleArn)
+	}
+	var out []string
+	var marker *string
+	for {
+		resp, err := c.iam.ListRolePolicies(ctx, &iam.ListRolePoliciesInput{
+			RoleName: aws.String(name),
+			Marker:   marker,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("iam:ListRolePolicies %s: %w", name, err)
+		}
+		out = append(out, resp.PolicyNames...)
+		if !resp.IsTruncated || resp.Marker == nil {
+			break
+		}
+		marker = resp.Marker
+	}
+	return out, nil
+}
+
+// GetRolePolicy fetches the inline policy document attached to the
+// role under policyName. AWS returns the policy URL-encoded inside
+// a JSON string; this method URL-decodes before returning.
+func (c *Client) GetRolePolicy(ctx context.Context, roleArn, policyName string) (json.RawMessage, error) {
+	name, ok := roleNameFromArn(roleArn)
+	if !ok {
+		return nil, fmt.Errorf("iam:GetRolePolicy: unparseable role ARN %q", roleArn)
+	}
+	resp, err := c.iam.GetRolePolicy(ctx, &iam.GetRolePolicyInput{
+		RoleName:   aws.String(name),
+		PolicyName: aws.String(policyName),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("iam:GetRolePolicy %s/%s: %w", name, policyName, err)
+	}
+	if resp.PolicyDocument == nil {
+		return nil, fmt.Errorf("iam:GetRolePolicy %s/%s: nil PolicyDocument", name, policyName)
+	}
+	return decodePolicyDocument(aws.ToString(resp.PolicyDocument))
+}
+
+// ListAttachedRolePolicies returns the managed policies attached to
+// the role. Paginates via Marker. Returns iam-package AttachedPolicy
+// values directly so *Client satisfies iam.PolicyFetcher without an
+// adapter at the call site.
+func (c *Client) ListAttachedRolePolicies(ctx context.Context, roleArn string) ([]iamengine.AttachedPolicy, error) {
+	name, ok := roleNameFromArn(roleArn)
+	if !ok {
+		return nil, fmt.Errorf("iam:ListAttachedRolePolicies: unparseable role ARN %q", roleArn)
+	}
+	var out []iamengine.AttachedPolicy
+	var marker *string
+	for {
+		resp, err := c.iam.ListAttachedRolePolicies(ctx, &iam.ListAttachedRolePoliciesInput{
+			RoleName: aws.String(name),
+			Marker:   marker,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("iam:ListAttachedRolePolicies %s: %w", name, err)
+		}
+		for _, p := range resp.AttachedPolicies {
+			out = append(out, iamengine.AttachedPolicy{
+				PolicyArn:  aws.ToString(p.PolicyArn),
+				PolicyName: aws.ToString(p.PolicyName),
+			})
+		}
+		if !resp.IsTruncated || resp.Marker == nil {
+			break
+		}
+		marker = resp.Marker
+	}
+	return out, nil
+}
+
+// GetPolicyDocument resolves a managed-policy ARN to its current
+// (DefaultVersionId) document. Two-step under the hood: GetPolicy
+// to read DefaultVersionId, then GetPolicyVersion for the actual
+// document. Caller receives URL-decoded JSON as a single
+// RawMessage.
+//
+// Two AWS API calls per managed policy is documented and unavoidable;
+// the engine's per-role TTL cache amortizes them.
+func (c *Client) GetPolicyDocument(ctx context.Context, policyArn string) (json.RawMessage, error) {
+	pol, err := c.iam.GetPolicy(ctx, &iam.GetPolicyInput{
+		PolicyArn: aws.String(policyArn),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("iam:GetPolicy %s: %w", policyArn, err)
+	}
+	if pol.Policy == nil || pol.Policy.DefaultVersionId == nil {
+		return nil, fmt.Errorf("iam:GetPolicy %s: missing DefaultVersionId", policyArn)
+	}
+	versionID := aws.ToString(pol.Policy.DefaultVersionId)
+
+	ver, err := c.iam.GetPolicyVersion(ctx, &iam.GetPolicyVersionInput{
+		PolicyArn: aws.String(policyArn),
+		VersionId: aws.String(versionID),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("iam:GetPolicyVersion %s/%s: %w", policyArn, versionID, err)
+	}
+	if ver.PolicyVersion == nil || ver.PolicyVersion.Document == nil {
+		return nil, fmt.Errorf("iam:GetPolicyVersion %s/%s: nil Document", policyArn, versionID)
+	}
+	return decodePolicyDocument(aws.ToString(ver.PolicyVersion.Document))
+}
+
+// decodePolicyDocument URL-decodes the policy-document string AWS
+// returns from GetRolePolicy and GetPolicyVersion. The JSON is
+// wrapped in URL-encoding for AWS API compatibility (HTTP form-
+// data safety); the engine downstream expects raw JSON bytes.
+func decodePolicyDocument(encoded string) (json.RawMessage, error) {
+	if encoded == "" {
+		return nil, fmt.Errorf("empty policy document")
+	}
+	decoded, err := url.QueryUnescape(encoded)
+	if err != nil {
+		return nil, fmt.Errorf("decode policy document: %w", err)
+	}
+	return json.RawMessage(decoded), nil
 }

@@ -1,0 +1,11 @@
+{
+  "_comment": "sensitive catalog: s3:DeleteBucket → destructive",
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": "s3:DeleteBucket",
+      "Resource": "*"
+    }
+  ]
+}

@@ -1,0 +1,11 @@
+{
+  "_comment": "sensitive catalog: eks:DeleteCluster → cluster",
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": "eks:DeleteCluster",
+      "Resource": "*"
+    }
+  ]
+}

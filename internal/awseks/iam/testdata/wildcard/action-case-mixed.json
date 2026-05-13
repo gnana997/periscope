@@ -1,0 +1,11 @@
+{
+  "_comment": "wildcard case: action in non-canonical case. IAM evaluation is case-insensitive; matcher MUST normalize to lower-case to detect this as a sensitive secretsmanager:GetSecretValue grant despite the lowercase 'g'.",
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": "secretsmanager:getsecretvalue",
+      "Resource": "*"
+    }
+  ]
+}

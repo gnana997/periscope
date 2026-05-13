@@ -1,0 +1,14 @@
+{
+  "_comment": "wildcard case: scoped bucket, all objects in it. Tests reverse-lookup matching against arn:aws:s3:::orders-data-PROTECTED/some-key.",
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "s3:GetObject",
+        "s3:PutObject"
+      ],
+      "Resource": "arn:aws:s3:::orders-data-PROTECTED/*"
+    }
+  ]
+}

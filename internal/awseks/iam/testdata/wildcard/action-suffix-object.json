@@ -1,0 +1,11 @@
+{
+  "_comment": "wildcard case: action suffix *Object — rare but legal. Matches s3:GetObject, s3:PutObject, s3:DeleteObject, etc. across services if the suffix is unique enough. Tests suffix-glob handling in path.Match semantics.",
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": "s3:*Object",
+      "Resource": "*"
+    }
+  ]
+}

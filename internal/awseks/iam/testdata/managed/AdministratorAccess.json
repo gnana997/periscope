@@ -1,0 +1,11 @@
+{
+  "_comment": "source: AWS-managed AdministratorAccess (arn:aws:iam::aws:policy/AdministratorAccess), version v1 — the canonical full-admin policy",
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": "*",
+      "Resource": "*"
+    }
+  ]
+}

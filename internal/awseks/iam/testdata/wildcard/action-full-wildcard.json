@@ -1,0 +1,11 @@
+{
+  "_comment": "wildcard case: action == \"*\" — full admin. Tests the matcher's wildcard fast-path AND the sensitive catalog's literal-wildcard fallback in one fixture.",
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": "*",
+      "Resource": "*"
+    }
+  ]
+}

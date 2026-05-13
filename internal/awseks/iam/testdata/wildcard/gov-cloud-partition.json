@@ -1,0 +1,11 @@
+{
+  "_comment": "wildcard case: AWS GovCloud partition. ARNs start with arn:aws-us-gov:... — matcher must treat as a distinct namespace from arn:aws: but otherwise behave identically.",
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": "s3:*",
+      "Resource": "arn:aws-us-gov:s3:::govcloud-bucket/*"
+    }
+  ]
+}

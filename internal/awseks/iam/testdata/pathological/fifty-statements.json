@@ -1,0 +1,306 @@
+{
+  "_comment": "pathological: 50-statement policy — perf and pagination sanity. Each statement grants a distinct narrow action against a distinct resource so parser exercise scales linearly.",
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "Stmt01",
+      "Effect": "Allow",
+      "Action": "s3:GetObject",
+      "Resource": "arn:aws:s3:::bucket-01/*"
+    },
+    {
+      "Sid": "Stmt02",
+      "Effect": "Allow",
+      "Action": "s3:GetObject",
+      "Resource": "arn:aws:s3:::bucket-02/*"
+    },
+    {
+      "Sid": "Stmt03",
+      "Effect": "Allow",
+      "Action": "s3:GetObject",
+      "Resource": "arn:aws:s3:::bucket-03/*"
+    },
+    {
+      "Sid": "Stmt04",
+      "Effect": "Allow",
+      "Action": "s3:GetObject",
+      "Resource": "arn:aws:s3:::bucket-04/*"
+    },
+    {
+      "Sid": "Stmt05",
+      "Effect": "Allow",
+      "Action": "s3:GetObject",
+      "Resource": "arn:aws:s3:::bucket-05/*"
+    },
+    {
+      "Sid": "Stmt06",
+      "Effect": "Allow",
+      "Action": "s3:GetObject",
+      "Resource": "arn:aws:s3:::bucket-06/*"
+    },
+    {
+      "Sid": "Stmt07",
+      "Effect": "Allow",
+      "Action": "s3:GetObject",
+      "Resource": "arn:aws:s3:::bucket-07/*"
+    },
+    {
+      "Sid": "Stmt08",
+      "Effect": "Allow",
+      "Action": "s3:GetObject",
+      "Resource": "arn:aws:s3:::bucket-08/*"
+    },
+    {
+      "Sid": "Stmt09",
+      "Effect": "Allow",
+      "Action": "s3:GetObject",
+      "Resource": "arn:aws:s3:::bucket-09/*"
+    },
+    {
+      "Sid": "Stmt10",
+      "Effect": "Allow",
+      "Action": "s3:GetObject",
+      "Resource": "arn:aws:s3:::bucket-10/*"
+    },
+    {
+      "Sid": "Stmt11",
+      "Effect": "Allow",
+      "Action": "s3:GetObject",
+      "Resource": "arn:aws:s3:::bucket-11/*"
+    },
+    {
+      "Sid": "Stmt12",
+      "Effect": "Allow",
+      "Action": "s3:GetObject",
+      "Resource": "arn:aws:s3:::bucket-12/*"
+    },
+    {
+      "Sid": "Stmt13",
+      "Effect": "Allow",
+      "Action": "s3:GetObject",
+      "Resource": "arn:aws:s3:::bucket-13/*"
+    },
+    {
+      "Sid": "Stmt14",
+      "Effect": "Allow",
+      "Action": "s3:GetObject",
+      "Resource": "arn:aws:s3:::bucket-14/*"
+    },
+    {
+      "Sid": "Stmt15",
+      "Effect": "Allow",
+      "Action": "s3:GetObject",
+      "Resource": "arn:aws:s3:::bucket-15/*"
+    },
+    {
+      "Sid": "Stmt16",
+      "Effect": "Allow",
+      "Action": "s3:GetObject",
+      "Resource": "arn:aws:s3:::bucket-16/*"
+    },
+    {
+      "Sid": "Stmt17",
+      "Effect": "Allow",
+      "Action": "s3:GetObject",
+      "Resource": "arn:aws:s3:::bucket-17/*"
+    },
+    {
+      "Sid": "Stmt18",
+      "Effect": "Allow",
+      "Action": "s3:GetObject",
+      "Resource": "arn:aws:s3:::bucket-18/*"
+    },
+    {
+      "Sid": "Stmt19",
+      "Effect": "Allow",
+      "Action": "s3:GetObject",
+      "Resource": "arn:aws:s3:::bucket-19/*"
+    },
+    {
+      "Sid": "Stmt20",
+      "Effect": "Allow",
+      "Action": "s3:GetObject",
+      "Resource": "arn:aws:s3:::bucket-20/*"
+    },
+    {
+      "Sid": "Stmt21",
+      "Effect": "Allow",
+      "Action": "s3:GetObject",
+      "Resource": "arn:aws:s3:::bucket-21/*"
+    },
+    {
+      "Sid": "Stmt22",
+      "Effect": "Allow",
+      "Action": "s3:GetObject",
+      "Resource": "arn:aws:s3:::bucket-22/*"
+    },
+    {
+      "Sid": "Stmt23",
+      "Effect": "Allow",
+      "Action": "s3:GetObject",
+      "Resource": "arn:aws:s3:::bucket-23/*"
+    },
+    {
+      "Sid": "Stmt24",
+      "Effect": "Allow",
+      "Action": "s3:GetObject",
+      "Resource": "arn:aws:s3:::bucket-24/*"
+    },
+    {
+      "Sid": "Stmt25",
+      "Effect": "Allow",
+      "Action": "s3:GetObject",
+      "Resource": "arn:aws:s3:::bucket-25/*"
+    },
+    {
+      "Sid": "Stmt26",
+      "Effect": "Allow",
+      "Action": "s3:GetObject",
+      "Resource": "arn:aws:s3:::bucket-26/*"
+    },
+    {
+      "Sid": "Stmt27",
+      "Effect": "Allow",
+      "Action": "s3:GetObject",
+      "Resource": "arn:aws:s3:::bucket-27/*"
+    },
+    {
+      "Sid": "Stmt28",
+      "Effect": "Allow",
+      "Action": "s3:GetObject",
+      "Resource": "arn:aws:s3:::bucket-28/*"
+    },
+    {
+      "Sid": "Stmt29",
+      "Effect": "Allow",
+      "Action": "s3:GetObject",
+      "Resource": "arn:aws:s3:::bucket-29/*"
+    },
+    {
+      "Sid": "Stmt30",
+      "Effect": "Allow",
+      "Action": "s3:GetObject",
+      "Resource": "arn:aws:s3:::bucket-30/*"
+    },
+    {
+      "Sid": "Stmt31",
+      "Effect": "Allow",
+      "Action": "s3:GetObject",
+      "Resource": "arn:aws:s3:::bucket-31/*"
+    },
+    {
+      "Sid": "Stmt32",
+      "Effect": "Allow",
+      "Action": "s3:GetObject",
+      "Resource": "arn:aws:s3:::bucket-32/*"
+    },
+    {
+      "Sid": "Stmt33",
+      "Effect": "Allow",
+      "Action": "s3:GetObject",
+      "Resource": "arn:aws:s3:::bucket-33/*"
+    },
+    {
+      "Sid": "Stmt34",
+      "Effect": "Allow",
+      "Action": "s3:GetObject",
+      "Resource": "arn:aws:s3:::bucket-34/*"
+    },
+    {
+      "Sid": "Stmt35",
+      "Effect": "Allow",
+      "Action": "s3:GetObject",
+      "Resource": "arn:aws:s3:::bucket-35/*"
+    },
+    {
+      "Sid": "Stmt36",
+      "Effect": "Allow",
+      "Action": "s3:GetObject",
+      "Resource": "arn:aws:s3:::bucket-36/*"
+    },
+    {
+      "Sid": "Stmt37",
+      "Effect": "Allow",
+      "Action": "s3:GetObject",
+      "Resource": "arn:aws:s3:::bucket-37/*"
+    },
+    {
+      "Sid": "Stmt38",
+      "Effect": "Allow",
+      "Action": "s3:GetObject",
+      "Resource": "arn:aws:s3:::bucket-38/*"
+    },
+    {
+      "Sid": "Stmt39",
+      "Effect": "Allow",
+      "Action": "s3:GetObject",
+      "Resource": "arn:aws:s3:::bucket-39/*"
+    },
+    {
+      "Sid": "Stmt40",
+      "Effect": "Allow",
+      "Action": "s3:GetObject",
+      "Resource": "arn:aws:s3:::bucket-40/*"
+    },
+    {
+      "Sid": "Stmt41",
+      "Effect": "Allow",
+      "Action": "s3:GetObject",
+      "Resource": "arn:aws:s3:::bucket-41/*"
+    },
+    {
+      "Sid": "Stmt42",
+      "Effect": "Allow",
+      "Action": "s3:GetObject",
+      "Resource": "arn:aws:s3:::bucket-42/*"
+    },
+    {
+      "Sid": "Stmt43",
+      "Effect": "Allow",
+      "Action": "s3:GetObject",
+      "Resource": "arn:aws:s3:::bucket-43/*"
+    },
+    {
+      "Sid": "Stmt44",
+      "Effect": "Allow",
+      "Action": "s3:GetObject",
+      "Resource": "arn:aws:s3:::bucket-44/*"
+    },
+    {
+      "Sid": "Stmt45",
+      "Effect": "Allow",
+      "Action": "s3:GetObject",
+      "Resource": "arn:aws:s3:::bucket-45/*"
+    },
+    {
+      "Sid": "Stmt46",
+      "Effect": "Allow",
+      "Action": "s3:GetObject",
+      "Resource": "arn:aws:s3:::bucket-46/*"
+    },
+    {
+      "Sid": "Stmt47",
+      "Effect": "Allow",
+      "Action": "s3:GetObject",
+      "Resource": "arn:aws:s3:::bucket-47/*"
+    },
+    {
+      "Sid": "Stmt48",
+      "Effect": "Allow",
+      "Action": "s3:GetObject",
+      "Resource": "arn:aws:s3:::bucket-48/*"
+    },
+    {
+      "Sid": "Stmt49",
+      "Effect": "Allow",
+      "Action": "s3:GetObject",
+      "Resource": "arn:aws:s3:::bucket-49/*"
+    },
+    {
+      "Sid": "Stmt50",
+      "Effect": "Allow",
+      "Action": "s3:GetObject",
+      "Resource": "arn:aws:s3:::bucket-50/*"
+    }
+  ]
+}
