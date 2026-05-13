@@ -137,6 +137,15 @@ export const queryKeys = {
         ["cluster", c, "addons", "configSchema", name, version] as const,
     },
 
+    // EKS AWS Identity (#178). Cluster-scoped; mirrors the
+    // per-cluster Identity manager + handlers on the server.
+    identity: {
+      accessEntries: () => ["cluster", c, "identity", "access-entries"] as const,
+      awsAuthDiff: () => ["cluster", c, "identity", "aws-auth-diff"] as const,
+      saRoles: () => ["cluster", c, "identity", "sa-roles"] as const,
+      podIdentity: () => ["cluster", c, "identity", "pod-identity"] as const,
+    },
+
     // Custom resources are addressed by GVR (no static registry), so
     // they get a parallel subtree keyed on (group, version, plural).
     cr: (group: string, version: string, plural: string) => ({
