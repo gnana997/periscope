@@ -821,3 +821,91 @@ helm template periscope deploy/helm/periscope \
   --values my-values.yaml \
   --show-only templates/inspector-rbac.yaml
 ```
+
+## AWS Identity — Access Entries + Pod Identity + IRSA (v1.1+)
+
+The Identity page (under **EKS → Identity** in the sidebar)
+reconciles **EKS Access Entries** with the legacy
+**`kube-system/aws-auth` ConfigMap** and builds a unified
+**ServiceAccount → IAM Role** index spanning both **Pod Identity
+associations** and **IRSA annotations** (`eks.amazonaws.com/role-arn`).
+It is always-on for EKS-backed clusters — no `enabled` flag — but
+soft-fails to "AWS not configured" when the IAM grants below are
+absent.
+
+The IAM permissions go on the **periscope-server's** Pod Identity or
+IRSA role — same principal as the Inspector v2 grants above. All
+actions are read-only.
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [{
+    "Effect": "Allow",
+    "Action": [
+      "eks:ListAccessEntries",
+      "eks:DescribeAccessEntry",
+      "eks:ListAssociatedAccessPolicies",
+      "eks:ListPodIdentityAssociations",
+      "eks:DescribePodIdentityAssociation",
+      "iam:GetRole"
+    ],
+    "Resource": "*"
+  }]
+}
+```
+
+`iam:GetRole` is used to verify whether each IAM role bound to a
+ServiceAccount still exists (deleted-role detection). The SPA renders
+missing roles in red with a "role not found" caption; without this
+permission Periscope cannot distinguish "deleted" from "verification
+denied" and conservatively renders both as not-found.
+
+The `eks:` actions are EKS-cluster-scoped — Periscope automatically
+calls them against the EKS cluster a request is for. If your
+deployment scopes Periscope's role with a per-cluster
+`Resource: "arn:aws:eks:REGION:ACCOUNT:cluster/NAME"` list rather
+than `Resource: "*"`, ensure every entry in `clusters[]` is included.
+
+### Audit
+
+Each AWS API call emits one audit row with verb `aws_identity_read`
+and `extra.op` distinguishing the operation:
+
+| `op` | AWS / K8s call |
+|---|---|
+| `list_access_entries` | `eks:ListAccessEntries` |
+| `describe_access_entry` | `eks:DescribeAccessEntry` (one per principal) |
+| `list_associated_policies` | `eks:ListAssociatedAccessPolicies` (one per principal) |
+| `list_pod_identity` | `eks:ListPodIdentityAssociations` + per-association `DescribePodIdentityAssociation` |
+| `read_aws_auth` | K8s `get configmaps kube-system/aws-auth` |
+| `ensure_sa_roles` | the unified SA→Role index rebuild (combines several calls) |
+
+Granularity is intentional — a forensic reviewer can attribute every
+SDK call to the requesting user. Operators who find this too chatty
+can filter on `op` in the audit feed.
+
+### K8s RBAC for the SA informer
+
+The Identity page maintains a long-lived ServiceAccount informer for
+each EKS-backed cluster to keep the SA→Role index current. The
+informer runs against the **server's shared identity** (not the
+requesting user's impersonation), so it needs cluster-scope
+`get / list / watch` on `serviceaccounts`. The behaviour:
+
+- **`in-cluster` backend.** Operators who manage RBAC out-of-band
+  must grant this verb to the periscope-server SA via a ClusterRole
+  + ClusterRoleBinding. The chart does not auto-render this today;
+  see [`internal/awseks/identity/watch_hook.go`](../../internal/awseks/identity/watch_hook.go)
+  for the exact API call.
+- **`agent` backend.** Covered by the agent's existing cluster-wide
+  read grant (same provision that backs Inspector v2's watch).
+- **`eks` backend.** The periscope-server's AWS IAM role maps via
+  Access Entries / aws-auth to a K8s user; that user needs the
+  `serviceaccounts:get,list,watch` verbs cluster-wide. In tier mode
+  the `periscope-impersonator` flow grants this transitively.
+
+Reads of `kube-system/aws-auth` go through the **user's** K8s
+impersonation, so per-user denials surface naturally — operators
+without `get configmaps` on `kube-system` will see an empty diff
+and an explanatory chip rather than 403s sprinkled across the page.

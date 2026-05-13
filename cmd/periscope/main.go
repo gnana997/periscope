@@ -24,6 +24,7 @@ import (
 	"github.com/gnana997/periscope/internal/auth"
 	"github.com/gnana997/periscope/internal/authz"
 	"github.com/gnana997/periscope/internal/awsec2"
+	"github.com/gnana997/periscope/internal/awseks/identity"
 	"github.com/gnana997/periscope/internal/awsinspector"
 	"github.com/gnana997/periscope/internal/clusters"
 	"github.com/gnana997/periscope/internal/credentials"
@@ -437,6 +438,42 @@ func main() {
 		eksAddonUpgradeHandler(registry, eksAddonsC, auditEmitter)))
 	router.Delete("/api/clusters/{cluster}/eks/addons/{name}", credentials.Wrap(factory,
 		eksAddonDeleteHandler(registry, eksAddonsC, auditEmitter)))
+
+	// --- AWS Identity surface (#178) ---
+	//
+	// Four read-only endpoints that surface EKS Access Entries,
+	// the legacy aws-auth ConfigMap, EKS Pod Identity associations,
+	// and IRSA-annotated ServiceAccounts. The identityCache owns
+	// per-cluster Manager instances (each running a long-lived SA
+	// informer + an SA↔Role index + a role-existence cache). One
+	// audit row per AWS API call (verb = aws_identity_read).
+	identityAwsCfg := factory.AWSConfig()
+	identityC := newIdentityCache(
+		context.Background(),
+		identityAwsCfg,
+		func(ctx context.Context, c clusters.Cluster) (kubernetes.Interface, error) {
+			// SA informer reads use the server's shared (non-impersonated)
+			// identity — see the equivalent comment block on the CVE
+			// manager wiring above. The informer must outlive any single
+			// request and have permission to list SAs cluster-wide.
+			prov, perr := factory.For(ctx, credentials.Session{Subject: "identity-manager"})
+			if perr != nil {
+				return nil, perr
+			}
+			return k8s.NewClientset(ctx, prov, c)
+		},
+		identity.Config{},
+		slog.Default().With("component", "identity"),
+	)
+	defer identityC.Shutdown()
+	router.Get("/api/clusters/{cluster}/identity/access-entries", credentials.Wrap(factory,
+		identityAccessEntriesHandler(registry, identityAwsCfg, auditEmitter)))
+	router.Get("/api/clusters/{cluster}/identity/aws-auth-diff", credentials.Wrap(factory,
+		identityAwsAuthDiffHandler(registry, identityAwsCfg, auditEmitter)))
+	router.Get("/api/clusters/{cluster}/identity/sa-roles", credentials.Wrap(factory,
+		identitySARolesHandler(registry, identityC, auditEmitter)))
+	router.Get("/api/clusters/{cluster}/identity/pod-identity", credentials.Wrap(factory,
+		identityPodIdentityHandler(registry, identityAwsCfg, auditEmitter)))
 
 	// --- CVE / Inspector v2 surface (#165) ---
 	//

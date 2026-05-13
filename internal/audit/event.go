@@ -166,6 +166,16 @@ const (
 	// regardless of outcome so compliance can answer "did anyone view
 	// the autoscaler dashboard before this 3am node churn?".
 	VerbKarpenterRead Verb = "karpenter_read"
+	// VerbAwsIdentityRead records a read against the cluster
+	// Identity surface (#178): EKS Access Entries, the legacy
+	// kube-system/aws-auth ConfigMap, EKS Pod Identity associations,
+	// and IRSA-annotated ServiceAccounts. Same read-style verb as
+	// VerbEKSAddonsRead / VerbKarpenterRead — one row per AWS API
+	// call so compliance can attribute each Describe / List to a
+	// requesting actor. Extra carries `op` (e.g. "list_access_entries",
+	// "describe_pod_identity", "read_aws_auth", "get_role") to
+	// distinguish the calls inside one handler invocation.
+	VerbAwsIdentityRead Verb = "aws_identity_read"
 	// VerbEKSAddonInstallIntent / VerbEKSAddonInstall are the paired
 	// audit rows for an EKS managed add-on install (#119, PR-2).
 	//
