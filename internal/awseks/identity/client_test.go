@@ -3,6 +3,9 @@ package identity
 import (
 	"context"
 	"errors"
+	"fmt"
+	"net/url"
+	"strings"
 	"testing"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -35,14 +38,61 @@ func TestRoleNameFromArn(t *testing.T) {
 	}
 }
 
-// stubIAM lets us drive RoleExists' decision tree without touching AWS.
+// stubIAM lets us drive RoleExists' decision tree (and now the
+// policy-fetch methods added in #187) without touching AWS.
+//
+// Each AWS SDK method is backed by an optional closure so a given
+// test can opt into stubbing just the method(s) it exercises. The
+// legacy resp / err fields drive GetRole, kept for backward
+// compatibility with the original RoleExists tests.
 type stubIAM struct {
 	resp *iam.GetRoleOutput
 	err  error
+
+	listRolePolicies         func(*iam.ListRolePoliciesInput) (*iam.ListRolePoliciesOutput, error)
+	getRolePolicy            func(*iam.GetRolePolicyInput) (*iam.GetRolePolicyOutput, error)
+	listAttachedRolePolicies func(*iam.ListAttachedRolePoliciesInput) (*iam.ListAttachedRolePoliciesOutput, error)
+	getPolicy                func(*iam.GetPolicyInput) (*iam.GetPolicyOutput, error)
+	getPolicyVersion         func(*iam.GetPolicyVersionInput) (*iam.GetPolicyVersionOutput, error)
 }
 
 func (s *stubIAM) GetRole(ctx context.Context, in *iam.GetRoleInput, opts ...func(*iam.Options)) (*iam.GetRoleOutput, error) {
 	return s.resp, s.err
+}
+
+func (s *stubIAM) ListRolePolicies(ctx context.Context, in *iam.ListRolePoliciesInput, opts ...func(*iam.Options)) (*iam.ListRolePoliciesOutput, error) {
+	if s.listRolePolicies == nil {
+		return &iam.ListRolePoliciesOutput{}, nil
+	}
+	return s.listRolePolicies(in)
+}
+
+func (s *stubIAM) GetRolePolicy(ctx context.Context, in *iam.GetRolePolicyInput, opts ...func(*iam.Options)) (*iam.GetRolePolicyOutput, error) {
+	if s.getRolePolicy == nil {
+		return nil, fmt.Errorf("stub: GetRolePolicy not configured")
+	}
+	return s.getRolePolicy(in)
+}
+
+func (s *stubIAM) ListAttachedRolePolicies(ctx context.Context, in *iam.ListAttachedRolePoliciesInput, opts ...func(*iam.Options)) (*iam.ListAttachedRolePoliciesOutput, error) {
+	if s.listAttachedRolePolicies == nil {
+		return &iam.ListAttachedRolePoliciesOutput{}, nil
+	}
+	return s.listAttachedRolePolicies(in)
+}
+
+func (s *stubIAM) GetPolicy(ctx context.Context, in *iam.GetPolicyInput, opts ...func(*iam.Options)) (*iam.GetPolicyOutput, error) {
+	if s.getPolicy == nil {
+		return nil, fmt.Errorf("stub: GetPolicy not configured")
+	}
+	return s.getPolicy(in)
+}
+
+func (s *stubIAM) GetPolicyVersion(ctx context.Context, in *iam.GetPolicyVersionInput, opts ...func(*iam.Options)) (*iam.GetPolicyVersionOutput, error) {
+	if s.getPolicyVersion == nil {
+		return nil, fmt.Errorf("stub: GetPolicyVersion not configured")
+	}
+	return s.getPolicyVersion(in)
 }
 
 func TestRoleExists_FoundReturnsTrueNil(t *testing.T) {
@@ -212,4 +262,275 @@ func TestListAssociatedAccessPolicies_DecodesScope(t *testing.T) {
 	if len(got[0].Namespaces) != 2 {
 		t.Errorf("namespaces = %v", got[0].Namespaces)
 	}
+}
+
+// ── PolicyFetcher implementations (#187) ─────────────────────────
+
+// Helper: URL-encode a policy document the way AWS would in
+// GetRolePolicy/GetPolicyVersion responses, so test fixtures match
+// the wire shape the client must decode.
+func urlEncodePolicy(jsonDoc string) string {
+	return url.QueryEscape(jsonDoc)
+}
+
+const samplePolicyJSON = `{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Action":"s3:GetObject","Resource":"*"}]}`
+
+// ListRolePolicies: single page, names returned in input order.
+func TestListRolePolicies_SinglePage(t *testing.T) {
+	called := 0
+	c := NewWithAPIs(nil, &stubIAM{
+		listRolePolicies: func(in *iam.ListRolePoliciesInput) (*iam.ListRolePoliciesOutput, error) {
+			called++
+			if aws.ToString(in.RoleName) != "my-role" {
+				t.Errorf("RoleName = %q, want my-role (extracted from ARN)", aws.ToString(in.RoleName))
+			}
+			return &iam.ListRolePoliciesOutput{
+				PolicyNames: []string{"inline-a", "inline-b"},
+			}, nil
+		},
+	})
+	names, err := c.ListRolePolicies(context.Background(), "arn:aws:iam::123:role/my-role")
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if called != 1 {
+		t.Errorf("called %d times, want 1", called)
+	}
+	if len(names) != 2 || names[0] != "inline-a" || names[1] != "inline-b" {
+		t.Errorf("names = %v, want [inline-a, inline-b]", names)
+	}
+}
+
+// ListRolePolicies: paginated across multiple Marker pages.
+func TestListRolePolicies_Pagination(t *testing.T) {
+	page := 0
+	c := NewWithAPIs(nil, &stubIAM{
+		listRolePolicies: func(in *iam.ListRolePoliciesInput) (*iam.ListRolePoliciesOutput, error) {
+			page++
+			switch page {
+			case 1:
+				return &iam.ListRolePoliciesOutput{
+					PolicyNames: []string{"p1"},
+					IsTruncated: true,
+					Marker:      aws.String("page2"),
+				}, nil
+			case 2:
+				if aws.ToString(in.Marker) != "page2" {
+					t.Errorf("page 2 Marker = %q, want page2", aws.ToString(in.Marker))
+				}
+				return &iam.ListRolePoliciesOutput{
+					PolicyNames: []string{"p2", "p3"},
+					IsTruncated: false,
+				}, nil
+			}
+			t.Fatalf("unexpected page %d", page)
+			return nil, nil
+		},
+	})
+	names, err := c.ListRolePolicies(context.Background(), "arn:aws:iam::123:role/r")
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if len(names) != 3 || names[0] != "p1" || names[2] != "p3" {
+		t.Errorf("names = %v, want [p1, p2, p3]", names)
+	}
+}
+
+// ListRolePolicies: bad role ARN → typed error, no AWS call.
+func TestListRolePolicies_BadARN(t *testing.T) {
+	c := NewWithAPIs(nil, &stubIAM{
+		listRolePolicies: func(_ *iam.ListRolePoliciesInput) (*iam.ListRolePoliciesOutput, error) {
+			t.Fatal("stub called for bad ARN; expected early return")
+			return nil, nil
+		},
+	})
+	_, err := c.ListRolePolicies(context.Background(), "not-an-arn")
+	if err == nil {
+		t.Fatal("want error for bad ARN")
+	}
+}
+
+// ListRolePolicies: AWS error propagates with role-name context.
+func TestListRolePolicies_ErrorPropagates(t *testing.T) {
+	c := NewWithAPIs(nil, &stubIAM{
+		listRolePolicies: func(_ *iam.ListRolePoliciesInput) (*iam.ListRolePoliciesOutput, error) {
+			return nil, errors.New("AccessDenied")
+		},
+	})
+	_, err := c.ListRolePolicies(context.Background(), "arn:aws:iam::123:role/r")
+	if err == nil || !errorContains(err, "AccessDenied") {
+		t.Errorf("err = %v, want wrap of AccessDenied", err)
+	}
+}
+
+// GetRolePolicy: URL-encoded document is decoded into raw JSON bytes
+// that downstream ParsePolicyDocument can consume directly.
+func TestGetRolePolicy_URLDecodes(t *testing.T) {
+	encoded := urlEncodePolicy(samplePolicyJSON)
+	c := NewWithAPIs(nil, &stubIAM{
+		getRolePolicy: func(in *iam.GetRolePolicyInput) (*iam.GetRolePolicyOutput, error) {
+			return &iam.GetRolePolicyOutput{
+				PolicyDocument: aws.String(encoded),
+			}, nil
+		},
+	})
+	doc, err := c.GetRolePolicy(context.Background(), "arn:aws:iam::123:role/r", "inline-1")
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if string(doc) != samplePolicyJSON {
+		t.Errorf("decoded doc mismatch\n got:  %s\n want: %s", string(doc), samplePolicyJSON)
+	}
+}
+
+// GetRolePolicy: nil PolicyDocument → typed error.
+func TestGetRolePolicy_NilDocument(t *testing.T) {
+	c := NewWithAPIs(nil, &stubIAM{
+		getRolePolicy: func(_ *iam.GetRolePolicyInput) (*iam.GetRolePolicyOutput, error) {
+			return &iam.GetRolePolicyOutput{}, nil
+		},
+	})
+	_, err := c.GetRolePolicy(context.Background(), "arn:aws:iam::123:role/r", "inline")
+	if err == nil {
+		t.Fatal("want error for nil PolicyDocument")
+	}
+}
+
+// ListAttachedRolePolicies: paginated, returns iam-package
+// AttachedPolicy values directly.
+func TestListAttachedRolePolicies_Pagination(t *testing.T) {
+	page := 0
+	c := NewWithAPIs(nil, &stubIAM{
+		listAttachedRolePolicies: func(in *iam.ListAttachedRolePoliciesInput) (*iam.ListAttachedRolePoliciesOutput, error) {
+			page++
+			switch page {
+			case 1:
+				return &iam.ListAttachedRolePoliciesOutput{
+					AttachedPolicies: []iamtypes.AttachedPolicy{
+						{PolicyArn: aws.String("arn:aws:iam::aws:policy/A"), PolicyName: aws.String("A")},
+					},
+					IsTruncated: true,
+					Marker:      aws.String("p2"),
+				}, nil
+			case 2:
+				return &iam.ListAttachedRolePoliciesOutput{
+					AttachedPolicies: []iamtypes.AttachedPolicy{
+						{PolicyArn: aws.String("arn:aws:iam::aws:policy/B"), PolicyName: aws.String("B")},
+					},
+					IsTruncated: false,
+				}, nil
+			}
+			t.Fatalf("page %d unexpected", page)
+			return nil, nil
+		},
+	})
+	got, err := c.ListAttachedRolePolicies(context.Background(), "arn:aws:iam::123:role/r")
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("got %d, want 2", len(got))
+	}
+	if got[0].PolicyName != "A" || got[1].PolicyArn != "arn:aws:iam::aws:policy/B" {
+		t.Errorf("attribution: got = %+v", got)
+	}
+}
+
+// GetPolicyDocument: two-step (GetPolicy for DefaultVersionId, then
+// GetPolicyVersion). Both calls happen with the correct ARN/version.
+func TestGetPolicyDocument_TwoStep(t *testing.T) {
+	getPolicyCalls := 0
+	getPolicyVersionCalls := 0
+	encoded := urlEncodePolicy(samplePolicyJSON)
+	c := NewWithAPIs(nil, &stubIAM{
+		getPolicy: func(in *iam.GetPolicyInput) (*iam.GetPolicyOutput, error) {
+			getPolicyCalls++
+			return &iam.GetPolicyOutput{
+				Policy: &iamtypes.Policy{
+					Arn:              aws.String("arn:aws:iam::aws:policy/X"),
+					DefaultVersionId: aws.String("v3"),
+				},
+			}, nil
+		},
+		getPolicyVersion: func(in *iam.GetPolicyVersionInput) (*iam.GetPolicyVersionOutput, error) {
+			getPolicyVersionCalls++
+			if aws.ToString(in.VersionId) != "v3" {
+				t.Errorf("VersionId = %q, want v3", aws.ToString(in.VersionId))
+			}
+			return &iam.GetPolicyVersionOutput{
+				PolicyVersion: &iamtypes.PolicyVersion{
+					Document: aws.String(encoded),
+				},
+			}, nil
+		},
+	})
+	doc, err := c.GetPolicyDocument(context.Background(), "arn:aws:iam::aws:policy/X")
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if getPolicyCalls != 1 || getPolicyVersionCalls != 1 {
+		t.Errorf("calls: GetPolicy=%d GetPolicyVersion=%d, want 1/1",
+			getPolicyCalls, getPolicyVersionCalls)
+	}
+	if string(doc) != samplePolicyJSON {
+		t.Errorf("doc mismatch: %s", string(doc))
+	}
+}
+
+// GetPolicyDocument: missing DefaultVersionId → typed error, no
+// GetPolicyVersion call.
+func TestGetPolicyDocument_MissingDefaultVersion(t *testing.T) {
+	versionCalled := false
+	c := NewWithAPIs(nil, &stubIAM{
+		getPolicy: func(_ *iam.GetPolicyInput) (*iam.GetPolicyOutput, error) {
+			return &iam.GetPolicyOutput{Policy: &iamtypes.Policy{}}, nil
+		},
+		getPolicyVersion: func(_ *iam.GetPolicyVersionInput) (*iam.GetPolicyVersionOutput, error) {
+			versionCalled = true
+			return nil, nil
+		},
+	})
+	_, err := c.GetPolicyDocument(context.Background(), "arn:aws:iam::aws:policy/X")
+	if err == nil {
+		t.Fatal("want error for missing DefaultVersionId")
+	}
+	if versionCalled {
+		t.Error("GetPolicyVersion called despite missing DefaultVersionId; want early return")
+	}
+}
+
+// GetPolicyDocument: GetPolicy error propagates without calling
+// GetPolicyVersion.
+func TestGetPolicyDocument_GetPolicyErrors(t *testing.T) {
+	c := NewWithAPIs(nil, &stubIAM{
+		getPolicy: func(_ *iam.GetPolicyInput) (*iam.GetPolicyOutput, error) {
+			return nil, errors.New("Throttling")
+		},
+	})
+	_, err := c.GetPolicyDocument(context.Background(), "arn:aws:iam::aws:policy/X")
+	if err == nil || !errorContains(err, "Throttling") {
+		t.Errorf("err = %v, want wrap of Throttling", err)
+	}
+}
+
+// decodePolicyDocument: invalid URL encoding returns error.
+func TestDecodePolicyDocument_BadEscape(t *testing.T) {
+	_, err := decodePolicyDocument("%ZZ-not-valid-percent")
+	if err == nil {
+		t.Fatal("want error for malformed URL escape")
+	}
+}
+
+// decodePolicyDocument: empty document is an error (defensive).
+func TestDecodePolicyDocument_Empty(t *testing.T) {
+	_, err := decodePolicyDocument("")
+	if err == nil {
+		t.Fatal("want error for empty document")
+	}
+}
+
+// errorContains reports whether err is non-nil and its message
+// contains sub. Tiny helper kept local to client_test.go.
+func errorContains(err error, sub string) bool {
+	return err != nil && strings.Contains(err.Error(), sub)
 }
