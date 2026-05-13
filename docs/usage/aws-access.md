@@ -116,21 +116,25 @@ to force a fresh probe after a permission grant.
 
 ### IAM probe configuration
 
-The capabilities probe optionally calls `iam:SimulatePrincipalPolicy`
-against Periscope's own caller identity to populate the exact
-`Missing[]` list for `MISSING_IAM_PERMS`. Controlled by:
+The capabilities probe calls `iam:SimulatePrincipalPolicy` against
+Periscope's own caller identity (resolved once via
+`sts:GetCallerIdentity` and reused across the process lifetime) to
+populate the exact `Missing[]` list for `MISSING_IAM_PERMS`. The
+locked pane then shows the specific permissions the operator needs
+to add to periscope-server's IAM role. Controlled by:
 
 ```
 PERISCOPE_AWS_ACCESS_IAM_PROBE=true|false
 ```
 
-Default: `true`. When disabled (or when
-`iam:SimulatePrincipalPolicy` itself is denied to Periscope's role),
-the capabilities response stays optimistically `available: true` with
-a `note` explaining the limitation; the first real call surfaces the
-403 with an error chip. Set to `false` on locked-down accounts where
-adding `iam:SimulatePrincipalPolicy` to the periscope-server role is
-not desirable.
+Default: `true`. When `iam:SimulatePrincipalPolicy` itself is denied
+to Periscope's role, the capabilities response falls back to
+optimistically `available: true` with a `note` explaining the
+limitation; the first real call surfaces the underlying 403. When
+explicitly disabled, the response carries `reason:
+IAM_PROBE_DISABLED` with a similar fallback note. Set to `false` on
+locked-down accounts where granting `iam:SimulatePrincipalPolicy` to
+periscope-server is not desirable.
 
 ## Honest limits (v1.1)
 
@@ -166,11 +170,18 @@ set:
 "iam:GetPolicyVersion"
 ```
 
-Optional, only when `PERISCOPE_AWS_ACCESS_IAM_PROBE=true` (default):
+Required only when `PERISCOPE_AWS_ACCESS_IAM_PROBE=true` (default).
+Resolves the exact missing-permission list shown on the locked
+pane; absent grants degrade to an optimistic note rather than a
+hard fail:
 
 ```
 "iam:SimulatePrincipalPolicy"
 ```
+
+`sts:GetCallerIdentity` is implicit (AWS grants it to every
+authenticated principal by default) so it does not need to be
+listed.
 
 Kubernetes RBAC (cluster-wide reads — the reverse-lookup page
 iterates across namespaces):

@@ -463,21 +463,43 @@ func probeCapabilities(
 		return resp
 	}
 
-	// IAM-perms probe (configurable). The actual
-	// iam:SimulatePrincipalPolicy call lands in v1.1.1 — for v1.1
-	// the contract is in place and the response is honest about
-	// the limitation. When disabled, return optimistic
-	// Available=true with a clear note.
+	// IAM-perms probe (configurable). When enabled (default),
+	// resolve periscope-server's own caller ARN and call
+	// iam:SimulatePrincipalPolicy against the five v1.1 IAM read
+	// perms to populate Missing[] with the exact denied actions.
+	// When disabled, return optimistic Available=true with a clear
+	// note so the SPA renders the tab and first real call surfaces
+	// any 403.
 	tab := iam.FeatureCapability{Available: true, DocsURL: awsAccessDocsURL}
 	rev := iam.FeatureCapability{Available: true, DocsURL: awsAccessDocsURL}
-	if awsCfg.IAMProbe {
-		tab.Note = "IAM permission probe scheduled for v1.1.1; first call will surface missing perms via 403."
-		rev.Note = tab.Note
-	} else {
+	if !awsCfg.IAMProbe {
 		tab.Reason = iam.ReasonIAMProbeDisabled
 		tab.Note = "IAM permission probe disabled by PERISCOPE_AWS_ACCESS_IAM_PROBE=false; first call surfaces missing perms via 403."
 		rev.Reason = tab.Reason
 		rev.Note = tab.Note
+	} else {
+		client := newIdentityClient(cache.awsCfg, c)
+		missing, probeErr := probeIAMPermissions(ctx, client, iamProbeActions)
+		switch {
+		case probeErr != nil:
+			// Probe itself failed (likely the role lacks
+			// iam:SimulatePrincipalPolicy or sts:GetCallerIdentity).
+			// Fall back to optimistic Available=true with a Note —
+			// the SPA still renders the tab; the first real call
+			// surfaces any underlying 403.
+			tab.Note = "IAM permission probe couldn't run (" + probeErr.Error() + "). Add iam:SimulatePrincipalPolicy to periscope-server's role to surface the exact missing-perms list."
+			rev.Note = tab.Note
+		case len(missing) > 0:
+			locked := iam.FeatureCapability{
+				Available: false,
+				Reason:    iam.ReasonMissingIAMPerms,
+				Message:   "Periscope's AWS role is missing IAM permissions required to resolve role policies.",
+				Missing:   missing,
+				DocsURL:   awsAccessDocsURL,
+			}
+			tab = locked
+			rev = locked
+		}
 	}
 
 	// Identity-configured check: if the SA→Role index is empty,
@@ -508,6 +530,91 @@ func appendNote(existing, addition string) string {
 		return addition
 	}
 	return existing + " " + addition
+}
+
+// iamProbeActions is the v1.1 IAM read set the AWS Access surface
+// needs end-to-end. SimulatePrincipalPolicy is called once per
+// capabilities probe with this list as ActionNames; denied
+// actions surface as the Missing[] field on the locked-pane.
+//
+// iam:GetRole is the existence probe from #178 — included here so
+// the AWS Access surface lights up "missing" if it's stripped (a
+// common downgrade footgun: operators trim "AWS Identity" perms
+// thinking they're not needed once #178 is live).
+//
+// sts:GetCallerIdentity is intentionally not in this list — AWS
+// grants it to every authenticated principal by default, and
+// resolving the caller ARN is the first step of the probe itself.
+// If it's denied, probeIAMPermissions returns an error that the
+// handler maps to optimistic-mode with a Note.
+var iamProbeActions = []string{
+	"iam:GetRole",
+	"iam:ListRolePolicies",
+	"iam:GetRolePolicy",
+	"iam:ListAttachedRolePolicies",
+	"iam:GetPolicy",
+	"iam:GetPolicyVersion",
+}
+
+// callerArnCache is process-wide because periscope-server runs as
+// one identity; sts:GetCallerIdentity returns the same ARN
+// regardless of the request's per-cluster aws.Config. Resolved on
+// first probe and reused thereafter.
+//
+// Reset on process restart; not invalidated by Re-check (the user-
+// facing probe-cache bypass) because the caller ARN doesn't change
+// without a re-deploy.
+var (
+	callerArnMu  sync.Mutex
+	callerArnVal string
+	callerArnErr error
+	callerArnSet bool
+)
+
+// resolveCallerArn returns periscope-server's principal ARN in IAM
+// role form, with sticky memoization. The first caller pays the
+// sts:GetCallerIdentity round-trip; subsequent calls (across all
+// clusters, all users) reuse the cached value.
+//
+// Exposed as a var-function so tests can reset between cases by
+// calling resetCallerArnCache().
+var resolveCallerArn = func(ctx context.Context, client *identity.Client) (string, error) {
+	callerArnMu.Lock()
+	defer callerArnMu.Unlock()
+	if callerArnSet {
+		return callerArnVal, callerArnErr
+	}
+	arn, err := client.CallerIdentity(ctx)
+	callerArnVal = arn
+	callerArnErr = err
+	callerArnSet = true
+	return arn, err
+}
+
+// resetCallerArnCache wipes the memoized caller ARN. Test-only;
+// keep the symbol unexported.
+func resetCallerArnCache() {
+	callerArnMu.Lock()
+	defer callerArnMu.Unlock()
+	callerArnVal = ""
+	callerArnErr = nil
+	callerArnSet = false
+}
+
+// probeIAMPermissions resolves the server's caller ARN and runs
+// iam:SimulatePrincipalPolicy for actions. Returns the subset of
+// actions denied by the simulator. Errors propagate when STS or
+// SimulatePrincipalPolicy itself is denied — caller maps to
+// optimistic mode.
+func probeIAMPermissions(ctx context.Context, client *identity.Client, actions []string) ([]string, error) {
+	arn, err := resolveCallerArn(ctx, client)
+	if err != nil {
+		return nil, fmt.Errorf("resolve caller ARN: %w", err)
+	}
+	if arn == "" {
+		return nil, fmt.Errorf("resolve caller ARN: empty result")
+	}
+	return client.SimulateActions(ctx, arn, actions, "*")
 }
 
 // ── Capabilities cache ───────────────────────────────────────────

@@ -919,31 +919,37 @@ Granularity is intentional — a forensic reviewer can attribute every
 SDK call to the requesting user. Operators who find this too chatty
 can filter on `op` in the audit feed.
 
-### AWS Access surface (#188) — optional IAM probe
+### AWS Access surface (#188) — IAM probe
 
 The capabilities endpoint that drives the locked-feature paywall pane
-can optionally call `iam:SimulatePrincipalPolicy` against
-periscope-server's own caller identity to populate the exact
-`Missing[]` array for `MISSING_IAM_PERMS`. The probe is configurable
-via the env var:
+calls `iam:SimulatePrincipalPolicy` against periscope-server's own
+caller identity (resolved via `sts:GetCallerIdentity` on the first
+probe and cached process-wide) to populate the exact `Missing[]`
+array for `MISSING_IAM_PERMS`. The probe is configurable via the
+env var:
 
 ```
 PERISCOPE_AWS_ACCESS_IAM_PROBE=true   # default
 PERISCOPE_AWS_ACCESS_IAM_PROBE=false  # skip the probe
 ```
 
-When enabled, add the following to periscope-server's IAM role:
+When enabled (default), add the following to periscope-server's IAM
+role:
 
 ```
 "iam:SimulatePrincipalPolicy"
 ```
 
-When disabled, the capabilities response stays optimistically
-`available: true` with a `note` explaining the limitation; first call
-to the workload-permissions or reverse-lookup endpoint surfaces any
-missing IAM perm as a 403 with the operator's existing error chip.
-See [`docs/usage/aws-access.md`](../usage/aws-access.md) for the
-operator-facing UX.
+`sts:GetCallerIdentity` does not need to be listed — AWS grants it
+to every authenticated principal by default.
+
+When the probe is disabled or `iam:SimulatePrincipalPolicy` itself
+is denied, the capabilities response falls back to optimistically
+`available: true` with a `note` explaining the limitation; the
+first call to the workload-permissions or reverse-lookup endpoint
+surfaces any missing IAM perm as a 403 with the operator's existing
+error chip. See [`docs/usage/aws-access.md`](../usage/aws-access.md)
+for the operator-facing UX.
 
 ### K8s RBAC for the SA informer
 

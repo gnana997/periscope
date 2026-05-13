@@ -38,9 +38,13 @@ tag.
   this because X" without a 403 round-trip.
 - **Configurable IAM probe** for the capabilities endpoint:
   `PERISCOPE_AWS_ACCESS_IAM_PROBE=true|false` (default `true`).
-  When enabled, the capabilities response surfaces an honest note
-  about the probe; when disabled, the response stays optimistic
-  and first calls surface missing perms lazily.
+  When enabled, the capabilities response calls
+  `iam:SimulatePrincipalPolicy` against periscope-server's own
+  caller identity and populates the exact `Missing[]` permission
+  list shown on the locked pane. When disabled or when the probe
+  itself is denied, the response falls back to optimistically
+  `available: true` with a `note` and the first real call surfaces
+  any missing perm lazily.
 
 ### Changed
 
