@@ -1,0 +1,11 @@
+{
+  "_comment": "sensitive catalog pattern entry: ssm:GetParameter* → data. Uses ssm:GetParameters (the plural form) to verify pattern matching across the family.",
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": "ssm:GetParameters",
+      "Resource": "*"
+    }
+  ]
+}

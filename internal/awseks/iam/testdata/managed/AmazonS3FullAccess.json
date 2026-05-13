@@ -1,0 +1,14 @@
+{
+  "_comment": "source: AWS-managed AmazonS3FullAccess (arn:aws:iam::aws:policy/AmazonS3FullAccess) — full S3 + S3-Object-Lambda. Tests service-wildcard action with all-resource.",
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "s3:*",
+        "s3-object-lambda:*"
+      ],
+      "Resource": "*"
+    }
+  ]
+}

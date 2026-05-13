@@ -1,0 +1,27 @@
+{
+  "_comment": "source: AWS-managed PowerUserAccess (arn:aws:iam::aws:policy/PowerUserAccess), version v5 — full access EXCEPT identity / org management; uses NotAction so parser must surface this as RawStatement",
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "NotAction": [
+        "iam:*",
+        "organizations:*",
+        "account:*"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "iam:CreateServiceLinkedRole",
+        "iam:DeleteServiceLinkedRole",
+        "iam:ListRoles",
+        "organizations:DescribeOrganization",
+        "account:ListRegions",
+        "account:GetAccountInformation"
+      ],
+      "Resource": "*"
+    }
+  ]
+}

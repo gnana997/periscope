@@ -1,0 +1,11 @@
+{
+  "_comment": "wildcard case: action prefix s3:Get* — most common idiom for 'read-only S3 access' in hand-rolled policies",
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": "s3:Get*",
+      "Resource": "*"
+    }
+  ]
+}

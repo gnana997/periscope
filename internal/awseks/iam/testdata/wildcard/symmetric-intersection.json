@@ -1,0 +1,11 @@
+{
+  "_comment": "wildcard case: reverse-lookup symmetric intersection. Policy has s3:* + a specific resource; reverse-lookup query 's3:GetObject on arn:aws:s3:::query-bucket/file' must match because BOTH patterns cover the concrete (action, resource) pair.",
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": "s3:*",
+      "Resource": "arn:aws:s3:::query-*"
+    }
+  ]
+}

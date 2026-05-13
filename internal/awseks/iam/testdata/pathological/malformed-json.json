@@ -1,0 +1,8 @@
+{
+  "_comment": "pathological: intentionally invalid JSON — unterminated array. Parser MUST return ErrMalformedPolicy (or equivalent typed error); engine surfaces as PolicyFetchPartial: true.",
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": "s3:GetObject",
+      "Resource": "*"

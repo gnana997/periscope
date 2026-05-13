@@ -1,0 +1,11 @@
+{
+  "_comment": "wildcard case: scoped action, all-resource wildcard. Common for service-only actions like sts:GetCallerIdentity that don't accept resource constraints — the Resource: \"*\" is required by AWS, not operator carelessness. SPA should not flag these as alarming.",
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": "sts:GetCallerIdentity",
+      "Resource": "*"
+    }
+  ]
+}

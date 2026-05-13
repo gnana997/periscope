@@ -1,0 +1,15 @@
+{
+  "_comment": "pathological: NotResource + Allow = 'allow this action on every resource EXCEPT these'. Engine surfaces as RawStatement; matcher must NOT project rows for the negated set.",
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "AllowS3ReadsExceptSensitive",
+      "Effect": "Allow",
+      "Action": "s3:GetObject",
+      "NotResource": [
+        "arn:aws:s3:::sensitive-bucket/*",
+        "arn:aws:s3:::secrets-*/*"
+      ]
+    }
+  ]
+}

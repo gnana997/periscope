@@ -1,0 +1,9 @@
+{
+  "_comment": "pathological: Statement as a single object (NOT wrapped in an array). AWS accepts both shapes — Statement: {...} and Statement: [{...}]. Parser must handle the bare-object form by lifting it to a single-element array.",
+  "Version": "2012-10-17",
+  "Statement": {
+    "Effect": "Allow",
+    "Action": "s3:GetObject",
+    "Resource": "arn:aws:s3:::single-object-style/*"
+  }
+}

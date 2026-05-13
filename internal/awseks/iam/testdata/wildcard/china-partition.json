@@ -1,0 +1,11 @@
+{
+  "_comment": "wildcard case: AWS China partition. ARNs start with arn:aws-cn:... — Region in ARNs is constrained to cn-north-1 / cn-northwest-1. Tests partition handling in resource ARN matching.",
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": "s3:GetObject",
+      "Resource": "arn:aws-cn:s3:::cn-bucket/*"
+    }
+  ]
+}
