@@ -33,6 +33,7 @@ import { EventsView } from "../components/detail/EventsView";
 import { PodLogsTab } from "../components/logs/PodLogsTab";
 import { NamespacePicker } from "../components/shell/NamespacePicker";
 import { SecurityTab } from "../components/security/SecurityTab";
+import { AWSAccessTab } from "../components/awsaccess/AWSAccessTab";
 import { SecurityEmptyBanner } from "../components/security/SecurityEmptyBanner";
 import { useCvePodSummaries } from "../hooks/useCve";
 import { countVulnerable, podKey } from "../lib/cve";
@@ -261,6 +262,12 @@ export function PodsPage({ cluster }: { cluster: string }) {
             label: "events",
             ready: true,
             content: <EventsView cluster={cluster} kind="pods" ns={selectedNs} name={selectedName} />,
+          },
+          {
+            id: "aws-access",
+            label: "AWS access",
+            ready: true,
+            content: <AWSAccessTab cluster={cluster} kind="Pod" namespace={selectedNs} name={selectedName} />,
           },
           {
             id: "logs",

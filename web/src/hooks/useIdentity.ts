@@ -8,14 +8,20 @@
 // missing IAM, 429 = AWS throttling, 503 = SA informer still
 // syncing (sa-roles only).
 
-import { skipToken, useQuery } from "@tanstack/react-query";
+import { skipToken, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useCallback } from "react";
 
 import { api } from "../lib/api";
 import type {
   AccessEntry,
   AwsAuthDiffResponse,
+  CapabilitiesResponse,
   PodIdentityResponse,
+  ReverseLookupResponse,
   SARoleIndexEntry,
+  SensitiveCatalogResponse,
+  WorkloadKind,
+  WorkloadPermissionsResponse,
 } from "../lib/identity";
 import { queryKeys } from "../lib/queryKeys";
 
@@ -99,4 +105,84 @@ export function usePodIdentity(cluster: string) {
     staleTime: STALE_MS,
     retry: retryUnless422,
   });
+}
+
+// ── Composed AWS Access surface (#188) ────────────────────────────
+
+// useWorkloadPermissions powers the AWS Access tab on Pod / SA /
+// Deployment / StatefulSet / DaemonSet detail panes. One round-
+// trip returns the full composed response — identity chain,
+// service-grouped permissions, warnings, affected pods. The SPA
+// never joins on its own.
+export function useWorkloadPermissions(
+  cluster: string,
+  kind: WorkloadKind | "",
+  namespace: string,
+  name: string,
+) {
+  const enabled = !!cluster && !!kind && !!name && (kind === "ServiceAccount" || !!namespace);
+  return useQuery<WorkloadPermissionsResponse>({
+    queryKey: queryKeys.cluster(cluster).identity.workloadPermissions(kind || "", namespace, name),
+    queryFn: enabled
+      ? ({ signal }) => api.iamWorkloadPermissions(cluster, kind as WorkloadKind, namespace, name, signal)
+      : skipToken,
+    staleTime: STALE_MS,
+    retry: retryUnless422,
+  });
+}
+
+// useReverseLookup fires only after the user submits the form.
+// `enabled` is the gate so autocomplete keystrokes don't trigger
+// the per-cluster role walk.
+export function useReverseLookup(
+  cluster: string,
+  q: { action: string; resource?: string; namespace?: string },
+  enabled: boolean,
+) {
+  const active = enabled && !!cluster && !!q.action.trim();
+  return useQuery<ReverseLookupResponse>({
+    queryKey: queryKeys
+      .cluster(cluster)
+      .identity.reverseLookup(q.action, q.resource ?? "", q.namespace ?? ""),
+    queryFn: active
+      ? ({ signal }) => api.iamReverseLookup(cluster, q, signal)
+      : skipToken,
+    staleTime: STALE_MS,
+    retry: retryUnless422,
+  });
+}
+
+// useSensitiveCatalog is the chip palette + autocomplete source.
+// Cluster-agnostic, immutable across a process lifetime; treat as
+// effectively infinite stale.
+export function useSensitiveCatalog() {
+  return useQuery<SensitiveCatalogResponse>({
+    queryKey: queryKeys.sensitiveCatalog(),
+    queryFn: ({ signal }) => api.identitySensitiveCatalog(signal),
+    staleTime: Infinity,
+    gcTime: Infinity,
+  });
+}
+
+// useIdentityCapabilities backs the paywall pane. Returns the
+// capabilities response plus a recheck() that bypasses the
+// server-side cache and invalidates the local cache so the next
+// render reflects fresh state (Re-check button after the user
+// fixes an IAM perm or RBAC binding).
+export function useIdentityCapabilities(cluster: string) {
+  const qc = useQueryClient();
+  const query = useQuery<CapabilitiesResponse>({
+    queryKey: queryKeys.cluster(cluster).identity.capabilities(),
+    queryFn: cluster
+      ? ({ signal }) => api.identityCapabilities(cluster, { signal })
+      : skipToken,
+    staleTime: 5 * 60_000, // mirrors backend cache TTL
+    retry: retryUnless422,
+  });
+  const recheck = useCallback(async () => {
+    if (!cluster) return;
+    const fresh = await api.identityCapabilities(cluster, { bypassCache: true });
+    qc.setQueryData(queryKeys.cluster(cluster).identity.capabilities(), fresh);
+  }, [cluster, qc]);
+  return { ...query, recheck };
 }

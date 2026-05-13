@@ -13,8 +13,51 @@ tag.
 
 ## [Unreleased]
 
+### Added
+
+- **AWS Access UI: forward view + per-cluster reverse lookup** (#188).
+  Every Pod / ServiceAccount / Deployment / StatefulSet / DaemonSet
+  detail pane gains an **AWS Access** tab that renders the resolved
+  identity chain (workload → SA → IAM role(s)), every attached IAM
+  policy grouped by AWS service, sensitive-permissions chips against
+  an 18-action locked catalog, and the running pods affected — one
+  backend call composes the whole tab. A new top-level
+  **AWS reverse lookup** page (`/clusters/<name>/reverse-lookup`)
+  answers "which pods can perform action X on resource Y?" with
+  one-row-per-matched-pod results and one-click chip pre-fills.
+  Three new endpoints power both surfaces:
+  `GET /api/clusters/{cluster}/identity/workload-permissions?kind=…`,
+  `GET /api/identity/sensitive-catalog`,
+  `GET /api/clusters/{cluster}/identity/capabilities`.
+- **Locked-feature paywall pane.** When an AWS Access surface isn't
+  available for a user (non-EKS, RBAC denied, missing IAM perms,
+  informer warming), the tab still renders — with a structured
+  reason, the exact missing permissions, a docs link, and a
+  **Re-check** button that bypasses the 5-minute capabilities cache.
+  Same wire shape an MCP / AI tool reads to explain "I can't run
+  this because X" without a 403 round-trip.
+- **Configurable IAM probe** for the capabilities endpoint:
+  `PERISCOPE_AWS_ACCESS_IAM_PROBE=true|false` (default `true`).
+  When enabled, the capabilities response surfaces an honest note
+  about the probe; when disabled, the response stays optimistic
+  and first calls surface missing perms lazily.
+
 ### Changed
 
+- **Audit verb split: `aws_iam_read`** (#188). The IAM policy
+  resolution engine (#187) and the new AWS Access surfaces emit a
+  new `aws_iam_read` verb; the four cluster-identity endpoints
+  (#178 — access-entries, aws-auth-diff, sa-roles, pod-identity)
+  continue to emit `aws_identity_read`. Operator audit-feed filters
+  that key on `aws_identity_read` should add `aws_iam_read` to
+  capture IAM-engine activity.
+- **Reverse-lookup wire shape: pod-rows replace SA-matches** (#188).
+  `GET /api/clusters/{cluster}/iam/reverse-lookup` now returns
+  `rows: ReverseLookupPodRow[]` (one row per matched pod, with
+  binding source attribution) instead of `matches:
+  ReverseLookupMatch[]`. The composed response carries `truncated`
+  and `totalPods` flags for paginated UIs. Downstream scripts /
+  MCP wrappers keyed on the old `matches` field need updating.
 - **Helm: cluster-admin tier binding is now opt-in** (#84). Default
   install of both `periscope` and `periscope-agent` charts no longer
   renders the `periscope-tier-admin` ClusterRoleBinding, so AWS

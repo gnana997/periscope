@@ -895,20 +895,55 @@ than `Resource: "*"`, ensure every entry in `clusters[]` is included.
 ### Audit
 
 Each AWS API call emits one audit row with verb `aws_identity_read`
-and `extra.op` distinguishing the operation:
+(identity surface) or `aws_iam_read` (IAM-engine + AWS Access
+surface, v1.1+) and `extra.op` distinguishing the operation:
 
-| `op` | AWS / K8s call |
-|---|---|
-| `list_access_entries` | `eks:ListAccessEntries` |
-| `describe_access_entry` | `eks:DescribeAccessEntry` (one per principal) |
-| `list_associated_policies` | `eks:ListAssociatedAccessPolicies` (one per principal) |
-| `list_pod_identity` | `eks:ListPodIdentityAssociations` + per-association `DescribePodIdentityAssociation` |
-| `read_aws_auth` | K8s `get configmaps kube-system/aws-auth` |
-| `ensure_sa_roles` | the unified SA→Role index rebuild (combines several calls) |
+| Verb | `op` | AWS / K8s call |
+|---|---|---|
+| `aws_identity_read` | `list_access_entries` | `eks:ListAccessEntries` |
+| `aws_identity_read` | `describe_access_entry` | `eks:DescribeAccessEntry` (one per principal) |
+| `aws_identity_read` | `list_associated_policies` | `eks:ListAssociatedAccessPolicies` (one per principal) |
+| `aws_identity_read` | `list_pod_identity` | `eks:ListPodIdentityAssociations` + per-association `DescribePodIdentityAssociation` |
+| `aws_identity_read` | `read_aws_auth` | K8s `get configmaps kube-system/aws-auth` |
+| `aws_identity_read` | `ensure_sa_roles` | the unified SA→Role index rebuild (combines several calls) |
+| `aws_iam_read` | `role_permissions` | engine `RolePermissions` rollup (#187) |
+| `aws_iam_read` | `reverse_lookup` | engine `ReverseLookup` rollup (#187) |
+| `aws_iam_read` | `workload_permissions` | composed forward-view rollup (#188) |
+| `aws_iam_read` | `capabilities` / `capabilities:cache_hit` | per-feature paywall probe (#188) |
+| `aws_iam_read` | `list_role_policies`, `get_role_policy`, … | per-SDK-call IAM reads |
+
+Operator audit-feed filters keyed on `aws_identity_read` should add
+`aws_iam_read` to capture IAM-engine activity.
 
 Granularity is intentional — a forensic reviewer can attribute every
 SDK call to the requesting user. Operators who find this too chatty
 can filter on `op` in the audit feed.
+
+### AWS Access surface (#188) — optional IAM probe
+
+The capabilities endpoint that drives the locked-feature paywall pane
+can optionally call `iam:SimulatePrincipalPolicy` against
+periscope-server's own caller identity to populate the exact
+`Missing[]` array for `MISSING_IAM_PERMS`. The probe is configurable
+via the env var:
+
+```
+PERISCOPE_AWS_ACCESS_IAM_PROBE=true   # default
+PERISCOPE_AWS_ACCESS_IAM_PROBE=false  # skip the probe
+```
+
+When enabled, add the following to periscope-server's IAM role:
+
+```
+"iam:SimulatePrincipalPolicy"
+```
+
+When disabled, the capabilities response stays optimistically
+`available: true` with a `note` explaining the limitation; first call
+to the workload-permissions or reverse-lookup endpoint surfaces any
+missing IAM perm as a 403 with the operator's existing error chip.
+See [`docs/usage/aws-access.md`](../usage/aws-access.md) for the
+operator-facing UX.
 
 ### K8s RBAC for the SA informer
 

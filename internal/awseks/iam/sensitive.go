@@ -4,6 +4,7 @@ import (
 	_ "embed"
 	"fmt"
 	"path"
+	"sort"
 	"strings"
 
 	"sigs.k8s.io/yaml"
@@ -129,6 +130,38 @@ func (c *Catalog) Classify(action string) (SensitiveCategory, bool) {
 // fallback, not a YAML-defined entry.
 func (c *Catalog) Size() int {
 	return len(c.exact) + len(c.patterns)
+}
+
+// CatalogEntry is one row exposed via the cluster-agnostic
+// /api/identity/sensitive-catalog endpoint so the SPA's chip
+// palette and the reverse-lookup autocomplete share the server's
+// source of truth.
+type CatalogEntry struct {
+	Action   string            `json:"action"`
+	Category SensitiveCategory `json:"category"`
+	Pattern  bool              `json:"pattern"`
+}
+
+// Entries returns a stable, deterministic snapshot of the catalog's
+// rows for serialisation. Sorted alphabetically by action so the
+// wire format is byte-stable across calls (cheap to diff in tests
+// + good for client-side ETag caching if added later).
+//
+// The literal "*" action is NOT included — it's a runtime
+// classifier rule, not a YAML entry, and including it would invite
+// "operators can disable wildcard" misuse.
+func (c *Catalog) Entries() []CatalogEntry {
+	out := make([]CatalogEntry, 0, len(c.exact)+len(c.patterns))
+	for action, cat := range c.exact {
+		out = append(out, CatalogEntry{Action: action, Category: cat, Pattern: false})
+	}
+	for _, p := range c.patterns {
+		out = append(out, CatalogEntry{Action: p.pattern, Category: p.category, Pattern: true})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		return out[i].Action < out[j].Action
+	})
+	return out
 }
 
 func validCategory(c SensitiveCategory) bool {

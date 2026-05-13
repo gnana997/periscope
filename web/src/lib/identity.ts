@@ -145,17 +145,23 @@ export interface RolePermissionsResponse {
   totalCount: number;           // matches permissions.length if !truncated
 }
 
-// One hit from a reverse lookup: a (Pod, SA, Role, Permission)
-// tuple. podRefs is truncated server-side to PodRefsLimit (default
-// 5); podCount is the untruncated total so the SPA can render
-// "5 of 50".
-export interface ReverseLookupMatch {
+// One row of the reverse-lookup result table — one row per matched
+// pod (#188 wire shape; the older one-row-per-SA `matches` shape
+// is gone). The same data drives an MCP tool's "which pods can do
+// X" answer without a client-side join.
+export interface ReverseLookupPodRow {
+  pod: PodRef;
   saName: string;
   namespace: string;
   roleArn: string;
   permission: Permission;
-  podRefs: string[];
-  podCount: number;
+  source: Source | "";  // empty if index moved between snapshot + lookup
+}
+
+export interface PodRef {
+  namespace: string;
+  name: string;
+  nodeName?: string;
 }
 
 export interface ReverseLookupScope {
@@ -167,5 +173,126 @@ export interface ReverseLookupResponse {
   action: string;
   resource?: string;
   scope?: ReverseLookupScope;
-  matches: ReverseLookupMatch[];
+  rows: ReverseLookupPodRow[];
+  truncated: boolean;
+  totalPods: number;
+}
+
+// ── Composed AWS Access surface (#188) ────────────────────────────
+
+// Server-grouped permissions for the AWS Access tab. The SPA
+// renders one accordion per ServiceGroup and never re-buckets.
+export interface ServiceGroup {
+  service: string;       // lower-cased, "*" for wildcard-action statements
+  sensitive: boolean;    // any perm in the group is sensitive
+  count: number;
+  permissions: Permission[];
+}
+
+// Mirrors identity.SARoleBinding; copied into the AWS Access tab
+// response so the SPA doesn't need a join to render the chain.
+export interface IdentityChainBinding {
+  source: Source;
+  roleArn: string;
+  roleExists: boolean;
+  podIdentityAssociationId?: string;
+  irsaAnnotationValue?: string;
+}
+
+export interface IdentityChain {
+  serviceAccount: string;
+  bindings: IdentityChainBinding[];
+  dualSource: boolean;
+}
+
+export type AwsAccessWarningCode =
+  | "DUAL_SOURCE_IRSA_SHADOWED"
+  | "ROLE_NOT_FOUND"
+  | "POLICY_FETCH_PARTIAL"
+  | "NO_BINDINGS";
+
+export interface AwsAccessWarning {
+  code: AwsAccessWarningCode;
+  message: string;
+  roleArn?: string;
+}
+
+export type WorkloadKind =
+  | "Pod"
+  | "ServiceAccount"
+  | "Deployment"
+  | "StatefulSet"
+  | "DaemonSet";
+
+// Composed forward-view response — one round-trip = full tab body.
+export interface WorkloadPermissionsResponse {
+  cluster: string;
+  kind: WorkloadKind;
+  namespace: string;
+  name: string;
+  identityChain: IdentityChain;
+  groups: ServiceGroup[];
+  rawStatements: RawStatement[];
+  warnings: AwsAccessWarning[];
+  affectedPods: PodRef[];
+  affectedPodCount: number;
+  policyFetchPartial: boolean;
+  truncated: boolean;
+  totalCount: number;
+  catalogVersion: string;
+  fetchedAt: string;
+}
+
+// ── Sensitive catalog (#188) ──────────────────────────────────────
+
+export interface ReverseQueryHint {
+  action: string;
+  resource?: string;
+}
+
+export interface SensitiveCatalogEntry {
+  action: string;
+  category: SensitiveCategory;
+  pattern: boolean;
+  reverseQuery: ReverseQueryHint;
+}
+
+export interface SensitiveCatalogResponse {
+  version: string;
+  entries: SensitiveCatalogEntry[];
+}
+
+// ── Capabilities (#188 paywall) ───────────────────────────────────
+
+export type CapabilityReason =
+  | "NOT_EKS"
+  | "RBAC_DENIED"
+  | "MISSING_IAM_PERMS"
+  | "NO_IDENTITY_CONFIGURED"
+  | "INFORMER_WARMING"
+  | "IAM_PROBE_DISABLED";
+
+export interface FeatureCapability {
+  available: boolean;
+  reason?: CapabilityReason;
+  message?: string;
+  missing?: string[];
+  docsUrl?: string;
+  consoleUrl?: string;
+  note?: string;
+}
+
+// Stable feature keys — match the Go constants in
+// internal/awseks/iam/types.go (FeatureAwsAccessTab etc.).
+export interface CapabilitiesFeatures {
+  awsAccessTab: FeatureCapability;
+  reverseLookup: FeatureCapability;
+  sensitiveCatalog: FeatureCapability;
+}
+
+export interface CapabilitiesResponse {
+  cluster: string;
+  features: CapabilitiesFeatures;
+  fetchedAt: string;
+  note?: string;
 }

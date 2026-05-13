@@ -146,7 +146,7 @@ func TestIAMRolePermissions_HappyPath(t *testing.T) {
 	// Audit row asserted via the recording sink.
 	found := false
 	for _, ev := range sink.events {
-		if ev.Verb == audit.VerbAwsIdentityRead && ev.Extra["op"] == "role_permissions" && ev.Outcome == audit.OutcomeSuccess {
+		if ev.Verb == audit.VerbAwsIAMRead && ev.Extra["op"] == "role_permissions" && ev.Outcome == audit.OutcomeSuccess {
 			found = true
 			break
 		}
@@ -256,7 +256,7 @@ func TestIAMReverseLookup_AuditRollupEmitted(t *testing.T) {
 
 	found := false
 	for _, ev := range sink.events {
-		if ev.Verb == audit.VerbAwsIdentityRead && ev.Extra["op"] == "reverse_lookup" {
+		if ev.Verb == audit.VerbAwsIAMRead && ev.Extra["op"] == "reverse_lookup" {
 			found = true
 			break
 		}
