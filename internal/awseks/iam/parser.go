@@ -216,7 +216,7 @@ func unmarshalPrincipalBlock(raw json.RawMessage) (map[string][]string, error) {
 	for k, v := range obj {
 		vals, err := unmarshalStringOrStringArray(v)
 		if err != nil {
-			return nil, fmt.Errorf("Principal[%s]: %v", k, err)
+			return nil, fmt.Errorf("principal[%s]: %v", k, err)
 		}
 		out[k] = vals
 	}

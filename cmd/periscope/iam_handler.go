@@ -90,7 +90,6 @@ func iamRolePermissionsHandler(reg *clusters.Registry, cache *iamEngineCache, em
 //
 // PodRefs / PodCount stay empty in v1.1; the SPA renders SA +
 // namespace + role without per-pod expansion. Pod enumeration is
-// a v1.1.x polish PR — see #187 plan §10 follow-ups.
 
 func iamReverseLookupHandler(reg *clusters.Registry, cache *iamEngineCache, emitter *audit.Emitter) func(http.ResponseWriter, *http.Request, credentials.Provider) {
 	return func(w http.ResponseWriter, r *http.Request, p credentials.Provider) {
