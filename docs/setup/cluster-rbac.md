@@ -848,7 +848,12 @@ actions are read-only.
       "eks:ListAssociatedAccessPolicies",
       "eks:ListPodIdentityAssociations",
       "eks:DescribePodIdentityAssociation",
-      "iam:GetRole"
+      "iam:GetRole",
+      "iam:ListRolePolicies",
+      "iam:GetRolePolicy",
+      "iam:ListAttachedRolePolicies",
+      "iam:GetPolicy",
+      "iam:GetPolicyVersion"
     ],
     "Resource": "*"
   }]
@@ -860,6 +865,26 @@ ServiceAccount still exists (deleted-role detection). The SPA renders
 missing roles in red with a "role not found" caption; without this
 permission Periscope cannot distinguish "deleted" from "verification
 denied" and conservatively renders both as not-found.
+
+The five `iam:*Role*Polic*` actions back the v1.1 IAM policy
+resolution engine (#187) — the per-Pod "AWS Access" tab and the
+per-cluster reverse-lookup form. Each AWS managed policy attached
+to a role costs two SDK calls (`iam:GetPolicy` to resolve the
+DefaultVersionId, then `iam:GetPolicyVersion` for the document);
+the engine's per-role policy cache (default 30-min TTL) amortizes
+the cost across requests. Inline policies cost one
+`iam:GetRolePolicy` call each.
+
+If you scope Periscope's role to specific resource ARNs rather than
+`Resource: "*"`, note that the five IAM actions need to cover both:
+
+  - `arn:aws:iam::ACCOUNT:role/*` for the role-side actions
+    (`iam:GetRole`, `iam:ListRolePolicies`, `iam:GetRolePolicy`,
+    `iam:ListAttachedRolePolicies`)
+  - `arn:aws:iam::ACCOUNT:policy/*` AND `arn:aws:iam::aws:policy/*`
+    for the policy-side actions (`iam:GetPolicy`,
+    `iam:GetPolicyVersion`). The second ARN matches AWS-managed
+    policies which are partitioned to the `aws` account.
 
 The `eks:` actions are EKS-cluster-scoped — Periscope automatically
 calls them against the EKS cluster a request is for. If your

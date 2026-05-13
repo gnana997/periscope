@@ -24,6 +24,7 @@ import (
 	"github.com/gnana997/periscope/internal/auth"
 	"github.com/gnana997/periscope/internal/authz"
 	"github.com/gnana997/periscope/internal/awsec2"
+	"github.com/gnana997/periscope/internal/awseks/iam"
 	"github.com/gnana997/periscope/internal/awseks/identity"
 	"github.com/gnana997/periscope/internal/awsinspector"
 	"github.com/gnana997/periscope/internal/clusters"
@@ -474,6 +475,21 @@ func main() {
 		identitySARolesHandler(registry, identityC, auditEmitter)))
 	router.Get("/api/clusters/{cluster}/identity/pod-identity", credentials.Wrap(factory,
 		identityPodIdentityHandler(registry, identityAwsCfg, auditEmitter)))
+
+	// --- IAM policy resolution surface (#187) ---
+	//
+	// Two read-only endpoints for the per-Pod AWS Access tab and
+	// the per-cluster reverse-lookup form (#188 SPA work). The
+	// iamEngineCache holds one *iam.Engine per cluster, each with
+	// its own per-role policy cache + the SA→Role index seam.
+	// Engine depends on identityCache for the SA index, so it's
+	// constructed after the identity routes above.
+	iamEngineC := newIAMEngineCache(identityAwsCfg, identityC, iam.Config{}, slog.Default())
+	defer iamEngineC.Shutdown()
+	router.Get("/api/clusters/{cluster}/iam/role-permissions", credentials.Wrap(factory,
+		iamRolePermissionsHandler(registry, iamEngineC, auditEmitter)))
+	router.Get("/api/clusters/{cluster}/iam/reverse-lookup", credentials.Wrap(factory,
+		iamReverseLookupHandler(registry, iamEngineC, auditEmitter)))
 
 	// --- CVE / Inspector v2 surface (#165) ---
 	//
