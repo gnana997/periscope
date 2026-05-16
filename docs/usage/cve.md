@@ -93,6 +93,8 @@ The tab content has three shapes:
   replica chip list at the bottom — click a replica to jump
   straight to that pod's Security tab.
 
+![Pod-detail Security tab on prod/legacy-nginx (the periscope-demo-eks-antipatterns fixture image) — the nginx container expanded into package groups with severity chips and the per-finding CVE count alongside Inspector's suggested upgrade target](../assets/security/legacy-nginx.png)
+
 ![Deployments page — Workload Security tab on grafana-old, showing 2 pods, unique-containers section with the grafana container expanded into package groups (go/stdlib, golang.org/x/crypto, github.com/crewjam/saml, google.golang.org/grpc), each with severity chip + suggested upgrade + CVE count](../assets/security/deployments-list.png)
 
 ### Package grouping
