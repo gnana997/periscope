@@ -1,5 +1,5 @@
 # Dependabot — auto-PRs for vulnerable / outdated dependencies across
-# the three ecosystems Periscope cares about. Weekly cadence keeps PR
+# the four ecosystems Periscope cares about. Weekly cadence keeps PR
 # noise low while still catching CVEs within a reasonable window.
 #
 # Grouping: minor + patch updates land in a single PR per ecosystem so
@@ -47,8 +47,9 @@ updates:
         update-types:
           - version-update:semver-patch
 
-  # GitHub Actions — pinned to major versions across our workflows.
-  # Dependabot bumps the major when a new one ships so we don't lag.
+  # GitHub Actions — every `uses:` is pinned by full commit SHA with a
+  # trailing `# vX.Y.Z` comment. Dependabot bumps both the SHA and the
+  # comment when a new release ships so the pins don't rot.
   - package-ecosystem: github-actions
     directory: /
     schedule:
@@ -59,5 +60,21 @@ updates:
     open-pull-requests-limit: 5
     groups:
       actions-all:
+        patterns:
+          - "*"
+
+  # Container base images — Dockerfile + Dockerfile.agent. The FROM
+  # lines are digest-pinned (@sha256:...); without this ecosystem the
+  # pins silently rot on an old base with unpatched CVEs.
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "08:00"
+      timezone: UTC
+    open-pull-requests-limit: 5
+    groups:
+      docker-all:
         patterns:
           - "*"
