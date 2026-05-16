@@ -1,0 +1,42 @@
+{
+  "_comment": "Periscope v1.1 AWS IAM policy — attach to the periscope-server's IRSA role or Pod Identity association role. Covers #178 (Identity page), #187 (IAM resolution engine), and #188 (AWS Access tab + reverse lookup + capabilities paywall). All actions are read-only. See docs/setup/cluster-rbac.md and docs/usage/aws-access.md.",
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "EKSIdentityReads",
+      "Effect": "Allow",
+      "Action": [
+        "eks:ListAccessEntries",
+        "eks:DescribeAccessEntry",
+        "eks:ListAssociatedAccessPolicies",
+        "eks:ListPodIdentityAssociations",
+        "eks:DescribePodIdentityAssociation"
+      ],
+      "Resource": "*",
+      "_resourceComment": "Scope to your cluster ARNs (arn:aws:eks:REGION:ACCOUNT:cluster/NAME) if you want least-privilege per-cluster; * is fine for a single-tenant install."
+    },
+    {
+      "Sid": "IAMRoleAndPolicyReads",
+      "Effect": "Allow",
+      "Action": [
+        "iam:GetRole",
+        "iam:ListRolePolicies",
+        "iam:GetRolePolicy",
+        "iam:ListAttachedRolePolicies",
+        "iam:GetPolicy",
+        "iam:GetPolicyVersion"
+      ],
+      "Resource": "*",
+      "_resourceComment": "If you want per-account scoping, split this statement into two: arn:aws:iam::ACCOUNT:role/* for the four iam:*Role* actions and arn:aws:iam::ACCOUNT:policy/* + arn:aws:iam::aws:policy/* for iam:GetPolicy / iam:GetPolicyVersion (AWS-managed policies live in the `aws` account)."
+    },
+    {
+      "Sid": "IAMSimulatePrincipalPolicyForCapabilitiesProbe",
+      "Effect": "Allow",
+      "Action": [
+        "iam:SimulatePrincipalPolicy"
+      ],
+      "Resource": "*",
+      "_resourceComment": "Required only when awsAccess.iamProbe.enabled=true in values.yaml (the default). Drives the exact missing-perms list on the capabilities paywall. Drop this statement if you set awsAccess.iamProbe.enabled=false; the surface stays functional with an optimistic locked-pane note."
+    }
+  ]
+}

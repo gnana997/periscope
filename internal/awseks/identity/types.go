@@ -124,3 +124,13 @@ type PodIdentityAssoc struct {
 	ServiceAccount string `json:"serviceAccount"`
 	ClusterName    string `json:"clusterName,omitempty"`
 }
+
+// PodRef is one pod row returned by Manager.PodsForSA — the
+// minimal shape the AWS Access surface (#188) renders. NodeName
+// is best-effort (empty for pending pods) but useful for SPA
+// hover and forensic correlation.
+type PodRef struct {
+	Namespace string `json:"namespace"`
+	Name      string `json:"name"`
+	NodeName  string `json:"nodeName,omitempty"`
+}

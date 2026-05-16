@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"sort"
 	"sync"
 	"time"
 
@@ -24,6 +25,18 @@ const IrsaAnnotation = "eks.amazonaws.com/role-arn"
 // without exporting a wrapper interface, and tests can pass an inline
 // closure with synthetic data.
 type IRSALister func() (map[SAKey]string, error)
+
+// PodLister returns the pods currently bound to a given
+// (namespace, serviceAccountName). Empty saName is treated as
+// "default" (k8s implicit default SA). Returns up to len(refs)
+// PodRefs alongside the untruncated total count so callers can
+// render "N of M". Implementations are expected to be cheap
+// (indexer-backed lookup over the cluster pod informer cache).
+//
+// Defined as a func type so watch_hook can wire its informer's
+// indexed lister without exporting a wrapper interface, and tests
+// can pass an inline closure with synthetic data.
+type PodLister func(namespace, saName string) (refs []PodRef, total int, err error)
 
 // PodIdentityLister returns the cluster's Pod Identity associations.
 // Implemented by *Client; stubbable for manager tests that don't want
@@ -71,6 +84,7 @@ func (c Config) withDefaults() Config {
 type Manager struct {
 	clusterName  string
 	saLister     IRSALister
+	podLister    PodLister
 	podIdentity  PodIdentityLister
 	roleResolver IAMRoleResolver
 	store        *Store
@@ -118,6 +132,55 @@ func (m *Manager) SetIRSALister(l IRSALister) {
 	m.ensureMu.Lock()
 	defer m.ensureMu.Unlock()
 	m.saLister = l
+}
+
+// SetPodLister wires the informer-backed Pod lister. Called once by
+// watch_hook after the pod informer's cache is synced. Distinct
+// lifecycle from the SA lister: PodsForSA returns
+// ErrPodListerNotReady until this is called and the pod informer
+// has finished its initial sync.
+func (m *Manager) SetPodLister(l PodLister) {
+	m.ensureMu.Lock()
+	defer m.ensureMu.Unlock()
+	m.podLister = l
+}
+
+// PodsForSA returns up to limit pod refs (alphabetically by
+// namespace, then name) for the given (namespace, saName), plus
+// the untruncated total count. Empty saName resolves to "default"
+// (k8s implicit default SA).
+//
+// Returns ErrPodListerNotReady before the pod informer's initial
+// sync completes — the HTTP handler translates this into a 503
+// with Retry-After mirroring the SA-informer path.
+func (m *Manager) PodsForSA(_ context.Context, namespace, saName string, limit int) ([]PodRef, int, error) {
+	m.ensureMu.Lock()
+	lister := m.podLister
+	m.ensureMu.Unlock()
+	if lister == nil {
+		return nil, 0, ErrPodListerNotReady
+	}
+	refs, total, err := lister(namespace, saName)
+	if err != nil {
+		return nil, 0, err
+	}
+	sortPodRefs(refs)
+	if limit > 0 && len(refs) > limit {
+		refs = refs[:limit]
+	}
+	return refs, total, nil
+}
+
+// sortPodRefs imposes alphabetical (namespace, name) order so
+// truncation to `limit` is deterministic and golden tests are
+// stable.
+func sortPodRefs(refs []PodRef) {
+	sort.SliceStable(refs, func(i, j int) bool {
+		if refs[i].Namespace != refs[j].Namespace {
+			return refs[i].Namespace < refs[j].Namespace
+		}
+		return refs[i].Name < refs[j].Name
+	})
 }
 
 // Store exposes the underlying store so the watch hook can call
@@ -261,4 +324,16 @@ type errIRSAListerNotReady struct{}
 
 func (errIRSAListerNotReady) Error() string {
 	return "identity: ServiceAccount informer not yet synced"
+}
+
+// ErrPodListerNotReady is returned by PodsForSA when the Pod
+// informer hasn't finished its initial sync. Mirrors
+// ErrIRSAListerNotReady's contract — the HTTP handler maps to 503
+// with Retry-After.
+var ErrPodListerNotReady = errPodListerNotReady{}
+
+type errPodListerNotReady struct{}
+
+func (errPodListerNotReady) Error() string {
+	return "identity: Pod informer not yet synced"
 }

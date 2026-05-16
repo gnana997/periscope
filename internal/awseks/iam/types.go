@@ -144,30 +144,58 @@ type ReverseLookupQuery struct {
 	Namespace string `json:"namespace,omitempty"`
 }
 
-// ReverseLookupMatch is one hit from a reverse lookup: a (Pod, SA,
-// Role, Permission) tuple with the matching Permission already
-// attributed.
+// ReverseLookupMatch is the engine-internal hit shape: one (SA,
+// role, permission) tuple before pod enrichment. The cmd/periscope
+// handler joins each match against the cluster's pod informer
+// cache to flatten into ReverseLookupPodRow.
 //
-// PodRefs is truncated to PodRefsLimit (default 5) so a single SA
-// bound to 50 pods doesn't flood the SPA result row. PodCount is
-// the untruncated total so the SPA can render "5 of 50".
+// Distinct from ReverseLookupPodRow (the wire shape) so the engine
+// stays in-package — no k8s informer types leak across the iam
+// package boundary.
 type ReverseLookupMatch struct {
+	SAName     string
+	Namespace  string
+	RoleArn    string
+	Permission Permission
+}
+
+// ReverseLookupPodRow is the wire shape — one row per matched pod.
+// Flattened from ReverseLookupMatch by the cmd/periscope handler
+// after pod-cache enrichment. Source attributes the binding
+// (IRSA / PodIdentity); dual-source SAs emit two rows per pod (one
+// per binding) so the SPA renders the honest dual-source story.
+type ReverseLookupPodRow struct {
+	Pod        PodRef     `json:"pod"`
 	SAName     string     `json:"saName"`
 	Namespace  string     `json:"namespace"`
 	RoleArn    string     `json:"roleArn"`
 	Permission Permission `json:"permission"`
-	PodRefs    []string   `json:"podRefs"`
-	PodCount   int        `json:"podCount"`
+	Source     string     `json:"source"` // "IRSA" | "PodIdentity" | "Both"
+}
+
+// PodRef is the wire representation of a pod reference. Same
+// fields as identity.PodRef; duplicated here to avoid a reverse
+// import edge from iam → identity.
+type PodRef struct {
+	Namespace string `json:"namespace"`
+	Name      string `json:"name"`
+	NodeName  string `json:"nodeName,omitempty"`
 }
 
 // ReverseLookupResponse is the wire shape for the reverse-lookup
-// endpoint. Echoes the query for SPA convenience (lets the result
-// pane show the query without holding it in component state).
+// endpoint. Echoes the query for SPA convenience and carries the
+// row-per-pod result list plus a server-computed truncation flag.
+//
+// Wire-shape change from v1.0: the previous `matches` field is
+// now `rows`, carrying one entry per matched pod (was: one entry
+// per SA with embedded podRefs). See CHANGELOG `Changed`.
 type ReverseLookupResponse struct {
-	Action   string               `json:"action"`
-	Resource string               `json:"resource,omitempty"`
-	Scope    ReverseLookupScope   `json:"scope,omitempty"`
-	Matches  []ReverseLookupMatch `json:"matches"`
+	Action    string                `json:"action"`
+	Resource  string                `json:"resource,omitempty"`
+	Scope     ReverseLookupScope    `json:"scope,omitempty"`
+	Rows      []ReverseLookupPodRow `json:"rows"`
+	Truncated bool                  `json:"truncated"`
+	TotalPods int                   `json:"totalPods"`
 }
 
 // ReverseLookupScope is the optional filter context for a reverse
@@ -175,6 +203,172 @@ type ReverseLookupResponse struct {
 type ReverseLookupScope struct {
 	Cluster   string `json:"cluster,omitempty"`
 	Namespace string `json:"namespace,omitempty"`
+}
+
+// ── Composed forward-view wire types (#188) ──────────────────────
+
+// ServiceGroup buckets Permissions by the AWS service segment of
+// the action ("s3", "iam", "kms", "*"). Server-grouped so the SPA
+// renders accordions directly without re-bucketing. Sort key on
+// the outer slice: sensitive-first, then service alpha.
+type ServiceGroup struct {
+	Service     string       `json:"service"`     // lower-cased; "*" for wildcard-action statements
+	Sensitive   bool         `json:"sensitive"`   // any perm in the group is sensitive
+	Count       int          `json:"count"`       // len(Permissions)
+	Permissions []Permission `json:"permissions"` // already sorted by sortPermissions
+}
+
+// IdentityChainBinding is the wire-shape view of one SA→Role
+// binding edge for the composed forward-view response. Same
+// fields as identity.SARoleBinding; duplicated to avoid a reverse
+// import from iam → identity.
+type IdentityChainBinding struct {
+	Source                   string `json:"source"` // "IRSA" | "PodIdentity" | "Both"
+	RoleArn                  string `json:"roleArn"`
+	RoleExists               bool   `json:"roleExists"`
+	PodIdentityAssociationId string `json:"podIdentityAssociationId,omitempty"`
+	IRSAAnnotationValue      string `json:"irsaAnnotationValue,omitempty"`
+}
+
+// IdentityChain is the resolved identity attribution for a
+// workload: which SA it runs as plus every IAM role bound to that
+// SA. DualSource is true when both IRSA and Pod Identity bindings
+// exist on the same SA (the IRSA one is shadowed dead-config at
+// runtime).
+type IdentityChain struct {
+	ServiceAccount string                 `json:"serviceAccount"`
+	Bindings       []IdentityChainBinding `json:"bindings"`
+	DualSource     bool                   `json:"dualSource"`
+}
+
+// AwsAccessWarning is one server-emitted advisory the SPA renders
+// as a chip. Codes are stable identifiers an MCP tool can branch
+// on; Message is human-readable.
+type AwsAccessWarning struct {
+	Code    string `json:"code"` // DUAL_SOURCE_IRSA_SHADOWED | ROLE_NOT_FOUND | POLICY_FETCH_PARTIAL | NO_BINDINGS
+	Message string `json:"message"`
+	RoleArn string `json:"roleArn,omitempty"`
+}
+
+// Warning codes — stable string keys MCP tools can branch on.
+const (
+	WarningDualSourceIRSAShadowed = "DUAL_SOURCE_IRSA_SHADOWED"
+	WarningRoleNotFound           = "ROLE_NOT_FOUND"
+	WarningPolicyFetchPartial     = "POLICY_FETCH_PARTIAL"
+	WarningNoBindings             = "NO_BINDINGS"
+)
+
+// WorkloadPermissionsResponse is the composed forward-view
+// response — one round-trip from the SPA returns the full AWS
+// Access tab. Per backend-as-source-of-truth, every join,
+// grouping, and classification is computed server-side so MCP
+// tools can wrap the endpoint as a single tool call.
+//
+// AffectedPods is the list of running pods this composition
+// applies to: for kind=Pod, just the pod itself; for controllers,
+// the pods using the resolved SA; for kind=ServiceAccount, all
+// pods bound to that SA. Truncated to PodRefsLimit;
+// AffectedPodCount is the untruncated total.
+type WorkloadPermissionsResponse struct {
+	Cluster   string `json:"cluster"`
+	Kind      string `json:"kind"`
+	Namespace string `json:"namespace"`
+	Name      string `json:"name"`
+
+	IdentityChain IdentityChain      `json:"identityChain"`
+	Groups        []ServiceGroup     `json:"groups"`
+	RawStatements []RawStatement     `json:"rawStatements"`
+	Warnings      []AwsAccessWarning `json:"warnings"`
+
+	AffectedPods     []PodRef `json:"affectedPods"`
+	AffectedPodCount int      `json:"affectedPodCount"`
+
+	PolicyFetchPartial bool `json:"policyFetchPartial"`
+	Truncated          bool `json:"truncated"`
+	TotalCount         int  `json:"totalCount"`
+
+	CatalogVersion string    `json:"catalogVersion"`
+	FetchedAt      time.Time `json:"fetchedAt"`
+}
+
+// ── Sensitive-catalog wire types (#188) ──────────────────────────
+
+// SensitiveCatalogEntry is one row of the cluster-agnostic catalog
+// endpoint. ReverseQuery is the pre-canned reverse-lookup query
+// the SPA fires when a chip is clicked — keeps the chip→action
+// mapping server-side so an MCP tool can resolve "what does this
+// chip mean?" without a TS lookup table.
+type SensitiveCatalogEntry struct {
+	Action       string            `json:"action"`
+	Category     SensitiveCategory `json:"category"`
+	Pattern      bool              `json:"pattern"`
+	ReverseQuery ReverseQueryHint  `json:"reverseQuery"`
+}
+
+// ReverseQueryHint is the (action, resource) pair the SPA
+// pre-fills into the reverse-lookup form when a chip is clicked.
+// Resource is optional and almost always empty (the chip's action
+// is the whole signal); reserved for future per-category resource
+// defaults.
+type ReverseQueryHint struct {
+	Action   string `json:"action"`
+	Resource string `json:"resource,omitempty"`
+}
+
+// SensitiveCatalogResponse is the wire shape for
+// GET /api/identity/sensitive-catalog. Cluster-agnostic.
+type SensitiveCatalogResponse struct {
+	Version string                  `json:"version"`
+	Entries []SensitiveCatalogEntry `json:"entries"`
+}
+
+// ── Capabilities wire types (#188) ───────────────────────────────
+
+// Capability feature keys — stable identifiers the SPA and MCP
+// tools index into CapabilitiesResponse.Features.
+const (
+	FeatureAwsAccessTab     = "awsAccessTab"
+	FeatureReverseLookup    = "reverseLookup"
+	FeatureSensitiveCatalog = "sensitiveCatalog"
+)
+
+// Capability lock reasons — stable string keys. MCP tools branch
+// on these instead of parsing the human-readable Message.
+const (
+	ReasonNotEKS              = "NOT_EKS"
+	ReasonRBACDenied          = "RBAC_DENIED"
+	ReasonMissingIAMPerms     = "MISSING_IAM_PERMS"
+	ReasonNoIdentityConfigured = "NO_IDENTITY_CONFIGURED"
+	ReasonInformerWarming     = "INFORMER_WARMING"
+	ReasonIAMProbeDisabled    = "IAM_PROBE_DISABLED"
+)
+
+// FeatureCapability is one feature's availability + lock reason.
+// Available=true means the SPA may render the feature; otherwise
+// the locked-pane shows Message + Missing + DocsURL.
+//
+// Note is set when the feature is Available but the probe
+// couldn't definitively prove it (e.g. iam:SimulatePrincipalPolicy
+// itself is denied). UI surfaces the note inline so operators
+// understand they're in optimistic mode.
+type FeatureCapability struct {
+	Available  bool     `json:"available"`
+	Reason     string   `json:"reason,omitempty"`
+	Message    string   `json:"message,omitempty"`
+	Missing    []string `json:"missing,omitempty"`
+	DocsURL    string   `json:"docsUrl,omitempty"`
+	ConsoleURL string   `json:"consoleUrl,omitempty"`
+	Note       string   `json:"note,omitempty"`
+}
+
+// CapabilitiesResponse is the wire shape for the per-cluster
+// capabilities probe. Features keys are stable identifiers:
+// "awsAccessTab", "reverseLookup", "sensitiveCatalog".
+type CapabilitiesResponse struct {
+	Cluster   string                       `json:"cluster"`
+	Features  map[string]FeatureCapability `json:"features"`
+	FetchedAt time.Time                    `json:"fetchedAt"`
+	Note      string                       `json:"note,omitempty"`
 }
 
 // ── Internal types: NOT shipped to the SPA ───────────────────────

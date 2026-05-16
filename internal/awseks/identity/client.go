@@ -13,6 +13,7 @@ import (
 	ekstypes "github.com/aws/aws-sdk-go-v2/service/eks/types"
 	"github.com/aws/aws-sdk-go-v2/service/iam"
 	iamtypes "github.com/aws/aws-sdk-go-v2/service/iam/types"
+	"github.com/aws/aws-sdk-go-v2/service/sts"
 
 	iamengine "github.com/gnana997/periscope/internal/awseks/iam"
 )
@@ -41,13 +42,31 @@ type IAMAPI interface {
 	ListAttachedRolePolicies(ctx context.Context, in *iam.ListAttachedRolePoliciesInput, opts ...func(*iam.Options)) (*iam.ListAttachedRolePoliciesOutput, error)
 	GetPolicy(ctx context.Context, in *iam.GetPolicyInput, opts ...func(*iam.Options)) (*iam.GetPolicyOutput, error)
 	GetPolicyVersion(ctx context.Context, in *iam.GetPolicyVersionInput, opts ...func(*iam.Options)) (*iam.GetPolicyVersionOutput, error)
+
+	// Capabilities-probe surface (#188): SimulatePrincipalPolicy
+	// is called once per /identity/capabilities cold call to
+	// populate the MISSING_IAM_PERMS lock with the exact missing
+	// action list. Optional — when periscope-server's role lacks
+	// iam:SimulatePrincipalPolicy, the capabilities response stays
+	// optimistically Available=true with a Note.
+	SimulatePrincipalPolicy(ctx context.Context, in *iam.SimulatePrincipalPolicyInput, opts ...func(*iam.Options)) (*iam.SimulatePrincipalPolicyOutput, error)
 }
 
-// Client wraps the EKS + IAM SDK calls used by the Identity surface.
-// Construct with New (real SDK) or NewWithAPIs (tests).
+// STSAPI is the subset of the AWS STS client used by this package.
+// Today only sts:GetCallerIdentity is needed — to resolve the
+// principal ARN that drives the iam:SimulatePrincipalPolicy probe.
+// Defined as an interface so handler tests can substitute a stub.
+type STSAPI interface {
+	GetCallerIdentity(ctx context.Context, in *sts.GetCallerIdentityInput, opts ...func(*sts.Options)) (*sts.GetCallerIdentityOutput, error)
+}
+
+// Client wraps the EKS + IAM + STS SDK calls used by the Identity
+// and AWS Access surfaces. Construct with New (real SDK) or
+// NewWithAPIs (tests).
 type Client struct {
 	eks    EKSAPI
 	iam    IAMAPI
+	sts    STSAPI
 	region string
 }
 
@@ -58,14 +77,23 @@ func New(cfg aws.Config) *Client {
 	return &Client{
 		eks:    eks.NewFromConfig(cfg),
 		iam:    iam.NewFromConfig(cfg),
+		sts:    sts.NewFromConfig(cfg),
 		region: cfg.Region,
 	}
 }
 
-// NewWithAPIs is the test seam — handler tests inject stubs for both
-// APIs without touching the SDK construction path.
+// NewWithAPIs is the test seam — handler tests inject stubs for the
+// EKS + IAM APIs without touching the SDK construction path. STS
+// is omitted; callers that need it use NewWithAllAPIs.
 func NewWithAPIs(eksAPI EKSAPI, iamAPI IAMAPI) *Client {
 	return &Client{eks: eksAPI, iam: iamAPI}
+}
+
+// NewWithAllAPIs is the test seam for surfaces that also need STS
+// (the AWS Access capabilities probe). When STS is nil, the
+// capabilities probe falls back to its optimistic mode.
+func NewWithAllAPIs(eksAPI EKSAPI, iamAPI IAMAPI, stsAPI STSAPI) *Client {
+	return &Client{eks: eksAPI, iam: iamAPI, sts: stsAPI}
 }
 
 // IAMRoleResolver is the narrow interface the Manager depends on for
@@ -404,4 +432,91 @@ func decodePolicyDocument(encoded string) (json.RawMessage, error) {
 		return nil, fmt.Errorf("decode policy document: %w", err)
 	}
 	return json.RawMessage(decoded), nil
+}
+
+// ── STS + SimulatePrincipalPolicy (#188 capabilities probe) ──────
+
+// ErrSTSNotWired is returned when CallerIdentity is called on a
+// Client built without an STS API (NewWithAPIs without STS, or a
+// production Client with sts disabled). The capabilities handler
+// maps to optimistic Available=true with a Note.
+var ErrSTSNotWired = errors.New("identity: STS API not wired")
+
+// CallerIdentity returns periscope-server's own principal ARN in
+// IAM role form (collapsing the sts:assumed-role session form to
+// the underlying iam:role/Name form, which is the shape
+// iam:SimulatePrincipalPolicy expects as PolicySourceArn).
+//
+// AWS grants sts:GetCallerIdentity to every authenticated principal
+// by default, so this call almost never 403s in practice — but
+// callers should handle the error path defensively (the probe is
+// optional).
+func (c *Client) CallerIdentity(ctx context.Context) (string, error) {
+	if c.sts == nil {
+		return "", ErrSTSNotWired
+	}
+	out, err := c.sts.GetCallerIdentity(ctx, &sts.GetCallerIdentityInput{})
+	if err != nil {
+		return "", fmt.Errorf("sts:GetCallerIdentity: %w", err)
+	}
+	return CollapseSessionToRoleArn(aws.ToString(out.Arn)), nil
+}
+
+// CollapseSessionToRoleArn converts an assumed-role session ARN
+// (arn:aws:sts::ACCT:assumed-role/RoleName/SessionName) to the
+// underlying IAM role ARN (arn:aws:iam::ACCT:role/RoleName).
+// Returns input unchanged for non-session ARNs (already a role
+// ARN, a user ARN, or unparseable).
+//
+// Exported so cmd/periscope can use the same canonicalization when
+// resolving the principal ARN for a configured override.
+func CollapseSessionToRoleArn(arn string) string {
+	if !strings.Contains(arn, ":sts::") || !strings.Contains(arn, ":assumed-role/") {
+		return arn
+	}
+	parts := strings.SplitN(arn, ":", 6)
+	if len(parts) < 6 {
+		return arn
+	}
+	tail := strings.TrimPrefix(parts[5], "assumed-role/")
+	role := tail
+	if i := strings.Index(tail, "/"); i > 0 {
+		role = tail[:i]
+	}
+	if role == "" {
+		return arn
+	}
+	return fmt.Sprintf("arn:%s:iam::%s:role/%s", parts[1], parts[4], role)
+}
+
+// SimulateActions calls iam:SimulatePrincipalPolicy and returns the
+// subset of `actions` that the principal cannot perform. resource
+// is optional; pass "*" (or "") to skip resource-level evaluation
+// and surface action-only permission state.
+//
+// Used by the /identity/capabilities probe to populate the exact
+// Missing[] list on a MISSING_IAM_PERMS lock. Empty `actions`
+// returns (nil, nil) without an SDK call.
+func (c *Client) SimulateActions(ctx context.Context, principalArn string, actions []string, resource string) ([]string, error) {
+	if len(actions) == 0 {
+		return nil, nil
+	}
+	in := &iam.SimulatePrincipalPolicyInput{
+		PolicySourceArn: aws.String(principalArn),
+		ActionNames:     actions,
+	}
+	if resource != "" && resource != "*" {
+		in.ResourceArns = []string{resource}
+	}
+	out, err := c.iam.SimulatePrincipalPolicy(ctx, in)
+	if err != nil {
+		return nil, fmt.Errorf("iam:SimulatePrincipalPolicy: %w", err)
+	}
+	var missing []string
+	for _, r := range out.EvaluationResults {
+		if r.EvalDecision != iamtypes.PolicyEvaluationDecisionTypeAllowed {
+			missing = append(missing, aws.ToString(r.EvalActionName))
+		}
+	}
+	return missing, nil
 }

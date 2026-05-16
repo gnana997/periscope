@@ -14,6 +14,7 @@ import (
 	ekstypes "github.com/aws/aws-sdk-go-v2/service/eks/types"
 	"github.com/aws/aws-sdk-go-v2/service/iam"
 	iamtypes "github.com/aws/aws-sdk-go-v2/service/iam/types"
+	"github.com/aws/aws-sdk-go-v2/service/sts"
 	"github.com/go-chi/chi/v5"
 	smithy "github.com/aws/smithy-go"
 	corev1 "k8s.io/api/core/v1"
@@ -37,15 +38,27 @@ type fakeIdentityEKS struct {
 }
 
 func (f *fakeIdentityEKS) ListAccessEntries(ctx context.Context, in *eks.ListAccessEntriesInput, _ ...func(*eks.Options)) (*eks.ListAccessEntriesOutput, error) {
+	if f.listAccessEntries == nil {
+		return &eks.ListAccessEntriesOutput{}, nil
+	}
 	return f.listAccessEntries(in)
 }
 func (f *fakeIdentityEKS) DescribeAccessEntry(ctx context.Context, in *eks.DescribeAccessEntryInput, _ ...func(*eks.Options)) (*eks.DescribeAccessEntryOutput, error) {
+	if f.describeAccessEntry == nil {
+		return &eks.DescribeAccessEntryOutput{}, nil
+	}
 	return f.describeAccessEntry(in)
 }
 func (f *fakeIdentityEKS) ListAssociatedAccessPolicies(ctx context.Context, in *eks.ListAssociatedAccessPoliciesInput, _ ...func(*eks.Options)) (*eks.ListAssociatedAccessPoliciesOutput, error) {
+	if f.listAssociatedAccessPolicy == nil {
+		return &eks.ListAssociatedAccessPoliciesOutput{}, nil
+	}
 	return f.listAssociatedAccessPolicy(in)
 }
 func (f *fakeIdentityEKS) ListPodIdentityAssociations(ctx context.Context, in *eks.ListPodIdentityAssociationsInput, _ ...func(*eks.Options)) (*eks.ListPodIdentityAssociationsOutput, error) {
+	if f.listPodIdentity == nil {
+		return &eks.ListPodIdentityAssociationsOutput{}, nil
+	}
 	return f.listPodIdentity(in)
 }
 func (f *fakeIdentityEKS) DescribePodIdentityAssociation(ctx context.Context, in *eks.DescribePodIdentityAssociationInput, _ ...func(*eks.Options)) (*eks.DescribePodIdentityAssociationOutput, error) {
@@ -64,6 +77,9 @@ type fakeIdentityIAM struct {
 	listAttachedRolePolicies func(*iam.ListAttachedRolePoliciesInput) (*iam.ListAttachedRolePoliciesOutput, error)
 	getPolicy                func(*iam.GetPolicyInput) (*iam.GetPolicyOutput, error)
 	getPolicyVersion         func(*iam.GetPolicyVersionInput) (*iam.GetPolicyVersionOutput, error)
+
+	// Capabilities-probe surface (#188).
+	simulatePrincipalPolicy func(*iam.SimulatePrincipalPolicyInput) (*iam.SimulatePrincipalPolicyOutput, error)
 }
 
 func (f *fakeIdentityIAM) GetRole(ctx context.Context, in *iam.GetRoleInput, _ ...func(*iam.Options)) (*iam.GetRoleOutput, error) {
@@ -105,13 +121,38 @@ func (f *fakeIdentityIAM) GetPolicyVersion(ctx context.Context, in *iam.GetPolic
 	return f.getPolicyVersion(in)
 }
 
+func (f *fakeIdentityIAM) SimulatePrincipalPolicy(ctx context.Context, in *iam.SimulatePrincipalPolicyInput, _ ...func(*iam.Options)) (*iam.SimulatePrincipalPolicyOutput, error) {
+	if f.simulatePrincipalPolicy == nil {
+		return nil, errors.New("stub: SimulatePrincipalPolicy not configured")
+	}
+	return f.simulatePrincipalPolicy(in)
+}
+
+// fakeIdentitySTS satisfies identity.STSAPI for tests that exercise
+// the capabilities probe (#188).
+type fakeIdentitySTS struct {
+	getCallerIdentity func(*sts.GetCallerIdentityInput) (*sts.GetCallerIdentityOutput, error)
+}
+
+func (f *fakeIdentitySTS) GetCallerIdentity(ctx context.Context, in *sts.GetCallerIdentityInput, _ ...func(*sts.Options)) (*sts.GetCallerIdentityOutput, error) {
+	if f.getCallerIdentity == nil {
+		return nil, errors.New("stub: GetCallerIdentity not configured")
+	}
+	return f.getCallerIdentity(in)
+}
+
 // withFakeIdentityClient swaps newIdentityClient to return a Client
 // backed by the given fake EKS/IAM stubs. Cleanup restores the
-// original after the test.
-func withFakeIdentityClient(t *testing.T, fEKS *fakeIdentityEKS, fIAM *fakeIdentityIAM) {
+// original after the test. Variadic STS arg lets capabilities-probe
+// tests inject a fake STS without forcing every other test through
+// the longer constructor.
+func withFakeIdentityClient(t *testing.T, fEKS *fakeIdentityEKS, fIAM *fakeIdentityIAM, fSTS ...*fakeIdentitySTS) {
 	t.Helper()
 	orig := newIdentityClient
 	newIdentityClient = func(_ aws.Config, _ clusters.Cluster) *identity.Client {
+		if len(fSTS) > 0 && fSTS[0] != nil {
+			return identity.NewWithAllAPIs(fEKS, fIAM, fSTS[0])
+		}
 		return identity.NewWithAPIs(fEKS, fIAM)
 	}
 	t.Cleanup(func() { newIdentityClient = orig })

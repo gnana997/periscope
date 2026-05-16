@@ -22,32 +22,100 @@ import (
 // edits between TTL ticks.
 const saInformerResyncPeriod = 30 * time.Minute
 
-// StartSAInformer starts a long-lived ServiceAccount informer for
-// the cluster and wires it into the manager. The informer:
+// podSAIndexName is the indexer name used to bucket Pods by
+// (namespace, serviceAccountName). PodsForSA reads via ByIndex so
+// per-SA lookups are O(pods-for-this-SA), not O(all-pods).
+const podSAIndexName = "saName"
+
+// podSAIndexKey builds the indexer key. Empty saName is normalized
+// to "default" to match k8s implicit-default-SA semantics on pod
+// admission.
+func podSAIndexKey(namespace, saName string) string {
+	if saName == "" {
+		saName = "default"
+	}
+	return namespace + "/" + saName
+}
+
+// StartOptions controls which informers StartSAInformer attaches.
+// Default is "all on" (matches v1.1 behaviour when #188 is enabled);
+// callers thread WithPodInformer(false) when the operator has
+// disabled the AWS Access surface via PERISCOPE_AWS_ACCESS_ENABLED=false
+// so the Pod informer's overhead doesn't run.
+type StartOptions struct {
+	// PodInformer toggles the Pod informer + (namespace, saName)
+	// indexer that drives Manager.PodsForSA for #188 reverse-lookup
+	// pod enrichment and the workload-permissions AffectedPods
+	// surface. When false, PodsForSA permanently returns
+	// ErrPodListerNotReady — handlers gated on the AWS-Access
+	// feature flag never reach that code path.
+	PodInformer bool
+}
+
+// StartOption is the functional-options shape callers pass to
+// StartSAInformer.
+type StartOption func(*StartOptions)
+
+// WithPodInformer enables (default) or disables the Pod informer.
+// cmd/periscope passes WithPodInformer(awsAccess.Enabled) at
+// startup so the operator's helm value drives the resource
+// footprint.
+func WithPodInformer(enabled bool) StartOption {
+	return func(o *StartOptions) { o.PodInformer = enabled }
+}
+
+// StartSAInformer starts a long-lived ServiceAccount + Pod
+// informer pair for the cluster and wires both into the manager.
+// One shared informer factory hosts both — same cancel, same
+// resync cadence — so identity surfaces (#178) and the AWS Access
+// surface (#188) share one lifecycle.
+//
+// The SA informer:
 //
 //   - Provides the manager's IRSALister (cache walk extracting
 //     eks.amazonaws.com/role-arn annotations).
 //   - Invalidates the manager's store when an SA's IRSA annotation
 //     is added, removed, or changed — lazy refresh on next Ensure.
 //
-// The returned cancel function stops the informer (and is also
+// The Pod informer:
+//
+//   - Provides the manager's PodLister via a (namespace, saName)
+//     indexer so per-SA lookups are O(pods-for-this-SA).
+//   - Does NOT invalidate the SA→Role index on pod churn — pod
+//     adds/removes don't change which IAM role a SA is bound to.
+//     Reverse-lookup result staleness is bounded by the informer
+//     resync period (30m) plus event latency (sub-second).
+//
+// The returned cancel function stops both informers (and is also
 // triggered by ctx cancellation). Callers in cmd/periscope wire
-// cancel into the shutdown sequence so the informer stops before
+// cancel into the shutdown sequence so the informers stop before
 // the server exits.
 //
-// The informer runs in a goroutine. Cache sync completes
-// asynchronously; until it does, Manager.Ensure returns
-// ErrIRSAListerNotReady which the handler translates to 503.
-func StartSAInformer(ctx context.Context, cs kubernetes.Interface, m *Manager) (cancel context.CancelFunc, err error) {
+// Cache sync completes asynchronously. Until SA cache is synced,
+// Manager.Ensure returns ErrIRSAListerNotReady; until Pod cache is
+// synced, Manager.PodsForSA returns ErrPodListerNotReady. Both map
+// to 503 with Retry-After at the handler layer.
+//
+// Options control which informers attach. WithPodInformer(false)
+// is the AWS-Access-disabled path: only the SA informer runs, no
+// Pod informer overhead, and PodsForSA returns ErrPodListerNotReady
+// indefinitely. The #178 / #190 surfaces work unchanged either way.
+func StartSAInformer(ctx context.Context, cs kubernetes.Interface, m *Manager, opts ...StartOption) (cancel context.CancelFunc, err error) {
+	options := StartOptions{PodInformer: true}
+	for _, opt := range opts {
+		opt(&options)
+	}
+
 	ctx, cancel = context.WithCancel(ctx)
 
 	factory := informers.NewSharedInformerFactory(cs, saInformerResyncPeriod)
+
 	saIface := factory.Core().V1().ServiceAccounts()
-	informer := saIface.Informer()
-	lister := saIface.Lister()
+	saInformer := saIface.Informer()
+	saLister := saIface.Lister()
 
 	hook := &saHook{m: m}
-	if _, err := informer.AddEventHandler(cache.ResourceEventHandlerFuncs{
+	if _, err := saInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc:    hook.onAdd,
 		UpdateFunc: hook.onUpdate,
 		DeleteFunc: hook.onDelete,
@@ -56,24 +124,79 @@ func StartSAInformer(ctx context.Context, cs kubernetes.Interface, m *Manager) (
 		return nil, fmt.Errorf("attach SA event handler: %w", err)
 	}
 
+	var podInformer cache.SharedIndexInformer
+	var podIndexer cache.Indexer
+	if options.PodInformer {
+		podIface := factory.Core().V1().Pods()
+		podInformer = podIface.Informer()
+		podIndexer = podInformer.GetIndexer()
+		if err := podIndexer.AddIndexers(cache.Indexers{
+			podSAIndexName: func(obj any) ([]string, error) {
+				pod, ok := obj.(*corev1.Pod)
+				if !ok {
+					return nil, nil
+				}
+				return []string{podSAIndexKey(pod.Namespace, pod.Spec.ServiceAccountName)}, nil
+			},
+		}); err != nil {
+			cancel()
+			return nil, fmt.Errorf("attach pod SA indexer: %w", err)
+		}
+	}
+
 	factory.Start(ctx.Done())
 
-	// Wire the IRSA lister now (synchronously). The lister returns
-	// an empty result until the cache is synced, but the manager
-	// gates Ensure on Hook.syncDone before that — once syncDone
-	// flips true, the lister's snapshot is authoritative.
+	// Wire the IRSA lister synchronously. Lister gates on syncDone;
+	// before sync, returns ErrIRSAListerNotReady so the handler can
+	// serve a Retry-After.
 	m.SetIRSALister(func() (map[SAKey]string, error) {
 		if !hook.syncDone.Load() {
 			return nil, ErrIRSAListerNotReady
 		}
-		return listerIRSASnapshot(lister)
+		return listerIRSASnapshot(saLister)
 	})
 
+	if options.PodInformer {
+		// Wire the Pod lister synchronously with its own sync gate.
+		// Pod sync is independent of SA sync — either may complete
+		// first; surfaces that don't need pods (sa-roles index) won't
+		// block on pod sync.
+		m.SetPodLister(func(namespace, saName string) ([]PodRef, int, error) {
+			if !hook.podSyncDone.Load() {
+				return nil, 0, ErrPodListerNotReady
+			}
+			objs, err := podIndexer.ByIndex(podSAIndexName, podSAIndexKey(namespace, saName))
+			if err != nil {
+				return nil, 0, fmt.Errorf("pod indexer ByIndex: %w", err)
+			}
+			refs := make([]PodRef, 0, len(objs))
+			for _, obj := range objs {
+				pod, ok := obj.(*corev1.Pod)
+				if !ok {
+					continue
+				}
+				refs = append(refs, PodRef{
+					Namespace: pod.Namespace,
+					Name:      pod.Name,
+					NodeName:  pod.Spec.NodeName,
+				})
+			}
+			return refs, len(refs), nil
+		})
+	}
+
 	go func() {
-		if cache.WaitForCacheSync(ctx.Done(), informer.HasSynced) {
+		if cache.WaitForCacheSync(ctx.Done(), saInformer.HasSynced) {
 			hook.syncDone.Store(true)
 		}
 	}()
+	if options.PodInformer {
+		go func() {
+			if cache.WaitForCacheSync(ctx.Done(), podInformer.HasSynced) {
+				hook.podSyncDone.Store(true)
+			}
+		}()
+	}
 
 	return cancel, nil
 }
@@ -96,13 +219,14 @@ func listerIRSASnapshot(lister corelisters.ServiceAccountLister) (map[SAKey]stri
 }
 
 // saHook bridges informer events to the manager's invalidation API.
-// syncDone reports whether the initial cache sync has completed —
-// before that, the lister returns an empty list and Manager.Ensure
-// soft-fails with ErrIRSAListerNotReady so the handler can serve a
-// Retry-After.
+// syncDone reports whether the initial SA cache sync has completed;
+// podSyncDone tracks the Pod informer's separate sync state. Both
+// gate their respective listers; before sync, listers return their
+// not-ready sentinel and the handler serves a Retry-After.
 type saHook struct {
-	m        *Manager
-	syncDone atomic.Bool
+	m           *Manager
+	syncDone    atomic.Bool
+	podSyncDone atomic.Bool
 }
 
 func (h *saHook) onAdd(obj any) {

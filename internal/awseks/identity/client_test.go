@@ -54,6 +54,7 @@ type stubIAM struct {
 	listAttachedRolePolicies func(*iam.ListAttachedRolePoliciesInput) (*iam.ListAttachedRolePoliciesOutput, error)
 	getPolicy                func(*iam.GetPolicyInput) (*iam.GetPolicyOutput, error)
 	getPolicyVersion         func(*iam.GetPolicyVersionInput) (*iam.GetPolicyVersionOutput, error)
+	simulatePrincipalPolicy  func(*iam.SimulatePrincipalPolicyInput) (*iam.SimulatePrincipalPolicyOutput, error)
 }
 
 func (s *stubIAM) GetRole(ctx context.Context, in *iam.GetRoleInput, opts ...func(*iam.Options)) (*iam.GetRoleOutput, error) {
@@ -93,6 +94,13 @@ func (s *stubIAM) GetPolicyVersion(ctx context.Context, in *iam.GetPolicyVersion
 		return nil, fmt.Errorf("stub: GetPolicyVersion not configured")
 	}
 	return s.getPolicyVersion(in)
+}
+
+func (s *stubIAM) SimulatePrincipalPolicy(ctx context.Context, in *iam.SimulatePrincipalPolicyInput, opts ...func(*iam.Options)) (*iam.SimulatePrincipalPolicyOutput, error) {
+	if s.simulatePrincipalPolicy == nil {
+		return nil, fmt.Errorf("stub: SimulatePrincipalPolicy not configured")
+	}
+	return s.simulatePrincipalPolicy(in)
 }
 
 func TestRoleExists_FoundReturnsTrueNil(t *testing.T) {
