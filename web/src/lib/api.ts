@@ -111,6 +111,17 @@ import type {
   CveByWorkloadResp,
   CveRefreshRequest,
 } from "./types";
+import type {
+  AccessEntry,
+  AwsAuthDiffResponse,
+  CapabilitiesResponse,
+  PodIdentityResponse,
+  ReverseLookupResponse,
+  SARoleIndexEntry,
+  SensitiveCatalogResponse,
+  WorkloadKind,
+  WorkloadPermissionsResponse,
+} from "./identity";
 
 class ApiError extends Error {
   status: number;
@@ -124,10 +135,14 @@ class ApiError extends Error {
   }
 }
 
-async function getJSON<T>(path: string, signal?: AbortSignal): Promise<T> {
+async function getJSON<T>(
+  path: string,
+  signal?: AbortSignal,
+  extraHeaders?: Record<string, string>,
+): Promise<T> {
   const res = await fetch(path, {
     signal,
-    headers: { Accept: "application/json" },
+    headers: { Accept: "application/json", ...(extraHeaders ?? {}) },
   });
   if (!res.ok) {
     const text = await res.text().catch(() => "");
@@ -1215,6 +1230,87 @@ export const api = {
       signal,
     );
   },
+  // --- AWS Identity (#178) ----------------------------------
+  //
+  // Four read-only endpoints powering the Identity page:
+  // access entries, aws-auth ↔ Access Entries diff, the
+  // unified SA↔Role index, and role-centric Pod Identity.
+  // Same 422 / 403 / 429 contract as upgrade-insights /
+  // nodegroups — callers branch on isBackendNotEKS /
+  // isAWSForbidden / isAWSThrottled.
+
+  identityAccessEntries: (cluster: string, signal?: AbortSignal) =>
+    getJSON<AccessEntry[]>(
+      `/api/clusters/${enc(cluster)}/identity/access-entries`,
+      signal,
+    ),
+
+  identityAwsAuthDiff: (cluster: string, signal?: AbortSignal) =>
+    getJSON<AwsAuthDiffResponse>(
+      `/api/clusters/${enc(cluster)}/identity/aws-auth-diff`,
+      signal,
+    ),
+
+  identitySARoles: (cluster: string, signal?: AbortSignal) =>
+    getJSON<SARoleIndexEntry[]>(
+      `/api/clusters/${enc(cluster)}/identity/sa-roles`,
+      signal,
+    ),
+
+  identityPodIdentity: (cluster: string, signal?: AbortSignal) =>
+    getJSON<PodIdentityResponse>(
+      `/api/clusters/${enc(cluster)}/identity/pod-identity`,
+      signal,
+    ),
+
+  /** Composed AWS Access surface (#188).
+   *
+   *  Backend-as-source-of-truth: every Pod→SA→Role join, service
+   *  grouping, dual-source warning, and pod enrichment is computed
+   *  in Go. Callers render the response directly — no client-side
+   *  join or chip catalog. */
+
+  iamWorkloadPermissions: (
+    cluster: string,
+    kind: WorkloadKind,
+    namespace: string,
+    name: string,
+    signal?: AbortSignal,
+  ) => {
+    const params = new URLSearchParams({ kind, namespace, name });
+    return getJSON<WorkloadPermissionsResponse>(
+      `/api/clusters/${enc(cluster)}/identity/workload-permissions?${params}`,
+      signal,
+    );
+  },
+
+  iamReverseLookup: (
+    cluster: string,
+    q: { action: string; resource?: string; namespace?: string },
+    signal?: AbortSignal,
+  ) => {
+    const params = new URLSearchParams({ action: q.action });
+    if (q.resource) params.set("resource", q.resource);
+    if (q.namespace) params.set("namespace", q.namespace);
+    return getJSON<ReverseLookupResponse>(
+      `/api/clusters/${enc(cluster)}/iam/reverse-lookup?${params}`,
+      signal,
+    );
+  },
+
+  identitySensitiveCatalog: (signal?: AbortSignal) =>
+    getJSON<SensitiveCatalogResponse>(`/api/identity/sensitive-catalog`, signal),
+
+  identityCapabilities: (
+    cluster: string,
+    opts?: { bypassCache?: boolean; signal?: AbortSignal },
+  ) =>
+    getJSON<CapabilitiesResponse>(
+      `/api/clusters/${enc(cluster)}/identity/capabilities`,
+      opts?.signal,
+      opts?.bypassCache ? { "Cache-Control": "no-cache" } : undefined,
+    ),
+
   /** CVE \/ Inspector v2 surface (#165 + #166).
    *  Read endpoints serve from the per-cluster local store; the SPA
    *  never hits Inspector directly. Cold-start hydrate blocks the

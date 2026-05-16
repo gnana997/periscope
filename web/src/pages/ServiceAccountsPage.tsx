@@ -14,6 +14,7 @@ import { EmptyState, ErrorState, ForbiddenState, LoadingState } from "../compone
 import { isForbidden } from "../components/table/isForbidden";
 import { DetailPane } from "../components/detail/DetailPane";
 import { ServiceAccountDescribe } from "../components/detail/describe/ServiceAccountDescribe";
+import { AWSAccessTab } from "../components/awsaccess/AWSAccessTab";
 import { YamlView } from "../components/detail/YamlView";
 import { useEditorDirty } from "../hooks/useEditorDirty";
 import { useConfirmDiscard } from "../hooks/useConfirmDiscard";
@@ -84,6 +85,7 @@ export function ServiceAccountsPage({ cluster }: { cluster: string }) {
         tabs={[
           { id: "describe", label: "describe", ready: true, content: <ServiceAccountDescribe cluster={cluster} ns={selectedNs} name={selectedName} /> },
           { id: "yaml", label: "yaml", ready: true, content: <YamlView cluster={cluster} source={{ kind: "builtin", yamlKind: "serviceaccounts" }} ns={selectedNs} name={selectedName} />, dirty: editFlag.dirty },
+          { id: "aws-access", label: "AWS access", ready: true, content: <AWSAccessTab cluster={cluster} kind="ServiceAccount" namespace={selectedNs} name={selectedName} /> },
         ]}
         actions={
           <ResourceActions

@@ -821,3 +821,164 @@ helm template periscope deploy/helm/periscope \
   --values my-values.yaml \
   --show-only templates/inspector-rbac.yaml
 ```
+
+## AWS Access — Cluster Access page, per-workload tab, reverse lookup (v1.1+)
+
+The **Cluster Access** page (under **EKS → Cluster Access** in the
+sidebar), the per-workload **AWS Access** tab on Pod / SA /
+Deployment / StatefulSet / DaemonSet detail panes, and the
+top-level **Reverse lookup** page together make up the v1.1 AWS
+Access surface. They reconcile **EKS Access Entries** with the
+legacy **`kube-system/aws-auth` ConfigMap**, build a unified
+**ServiceAccount → IAM Role** index spanning both **Pod Identity
+associations** and **IRSA annotations**
+(`eks.amazonaws.com/role-arn`), and resolve every IAM policy
+attached to a role into sensitive-permission chips.
+
+The surfaces are always-on for EKS-backed clusters — no `enabled`
+flag — but soft-fail to a locked-feature pane carrying the exact
+missing permission when the IAM grants below are absent.
+
+The IAM permissions go on the **periscope-server's** Pod Identity or
+IRSA role — same principal as the Inspector v2 grants above. All
+actions are read-only.
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [{
+    "Effect": "Allow",
+    "Action": [
+      "eks:ListAccessEntries",
+      "eks:DescribeAccessEntry",
+      "eks:ListAssociatedAccessPolicies",
+      "eks:ListPodIdentityAssociations",
+      "eks:DescribePodIdentityAssociation",
+      "iam:GetRole",
+      "iam:ListRolePolicies",
+      "iam:GetRolePolicy",
+      "iam:ListAttachedRolePolicies",
+      "iam:GetPolicy",
+      "iam:GetPolicyVersion"
+    ],
+    "Resource": "*"
+  }]
+}
+```
+
+`iam:GetRole` is used to verify whether each IAM role bound to a
+ServiceAccount still exists (deleted-role detection). The SPA renders
+missing roles in red with a "role not found" caption; without this
+permission Periscope cannot distinguish "deleted" from "verification
+denied" and conservatively renders both as not-found.
+
+The five `iam:*Role*Polic*` actions back the v1.1 IAM policy
+resolution engine (#187) — the per-Pod "AWS Access" tab and the
+per-cluster reverse-lookup form. Each AWS managed policy attached
+to a role costs two SDK calls (`iam:GetPolicy` to resolve the
+DefaultVersionId, then `iam:GetPolicyVersion` for the document);
+the engine's per-role policy cache (default 30-min TTL) amortizes
+the cost across requests. Inline policies cost one
+`iam:GetRolePolicy` call each.
+
+If you scope Periscope's role to specific resource ARNs rather than
+`Resource: "*"`, note that the five IAM actions need to cover both:
+
+  - `arn:aws:iam::ACCOUNT:role/*` for the role-side actions
+    (`iam:GetRole`, `iam:ListRolePolicies`, `iam:GetRolePolicy`,
+    `iam:ListAttachedRolePolicies`)
+  - `arn:aws:iam::ACCOUNT:policy/*` AND `arn:aws:iam::aws:policy/*`
+    for the policy-side actions (`iam:GetPolicy`,
+    `iam:GetPolicyVersion`). The second ARN matches AWS-managed
+    policies which are partitioned to the `aws` account.
+
+The `eks:` actions are EKS-cluster-scoped — Periscope automatically
+calls them against the EKS cluster a request is for. If your
+deployment scopes Periscope's role with a per-cluster
+`Resource: "arn:aws:eks:REGION:ACCOUNT:cluster/NAME"` list rather
+than `Resource: "*"`, ensure every entry in `clusters[]` is included.
+
+### Audit
+
+Each AWS API call emits one audit row with verb `aws_identity_read`
+(identity surface) or `aws_iam_read` (IAM-engine + AWS Access
+surface, v1.1+) and `extra.op` distinguishing the operation:
+
+| Verb | `op` | AWS / K8s call |
+|---|---|---|
+| `aws_identity_read` | `list_access_entries` | `eks:ListAccessEntries` |
+| `aws_identity_read` | `describe_access_entry` | `eks:DescribeAccessEntry` (one per principal) |
+| `aws_identity_read` | `list_associated_policies` | `eks:ListAssociatedAccessPolicies` (one per principal) |
+| `aws_identity_read` | `list_pod_identity` | `eks:ListPodIdentityAssociations` + per-association `DescribePodIdentityAssociation` |
+| `aws_identity_read` | `read_aws_auth` | K8s `get configmaps kube-system/aws-auth` |
+| `aws_identity_read` | `ensure_sa_roles` | the unified SA→Role index rebuild (combines several calls) |
+| `aws_iam_read` | `role_permissions` | engine `RolePermissions` rollup (#187) |
+| `aws_iam_read` | `reverse_lookup` | engine `ReverseLookup` rollup (#187) |
+| `aws_iam_read` | `workload_permissions` | composed forward-view rollup (#188) |
+| `aws_iam_read` | `capabilities` / `capabilities:cache_hit` | per-feature paywall probe (#188) |
+| `aws_iam_read` | `list_role_policies`, `get_role_policy`, … | per-SDK-call IAM reads |
+
+Operator audit-feed filters keyed on `aws_identity_read` should add
+`aws_iam_read` to capture IAM-engine activity.
+
+Granularity is intentional — a forensic reviewer can attribute every
+SDK call to the requesting user. Operators who find this too chatty
+can filter on `op` in the audit feed.
+
+### AWS Access surface (#188) — IAM probe
+
+The capabilities endpoint that drives the locked-feature paywall pane
+calls `iam:SimulatePrincipalPolicy` against periscope-server's own
+caller identity (resolved via `sts:GetCallerIdentity` on the first
+probe and cached process-wide) to populate the exact `Missing[]`
+array for `MISSING_IAM_PERMS`. The probe is configurable via the
+env var:
+
+```
+PERISCOPE_AWS_ACCESS_IAM_PROBE=true   # default
+PERISCOPE_AWS_ACCESS_IAM_PROBE=false  # skip the probe
+```
+
+When enabled (default), add the following to periscope-server's IAM
+role:
+
+```
+"iam:SimulatePrincipalPolicy"
+```
+
+`sts:GetCallerIdentity` does not need to be listed — AWS grants it
+to every authenticated principal by default.
+
+When the probe is disabled or `iam:SimulatePrincipalPolicy` itself
+is denied, the capabilities response falls back to optimistically
+`available: true` with a `note` explaining the limitation; the
+first call to the workload-permissions or reverse-lookup endpoint
+surfaces any missing IAM perm as a 403 with the operator's existing
+error chip. See [`docs/usage/aws-access.md`](../usage/aws-access.md)
+for the operator-facing UX.
+
+### K8s RBAC for the SA informer
+
+The Cluster Access page maintains a long-lived ServiceAccount
+informer for each EKS-backed cluster to keep the SA→Role index
+current. The
+informer runs against the **server's shared identity** (not the
+requesting user's impersonation), so it needs cluster-scope
+`get / list / watch` on `serviceaccounts`. The behaviour:
+
+- **`in-cluster` backend.** Operators who manage RBAC out-of-band
+  must grant this verb to the periscope-server SA via a ClusterRole
+  + ClusterRoleBinding. The chart does not auto-render this today;
+  see [`internal/awseks/identity/watch_hook.go`](../../internal/awseks/identity/watch_hook.go)
+  for the exact API call.
+- **`agent` backend.** Covered by the agent's existing cluster-wide
+  read grant (same provision that backs Inspector v2's watch).
+- **`eks` backend.** The periscope-server's AWS IAM role maps via
+  Access Entries / aws-auth to a K8s user; that user needs the
+  `serviceaccounts:get,list,watch` verbs cluster-wide. In tier mode
+  the `periscope-impersonator` flow grants this transitively.
+
+Reads of `kube-system/aws-auth` go through the **user's** K8s
+impersonation, so per-user denials surface naturally — operators
+without `get configmaps` on `kube-system` will see an empty diff
+and an explanatory chip rather than 403s sprinkled across the page.

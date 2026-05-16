@@ -137,6 +137,21 @@ export const queryKeys = {
         ["cluster", c, "addons", "configSchema", name, version] as const,
     },
 
+    // EKS AWS Identity (#178) + composed AWS Access surface
+    // (#188). Cluster-scoped; mirrors the per-cluster Identity
+    // manager + handlers on the server.
+    identity: {
+      accessEntries: () => ["cluster", c, "identity", "access-entries"] as const,
+      awsAuthDiff: () => ["cluster", c, "identity", "aws-auth-diff"] as const,
+      saRoles: () => ["cluster", c, "identity", "sa-roles"] as const,
+      podIdentity: () => ["cluster", c, "identity", "pod-identity"] as const,
+      workloadPermissions: (kind: string, ns: string, name: string) =>
+        ["cluster", c, "identity", "workload-permissions", kind, ns, name] as const,
+      reverseLookup: (action: string, resource: string, ns: string) =>
+        ["cluster", c, "identity", "reverse-lookup", action, resource, ns] as const,
+      capabilities: () => ["cluster", c, "identity", "capabilities"] as const,
+    },
+
     // Custom resources are addressed by GVR (no static registry), so
     // they get a parallel subtree keyed on (group, version, plural).
     cr: (group: string, version: string, plural: string) => ({
@@ -182,4 +197,9 @@ export const queryKeys = {
   // currently looking at.
   edit: (cluster: string, kind: string, ns: string, name: string) =>
     ["edit", cluster, kind, ns, name] as const,
+
+  // Sensitive catalog is cluster-agnostic — same response shape
+  // regardless of which cluster is selected — so the key lives
+  // outside the cluster(c) subtree to allow cross-cluster caching.
+  sensitiveCatalog: () => ["identity", "sensitive-catalog"] as const,
 } as const;

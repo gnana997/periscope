@@ -1,0 +1,11 @@
+{
+  "_comment": "sensitive catalog: iam:CreateRole → privilege-escalation",
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": "iam:CreateRole",
+      "Resource": "*"
+    }
+  ]
+}

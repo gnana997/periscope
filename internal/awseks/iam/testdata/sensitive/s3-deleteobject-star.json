@@ -1,0 +1,11 @@
+{
+  "_comment": "sensitive catalog pattern entry: s3:DeleteObject* → destructive. Statement uses the actual concrete action s3:DeleteObject so the matcher exercises pattern lookup against a real expanded action.",
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": "s3:DeleteObject",
+      "Resource": "arn:aws:s3:::*/*"
+    }
+  ]
+}

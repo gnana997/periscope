@@ -1,0 +1,18 @@
+{
+  "_comment": "pathological: IAM ARN variable ${aws:username}. AWS substitutes at evaluation time; engine renders literally (no substitution in v1.1) and the SPA shows the unresolved variable so operators see the templating.",
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "s3:ListBucket",
+        "s3:GetObject",
+        "s3:PutObject"
+      ],
+      "Resource": [
+        "arn:aws:s3:::personal-${aws:username}",
+        "arn:aws:s3:::personal-${aws:username}/*"
+      ]
+    }
+  ]
+}

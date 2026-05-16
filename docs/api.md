@@ -780,6 +780,526 @@ calls against the periscope-server's role; that's the auditable
 trail for "what did the server fetch."
 
 
+### `/api/clusters/{cluster}/identity/*` and `/api/clusters/{cluster}/iam/*` — AWS Access surface (v1.1+)
+
+Eight endpoints power the v1.1 AWS Access surface: the **Cluster
+Access page** (Access Entries + aws-auth ConfigMap diff + unified
+SA → Role index + Pod Identity view), the per-workload **AWS
+Access tab**, the **reverse-lookup** page, and the shared
+**capabilities probe** + **sensitive-permissions catalog**.
+
+IAM grant for the periscope-server role is documented in
+[`docs/setup/cluster-rbac.md`](setup/cluster-rbac.md#aws-access--cluster-access-page-per-workload-tab-reverse-lookup-v11);
+operator-facing usage is in
+[`docs/usage/aws-access.md`](usage/aws-access.md).
+
+**Not-EKS contract.** Every `/identity/*` and `/iam/*` endpoint
+returns HTTP **422** with `{"code":"E_BACKEND_NOT_EKS","message":"…"}`
+when the cluster is not EKS-backed. The SPA's Cluster Access page
+uses this signal to render a single page-level "not EKS" empty
+state instead of repeating the error on each of the four sections.
+Don't treat 422 here as a transport error — branch on the code.
+
+**Audit verbs.** The four cluster-identity endpoints
+(`access-entries`, `aws-auth-diff`, `sa-roles`, `pod-identity`)
+emit `aws_identity_read`. The composed forward-view + reverse-
+lookup + capabilities + sensitive-catalog endpoints emit
+`aws_iam_read`. The catalog endpoint is cluster-agnostic but
+still audited. See `docs/setup/cluster-rbac.md#audit` for the
+full verb / `extra.op` table.
+
+#### `GET /api/clusters/{cluster}/identity/access-entries`
+
+Raw `eks:DescribeAccessEntry` rollup — one entry per principal
+returned by `ListAccessEntries`, each enriched with its associated
+access-policy bindings (`ListAssociatedAccessPolicies`). Returns a
+top-level JSON array.
+
+```json
+[
+  {
+    "principalArn": "arn:aws:iam::000000000000:user/alice",
+    "type": "STANDARD",
+    "kubernetesGroups": ["platform-admins"],
+    "accessPolicies": [
+      {
+        "policyArn": "arn:aws:eks::aws:cluster-access-policy/AmazonEKSAdminPolicy",
+        "accessScope": "cluster"
+      }
+    ],
+    "modifiedAt": "2026-04-19T09:14:22Z"
+  }
+]
+```
+
+- `accessPolicies` is omitted when the principal has no policy
+  associations (or when `ListAssociatedAccessPolicies` denied for
+  that principal — soft-failed; the entry still renders).
+- Per-principal describe calls fan out concurrently (server-side
+  semaphore caps inflight); one describe-level error fails the
+  whole response, while one list-associated-policies error per
+  entry soft-fails to `accessPolicies: null`.
+
+**Errors.** 422 not-EKS · 502 / 403 / 429 mapped from AWS SDK
+errors with stable codes (`E_AWS_FORBIDDEN` / `E_AWS_NOT_FOUND` /
+`E_AWS_THROTTLED`) in the error envelope.
+
+**Audit.** One `aws_identity_read{op:list_access_entries}` row for
+the listing call + one `op:describe_access_entry` row per
+principal + one `op:list_associated_policies` row per principal.
+
+#### `GET /api/clusters/{cluster}/identity/aws-auth-diff`
+
+Reconciles the legacy `kube-system/aws-auth` ConfigMap with the
+modern Access Entries surface. Powers the **migration-health**
+chip + entry table on the Cluster Access page. A missing aws-auth
+ConfigMap (404 from the K8s API) is the desired
+migration-complete signal — the response renders with an empty
+`aws-auth` side, NOT a 404.
+
+```json
+{
+  "entries": [
+    {
+      "in": "both",
+      "principalArn": "arn:aws:iam::000000000000:role/general-eks-node-group-…",
+      "kubernetesGroups": ["system:bootstrappers", "system:nodes"]
+    },
+    {
+      "in": "aws-auth",
+      "principalArn": "arn:aws:iam::000000000000:user/demo-legacy-admin",
+      "kubernetesGroups": ["system:masters"]
+    },
+    {
+      "in": "access-entries",
+      "principalArn": "arn:aws:iam::000000000000:user/demo-finops"
+    }
+  ],
+  "health": {
+    "awsAuthOnly": 1,
+    "dual": 1,
+    "accessEntriesOnly": 1
+  }
+}
+```
+
+- `in` is one of `aws-auth` / `access-entries` / `both`. The
+  three buckets are mutually exclusive and sum to the distinct
+  principal-ARN count across both sources.
+- `kubernetesGroups` is the union across both sources when
+  `in: both`.
+- Principal-ARN comparison is **case-insensitive on the IAM
+  user/role segment** (AWS normalizes inconsistently across these
+  two surfaces); the response uses the EKS-side casing when both
+  sides match. A pure case difference renders as `in: both`, not
+  as two separate rows.
+
+**Errors.** 422 not-EKS · 502 K8s API error (other than 404 on
+the ConfigMap) · 502 / 403 / 429 AWS SDK errors.
+
+**Audit.** `aws_identity_read{op:read_aws_auth}` for the
+ConfigMap read + `op:list_access_entries` + per-principal
+`op:describe_access_entry` rows.
+
+#### `GET /api/clusters/{cluster}/identity/sa-roles`
+
+Unified ServiceAccount → IAM Role index. Joins:
+- IRSA annotations on every SA in the cluster
+  (`eks.amazonaws.com/role-arn`), from a long-lived SA informer.
+- Pod Identity associations
+  (`eks:ListPodIdentityAssociations`).
+- IAM role-existence probe (`iam:GetRole`) so the SPA can render
+  a red "role not found" caption for stale annotations and
+  orphan PI associations.
+
+Returns a top-level JSON array, one entry per (namespace, SA)
+that has at least one binding.
+
+```json
+[
+  {
+    "cluster": "periscope-demo",
+    "namespace": "prod",
+    "saName": "payments-worker",
+    "bindings": [
+      {
+        "source": "PodIdentity",
+        "roleArn": "arn:aws:iam::000000000000:role/periscope-demo-payments-pi-role",
+        "roleExists": true,
+        "podIdentityAssociationId": "a-y4wb6pficbn57xg32"
+      },
+      {
+        "source": "IRSA",
+        "roleArn": "arn:aws:iam::000000000000:role/periscope-demo-payments-irsa-role",
+        "roleExists": true,
+        "irsaAnnotationValue": "arn:aws:iam::000000000000:role/periscope-demo-payments-irsa-role"
+      }
+    ],
+    "dualSource": true
+  },
+  {
+    "cluster": "periscope-demo",
+    "namespace": "staging",
+    "saName": "metrics-collector",
+    "bindings": [
+      {
+        "source": "IRSA",
+        "roleArn": "arn:aws:iam::000000000000:role/periscope-demo-metrics-collector-role",
+        "roleExists": false,
+        "irsaAnnotationValue": "arn:aws:iam::000000000000:role/periscope-demo-metrics-collector-role"
+      }
+    ],
+    "dualSource": false
+  }
+]
+```
+
+- `source` is one of `IRSA` / `PodIdentity` / `Both`. A single
+  SA with both an annotation and a PI association emits two
+  rows (one per binding) AND `dualSource: true` on the parent
+  entry — Pod Identity wins at runtime, the IRSA annotation is
+  shadowed dead config.
+- `roleExists: false` means `iam:GetRole` returned NoSuchEntity.
+  When `iam:GetRole` is **denied**, the response sets
+  `roleExists: false` as a conservative default with an
+  `X-Identity-Stale: true` header indicating partial trust;
+  operators should add the permission to disambiguate.
+- A 503 with `Retry-After: 3` is returned during cold informer
+  start (typically < 3s on a fresh cluster).
+- The handler tolerates a partial `Ensure()` failure: if the
+  underlying manager returns both a stale snapshot AND an
+  error, the stale entries render with the `X-Identity-Stale`
+  header instead of a 5xx.
+
+**Errors.** 422 not-EKS · 503 informer warming
+(`E_IDENTITY_WARMING`) · 500 setup error
+(`E_IDENTITY_SETUP`) · 502 / 403 AWS SDK errors.
+
+**Audit.** Single `aws_identity_read{op:ensure_sa_roles}` row
+per call (the inner SDK fan-out emits per-call rows under their
+own ops).
+
+#### `GET /api/clusters/{cluster}/identity/pod-identity`
+
+Role-centric pivot of Pod Identity associations: one map entry
+per role ARN, all associations of that role underneath. Powers
+the "Pod Identity view" section of the Cluster Access page.
+
+```json
+{
+  "groups": {
+    "arn:aws:iam::000000000000:role/periscope-demo-data-team-runner-role": [
+      {
+        "associationId": "a-6bwbcbafesphxrdct",
+        "roleArn": "arn:aws:iam::000000000000:role/periscope-demo-data-team-runner-role",
+        "namespace": "team-data",
+        "serviceAccount": "data-team-runner",
+        "clusterName": "periscope-demo"
+      }
+    ]
+  }
+}
+```
+
+- Map keys are role ARNs; values are arrays so the SPA can render
+  one-role-many-SAs cases (data-team role bound to 3 SAs is one
+  map entry with 3 association objects).
+- `clusterName` is repeated in every association object so the
+  SPA can render a role-pivoted view across multiple clusters
+  without re-correlating; under this endpoint it always matches
+  the path parameter.
+
+**Errors.** 422 not-EKS · 502 / 403 AWS SDK errors.
+
+**Audit.** One `aws_identity_read{op:list_pod_identity}` row
+plus one `op:describe_pod_identity` row per association.
+
+#### `GET /api/clusters/{cluster}/identity/workload-permissions?kind=…&namespace=…&name=…`
+
+Composed forward-view: one round-trip from the SPA returns the
+entire per-workload **AWS Access tab**. Resolves the workload's
+SA, every IAM role bound to that SA, every inline + managed
+policy attached to those roles, expands and groups every
+statement by AWS service, classifies sensitive permissions, and
+returns the running pods this composition applies to.
+
+Required query params: `kind` (one of `Pod`, `ServiceAccount`,
+`Deployment`, `StatefulSet`, `DaemonSet`), `namespace`, `name`.
+Other kinds return **400** with `code: E_UNSUPPORTED_KIND`.
+
+```json
+{
+  "cluster": "periscope-demo",
+  "kind": "Pod",
+  "namespace": "staging",
+  "name": "cron-rotator-75d59c798d-97h92",
+  "identityChain": {
+    "serviceAccount": "cron-rotator",
+    "bindings": [
+      {
+        "source": "IRSA",
+        "roleArn": "arn:aws:iam::000000000000:role/periscope-demo-cron-rotator-role",
+        "roleExists": true,
+        "irsaAnnotationValue": "arn:aws:iam::000000000000:role/periscope-demo-cron-rotator-role"
+      }
+    ],
+    "dualSource": false
+  },
+  "groups": [
+    {
+      "service": "*",
+      "sensitive": true,
+      "count": 1,
+      "permissions": [
+        {
+          "action": "*",
+          "service": "*",
+          "resource": "*",
+          "effect": "Allow",
+          "policyName": "periscope-demo-cron-rotator-role-inline",
+          "policySource": "inline",
+          "statementSid": "Antipattern1FullAdmin",
+          "statementIdx": 2,
+          "sensitive": true,
+          "sensitiveReason": "wildcard",
+          "hasCondition": false,
+          "wildcard": true
+        }
+      ]
+    }
+  ],
+  "rawStatements": [],
+  "warnings": [
+    { "code": "DUAL_SOURCE_IRSA_SHADOWED", "message": "…", "roleArn": "…" }
+  ],
+  "affectedPods": [
+    { "namespace": "staging", "name": "cron-rotator-75d59c798d-97h92", "nodeName": "ip-10-0-28-199.ec2.internal" }
+  ],
+  "affectedPodCount": 1,
+  "policyFetchPartial": false,
+  "truncated": false,
+  "totalCount": 13,
+  "catalogVersion": "1.0.0",
+  "fetchedAt": "2026-05-16T13:36:42.118Z"
+}
+```
+
+- `groups[]` is **pre-sorted** server-side: sensitive-first, then
+  alphabetical by `service`. The SPA does no re-bucketing.
+- `groups[].permissions[]` is **pre-sorted**: sensitive-first,
+  then by `wildcard` (true first), then by `action`.
+- `service: "*"` is the wildcard-action bucket (statements with
+  `Action: "*"`); it always sorts first because every wildcard
+  is sensitive.
+- `sensitiveReason` is one of `privilege-escalation` /
+  `data` / `cross-account` / `destructive` / `cluster` /
+  `wildcard` — same categories as the sensitive-catalog
+  endpoint. Empty string for non-sensitive permissions.
+- `policySource` is one of `inline` / `managed` / `aws-managed`.
+- `rawStatements[]` is non-empty when a policy contains
+  `NotAction` / `NotResource` / `NotPrincipal` — the engine
+  cannot expand these to (action, resource) tuples cleanly, so
+  it surfaces the raw statement separately for SPA "review by
+  hand" rendering.
+- `warnings[].code` is one of `DUAL_SOURCE_IRSA_SHADOWED` /
+  `ROLE_NOT_FOUND` / `POLICY_FETCH_PARTIAL` / `NO_BINDINGS`.
+- `affectedPods[]` is truncated to 5 entries by default;
+  `affectedPodCount` is the untruncated total.
+- `truncated: true` + `totalCount` signal a soft cap on
+  permission rows per role (default 10000); the SPA renders a
+  "showing N of M" banner.
+- `catalogVersion` is the embedded sensitive-permissions catalog
+  version (`internal/awseks/iam/sensitive.yaml`'s `version:`
+  field) — included on every response so operators can trace
+  "why is this flagged?" to a specific catalog version.
+
+**Errors.** 422 not-EKS · 400 unsupported kind · 404 workload
+not found · 502 / 403 / 429 AWS SDK errors.
+
+**Audit.** One `aws_iam_read{op:workload_permissions}` row per
+call. Inner SDK calls (`iam:GetRole`, `iam:GetRolePolicy`,
+`iam:GetPolicy`, `iam:GetPolicyVersion`) emit one
+`aws_iam_read{op:get_role_policy|...}` row each — chatty by
+design so a forensic reviewer can attribute every SDK call.
+
+#### `GET /api/clusters/{cluster}/iam/reverse-lookup?action=…&resource=…`
+
+Answers "which workloads can perform action X on resource Y?"
+across every SA-bound IAM role in the cluster. Powers the
+top-level **Reverse lookup** page and the one-click chip-pre-fill
+on the AWS Access tab.
+
+Required query: `action` (case-insensitive; e.g. `s3:DeleteBucket`,
+`iam:PassRole`, or `*` for any wildcard match). Optional:
+`resource` (defaults to `*` — match any resource ARN the
+statement grants).
+
+```json
+{
+  "action": "s3:DeleteBucket",
+  "scope": {},
+  "rows": [
+    {
+      "pod": { "namespace": "staging", "name": "cron-rotator-…", "nodeName": "ip-10-0-28-199.ec2.internal" },
+      "saName": "cron-rotator",
+      "namespace": "staging",
+      "roleArn": "arn:aws:iam::000000000000:role/periscope-demo-cron-rotator-role",
+      "permission": {
+        "action": "s3:*",
+        "service": "s3",
+        "resource": "*",
+        "effect": "Allow",
+        "statementSid": "Antipattern1FullAdmin",
+        "wildcard": true,
+        "sensitive": true,
+        "sensitiveReason": "destructive"
+      },
+      "source": "IRSA"
+    }
+  ],
+  "truncated": false,
+  "totalPods": 4
+}
+```
+
+- One row per **matched pod**, not per SA. A 20-replica
+  Deployment with one role grant emits 20 rows. A dual-source
+  SA (IRSA + Pod Identity both grant the action) emits TWO rows
+  per pod — one per binding — so the SPA renders the honest
+  dual-source story.
+- `pod.name` / `pod.nodeName` / `saName` may be null if pod
+  enrichment is unavailable for that match (no live pod with
+  the binding — known v1.1.x follow-up: row enrichment from
+  the SA informer). The match itself is still surfaced.
+- `permission.wildcard: true` means the underlying policy
+  statement uses a wildcard action / resource that covers the
+  query — operators see those rows as red chips on the SPA.
+- `scope` is reserved for future per-cluster / per-namespace
+  filtering; v1.1 returns `{}` (whole cluster).
+- `truncated: true` + `totalPods` signal a server-side cap on
+  rows returned (10000 default).
+
+**Wire-shape note.** The v1.0 `matches[]` field (one entry per
+SA, with embedded `podRefs[]`) was renamed to `rows[]` (one
+entry per matched pod) in v1.1. See the CHANGELOG `Changed`
+section.
+
+**Errors.** 422 not-EKS · 400 missing/invalid `action` · 502 /
+403 / 429 AWS SDK errors.
+
+**Audit.** One `aws_iam_read{op:reverse_lookup}` row per call.
+
+#### `GET /api/clusters/{cluster}/identity/capabilities`
+
+Per-feature availability probe for the AWS Access surfaces.
+Powers the **locked-feature pane** on every AWS Access tab and
+the reverse-lookup page — instead of a 403 on first use, the SPA
+renders a structured "you can't use this because X, here's
+exactly what's missing" panel.
+
+```json
+{
+  "cluster": "periscope-demo",
+  "features": {
+    "awsAccessTab": { "available": true, "docsUrl": "/docs/usage/aws-access" },
+    "reverseLookup": { "available": true, "docsUrl": "/docs/usage/aws-access" },
+    "sensitiveCatalog": { "available": true }
+  },
+  "fetchedAt": "2026-05-16T13:31:36.805Z"
+}
+```
+
+When a feature is **locked**, the entry carries a stable reason
+code, the exact missing IAM actions, and a docs URL:
+
+```json
+{
+  "awsAccessTab": {
+    "available": false,
+    "reason": "MISSING_IAM_PERMS",
+    "message": "Periscope's IAM role is missing 2 permission(s) required for the AWS Access tab.",
+    "missing": ["iam:GetPolicy", "iam:GetPolicyVersion"],
+    "docsUrl": "/docs/setup/cluster-rbac"
+  }
+}
+```
+
+- `reason` is one of:
+  `NOT_EKS` · `RBAC_DENIED` · `MISSING_IAM_PERMS` ·
+  `NO_IDENTITY_CONFIGURED` · `INFORMER_WARMING` ·
+  `IAM_PROBE_DISABLED`. MCP tools should branch on the code,
+  not parse `message`.
+- `missing[]` is populated when the server's
+  `iam:SimulatePrincipalPolicy` probe (default enabled, off via
+  `PERISCOPE_AWS_ACCESS_IAM_PROBE=false`) can prove which
+  actions are denied. When the probe itself is denied, the
+  endpoint falls back to optimistic `available: true` with a
+  top-level `note` explaining the limitation.
+- Response is cached server-side for 5 minutes per (cluster,
+  actor). The SPA's **Re-check** button on the locked pane
+  sends `Cache-Control: no-cache` to bypass.
+
+**Errors.** 422 not-EKS only when the cluster is non-EKS; the
+endpoint deliberately swallows IAM / RBAC errors into the
+`features[].reason` field instead of erroring out.
+
+**Audit.** One `aws_iam_read{op:capabilities}` row per fresh
+probe; `op:capabilities:cache_hit` when served from cache.
+
+#### `GET /api/identity/sensitive-catalog`
+
+Cluster-agnostic catalog of sensitive IAM actions Periscope
+recognizes. Used by the SPA for chip metadata and by MCP /
+agent tools for "what does this chip mean?" lookups without a
+TypeScript side table.
+
+```json
+{
+  "version": "1.0.0",
+  "entries": [
+    {
+      "action": "iam:PassRole",
+      "category": "privilege-escalation",
+      "pattern": false,
+      "reverseQuery": { "action": "iam:PassRole" }
+    },
+    {
+      "action": "s3:Delete*",
+      "category": "destructive",
+      "pattern": true,
+      "reverseQuery": { "action": "s3:DeleteBucket" }
+    },
+    {
+      "action": "*",
+      "category": "wildcard",
+      "pattern": true,
+      "reverseQuery": { "action": "*" }
+    }
+  ]
+}
+```
+
+- 17 named actions in v1.1 plus the literal `*` wildcard
+  (handled in classification code, not the YAML), for an
+  effective 18-chip catalog.
+- `category` is one of `privilege-escalation` / `data` /
+  `cross-account` / `destructive` / `cluster` / `wildcard`.
+- `pattern: true` means the `action` field is a glob (e.g.
+  `s3:Delete*`); the classifier matches statements against the
+  glob, not just exact equality.
+- `reverseQuery` is the pre-canned `(action, resource)` pair
+  the SPA pre-fills into the reverse-lookup form when a chip
+  is clicked. For glob patterns the canonical action is a
+  representative (`s3:DeleteBucket` for `s3:Delete*`).
+- `version` matches the `catalogVersion` field on every
+  workload-permissions response — bumped on catalog edits so
+  consumers can diff what changed across releases.
+
+**Audit.** One `aws_iam_read{op:sensitive_catalog}` row per
+call. Cluster-agnostic (the path has no `{cluster}` param) so
+the audit row has an empty cluster field.
+
+
 ## 4. Tier 2 — SPA-coupled patterns
 
 The remaining ~130 endpoints follow eight patterns. Specific

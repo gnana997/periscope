@@ -1,0 +1,11 @@
+{
+  "_comment": "wildcard case: resource matches every object in every bucket. The canonical 'I scoped my resource but not enough' antipattern.",
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": "s3:GetObject",
+      "Resource": "arn:aws:s3:::*/*"
+    }
+  ]
+}

@@ -1,0 +1,11 @@
+{
+  "_comment": "sensitive catalog: eks:UpdateClusterConfig → cluster",
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": "eks:UpdateClusterConfig",
+      "Resource": "*"
+    }
+  ]
+}

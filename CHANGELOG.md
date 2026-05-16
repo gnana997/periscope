@@ -13,37 +13,213 @@ tag.
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-05-16
+
+### Added
+
+- **Cluster Access page** (#178). New `/clusters/{c}/cluster-access`
+  surface reconciles the four EKS authentication primitives in one
+  view: EKS Access Entries, the legacy aws-auth ConfigMap, IRSA
+  annotations on ServiceAccounts, and Pod Identity associations.
+  Three independent sections, each driven by its own backend hook
+  so a 403 on one (e.g. aws-auth visibility) doesn't blank the rest
+  of the page:
+  - **Migration health** — every principal bucketed `aws-auth-only`
+    / `entries-only` / `both`, with a roll-up chip on the page
+    header. Surfaces the "still on aws-auth" backlog and the
+    dual-source overlap operators worry about during the EKS
+    Access Entries migration.
+  - **SA → Role index** — every ServiceAccount in the cluster, with
+    the IAM roles bound to it (IRSA annotation + Pod Identity
+    association), flagged for `dualSource: true` (both surfaces
+    point at IAM roles, Pod Identity wins) and `roleExists: false`
+    (stale annotation, orphan PI).
+  - **Pod Identity view** — role-centric pivot of the same data:
+    one row per role, every association underneath.
+  Sidebar entry **Cluster Access** under the EKS group; hidden on
+  non-EKS clusters. Four backend endpoints, each emitting an
+  `aws_identity_read` audit row:
+  `GET /api/clusters/{c}/identity/access-entries`,
+  `GET /api/clusters/{c}/identity/aws-auth-diff`,
+  `GET /api/clusters/{c}/identity/sa-roles`,
+  `GET /api/clusters/{c}/identity/pod-identity`.
+  Full guide: [`docs/usage/aws-access.md`](docs/usage/aws-access.md).
+
+- **AWS Access tab on every workload detail pane** (#188). Pod /
+  ServiceAccount / Deployment / StatefulSet / DaemonSet panes
+  gain a unified **AWS Access** tab that renders the resolved
+  identity chain (workload → SA → IAM role(s)), every attached
+  IAM policy grouped by AWS service, sensitive-permissions chips
+  against an 18-chip catalog (17 named actions + the literal `*`
+  wildcard), and the running pods affected — one backend call
+  composes the whole tab. Dual-source warnings surface inline when
+  a SA carries both IRSA and Pod Identity bindings.
+
+- **Reverse-lookup page** (#188). New top-level
+  `/clusters/{c}/reverse-lookup` answers "which workloads can
+  perform action X on resource Y?" with one-row-per-matched-pod
+  results, binding-source attribution (IRSA / Pod Identity), and
+  one-click chip pre-fills from any sensitive-permission chip on
+  the AWS Access tab.
+
+- **IAM policy resolution engine** (#187). Server-side resolver
+  fetches every inline + managed IAM policy attached to a role,
+  parses statements, matches them against the embedded 17-action
+  sensitive-permissions catalog (categories: `privilege-escalation`,
+  `data`, `cross-account`, `destructive`, `cluster`, `wildcard`),
+  and groups results by AWS service. Three new endpoints power
+  both the per-workload tab and the reverse lookup:
+  `GET /api/clusters/{c}/identity/workload-permissions?kind=…`,
+  `GET /api/identity/sensitive-catalog`,
+  `GET /api/clusters/{c}/identity/capabilities`.
+  Embedded `sensitive.yaml` is versioned (`catalogVersion: 1.0.0`)
+  and returned on every response so operators can trace "why is
+  this flagged?" to a specific catalog version. Policy cache TTL
+  30m; soft cap of 10000 permission rows per role with
+  `truncated` + `totalCount` signal for the SPA.
+
+- **Locked-feature paywall pane.** When an AWS Access surface
+  isn't available for a user (non-EKS, RBAC denied, missing IAM
+  perms, informer warming, Pod Identity not configured), the tab
+  still renders — with a structured `reason`, the exact missing
+  permissions, a docs link, and a **Re-check** button that
+  bypasses the 5-minute capabilities cache. Same wire shape an
+  MCP / AI tool reads to explain "I can't run this because X"
+  without a 403 round-trip.
+
+- **Configurable IAM probe** for the capabilities endpoint:
+  `PERISCOPE_AWS_ACCESS_IAM_PROBE=true|false` (default `true`).
+  When enabled, the capabilities response calls
+  `iam:SimulatePrincipalPolicy` against periscope-server's own
+  caller identity and populates the exact `Missing[]` permission
+  list shown on the locked pane. When disabled or when the probe
+  itself is denied, the response falls back to optimistically
+  `available: true` with a `note` and the first real call
+  surfaces any missing perm lazily.
+
 ### Changed
 
-- **Helm: cluster-admin tier binding is now opt-in** (#84). Default
-  install of both `periscope` and `periscope-agent` charts no longer
-  renders the `periscope-tier-admin` ClusterRoleBinding, so AWS
-  Guardrails and CIS Kubernetes Benchmark 5.1.1 pass out of the box.
-  New `clusterRBAC.adminTier.{enabled, clusterRoleName}` value gates
-  the binding and lets operators repoint at a tighter custom
-  ClusterRole. The chart fails loudly at template time when
-  `auth.authorization.groupTiers` maps any group to `admin` but
-  `clusterRBAC.adminTier.enabled` is false — a silent 403 storm was
-  the alternative.
-  **Migration**: if your release was on v1.0.x with tier mode AND any
-  `auth.authorization.groupTiers` value resolving to `admin`, set
-  `clusterRBAC.adminTier.enabled: true` on upgrade to preserve current
-  behaviour. The chart pre-render check will surface the same recipe
-  with a specific group name on `helm template` /
-  `helm upgrade --dry-run`.
+- **Audit verb split: `aws_iam_read`** (#188). The IAM policy
+  resolution engine (#187) and the new AWS Access surfaces emit a
+  new `aws_iam_read` verb; the four cluster-identity endpoints
+  (#178 — access-entries, aws-auth-diff, sa-roles, pod-identity)
+  continue to emit `aws_identity_read`. Operator audit-feed filters
+  that key on `aws_identity_read` should add `aws_iam_read` to
+  capture IAM-engine activity.
+
+- **Reverse-lookup wire shape: pod-rows replace SA-matches** (#188).
+  `GET /api/clusters/{c}/iam/reverse-lookup` now returns
+  `rows: ReverseLookupPodRow[]` (one row per matched pod, with
+  binding source attribution) instead of `matches:
+  ReverseLookupMatch[]`. The composed response carries `truncated`
+  and `totalPods` flags for paginated UIs. Downstream scripts /
+  MCP wrappers keyed on the old `matches` field need updating.
+
+- **Sidebar / route rename: Identity → Cluster Access** (#199). The
+  v1.1 EKS-authentication surface ships as **Cluster Access** in
+  both the sidebar and route path (`/cluster-access`); the
+  intermediate `Identity` label / `/identity` route used during
+  v1.1 development is gone. Bookmarks to `/identity` 404; update
+  to `/cluster-access`.
 
 ### Fixed
 
-- **Helm: shared authz mode + in-cluster backend now wires the SA RBAC
-  by default** (#142). The previous default left the periscope
-  ServiceAccount with zero cluster-scoped permissions when
-  `auth.authorization.mode: shared` and any `clusters[].backend:
-  in-cluster`, causing every list-call to return 403 and the SPA
-  `OverviewPage` to crash on `.length` of `null`. The chart now
-  auto-renders a `periscope-shared` ClusterRoleBinding pointing the
-  SA at `clusterRBAC.sharedRoleName` (default `view` — read-only and
-  safe). Operators who manage RBAC out-of-band can suppress by setting
-  `clusterRBAC.sharedRoleName: ""`. The kind quickstart
+- **AWS Access tab: null-bindings crash** (#199). The backend
+  returns `bindings: null` (not `[]`) when a SA has no IAM
+  bindings, matching the `NO_BINDINGS` warning shape. The SPA
+  called `.length` without a guard and crashed the detail pane
+  with `Cannot read properties of null (reading 'length')`.
+  Three call sites in `AWSAccessTab.tsx` now normalize via
+  `bindings ?? []` / `groups ?? []` before any property access.
+
+### Maintenance
+
+- CI workflows: pin every third-party GitHub Action to a commit
+  SHA (with version comment) per OpenSSF Scorecard's
+  pinned-dependencies check (#193).
+- Bump Go module dependencies — 10 patch / minor updates across
+  the `go-minor-and-patch` Dependabot group (#196).
+- Code-formatting cleanup across backend handlers + cmd
+  entrypoint (#197).
+
+## [1.0.8] - 2026-05-13
+
+### Added
+
+- **Watch streams: cluster-RBAC kinds** (#185). Added SSE-backed
+  list-page streaming for Secrets, Roles, RoleBindings,
+  ClusterRoles, and ClusterRoleBindings — five previously
+  polling-only pages now match the rest of the SSE-streamed
+  surface. Per-user concurrency caps and operator opt-out behave
+  as on the existing streamed kinds.
+
+- **Helm: auto-render Inspector RBAC for in-cluster backend**
+  (#184). When `inspector.enabled: true` and any `clusters[]`
+  entry is `backend: in-cluster`, the chart auto-renders the
+  `periscope-inspector` ClusterRoleBinding so the periscope SA
+  can read the CVE cache without operators copy-pasting RBAC YAML
+  out of `docs/setup/cluster-rbac.md`. Manifest still ships
+  separately for `agent` / `eks` / `kubeconfig` backends.
+
+- **Form-mode `oneOf` discriminator: branch seed values** (#183).
+  Walker emits structurally-correct branch seeds (string, integer,
+  boolean primitives, plus required-key objects) when the operator
+  picks a branch on a `oneOf` discriminator, so the form renders
+  without the user having to type a placeholder first. Adds a
+  deeper schema-walk for `walkRequiredUnsupported` so nested
+  unsupported fields surface at every depth (previously only
+  top-level).
+
+### Changed
+
+- **Apply: retained-ownership SSA on form-mode + YAML editor**
+  (#182). Form-mode and YAML editor `apply` / `dry-run` paths now
+  route through `buildRetainedOwnershipBody`, so each apply claims
+  only the user's edited paths plus the paths periscope-spa
+  already owned — fixes the previous behaviour of submitting the
+  full draft buffer, which made periscope-spa claim ownership of
+  every field on every save. Adds a sticky **Co-management banner**
+  when the resource has field managers other than periscope-spa
+  (controllers, GitOps), dismissable per-session per-resource.
+  ActionBar gates on managed-fields meta-poll completion to avoid
+  racing the 15s poll.
+
+- **Helm: cluster-admin tier binding is now opt-in** (#84 / #186).
+  Default install of both `periscope` and `periscope-agent`
+  charts no longer renders the `periscope-tier-admin`
+  ClusterRoleBinding, so AWS Guardrails and CIS Kubernetes
+  Benchmark 5.1.1 pass out of the box. New
+  `clusterRBAC.adminTier.{enabled, clusterRoleName}` value gates
+  the binding and lets operators repoint at a tighter custom
+  ClusterRole. The chart fails loudly at template time when
+  `auth.authorization.groupTiers` maps any group to `admin` but
+  `clusterRBAC.adminTier.enabled` is false — a silent 403 storm
+  was the alternative.
+  **Migration**: if your release was on v1.0.x with tier mode AND
+  any `auth.authorization.groupTiers` value resolving to `admin`,
+  set `clusterRBAC.adminTier.enabled: true` on upgrade to preserve
+  current behaviour. The chart pre-render check will surface the
+  same recipe with a specific group name on `helm template` /
+  `helm upgrade --dry-run`.
+
+- **Logs viewer: wrap long lines by default** (#183). The logs
+  panel now wraps long lines on first open; the previous
+  horizontal-scroll-only default hid stack traces and JSON-encoded
+  payloads. Per-user toggle persists in localStorage.
+
+### Fixed
+
+- **Helm: shared authz mode + in-cluster backend now wires the SA
+  RBAC by default** (#142 / #186). The previous default left the
+  periscope ServiceAccount with zero cluster-scoped permissions
+  when `auth.authorization.mode: shared` and any
+  `clusters[].backend: in-cluster`, causing every list-call to
+  return 403 and the SPA `OverviewPage` to crash on `.length` of
+  `null`. The chart now auto-renders a `periscope-shared`
+  ClusterRoleBinding pointing the SA at
+  `clusterRBAC.sharedRoleName` (default `view` — read-only and
+  safe). Operators who manage RBAC out-of-band can suppress by
+  setting `clusterRBAC.sharedRoleName: ""`. The kind quickstart
   (`examples/values-kind.yaml`) is updated to `mode: shared` +
   `sharedRoleName: edit` to demonstrate the clean default.
 

@@ -1,0 +1,11 @@
+{
+  "_comment": "sensitive catalog literal-wildcard case: Action: \"*\" → wildcard. Handled in code (sensitive.go Classify), NOT in the YAML — this fixture exercises the runtime fallback.",
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": "*",
+      "Resource": "*"
+    }
+  ]
+}

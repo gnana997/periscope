@@ -1,0 +1,33 @@
+{
+  "_comment": "source: AWS-managed ReadOnlyAccess (arn:aws:iam::aws:policy/ReadOnlyAccess) — abbreviated for fixture; real policy has hundreds of services. Includes representative Describe* / List* / Get* across common services so the parser exercises Action arrays.",
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "s3:Get*",
+        "s3:List*",
+        "s3:Describe*",
+        "ec2:Describe*",
+        "ec2:Get*",
+        "iam:Get*",
+        "iam:List*",
+        "iam:SimulatePrincipalPolicy",
+        "kms:Describe*",
+        "kms:Get*",
+        "kms:List*",
+        "rds:Describe*",
+        "rds:List*",
+        "secretsmanager:Describe*",
+        "secretsmanager:List*",
+        "ssm:Describe*",
+        "ssm:Get*",
+        "ssm:List*",
+        "eks:Describe*",
+        "eks:List*",
+        "sts:GetCallerIdentity"
+      ],
+      "Resource": "*"
+    }
+  ]
+}

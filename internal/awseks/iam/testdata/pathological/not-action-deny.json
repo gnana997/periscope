@@ -1,0 +1,16 @@
+{
+  "_comment": "pathological: NotAction + Deny = 'deny everything EXCEPT these actions'. Engine MUST surface as RawStatement (NOT project to Permission rows) per v1.1 stance — skipped cleanly with 'complex statement — see in IAM console' link.",
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "DenyEverythingExceptIAMReads",
+      "Effect": "Deny",
+      "NotAction": [
+        "iam:Get*",
+        "iam:List*",
+        "iam:SimulatePrincipalPolicy"
+      ],
+      "Resource": "*"
+    }
+  ]
+}

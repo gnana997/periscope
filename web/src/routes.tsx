@@ -73,6 +73,8 @@ const HelmReleasesPage = lazyNamed(() => import("./pages/HelmReleasesPage"), "He
 const HelmReleasePage = lazyNamed(() => import("./pages/HelmReleasePage"), "HelmReleasePage");
 const HelmDiffPage = lazyNamed(() => import("./pages/HelmDiffPage"), "HelmDiffPage");
 const UpgradeReadinessPage = lazyNamed(() => import("./pages/UpgradeReadinessPage"), "UpgradeReadinessPage");
+const ClusterAccessPage = lazyNamed(() => import("./pages/ClusterAccessPage"), "ClusterAccessPage");
+const ReverseLookupPage = lazyNamed(() => import("./pages/ReverseLookupPage"), "ReverseLookupPage");
 const KarpenterPage = lazyNamed(() => import("./pages/KarpenterPage"), "KarpenterPage");
 const NodeGroupsPage = lazyNamed(() => import("./pages/NodeGroupsPage"), "NodeGroupsPage");
 const AddOnsPage = lazyNamed(() => import("./pages/AddOnsPage"), "AddOnsPage");
@@ -130,6 +132,8 @@ export const router = createBrowserRouter(
         <Route path="helm/:namespace/:name" element={<HelmReleasePage />} />
         <Route path="helm/:namespace/:name/diff" element={<HelmDiffPage />} />
         <Route path="upgrade-readiness" element={<WithCluster Page={UpgradeReadinessPage} />} />
+        <Route path="cluster-access" element={<WithCluster Page={ClusterAccessPage} />} />
+        <Route path="reverse-lookup" element={<WithCluster Page={ReverseLookupPage} />} />
         <Route path="karpenter" element={<WithCluster Page={KarpenterPage} />} />
         <Route path="nodegroups" element={<WithCluster Page={NodeGroupsPage} />} />
         <Route path="addons" element={<WithCluster Page={AddOnsPage} />} />

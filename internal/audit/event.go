@@ -166,6 +166,60 @@ const (
 	// regardless of outcome so compliance can answer "did anyone view
 	// the autoscaler dashboard before this 3am node churn?".
 	VerbKarpenterRead Verb = "karpenter_read"
+	// VerbAwsIdentityRead records a read against the cluster
+	// Identity surface (#178): EKS Access Entries, the legacy
+	// kube-system/aws-auth ConfigMap, EKS Pod Identity associations,
+	// and IRSA-annotated ServiceAccounts.
+	//
+	// Same read-style verb as VerbEKSAddonsRead / VerbKarpenterRead
+	// — one row per AWS API call so compliance can attribute each
+	// Describe / List to a requesting actor. Extra carries `op`
+	// to distinguish the calls inside one handler invocation:
+	//
+	//     "list_access_entries"        — eks:ListAccessEntries
+	//     "describe_access_entry"      — eks:DescribeAccessEntry
+	//     "list_associated_policies"   — eks:ListAssociatedAccessPolicies
+	//     "list_pod_identity"          — eks:ListPodIdentityAssociations
+	//     "describe_pod_identity"      — eks:DescribePodIdentityAssociation
+	//     "read_aws_auth"              — k8s GET kube-system/aws-auth
+	//     "get_role"                   — iam:GetRole (existence probe)
+	//     "ensure_sa_roles"            — SA→Role index build (rollup)
+	//
+	// IAM-engine and AWS Access surface (#187, #188) rows emit
+	// VerbAwsIAMRead instead — see that constant below.
+	VerbAwsIdentityRead Verb = "aws_identity_read"
+	// VerbAwsIAMRead records a read against the IAM policy
+	// resolution engine (#187) and the composed AWS Access surface
+	// (#188): per-Pod / per-workload IAM access tab, per-cluster
+	// reverse lookup, sensitive-perms catalog, and the capabilities
+	// probe.
+	//
+	// One row per AWS API call, mirroring VerbAwsIdentityRead, so
+	// operator audit-feed filters can split "who read identity
+	// surface" from "who read IAM policies" cleanly. Extra carries
+	// `op` to distinguish the calls inside one handler invocation:
+	//
+	//   #187 (IAM engine):
+	//     "list_role_policies"          — iam:ListRolePolicies (inline)
+	//     "get_role_policy"             — iam:GetRolePolicy
+	//     "list_attached_role_policies" — iam:ListAttachedRolePolicies (managed)
+	//     "get_policy"                  — iam:GetPolicy (resolves DefaultVersionId)
+	//     "get_policy_version"          — iam:GetPolicyVersion
+	//     "reverse_lookup"              — engine ReverseLookup invocation (rollup)
+	//     "role_permissions"            — engine RolePermissions invocation (rollup)
+	//
+	//   #188 (AWS Access composed surface):
+	//     "workload_permissions"        — composed forward-view handler
+	//     "capabilities"                — capabilities probe (cold)
+	//     "capabilities:cache_hit"      — capabilities probe (cache hit)
+	//     "simulate_principal_policy"   — iam:SimulatePrincipalPolicy
+	//
+	// The engine-level rollups (reverse_lookup / role_permissions /
+	// workload_permissions) are emitted once per request alongside
+	// the per-SDK-call rows so compliance reviewers can see the
+	// user-facing intent without scrolling through every Describe /
+	// Get.
+	VerbAwsIAMRead Verb = "aws_iam_read"
 	// VerbEKSAddonInstallIntent / VerbEKSAddonInstall are the paired
 	// audit rows for an EKS managed add-on install (#119, PR-2).
 	//

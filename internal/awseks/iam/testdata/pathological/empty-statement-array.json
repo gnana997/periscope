@@ -1,0 +1,5 @@
+{
+  "_comment": "pathological: empty Statement array. Valid IAM JSON but grants nothing. Engine must parse cleanly and return 0 Permissions / 0 RawStatements without error.",
+  "Version": "2012-10-17",
+  "Statement": []
+}

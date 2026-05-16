@@ -24,6 +24,8 @@ import (
 	"github.com/gnana997/periscope/internal/auth"
 	"github.com/gnana997/periscope/internal/authz"
 	"github.com/gnana997/periscope/internal/awsec2"
+	"github.com/gnana997/periscope/internal/awseks/iam"
+	"github.com/gnana997/periscope/internal/awseks/identity"
 	"github.com/gnana997/periscope/internal/awsinspector"
 	"github.com/gnana997/periscope/internal/clusters"
 	"github.com/gnana997/periscope/internal/credentials"
@@ -436,6 +438,85 @@ func main() {
 		eksAddonUpgradeHandler(registry, eksAddonsC, auditEmitter)))
 	router.Delete("/api/clusters/{cluster}/eks/addons/{name}", credentials.Wrap(factory,
 		eksAddonDeleteHandler(registry, eksAddonsC, auditEmitter)))
+
+	// --- AWS Identity surface (#178) ---
+	//
+	// Four read-only endpoints that surface EKS Access Entries,
+	// the legacy aws-auth ConfigMap, EKS Pod Identity associations,
+	// and IRSA-annotated ServiceAccounts. The identityCache owns
+	// per-cluster Manager instances (each running a long-lived SA
+	// informer + an SA↔Role index + a role-existence cache). One
+	// audit row per AWS API call (verb = aws_identity_read).
+	identityAwsCfg := factory.AWSConfig()
+	identityC := newIdentityCache(
+		context.Background(),
+		identityAwsCfg,
+		func(ctx context.Context, c clusters.Cluster) (kubernetes.Interface, error) {
+			// SA informer reads use the server's shared (non-impersonated)
+			// identity — see the equivalent comment block on the CVE
+			// manager wiring above. The informer must outlive any single
+			// request and have permission to list SAs cluster-wide.
+			prov, perr := factory.For(ctx, credentials.Session{Subject: "identity-manager"})
+			if perr != nil {
+				return nil, perr
+			}
+			return k8s.NewClientset(ctx, prov, c)
+		},
+		identity.Config{},
+		slog.Default().With("component", "identity"),
+	)
+	defer identityC.Shutdown()
+	router.Get("/api/clusters/{cluster}/identity/access-entries", credentials.Wrap(factory,
+		identityAccessEntriesHandler(registry, identityAwsCfg, auditEmitter)))
+	router.Get("/api/clusters/{cluster}/identity/aws-auth-diff", credentials.Wrap(factory,
+		identityAwsAuthDiffHandler(registry, identityAwsCfg, auditEmitter)))
+	router.Get("/api/clusters/{cluster}/identity/sa-roles", credentials.Wrap(factory,
+		identitySARolesHandler(registry, identityC, auditEmitter)))
+	router.Get("/api/clusters/{cluster}/identity/pod-identity", credentials.Wrap(factory,
+		identityPodIdentityHandler(registry, identityAwsCfg, auditEmitter)))
+
+	// --- IAM policy resolution surface (#187) ---
+	//
+	// Two read-only primitives for the per-Pod AWS Access tab and
+	// the per-cluster reverse-lookup form (#188 SPA work). The
+	// iamEngineCache holds one *iam.Engine per cluster, each with
+	// its own per-role policy cache + the SA→Role index seam.
+	// Engine depends on identityCache for the SA index, so it's
+	// constructed after the identity routes above.
+	iamEngineC := newIAMEngineCache(identityAwsCfg, identityC, iam.Config{}, slog.Default())
+	defer iamEngineC.Shutdown()
+	router.Get("/api/clusters/{cluster}/iam/role-permissions", credentials.Wrap(factory,
+		iamRolePermissionsHandler(registry, iamEngineC, auditEmitter)))
+	router.Get("/api/clusters/{cluster}/iam/reverse-lookup", credentials.Wrap(factory,
+		iamReverseLookupHandler(registry, iamEngineC, auditEmitter)))
+
+	// --- Composed AWS Access surface (#188) ---
+	//
+	// Three endpoints make the SPA's AWS Access tab + reverse-
+	// lookup page a single-call experience and an MCP-friendly
+	// shape (each handler maps cleanly to one future tool).
+	//   - workload-permissions: pod/SA/controller → full chain +
+	//     service-grouped permissions + warnings + affected pods.
+	//   - sensitive-catalog: cluster-agnostic catalog so chips
+	//     and autocomplete share the server's source of truth.
+	//   - capabilities: per-feature locks for the paywall pane;
+	//     5-min cache, Cache-Control: no-cache bypasses.
+	//
+	// All three routes (plus the per-cluster Pod informer that
+	// drives PodsForSA) are gated by PERISCOPE_AWS_ACCESS_ENABLED.
+	// When disabled, the four #178 /identity/* routes and the two
+	// #187 /iam/* primitives stay on so v1.0.7 installs aren't
+	// regressed.
+	awsAccessCfg := loadAwsAccessConfig()
+	identityC.SetPodInformerEnabled(awsAccessCfg.Enabled)
+	if awsAccessCfg.Enabled {
+		capabilitiesC := newCapabilitiesCache()
+		router.Get("/api/clusters/{cluster}/identity/workload-permissions", credentials.Wrap(factory,
+			iamWorkloadPermissionsHandler(registry, iamEngineC, auditEmitter)))
+		router.Get("/api/clusters/{cluster}/identity/capabilities", credentials.Wrap(factory,
+			identityCapabilitiesHandler(registry, iamEngineC, capabilitiesC, awsAccessCfg, auditEmitter)))
+		router.Get("/api/identity/sensitive-catalog", identitySensitiveCatalogHandler())
+	}
 
 	// --- CVE / Inspector v2 surface (#165) ---
 	//

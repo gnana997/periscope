@@ -1,0 +1,11 @@
+{
+  "_comment": "sensitive catalog: iam:AttachRolePolicy → privilege-escalation",
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": "iam:AttachRolePolicy",
+      "Resource": "*"
+    }
+  ]
+}
