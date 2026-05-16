@@ -1,4 +1,4 @@
-// Identity page (#178). Reconciles EKS Access Entries with the
+// Cluster Access page (#178). Reconciles EKS Access Entries with the
 // legacy aws-auth ConfigMap, shows the unified SA→Role index
 // (IRSA + Pod Identity), and the role-centric Pod Identity view.
 //
@@ -19,7 +19,7 @@ import {
   useSARoles,
 } from "../hooks/useIdentity";
 
-export function IdentityPage({ cluster }: { cluster: string }) {
+export function ClusterAccessPage({ cluster }: { cluster: string }) {
   // Four queries fire in parallel; TanStack Query dedupes within a
   // single render.
   const entries = useAccessEntries(cluster);
@@ -39,9 +39,9 @@ export function IdentityPage({ cluster }: { cluster: string }) {
   if (isNotEKS) {
     return (
       <div className="px-6 py-8">
-        <h1 className="mb-2 text-[16px] font-medium">Identity</h1>
+        <h1 className="mb-2 text-[16px] font-medium">Cluster Access</h1>
         <p className="text-[13px] text-ink-faint">
-          Identity surfaces (EKS Access Entries, Pod Identity, IRSA)
+          Cluster Access surfaces (EKS Access Entries, Pod Identity, IRSA)
           are EKS features; this cluster is not backed by EKS.
         </p>
       </div>
@@ -51,7 +51,7 @@ export function IdentityPage({ cluster }: { cluster: string }) {
   return (
     <div className="flex h-full min-h-0 flex-col overflow-y-auto px-6 py-5">
       <header className="mb-4">
-        <h1 className="text-[16px] font-medium">Identity</h1>
+        <h1 className="text-[16px] font-medium">Cluster Access</h1>
         <p className="mt-0.5 text-[12px] text-ink-faint">
           EKS Access Entries, the legacy aws-auth ConfigMap, IRSA
           annotations, and Pod Identity associations — reconciled.

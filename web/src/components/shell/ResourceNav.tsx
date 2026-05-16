@@ -30,7 +30,7 @@ function groupForPath(pathname: string): string | null {
 	if (pathname.includes("/karpenter")) return "Cluster";
 	if (pathname.includes("/nodegroups")) return "EKS";
 	if (pathname.includes("/addons")) return "EKS";
-	if (pathname.includes("/identity")) return "EKS";
+	if (pathname.includes("/cluster-access")) return "EKS";
   for (const group of RESOURCE_GROUPS) {
     for (const r of resourcesByGroup(group)) {
       // match /clusters/:cluster/<resource>
@@ -292,7 +292,7 @@ export function ResourceNav() {
               </li>
               <li>
                 <NavLink
-                  to={`/clusters/${encodeURIComponent(cluster)}/identity`}
+                  to={`/clusters/${encodeURIComponent(cluster)}/cluster-access`}
                   className={({ isActive }) =>
                     cn(
                       "flex items-center gap-2 rounded-sm px-3 py-1.5 text-[12.5px] transition-colors",
@@ -310,7 +310,7 @@ export function ResourceNav() {
                           isActive ? "bg-accent" : "bg-transparent",
                         )}
                       />
-                      <span className="flex-1">Identity</span>
+                      <span className="flex-1">Cluster Access</span>
                     </>
                   )}
                 </NavLink>
