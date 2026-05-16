@@ -1,20 +1,98 @@
-# AWS Access (Forward view + Reverse Lookup)
+# AWS Access — Cluster Access page, per-workload tab, Reverse Lookup
 
-Periscope's AWS Access surface answers two operational questions about an
-EKS-backed cluster without ever leaving the dashboard:
+![AWS Access tab on the staging/cron-rotator pod — four red sensitive-permission chips stacked alongside a wildcard chip, the "worst pod in the cluster" view](../assets/aws-access/tab-cron-rotator-sensitive-chips.png)
 
-1. **Forward view** — *"What can this Pod / Deployment / ServiceAccount do
-   in AWS?"* — surfaced as an **AWS access** tab on Pod, ServiceAccount,
+Periscope's v1.1 AWS Access surface answers three operational questions about
+an EKS-backed cluster without ever leaving the dashboard:
+
+1. **Who has cluster access?** — the **Cluster Access** page (sidebar →
+   EKS → Cluster Access). Reconciles **EKS Access Entries** with the
+   legacy `kube-system/aws-auth` ConfigMap and shows the unified
+   SA → IAM-role index spanning **IRSA** annotations and **Pod Identity**
+   associations.
+2. **Forward view — what can this Pod / Deployment / ServiceAccount do
+   in AWS?** — an **AWS access** tab on Pod, ServiceAccount,
    Deployment, StatefulSet, and DaemonSet detail panes.
-2. **Reverse lookup** — *"Which Pods in this cluster can perform action X
-   on resource Y?"* — surfaced as the **AWS reverse lookup** page under
-   the EKS section of the cluster nav.
+3. **Reverse lookup — which Pods can perform action X on resource Y?** —
+   the **AWS reverse lookup** page under the EKS section of the cluster
+   nav.
 
-Both surfaces sit on top of the EKS Identity layer (#178: Access Entries,
+All three sit on top of the EKS Identity layer (#178: Access Entries,
 aws-auth, Pod Identity, IRSA) and the IAM policy resolution engine (#187:
 inline + attached managed policy fetch + parsing + wildcard matching).
 
+## Cluster Access page
+
+![Cluster Access page — migration-health chip at the top reading "2 aws-auth-only · 2 dual · 4 entries-only", AccessEntriesSection table reconciling EKS Access Entries with the aws-auth ConfigMap below it, SARolesSection grouped by namespace at the bottom](../assets/aws-access/cluster-access-page.png)
+
+Open from the sidebar at **EKS → Cluster Access**. Three independently-
+rendered sections share the page; each fetches its own data, so a 403 on
+one (e.g. `iam:GetRole` missing) doesn't blank the rest.
+
+### Migration health (Access Entries ↔ aws-auth diff)
+
+At the top of the page a single compact chip summarises the
+aws-auth → Access-Entries migration:
+
+```
+2 aws-auth-only · 2 dual · 4 entries-only
+```
+
+| Segment | Color | What it means |
+|---|---|---|
+| `N aws-auth-only` | red | Principals only in the legacy `aws-auth` ConfigMap. Migration not yet started for these. |
+| `N dual` | yellow | Principal mapped in BOTH aws-auth AND Access Entries. Functional, but you can safely remove the aws-auth row once you've verified the Access Entry covers it. |
+| `N entries-only` | green | Migrated to Access Entries. Healthy. |
+
+Clicking a segment filters the AccessEntriesSection table; the
+`Diff only` toggle hides the `Both` rows so operators mid-migration
+focus on the delta:
+
+![AccessEntriesSection — Diff only toggle ON, table filtered to just the aws-auth-only and entries-only rows](../assets/aws-access/cluster-access-diff-only.png)
+
+Principal ARNs are canonicalised before the diff runs — STS assumed-role
+sessions collapse to their IAM-role form, casing is normalised — so a
+case-mismatched aws-auth row and Access Entry resolve to the same
+principal and render as `Both` instead of as two unrelated rows.
+
+### SA → Role index (IRSA + Pod Identity)
+
+Grouped by namespace, alphabetical. Each row is one ServiceAccount with
+either an IRSA annotation (`eks.amazonaws.com/role-arn`), a Pod Identity
+association, or both.
+
+The most operationally-useful chip on this page: when the same SA has
+BOTH an IRSA annotation AND a Pod Identity association at **different**
+IAM roles, Periscope flags it with a `both — Pod Identity wins`
+warning. Pod Identity wins at runtime — the IRSA annotation is
+shadowed config that lies about what permissions the workload actually
+has:
+
+![SARolesSection — prod/payments-worker SA with both IRSA and Pod Identity bindings at different roles; the dual-source warning chip is visible on the row](../assets/aws-access/cluster-access-dual-source.png)
+
+When an annotation or association points at an IAM role that's been
+deleted, the row renders red with a `role not found` chip —
+`iam:GetRole` returned `NoSuchEntity`. Typical cause: IaC drift where
+the role was destroyed but the SA wiring wasn't cleaned up:
+
+![SARolesSection — staging/metrics-collector SA in red with the role-not-found chip; the role ARN it points at no longer exists in IAM](../assets/aws-access/cluster-access-role-not-found.png)
+
+### Pod Identity view (role-centric)
+
+The inverse of SA → Role: grouped by IAM role, child rows are the
+`(namespace, ServiceAccount)` pairs bound to each role via Pod Identity.
+Surfaces the **default-SA blind spot** — when a Pod Identity association
+targets the `default` SA in a namespace, every workload that doesn't
+explicitly set `serviceAccountName:` silently inherits the role:
+
+![PodIdentitySection — team-data-broad-role expanded showing the team-data/default binding; pods in the team-data namespace that omit serviceAccountName silently inherit this role's permissions](../assets/aws-access/cluster-access-pod-identity.png)
+
+The audit verb for everything on this page is `aws_identity_read` (see
+#178). The forward view and reverse lookup below use `aws_iam_read`.
+
 ## Forward view — AWS Access tab
+
+![Pod detail pane on prod/checkout with the AWS access tab open — identity chain at the top showing the SA → IAM role, S3 service group expanded below with the s3:* wildcard statement and the wildcard chip on the action](../assets/aws-access/tab-checkout.png)
 
 For any workload of one of the supported kinds, the tab body is a single
 backend call that composes:
@@ -53,7 +131,31 @@ Returns a `WorkloadPermissionsResponse` (see
 classification is computed server-side so an MCP tool can wrap the
 endpoint as one tool call.
 
+### Examples
+
+**Dual-source identity chain.** When the SA has both an IRSA annotation
+AND a Pod Identity association — at different roles — the chain header
+makes the runtime winner explicit and surfaces the shadowed binding so
+operators can clean it up:
+
+![prod/payments-worker pod's AWS access tab — identity chain at the top shows the SA bound to two different IAM roles via IRSA + Pod Identity; Pod Identity flagged as active, IRSA flagged as shadowed](../assets/aws-access/tab-payments-dual-source.png)
+
+**Sensitive-permission chip close-up.** Every action in the locked v1.1
+catalog renders with a red chip wherever it appears. `s3:DeleteObject*`
+hits the catalog's `data` category:
+
+![Close-up of the s3:DeleteObject* row inside the S3 service group on the checkout pod — the red sensitive chip is visible on the action alongside the wildcard chip](../assets/aws-access/tab-checkout-zoomed.png)
+
+**Statement with a Condition block.** v1.1 doesn't evaluate `Condition`
+clauses; it surfaces presence as a neutral chip so operators don't
+mistake the action for unconditionally granted. (Conditions evaluation
+lands in v1.2.)
+
+![staging/cron-rotator pod's AWS access tab — the cloudwatch:PutMetricData row carries a "condition (not evaluated)" chip alongside the Allow effect](../assets/aws-access/tab-cron-rotator-condition.png)
+
 ## Reverse lookup
+
+![AWS reverse lookup page — form with the action field populated as s3:DeleteBucket, results table empty awaiting submit](../assets/aws-access/reverse-lookup-form.png)
 
 The page accepts an IAM action plus an optional resource ARN and
 optional namespace filter. Sensitive-permission chips on the page
@@ -70,6 +172,8 @@ GET /api/clusters/{cluster}/iam/reverse-lookup
 Returns a `ReverseLookupResponse` with `rows: ReverseLookupPodRow[]`.
 Sensitive-flagged rows sort first; the response carries `truncated`
 and `totalPods` so the SPA renders honest "N of M" banners.
+
+![Reverse lookup results for s3:DeleteBucket — four matched rows across prod, staging, and team-data namespaces; cron-rotator carries both a sensitive-permission chip and a wildcard chip because its role grants via the `*` wildcard rather than an explicit s3:DeleteBucket](../assets/aws-access/reverse-lookup-results.png)
 
 Dual-source SAs emit **one row per binding per pod** so the result
 honestly reflects that the same pod has two distinct permission paths.
@@ -100,6 +204,8 @@ Periscope **does not hide** AWS Access surfaces from users whose
 clusters or roles don't yet support them. The tab is always present;
 when unavailable, it renders a paywall pane with a structured reason
 and the exact list of missing permissions:
+
+![Locked feature pane on a pod's AWS access tab — the panel surfaces "MISSING_IAM_PERMS", a human-readable message, the precise missing-perm list (here just iam:GetPolicy), a Re-check button to force-refresh the probe after granting the permission, and a docs link](../assets/aws-access/locked-pane-missing-perms.png)
 
 ```
 GET /api/clusters/{cluster}/identity/capabilities

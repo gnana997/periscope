@@ -37,7 +37,7 @@ const testCallerArn = "arn:aws:iam::111111111111:role/periscope-server"
 func withAllRBACAllowed(t *testing.T) {
 	t.Helper()
 	fakeCS := fake.NewSimpleClientset()
-	fakeCS.Fake.PrependReactor("create", "selfsubjectaccessreviews",
+	fakeCS.PrependReactor("create", "selfsubjectaccessreviews",
 		func(_ k8stesting.Action) (bool, runtime.Object, error) {
 			return true, &authv1.SelfSubjectAccessReview{
 				Status: authv1.SubjectAccessReviewStatus{Allowed: true},
