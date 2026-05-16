@@ -174,6 +174,28 @@
         }
       }
     },
+    "awsAccess": {
+      "type": "object",
+      "description": "AWS Access surface (#188): per-workload 'AWS access' tab + per-cluster reverse lookup. The block also tunes the iam:SimulatePrincipalPolicy probe behind the capabilities paywall. Requires the v1.1 EKS + IAM read perms on periscope-server's role — see docs/usage/aws-access.md and examples/aws-iam-policy.json for the full set.",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Master switch for the new #188 surfaces (workload-permissions, capabilities, sensitive-catalog) and the per-cluster Pod informer driving PodsForSA enrichment. Default true. When false, the chart sets PERISCOPE_AWS_ACCESS_ENABLED=false; the server skips those three routes and the Pod informer. The four #178 /identity/* endpoints and the two #187 /iam/* primitives stay on regardless so v1.0.7 installs aren't regressed."
+        },
+        "iamProbe": {
+          "type": "object",
+          "description": "iam:SimulatePrincipalPolicy probe driving the MISSING_IAM_PERMS lock-pane's exact missing-perms list. Ignored when awsAccess.enabled is false.",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "description": "When true (default), GET /identity/capabilities calls iam:SimulatePrincipalPolicy against periscope-server's own caller identity and reports the exact missing IAM action names on a MISSING_IAM_PERMS lock. When false, the response stays optimistically available with a note and the first real call surfaces any missing perm as a 403. Requires iam:SimulatePrincipalPolicy on periscope-server's role when true."
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
     "pdb": {
       "type": "object",
       "properties": {

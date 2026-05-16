@@ -531,6 +531,79 @@ inspector:
   hydrateBatchSize: 50
 
 # -----------------------------------------------------------------------------
+# AWS Access surface (#188) — per-workload "AWS Access" tab on Pod /
+# ServiceAccount / Deployment / StatefulSet / DaemonSet detail
+# panes, and the per-cluster "AWS reverse lookup" page that
+# answers "which pods can perform IAM action X on resource Y?".
+#
+# Requires AWS IAM permissions on periscope-server's IRSA / Pod
+# Identity role. The full v1.1 set, copy-pasteable from
+# examples/aws-iam-policy.json:
+#
+#   EKS reads (#178 Identity surface — already required by v1.0.7):
+#     "eks:ListAccessEntries"
+#     "eks:DescribeAccessEntry"
+#     "eks:ListAssociatedAccessPolicies"
+#     "eks:ListPodIdentityAssociations"
+#     "eks:DescribePodIdentityAssociation"
+#
+#   IAM reads (#178 role-existence + #187 policy engine + #188 tab):
+#     "iam:GetRole"
+#     "iam:ListRolePolicies"
+#     "iam:GetRolePolicy"
+#     "iam:ListAttachedRolePolicies"
+#     "iam:GetPolicy"
+#     "iam:GetPolicyVersion"
+#
+#   Optional, only when iamProbe.enabled=true (capabilities paywall):
+#     "iam:SimulatePrincipalPolicy"
+#
+# `sts:GetCallerIdentity` is granted to every authenticated
+# principal by AWS default — no need to list it. See
+# docs/setup/cluster-rbac.md for the full policy JSON in context.
+#
+# enabled
+# -------
+# Master switch for the #188 surfaces:
+#   - GET /api/clusters/{c}/identity/workload-permissions
+#   - GET /api/clusters/{c}/identity/capabilities
+#   - GET /api/identity/sensitive-catalog
+#   - The per-cluster Pod informer that powers PodsForSA enrichment.
+#
+# When false, the chart sets PERISCOPE_AWS_ACCESS_ENABLED=false; the
+# server skips registering those three routes and skips starting
+# the Pod informer (so no in-memory pod cache, no extra K8s watch).
+# The already-shipped #178 /identity/* endpoints (access-entries,
+# aws-auth-diff, sa-roles, pod-identity) and #187 /iam/* primitives
+# stay on — disabling here only suppresses the new SPA tab and
+# reverse-lookup page.
+#
+# Default: true. v1.0.7 → v1.1 upgrades surface the new pages out
+# of the box. Set to false on locked-down accounts that don't want
+# the additional surface area or the Pod informer's memory cost.
+#
+# iamProbe
+# --------
+# Sub-knob: ignored when enabled=false. When iamProbe.enabled=true
+# (default), GET /identity/capabilities calls
+# iam:SimulatePrincipalPolicy against periscope-server's own caller
+# identity to populate the exact `missing[]` actions on a
+# MISSING_IAM_PERMS lock. When false, the response stays
+# optimistically available=true with a `note` and the first real
+# call surfaces any missing perm via the operator's existing 403
+# error chip. Use false on locked-down accounts where granting
+# iam:SimulatePrincipalPolicy is not desirable.
+#
+# Scope: process-global. The probe runs against periscope-server's
+# own caller identity (one role, one answer), so there is no
+# per-cluster override surface.
+# -----------------------------------------------------------------------------
+awsAccess:
+  enabled: true
+  iamProbe:
+    enabled: true
+
+# -----------------------------------------------------------------------------
 # Pod Disruption Budget
 #
 # v1 is single-replica (in-memory session store) so a node drain takes

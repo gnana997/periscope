@@ -24,6 +24,7 @@ import { DetailPane } from "../components/detail/DetailPane";
 import { SecurityTab } from "../components/security/SecurityTab";
 import { SecurityEmptyBanner } from "../components/security/SecurityEmptyBanner";
 import { DaemonSetDescribe } from "../components/detail/describe/DaemonSetDescribe";
+import { AWSAccessTab } from "../components/awsaccess/AWSAccessTab";
 import { YamlView } from "../components/detail/YamlView";
 import { useEditorDirty } from "../hooks/useEditorDirty";
 import { useConfirmDiscard } from "../hooks/useConfirmDiscard";
@@ -155,6 +156,7 @@ export function DaemonSetsPage({ cluster }: { cluster: string }) {
           { id: "describe", label: "describe", ready: true, content: <DaemonSetDescribe cluster={cluster} ns={selectedNs} name={selectedName} /> },
           { id: "yaml", label: "yaml", ready: true, content: <YamlView cluster={cluster} source={{ kind: "builtin", yamlKind: "daemonsets" }} ns={selectedNs} name={selectedName} />, dirty: editFlag.dirty },
           { id: "events", label: "events", ready: true, content: <EventsView cluster={cluster} kind="daemonsets" ns={selectedNs} name={selectedName} /> },
+          { id: "aws-access", label: "AWS access", ready: true, content: <AWSAccessTab cluster={cluster} kind="DaemonSet" namespace={selectedNs} name={selectedName} /> },
           { id: "logs", label: "logs", ready: true, content: <WorkloadLogsTab kind="daemonset" cluster={cluster} ns={selectedNs} name={selectedName} /> },
           { id: "security", label: "security", ready: true, content: <SecurityTab kind="workload" workloadKind="DaemonSet" cluster={cluster} ns={selectedNs} name={selectedName} /> },
         ]}

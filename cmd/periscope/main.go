@@ -478,7 +478,7 @@ func main() {
 
 	// --- IAM policy resolution surface (#187) ---
 	//
-	// Two read-only endpoints for the per-Pod AWS Access tab and
+	// Two read-only primitives for the per-Pod AWS Access tab and
 	// the per-cluster reverse-lookup form (#188 SPA work). The
 	// iamEngineCache holds one *iam.Engine per cluster, each with
 	// its own per-role policy cache + the SA→Role index seam.
@@ -490,6 +490,34 @@ func main() {
 		iamRolePermissionsHandler(registry, iamEngineC, auditEmitter)))
 	router.Get("/api/clusters/{cluster}/iam/reverse-lookup", credentials.Wrap(factory,
 		iamReverseLookupHandler(registry, iamEngineC, auditEmitter)))
+
+	// --- Composed AWS Access surface (#188) ---
+	//
+	// Three endpoints make the SPA's AWS Access tab + reverse-
+	// lookup page a single-call experience and an MCP-friendly
+	// shape (each handler maps cleanly to one future tool).
+	//   - workload-permissions: pod/SA/controller → full chain +
+	//     service-grouped permissions + warnings + affected pods.
+	//   - sensitive-catalog: cluster-agnostic catalog so chips
+	//     and autocomplete share the server's source of truth.
+	//   - capabilities: per-feature locks for the paywall pane;
+	//     5-min cache, Cache-Control: no-cache bypasses.
+	//
+	// All three routes (plus the per-cluster Pod informer that
+	// drives PodsForSA) are gated by PERISCOPE_AWS_ACCESS_ENABLED.
+	// When disabled, the four #178 /identity/* routes and the two
+	// #187 /iam/* primitives stay on so v1.0.7 installs aren't
+	// regressed.
+	awsAccessCfg := loadAwsAccessConfig()
+	identityC.SetPodInformerEnabled(awsAccessCfg.Enabled)
+	if awsAccessCfg.Enabled {
+		capabilitiesC := newCapabilitiesCache()
+		router.Get("/api/clusters/{cluster}/identity/workload-permissions", credentials.Wrap(factory,
+			iamWorkloadPermissionsHandler(registry, iamEngineC, auditEmitter)))
+		router.Get("/api/clusters/{cluster}/identity/capabilities", credentials.Wrap(factory,
+			identityCapabilitiesHandler(registry, iamEngineC, capabilitiesC, awsAccessCfg, auditEmitter)))
+		router.Get("/api/identity/sensitive-catalog", identitySensitiveCatalogHandler())
+	}
 
 	// --- CVE / Inspector v2 surface (#165) ---
 	//

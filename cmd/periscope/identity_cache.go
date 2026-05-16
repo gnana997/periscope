@@ -37,6 +37,13 @@ type identityCache struct {
 	parentCtx  context.Context
 	cfg        identity.Config
 	log        *slog.Logger
+
+	// podInformer toggles whether the Pod informer attaches alongside
+	// the SA informer. Set false when the AWS Access surface (#188)
+	// is disabled via PERISCOPE_AWS_ACCESS_ENABLED=false so the Pod
+	// cache's memory and watch don't run for operators who've opted
+	// out of the workload-permissions / reverse-lookup features.
+	podInformer bool
 }
 
 type identityCacheEntry struct {
@@ -52,13 +59,24 @@ func newIdentityCache(parentCtx context.Context, awsCfg aws.Config, k8sFactory i
 		log = slog.Default()
 	}
 	return &identityCache{
-		managers:   map[string]*identityCacheEntry{},
-		awsCfg:     awsCfg,
-		k8sFactory: k8sFactory,
-		parentCtx:  parentCtx,
-		cfg:        cfg,
-		log:        log,
+		managers:    map[string]*identityCacheEntry{},
+		awsCfg:      awsCfg,
+		k8sFactory:  k8sFactory,
+		parentCtx:   parentCtx,
+		cfg:         cfg,
+		log:         log,
+		podInformer: true,
 	}
+}
+
+// SetPodInformerEnabled flips the per-cluster Pod informer on or
+// off for managers created after this call. Existing managers keep
+// their original setting; the cache is a one-shot at construction.
+// Call this once at startup before any handler triggers For().
+func (c *identityCache) SetPodInformerEnabled(enabled bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.podInformer = enabled
 }
 
 // For returns the per-cluster Manager, lazily constructing it on
@@ -91,7 +109,7 @@ func (c *identityCache) For(ctx context.Context, cl clusters.Cluster) (*identity
 	if err != nil {
 		return nil, fmt.Errorf("identity: build k8s clientset for %s: %w", cl.Name, err)
 	}
-	cancel, err := identity.StartSAInformer(c.parentCtx, cs, mgr)
+	cancel, err := identity.StartSAInformer(c.parentCtx, cs, mgr, identity.WithPodInformer(c.podInformer))
 	if err != nil {
 		return nil, fmt.Errorf("identity: start SA informer for %s: %w", cl.Name, err)
 	}

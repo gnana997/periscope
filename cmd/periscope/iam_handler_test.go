@@ -24,9 +24,9 @@ import (
 // newTestIAMEngineCache wires a cache backed by stubs. Caller hands
 // in the EKS + IAM fake; the cache uses the swap-able
 // newIdentityClient so withFakeIdentityClient affects this too.
-func newTestIAMEngineCache(t *testing.T, fEKS *fakeIdentityEKS, fIAM *fakeIdentityIAM) (*iamEngineCache, *identityCache, func()) {
+func newTestIAMEngineCache(t *testing.T, fEKS *fakeIdentityEKS, fIAM *fakeIdentityIAM, fSTS ...*fakeIdentitySTS) (*iamEngineCache, *identityCache, func()) {
 	t.Helper()
-	withFakeIdentityClient(t, fEKS, fIAM)
+	withFakeIdentityClient(t, fEKS, fIAM, fSTS...)
 
 	// identityCache needs a k8s clientset factory; tests don't
 	// exercise the SA informer so a no-op factory is fine — the
@@ -146,7 +146,7 @@ func TestIAMRolePermissions_HappyPath(t *testing.T) {
 	// Audit row asserted via the recording sink.
 	found := false
 	for _, ev := range sink.events {
-		if ev.Verb == audit.VerbAwsIdentityRead && ev.Extra["op"] == "role_permissions" && ev.Outcome == audit.OutcomeSuccess {
+		if ev.Verb == audit.VerbAwsIAMRead && ev.Extra["op"] == "role_permissions" && ev.Outcome == audit.OutcomeSuccess {
 			found = true
 			break
 		}
@@ -256,7 +256,7 @@ func TestIAMReverseLookup_AuditRollupEmitted(t *testing.T) {
 
 	found := false
 	for _, ev := range sink.events {
-		if ev.Verb == audit.VerbAwsIdentityRead && ev.Extra["op"] == "reverse_lookup" {
+		if ev.Verb == audit.VerbAwsIAMRead && ev.Extra["op"] == "reverse_lookup" {
 			found = true
 			break
 		}

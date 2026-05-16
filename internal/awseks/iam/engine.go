@@ -285,8 +285,6 @@ func (e *Engine) ReverseLookup(ctx context.Context, q ReverseLookupQuery) ([]Rev
 				Namespace:  b.Namespace,
 				RoleArn:    b.RoleArn,
 				Permission: p,
-				PodRefs:    []string{}, // filled by cmd/periscope
-				PodCount:   0,
 			})
 		}
 	}
@@ -327,6 +325,37 @@ func sortMatches(matches []ReverseLookupMatch) {
 			return ai.Permission.Action < aj.Permission.Action
 		}
 		return ai.Permission.Resource < aj.Permission.Resource
+	})
+}
+
+// SortReverseLookupRows orders the row-per-pod result list:
+// sensitive rows first, then by (namespace, saName, action,
+// resource, podName) for deterministic within-group ordering.
+// Mirrors sortMatches but adds the pod-name tie-breaker so two
+// rows that flatten from the same (perm, SA) but different pods
+// render adjacent.
+//
+// Exported so cmd/periscope's reverse-lookup handler can sort
+// after the pod-cache flatten.
+func SortReverseLookupRows(rows []ReverseLookupPodRow) {
+	sort.SliceStable(rows, func(i, j int) bool {
+		ai, aj := rows[i], rows[j]
+		if ai.Permission.Sensitive != aj.Permission.Sensitive {
+			return ai.Permission.Sensitive // true first
+		}
+		if ai.Namespace != aj.Namespace {
+			return ai.Namespace < aj.Namespace
+		}
+		if ai.SAName != aj.SAName {
+			return ai.SAName < aj.SAName
+		}
+		if ai.Permission.Action != aj.Permission.Action {
+			return ai.Permission.Action < aj.Permission.Action
+		}
+		if ai.Permission.Resource != aj.Permission.Resource {
+			return ai.Permission.Resource < aj.Permission.Resource
+		}
+		return ai.Pod.Name < aj.Pod.Name
 	})
 }
 

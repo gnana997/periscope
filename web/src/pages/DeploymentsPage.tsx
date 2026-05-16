@@ -30,6 +30,7 @@ import { useConfirmDiscard } from "../hooks/useConfirmDiscard";
 import { ResourceActions } from "../components/edit/ResourceActions";
 import { EventsView } from "../components/detail/EventsView";
 import { WorkloadLogsTab } from "../components/logs/WorkloadLogsTab";
+import { AWSAccessTab } from "../components/awsaccess/AWSAccessTab";
 import { NamespacePicker } from "../components/shell/NamespacePicker";
 import { cn } from "../lib/cn";
 import { StuckBadge } from "../components/workload/StuckBadge";
@@ -142,6 +143,7 @@ export function DeploymentsPage({ cluster }: { cluster: string }) {
           { id: "describe", label: "describe", ready: true, content: <DeploymentDescribe cluster={cluster} ns={selectedNs} name={selectedName} /> },
           { id: "yaml", label: "yaml", ready: true, content: <YamlView cluster={cluster} source={{ kind: "builtin", yamlKind: "deployments" }} ns={selectedNs} name={selectedName} />, dirty: editFlag.dirty },
           { id: "events", label: "events", ready: true, content: <EventsView cluster={cluster} kind="deployments" ns={selectedNs} name={selectedName} /> },
+          { id: "aws-access", label: "AWS access", ready: true, content: <AWSAccessTab cluster={cluster} kind="Deployment" namespace={selectedNs} name={selectedName} /> },
           { id: "logs", label: "logs", ready: true, content: <WorkloadLogsTab kind="deployment" cluster={cluster} ns={selectedNs} name={selectedName} /> },
           { id: "security", label: "security", ready: true, content: <SecurityTab kind="workload" workloadKind="Deployment" cluster={cluster} ns={selectedNs} name={selectedName} /> },
         ]}

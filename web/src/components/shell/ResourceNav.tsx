@@ -31,6 +31,7 @@ function groupForPath(pathname: string): string | null {
 	if (pathname.includes("/nodegroups")) return "EKS";
 	if (pathname.includes("/addons")) return "EKS";
 	if (pathname.includes("/identity")) return "EKS";
+	if (pathname.includes("/reverse-lookup")) return "EKS";
   for (const group of RESOURCE_GROUPS) {
     for (const r of resourcesByGroup(group)) {
       // match /clusters/:cluster/<resource>
@@ -311,6 +312,31 @@ export function ResourceNav() {
                         )}
                       />
                       <span className="flex-1">Identity</span>
+                    </>
+                  )}
+                </NavLink>
+              </li>
+              <li>
+                <NavLink
+                  to={`/clusters/${encodeURIComponent(cluster)}/reverse-lookup`}
+                  className={({ isActive }) =>
+                    cn(
+                      "flex items-center gap-2 rounded-sm px-3 py-1.5 text-[12.5px] transition-colors",
+                      isActive
+                        ? "bg-accent-soft text-accent"
+                        : "text-ink hover:bg-surface-2",
+                    )
+                  }
+                >
+                  {({ isActive }) => (
+                    <>
+                      <span
+                        className={cn(
+                          "block size-1 shrink-0 rounded-full",
+                          isActive ? "bg-accent" : "bg-transparent",
+                        )}
+                      />
+                      <span className="flex-1">AWS reverse lookup</span>
                     </>
                   )}
                 </NavLink>
