@@ -68,10 +68,10 @@ type awsAccessConfig struct {
 func loadAwsAccessConfig() awsAccessConfig {
 	cfg := awsAccessConfig{Enabled: true, IAMProbe: true}
 	if v := strings.ToLower(strings.TrimSpace(os.Getenv("PERISCOPE_AWS_ACCESS_ENABLED"))); v != "" {
-		cfg.Enabled = !(v == "false" || v == "0" || v == "no" || v == "off")
+		cfg.Enabled = v != "false" && v != "0" && v != "no" && v != "off"
 	}
 	if v := strings.ToLower(strings.TrimSpace(os.Getenv("PERISCOPE_AWS_ACCESS_IAM_PROBE"))); v != "" {
-		cfg.IAMProbe = !(v == "false" || v == "0" || v == "no" || v == "off")
+		cfg.IAMProbe = v != "false" && v != "0" && v != "no" && v != "off"
 	}
 	return cfg
 }
