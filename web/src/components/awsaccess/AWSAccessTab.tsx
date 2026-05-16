@@ -122,7 +122,7 @@ function AWSAccessTabBody({
       />
       {data.truncated ? (
         <p className="mt-3 text-[12px] text-ink-faint">
-          Showing {data.groups.reduce((n, g) => n + g.permissions.length, 0)} of {data.totalCount} permissions; filter on a service to narrow.
+          Showing {(data.groups ?? []).reduce((n, g) => n + (g.permissions?.length ?? 0), 0)} of {data.totalCount} permissions; filter on a service to narrow.
         </p>
       ) : null}
       <p className="mt-3 text-[11px] text-ink-faint">
@@ -133,17 +133,21 @@ function AWSAccessTabBody({
 }
 
 function IdentityChainHeader({ chain }: { chain: import("../../lib/identity").IdentityChain }) {
+  // Server emits `bindings: null` (not []) when the SA has no IAM
+  // bindings — matches the NO_BINDINGS warning emitted in parallel.
+  // Normalize once so every .length / .map call below is safe.
+  const bindings = chain.bindings ?? [];
   return (
     <header className="mb-4">
       <h3 className="text-[14px] font-medium text-ink">Identity chain</h3>
       <p className="mt-1 text-[12.5px] text-ink-muted">
         ServiceAccount{" "}
         <code className="font-mono text-[12px] text-ink">{chain.serviceAccount}</code>
-        {chain.bindings.length > 0 ? " bound to" : " has no IAM role bindings."}
+        {bindings.length > 0 ? " bound to" : " has no IAM role bindings."}
       </p>
-      {chain.bindings.length > 0 ? (
+      {bindings.length > 0 ? (
         <ul className="mt-2 divide-y divide-border rounded-md border border-border">
-          {chain.bindings.map((b, i) => (
+          {bindings.map((b, i) => (
             <li key={`${b.roleArn}-${i}`} className="flex flex-wrap items-center gap-2 px-3 py-2">
               <span
                 className={cn(
@@ -185,8 +189,9 @@ function WarningsBand({ warnings }: { warnings: AwsAccessWarning[] }) {
   );
 }
 
-function ServiceGroupsList({ groups }: { groups: ServiceGroup[] }) {
-  if (groups.length === 0) {
+function ServiceGroupsList({ groups }: { groups: ServiceGroup[] | null }) {
+  const items = groups ?? [];
+  if (items.length === 0) {
     return (
       <p className="my-3 text-[13px] text-ink-faint">
         No expanded permissions to render. (Empty role policies, or all statements are complex — see Raw statements below.)
@@ -195,7 +200,7 @@ function ServiceGroupsList({ groups }: { groups: ServiceGroup[] }) {
   }
   return (
     <div className="mb-4 divide-y divide-border rounded-md border border-border">
-      {groups.map((g) => (
+      {items.map((g) => (
         <ServiceGroupRow key={g.service} group={g} />
       ))}
     </div>
