@@ -122,24 +122,6 @@ tag.
   v1.1 development is gone. Bookmarks to `/identity` 404; update
   to `/cluster-access`.
 
-- **Helm: cluster-admin tier binding is now opt-in** (#84). Default
-  install of both `periscope` and `periscope-agent` charts no longer
-  renders the `periscope-tier-admin` ClusterRoleBinding, so AWS
-  Guardrails and CIS Kubernetes Benchmark 5.1.1 pass out of the box.
-  New `clusterRBAC.adminTier.{enabled, clusterRoleName}` value gates
-  the binding and lets operators repoint at a tighter custom
-  ClusterRole. The chart fails loudly at template time when
-  `auth.authorization.groupTiers` maps any group to `admin` but
-  `clusterRBAC.adminTier.enabled` is false — a silent 403 storm was
-  the alternative.
-  **Migration**: if your release was on v1.0.x with tier mode AND any
-  `auth.authorization.groupTiers` value resolving to `admin`, set
-  `clusterRBAC.adminTier.enabled: true` on upgrade to preserve current
-  behaviour. The chart pre-render check will surface the same recipe
-  with a specific group name on `helm template` /
-  `helm upgrade --dry-run`.
-
-
 ### Fixed
 
 - **AWS Access tab: null-bindings crash** (#199). The backend
