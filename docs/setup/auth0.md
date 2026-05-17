@@ -1,3 +1,8 @@
+---
+title: "Auth0 SSO for Periscope — Kubernetes dashboard OIDC setup"
+description: "Wire Auth0 as the OIDC provider for Periscope's Kubernetes dashboard. Tenant config, callback URL, group claim mapping, and an example auth.yaml ready to drop into the Helm chart."
+---
+
 # Setting up Auth0 for Periscope
 
 A condensed checklist. End state: a working Auth0 tenant + an

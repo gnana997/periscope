@@ -1,0 +1,32 @@
+# Test fixture: gives the OIDC user "alice@corp" pod-read in the default
+# namespace. This is what makes `make run-allow` actually pass — without
+# this binding, alice has no RBAC and the SSAR pre-flight denies.
+#
+# The point of the demo is to show both verdicts:
+#   - With this binding applied:    list pods/default → allowed
+#   - With or without this binding: delete pods/kube-system → denied
+#
+# Delete this manifest to see the "denied" case for both calls.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: pod-reader
+  namespace: default
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: alice-pod-reader
+  namespace: default
+subjects:
+  - kind: User
+    name: alice@corp
+    apiGroup: rbac.authorization.k8s.io
+roleRef:
+  kind: Role
+  name: pod-reader
+  apiGroup: rbac.authorization.k8s.io

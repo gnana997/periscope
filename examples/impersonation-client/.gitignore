@@ -1,0 +1,5 @@
+bin/
+# `go build .` (no -o flag) drops a binary at the dir root named
+# after the package. The Makefile uses -o bin/..., but guard against
+# the bare `go build .` case so a 36MB binary doesn't sneak into a commit.
+/impersonation-client

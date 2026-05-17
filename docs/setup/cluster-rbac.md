@@ -1,3 +1,8 @@
+---
+title: "Per-cluster RBAC for Periscope — shared, tier, raw modes"
+description: "Periscope's K8s authorization is operator-selectable. Pick a mode (shared / tier / raw), apply per-cluster RBAC from the Helm chart, and the dashboard impersonates each user under their real OIDC identity."
+---
+
 # Per-cluster K8s RBAC for Periscope
 
 Periscope's K8s authorization is operator-selectable. Pick a mode in
@@ -822,16 +827,22 @@ helm template periscope deploy/helm/periscope \
   --show-only templates/inspector-rbac.yaml
 ```
 
-## AWS Identity — Access Entries + Pod Identity + IRSA (v1.1+)
+## AWS Access — Cluster Access page, per-workload tab, reverse lookup (v1.1+)
 
-The Identity page (under **EKS → Identity** in the sidebar)
-reconciles **EKS Access Entries** with the legacy
-**`kube-system/aws-auth` ConfigMap** and builds a unified
+The **Cluster Access** page (under **EKS → Cluster Access** in the
+sidebar), the per-workload **AWS Access** tab on Pod / SA /
+Deployment / StatefulSet / DaemonSet detail panes, and the
+top-level **Reverse lookup** page together make up the v1.1 AWS
+Access surface. They reconcile **EKS Access Entries** with the
+legacy **`kube-system/aws-auth` ConfigMap**, build a unified
 **ServiceAccount → IAM Role** index spanning both **Pod Identity
-associations** and **IRSA annotations** (`eks.amazonaws.com/role-arn`).
-It is always-on for EKS-backed clusters — no `enabled` flag — but
-soft-fails to "AWS not configured" when the IAM grants below are
-absent.
+associations** and **IRSA annotations**
+(`eks.amazonaws.com/role-arn`), and resolve every IAM policy
+attached to a role into sensitive-permission chips.
+
+The surfaces are always-on for EKS-backed clusters — no `enabled`
+flag — but soft-fail to a locked-feature pane carrying the exact
+missing permission when the IAM grants below are absent.
 
 The IAM permissions go on the **periscope-server's** Pod Identity or
 IRSA role — same principal as the Inspector v2 grants above. All
@@ -953,8 +964,9 @@ for the operator-facing UX.
 
 ### K8s RBAC for the SA informer
 
-The Identity page maintains a long-lived ServiceAccount informer for
-each EKS-backed cluster to keep the SA→Role index current. The
+The Cluster Access page maintains a long-lived ServiceAccount
+informer for each EKS-backed cluster to keep the SA→Role index
+current. The
 informer runs against the **server's shared identity** (not the
 requesting user's impersonation), so it needs cluster-scope
 `get / list / watch` on `serviceaccounts`. The behaviour:

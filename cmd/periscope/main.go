@@ -222,8 +222,8 @@ func main() {
 	var cveMgr *cve.Manager
 	if parseBoolEnv("PERISCOPE_INSPECTOR_ENABLED", false) {
 		cveCfg := cve.Config{
-			RefreshInterval: parseDurationEnv("PERISCOPE_INSPECTOR_REFRESH_INTERVAL", 6*time.Hour),
-			EvictAfter:      parseDurationEnv("PERISCOPE_INSPECTOR_EVICT_AFTER", 24*time.Hour),
+			RefreshInterval:  parseDurationEnv("PERISCOPE_INSPECTOR_REFRESH_INTERVAL", 6*time.Hour),
+			EvictAfter:       parseDurationEnv("PERISCOPE_INSPECTOR_EVICT_AFTER", 24*time.Hour),
 			HydrateBatchSize: parseIntEnv("PERISCOPE_INSPECTOR_HYDRATE_BATCH_SIZE", awsinspector.BatchSize),
 		}
 		inspectorClient := awsinspector.New(factory.AWSConfig())
@@ -305,7 +305,6 @@ func main() {
 		helmHistoryHandler(registry)))
 	router.Get("/api/clusters/{cluster}/helm/releases/{ns}/{name}/diff", credentials.Wrap(factory,
 		helmDiffHandler(registry)))
-
 
 	// Chart fetch (#73). Two endpoints: GET /versions for the picker,
 	// POST /values for the audited install-dialog open. Caches are
@@ -861,7 +860,6 @@ func main() {
 			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, ns, name string) (k8s.CronJobDetail, error) {
 				return k8s.GetCronJob(ctx, p, k8s.GetCronJobArgs{Cluster: c, Namespace: ns, Name: name})
 			})))
-
 
 	router.Post("/api/clusters/{cluster}/cronjobs/{ns}/{name}/trigger",
 		credentials.Wrap(factory, triggerCronJobHandler(registry, auditEmitter)))
@@ -2093,36 +2091,36 @@ func bulkDownloadAuditHandler(reg *clusters.Registry, auditer *audit.Emitter) cr
 // prefix since their plural varies per CRD.
 var bulkDownloadableKinds = map[string]struct{}{
 	// namespaced (have /{ns}/{name}/yaml)
-	"configmaps":              {},
-	"cronjobs":                {},
-	"daemonsets":              {},
-	"deployments":             {},
-	"endpointslices":          {},
+	"configmaps":               {},
+	"cronjobs":                 {},
+	"daemonsets":               {},
+	"deployments":              {},
+	"endpointslices":           {},
 	"horizontalpodautoscalers": {},
-	"ingresses":               {},
-	"jobs":                    {},
-	"limitranges":             {},
-	"networkpolicies":         {},
-	"poddisruptionbudgets":    {},
-	"pods":                    {},
-	"pvcs":                    {},
-	"replicasets":             {},
-	"resourcequotas":          {},
-	"rolebindings":            {},
-	"roles":                   {},
-	"secrets":                 {},
-	"serviceaccounts":         {},
-	"services":                {},
-	"statefulsets":            {},
+	"ingresses":                {},
+	"jobs":                     {},
+	"limitranges":              {},
+	"networkpolicies":          {},
+	"poddisruptionbudgets":     {},
+	"pods":                     {},
+	"pvcs":                     {},
+	"replicasets":              {},
+	"resourcequotas":           {},
+	"rolebindings":             {},
+	"roles":                    {},
+	"secrets":                  {},
+	"serviceaccounts":          {},
+	"services":                 {},
+	"statefulsets":             {},
 	// cluster-scoped (have /{name}/yaml)
-	"clusterrolebindings":     {},
-	"clusterroles":            {},
-	"ingressclasses":          {},
-	"namespaces":              {},
-	"priorityclasses":         {},
-	"pvs":                     {},
-	"runtimeclasses":          {},
-	"storageclasses":          {},
+	"clusterrolebindings": {},
+	"clusterroles":        {},
+	"ingressclasses":      {},
+	"namespaces":          {},
+	"priorityclasses":     {},
+	"pvs":                 {},
+	"runtimeclasses":      {},
+	"storageclasses":      {},
 }
 
 // isKnownBulkDownloadKind validates the SPA-supplied kind label.
@@ -2582,7 +2580,6 @@ func customResourceEventsHandler(reg *clusters.Registry) credentials.Handler {
 			return
 		}
 		ref := crdRefFromRequest(r, true)
-		ref.Cluster = c
 		// Look up the CRD's Kind so we can filter events by
 		// involvedObject.kind. Caching the lookup would shave a
 		// round-trip but the CRD list call is fast and the events tab

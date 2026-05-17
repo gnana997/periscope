@@ -1,3 +1,8 @@
+---
+title: "Install Periscope on Kubernetes — Helm guide"
+description: "Step-by-step Helm install for Periscope, the open-source Kubernetes dashboard with no AWS keys. Prerequisites, OIDC wiring, Pod Identity for EKS, and verifying the deploy — ~10 minutes for a working install."
+---
+
 # Deploying Periscope on Kubernetes
 
 The supported deploy artifact is the Helm chart at

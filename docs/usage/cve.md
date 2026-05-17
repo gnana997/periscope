@@ -1,3 +1,8 @@
+---
+title: "CVE dashboard for EKS pods — Amazon Inspector v2 integration"
+description: "Per-pod, per-workload, per-node, per-NodeClaim CVE counts inline in Periscope, plus a drill-down Security tab with package groupings and per-package upgrade targets. Data sourced from Amazon Inspector v2."
+---
+
 # CVE surfacing (Amazon Inspector v2)
 
 Periscope shows per-pod, per-workload, per-node, and per-NodeClaim

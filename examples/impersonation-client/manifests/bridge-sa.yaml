@@ -1,0 +1,45 @@
+# The "bridge" service account is what a Periscope-style console runs as.
+# It NEVER speaks to the apiserver as itself for end-user requests; it sets
+# Impersonate-User / Impersonate-Group headers and lets the apiserver
+# evaluate RBAC under the human's identity.
+#
+# The only privilege the bridge needs is the `impersonate` verb on users
+# and groups. It does NOT need permission to list pods, delete deployments,
+# read secrets, etc. — those rights belong to the impersonated user, not
+# the bridge.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: periscope-bridge
+  namespace: default
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: periscope-bridge-impersonator
+rules:
+  # Impersonate any user or group. Tighten this in production by listing
+  # specific resourceNames (the OIDC subs / group names you allow) if
+  # your IdP set is small and stable.
+  - apiGroups: [""]
+    resources: ["users", "groups", "serviceaccounts"]
+    verbs: ["impersonate"]
+  # Allow attaching extra fields (e.g. `scopes.authorization.openshift.io`,
+  # `oidc-id-token`) to impersonated requests. Periscope uses this for
+  # audit attribution metadata that follows the request through the system.
+  - apiGroups: ["authentication.k8s.io"]
+    resources: ["userextras/*"]
+    verbs: ["impersonate"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: periscope-bridge-impersonator
+subjects:
+  - kind: ServiceAccount
+    name: periscope-bridge
+    namespace: default
+roleRef:
+  kind: ClusterRole
+  name: periscope-bridge-impersonator
+  apiGroup: rbac.authorization.k8s.io

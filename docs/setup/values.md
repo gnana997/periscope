@@ -1,3 +1,8 @@
+---
+title: "Periscope Helm values reference — every chart option"
+description: "Canonical reference for every value in the Periscope and periscope-agent Helm charts. Image, replicas, RBAC, OIDC, audit, agent — every configurable value with types, defaults, and operator notes."
+---
+
 # Helm values reference
 
 Canonical reference for every value in the Periscope and

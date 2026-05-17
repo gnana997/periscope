@@ -19,9 +19,11 @@
 [![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/gnana997/periscope/badge)](https://scorecard.dev/viewer/?uri=github.com/gnana997/periscope)
 [![CodeQL](https://github.com/gnana997/periscope/actions/workflows/codeql.yml/badge.svg?branch=main)](https://github.com/gnana997/periscope/actions/workflows/codeql.yml)
 
-**v1.0.0 launched.** Read the [launch announcement](https://github.com/gnana997/periscope/discussions/70) — origin story, what shipped, what's not in v1.0, and what's next.
+**v1.1.0 shipped — AWS Access surfaces.** Cluster Access page (EKS Access Entries + aws-auth diff + unified SA → IAM Role index + Pod Identity view), per-workload AWS Access tab with sensitive-permissions chips against an 18-chip catalog, and a reverse-lookup page answering "which workloads can perform action X?" See [v1.1.0 release notes](CHANGELOG.md#110---2026-05-16) and the [usage guide](docs/usage/aws-access.md).
 
-> **Status — v1.0 stable.** Public HTTP API, configuration shape, and Helm values are covered by semver: breaking changes will land in a future major (v2). Bugfixes and additive features land on minor / patch tags off `main`. See [`CHANGELOG.md`](CHANGELOG.md) for what shipped per release.
+**v1.0.0 launched.** Origin story, what shipped, what's not in v1.0, and what's next — read the [launch announcement](https://github.com/gnana997/periscope/discussions/70).
+
+> **Status — v1.1 stable.** Public HTTP API, configuration shape, and Helm values are covered by semver: breaking changes will land in a future major (v2). Bugfixes and additive features land on minor / patch tags off `main`. See [`CHANGELOG.md`](CHANGELOG.md) for what shipped per release.
 
 ## What is Periscope
 
@@ -176,7 +178,14 @@ Both signed (cosign keyless) and discoverable on [Artifact Hub](https://artifact
 - Same wire shape feeds the SPA and the future MCP / AI-agent tool layer (v1.2) — one source of truth for "what to fix first" prioritization
 - Opt-in via Helm (`inspector.enabled: true`) — see [usage guide](docs/usage/cve.md) for IAM, audit, cost
 
-**Audit & observability**
+**AWS Access (v1.1)**
+- **Cluster Access page** — reconciles EKS Access Entries with the legacy aws-auth ConfigMap (migration-health chip: `aws-auth-only` / `entries-only` / `both`), unified SA → IAM Role index (IRSA + Pod Identity, with dual-source + orphan flags), and a role-centric Pod Identity view
+- **AWS Access tab** on every workload detail pane (Pod / ServiceAccount / Deployment / StatefulSet / DaemonSet) — resolved identity chain, IAM policies grouped by AWS service, sensitive-permissions chip strip against an 18-chip catalog (17 named actions + literal `*`) with categories `privilege-escalation` / `data` / `cross-account` / `destructive` / `cluster` / `wildcard`
+- **Reverse lookup** at `/clusters/{c}/reverse-lookup` — "which workloads can perform action X?" with one-row-per-matched-pod results, binding-source attribution, and one-click chip pre-fill from any sensitive chip on the AWS Access tab
+- **Locked-feature pane** with structured `reason` + exact missing-permissions list (powered by `iam:SimulatePrincipalPolicy` probe, 5-min server-side cache, `Re-check` button to bypass)
+- IAM probe configurable via `PERISCOPE_AWS_ACCESS_IAM_PROBE` env (default on); falls back to optimistic `available: true` + lazy 403 when the probe itself is denied
+- See [usage guide](docs/usage/aws-access.md) for Cluster Access page, per-workload tab, reverse-lookup walkthrough; IAM grant for the periscope-server role is in [cluster-rbac.md](docs/setup/cluster-rbac.md)
+
 **Audit & observability**
 - Every privileged action signed by the human user — apply, delete, exec, secret reveal, log open, cronjob trigger
 - Persistent audit log: SQLite (single-replica), with retention and size caps
@@ -273,7 +282,7 @@ CI: every push and PR runs `golangci-lint`, `go test`, `npm run lint`, `npm test
 
 ## Roadmap
 
-Planning is tracked in [GitHub Issues](https://github.com/gnana997/periscope/issues). Helm install / upgrade / uninstall and the full EKS add-on lifecycle (browse / install / upgrade / delete) shipped in v1.0.4. Areas in active scoping for the next minor: private OCI chart auth (ECR via Pod Identity / IRSA), richer per-cluster RBAC introspection, and EKS add-on detail enrichment (`requiresIamPermissions` / architecture / compute-type signals from `DescribeAddonVersions`).
+Planning is tracked in [GitHub Issues](https://github.com/gnana997/periscope/issues). v1.1 shipped the AWS Access surfaces — Cluster Access page reconciling EKS Access Entries + aws-auth + IRSA + Pod Identity, per-workload AWS Access tab with sensitive-permissions chips, and reverse lookup ("which workloads can perform action X?"). Active scoping for v1.2: in-browser cluster shell (#104), MCP / AI tool layer (#151) reusing v1.1's server-side IAM resolver + sensitive catalog, CronJob CVE-ownership chain on the Security tab, and per-NodeGroup CVE chip rollup.
 
 ## Community & support
 
