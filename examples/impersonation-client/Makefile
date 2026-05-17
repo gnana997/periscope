@@ -1,4 +1,4 @@
-CONTEXT ?= kind-certwatch
+CONTEXT ?= kind-periscope-demo
 BIN     := bin/impersonation-client
 
 .PHONY: build

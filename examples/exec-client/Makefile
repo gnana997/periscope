@@ -1,4 +1,4 @@
-CONTEXT ?= kind-certwatch
+CONTEXT ?= kind-periscope-demo
 POD     ?= busybox-probe
 NS      ?= default
 CMD     ?= uname -a; ls /
