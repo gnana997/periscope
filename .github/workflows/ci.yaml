@@ -71,6 +71,27 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+  examples-build:
+    name: Examples build (${{ matrix.example }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        example:
+          - impersonation-client
+          - exec-client
+    defaults:
+      run:
+        working-directory: examples/${{ matrix.example }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
+        with:
+          go-version-file: examples/${{ matrix.example }}/go.mod
+          cache: true
+          cache-dependency-path: examples/${{ matrix.example }}/go.sum
+      - run: go build ./...
+
   helm-lint:
     name: Helm lint
     runs-on: ubuntu-latest

@@ -1,0 +1,31 @@
+# kind-ws-off.yaml — a kind cluster with the RemoteCommandWebsocket
+# feature gate DISABLED on the apiserver. This is the cluster shape
+# that forces --protocol=auto to fall back from WS to SPDY: the
+# WebSocket upgrade is refused, IsUpgradeFailure returns true, and
+# the client retries via the SPDY path.
+#
+# WARNING: if RemoteCommandWebsocket has already GA'd in your K8s
+# version (target 1.32 / 1.33 per KEP-4006), the feature gate is
+# removed and toggling it via apiserver flags errors out. In that
+# case, pin to an older node image:
+#
+#   nodes:
+#     - role: control-plane
+#       image: kindest/node:v1.31.4    # WS still feature-gated here
+#
+# Adjust the image tag to whatever current kind release supports.
+#
+# Bring up:
+#
+#   kind create cluster --name exec-no-ws --config manifests/kind-ws-off.yaml
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: exec-no-ws
+nodes:
+  - role: control-plane
+    kubeadmConfigPatches:
+      - |
+        kind: ClusterConfiguration
+        apiServer:
+          extraArgs:
+            feature-gates: "RemoteCommandWebsocket=false"

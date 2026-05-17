@@ -1,0 +1,25 @@
+# kind-ws-on.yaml — a kind cluster with the RemoteCommandWebsocket
+# feature gate ENABLED on the apiserver. K8s 1.31+ enables this gate
+# by default (beta), so this config is technically a no-op against
+# recent kind node images. We pin it explicitly so the demo's intent
+# stays clear as K8s evolves.
+#
+#   kind create cluster --name exec-ws --config manifests/kind-ws-on.yaml
+#
+# Once up, deploy the busybox-probe pod the exec-client targets:
+#
+#   kubectl --context=kind-exec-ws apply \
+#     -f ../impersonation-client/manifests/   # reuses the bridge SA + alice fixture
+#
+# Or just run any pod named `busybox-probe` in the `default` namespace.
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: exec-ws
+nodes:
+  - role: control-plane
+    kubeadmConfigPatches:
+      - |
+        kind: ClusterConfiguration
+        apiServer:
+          extraArgs:
+            feature-gates: "RemoteCommandWebsocket=true"
