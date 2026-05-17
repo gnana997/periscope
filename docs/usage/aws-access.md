@@ -1,3 +1,8 @@
+---
+title: "AWS Access for EKS — what IAM does this pod grant?"
+description: "Three EKS identity surfaces in Periscope: Cluster Access reconciles Access Entries with aws-auth, the per-workload AWS Access tab lists every IAM policy on a pod's role, and reverse lookup finds every pod that can perform an AWS action."
+---
+
 # AWS Access — Cluster Access page, per-workload tab, Reverse Lookup
 
 ![AWS Access tab on the staging/cron-rotator pod — four red sensitive-permission chips stacked alongside a wildcard chip, the "worst pod in the cluster" view](../assets/aws-access/tab-cron-rotator-sensitive-chips.png)

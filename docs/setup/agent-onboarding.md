@@ -1,3 +1,8 @@
+---
+title: "Connect a Kubernetes cluster via the Periscope agent"
+description: "Register a managed K8s cluster with Periscope via the agent backend — for on-prem k3s, customer-managed EKS, or any cluster without inbound network. Three deployment topologies, ~15 minutes."
+---
+
 # Onboarding a managed cluster via the agent (#42)
 
 This guide walks an operator through registering a new managed

@@ -1,3 +1,8 @@
+---
+title: "Per-cluster RBAC for Periscope — shared, tier, raw modes"
+description: "Periscope's K8s authorization is operator-selectable. Pick a mode (shared / tier / raw), apply per-cluster RBAC from the Helm chart, and the dashboard impersonates each user under their real OIDC identity."
+---
+
 # Per-cluster K8s RBAC for Periscope
 
 Periscope's K8s authorization is operator-selectable. Pick a mode in
