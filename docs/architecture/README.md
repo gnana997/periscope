@@ -1,3 +1,8 @@
+---
+title: "Periscope architecture overview — design notes for contributors"
+description: "Internal design notes for Periscope contributors: load-bearing seams, the rationale behind structural decisions, and pointers to the operator-side how-tos these architecture notes complement."
+---
+
 # Architecture
 
 Contributor-facing design notes. The audience is someone changing

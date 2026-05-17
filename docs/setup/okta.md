@@ -1,3 +1,8 @@
+---
+title: "Okta SSO for Periscope — Kubernetes dashboard OIDC setup"
+description: "Wire Okta as the OIDC provider for Periscope's Kubernetes dashboard. App registration, callback URL, group claims, and an example auth.yaml ready to drop into the Helm chart."
+---
+
 # Setting up Okta for Periscope
 
 A condensed checklist. End state: a working Okta org + an `auth.yaml`

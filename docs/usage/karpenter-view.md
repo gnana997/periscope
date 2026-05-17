@@ -1,3 +1,8 @@
+---
+title: "Karpenter dashboard — NodePools, NodeClaims, pending pods"
+description: "Periscope's Karpenter view: NodePools with $/hr + spot savings, NodeClaims grouped by pool, pending pods with scheduling reasons. Read-only joins kubectl can't do, on one page."
+---
+
 # Karpenter dashboard
 
 ![Karpenter dashboard — three panels: NodePools with $/hr + spot savings, NodeClaims grouped by pool, pending pods](../assets/karpenter/overview.png)
