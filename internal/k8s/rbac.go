@@ -321,6 +321,15 @@ func serviceAccountSummary(sa *corev1.ServiceAccount) ServiceAccount {
 
 // --- YAML ---
 
+// Note on TypeMeta: client-go's typed Get() returns objects with empty
+// TypeMeta (apiVersion="", kind=""). formatYAML below marshals what's
+// there, so without explicit assignment the resulting YAML lacks
+// apiVersion/kind — which breaks the SPA editor's identity probe
+// (parseIdentityFromYaml returns null → gvk is null → Monaco mount
+// short-circuits → editor stays blank). Every other GetXxxYAML in
+// this package sets these explicitly; the RBAC + SA handlers below
+// were originally missing the assignment, fixed in v1.1.1.
+
 func GetRoleYAML(ctx context.Context, p credentials.Provider, args GetRoleArgs) (string, error) {
 	cs, err := newClientFn(ctx, p, args.Cluster)
 	if err != nil {
@@ -330,6 +339,8 @@ func GetRoleYAML(ctx context.Context, p credentials.Provider, args GetRoleArgs) 
 	if err != nil {
 		return "", fmt.Errorf("get role: %w", err)
 	}
+	raw.APIVersion = "rbac.authorization.k8s.io/v1"
+	raw.Kind = "Role"
 	return formatYAML(raw)
 }
 
@@ -342,6 +353,8 @@ func GetClusterRoleYAML(ctx context.Context, p credentials.Provider, args GetClu
 	if err != nil {
 		return "", fmt.Errorf("get clusterrole: %w", err)
 	}
+	raw.APIVersion = "rbac.authorization.k8s.io/v1"
+	raw.Kind = "ClusterRole"
 	return formatYAML(raw)
 }
 
@@ -354,6 +367,8 @@ func GetRoleBindingYAML(ctx context.Context, p credentials.Provider, args GetRol
 	if err != nil {
 		return "", fmt.Errorf("get rolebinding: %w", err)
 	}
+	raw.APIVersion = "rbac.authorization.k8s.io/v1"
+	raw.Kind = "RoleBinding"
 	return formatYAML(raw)
 }
 
@@ -366,6 +381,8 @@ func GetClusterRoleBindingYAML(ctx context.Context, p credentials.Provider, args
 	if err != nil {
 		return "", fmt.Errorf("get clusterrolebinding: %w", err)
 	}
+	raw.APIVersion = "rbac.authorization.k8s.io/v1"
+	raw.Kind = "ClusterRoleBinding"
 	return formatYAML(raw)
 }
 
@@ -378,6 +395,8 @@ func GetServiceAccountYAML(ctx context.Context, p credentials.Provider, args Get
 	if err != nil {
 		return "", fmt.Errorf("get serviceaccount: %w", err)
 	}
+	raw.APIVersion = "v1"
+	raw.Kind = "ServiceAccount"
 	return formatYAML(raw)
 }
 

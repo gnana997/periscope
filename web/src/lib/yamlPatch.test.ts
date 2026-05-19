@@ -238,16 +238,76 @@ describe("buildMinimalSSA", () => {
     expect(yaml).not.toContain("memory:");
   });
 
-  it("expresses removals as null leaves", () => {
+  it("omits removed keys from the payload (SSA retained-ownership semantics, hotfix v1.1.1)", () => {
+    // Regression for v1.1.0 label-deletion bug. Pre-fix, removing a
+    // managed map-of-string entry (label / annotation) emitted
+    // `<key>: ~` (null) in the apply payload; the apiserver coerced
+    // null → "" for the value type and left the key in place. Correct
+    // behavior under SSA is to OMIT the key — periscope-spa previously
+    // owned it, so dropping it from the apply relinquishes ownership
+    // and the apiserver removes the key.
     const after = NGINX_DEPLOYMENT.replace(
       `    app.kubernetes.io/version: "1.25.3"\n`,
       "",
     );
     const ops = computeOps(NGINX_DEPLOYMENT, after);
     const yaml = buildMinimalSSA(ops, IDENTITY);
-    // SSA expresses removal-of-managed-field by setting it to null
-    // (or `~` in PLAIN scalar style).
-    expect(yaml).toMatch(/app\.kubernetes\.io\/version: ~/);
+    // The removed key must not appear in the payload at all.
+    expect(yaml).not.toMatch(/app\.kubernetes\.io\/version/);
+    // And we must not be writing a null sentinel anywhere.
+    expect(yaml).not.toMatch(/:\s*~\s*$/m);
+    // Re-parsing should yield a payload whose labels map has no
+    // `app.kubernetes.io/version` key (verifying we didn't accidentally
+    // leave behind a `key: null` JS entry).
+    const { obj } = parseOrThrow(yaml);
+    const labels = ((obj as Record<string, unknown>).metadata as Record<string, unknown>)
+      .labels as Record<string, unknown> | undefined;
+    if (labels !== undefined) {
+      expect(Object.keys(labels)).not.toContain("app.kubernetes.io/version");
+    }
+  });
+
+  it("removes a ServiceAccount label cleanly (sibling-label preservation, hotfix v1.1.1)", () => {
+    // Direct repro of the user-reported v1.1.0 bug: a ServiceAccount
+    // with a periscope-added `test:` label. Deleting the label line in
+    // the editor must produce a payload that OMITS the `test` key
+    // entirely, not one that submits `test: ~`. The latter caused the
+    // apiserver to persist `test: ""` because labels are a
+    // map[string]string and null is coerced to the zero value of the
+    // value type.
+    const before = `apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: alloy
+  namespace: certwatch-monitoring
+  labels:
+    app.kubernetes.io/component: logging
+    app.kubernetes.io/name: alloy
+    test: anything
+`;
+    const after = `apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: alloy
+  namespace: certwatch-monitoring
+  labels:
+    app.kubernetes.io/component: logging
+    app.kubernetes.io/name: alloy
+`;
+    const ops = computeOps(before, after);
+    const yaml = buildMinimalSSA(ops, {
+      apiVersion: "v1",
+      kind: "ServiceAccount",
+      name: "alloy",
+      namespace: "certwatch-monitoring",
+    });
+    // The `test` key must not appear in the payload at all — neither
+    // as `test: ~` nor as `test: ""`.
+    expect(yaml).not.toMatch(/\btest\s*:/);
+    // Sibling labels owned by other field managers must not be touched
+    // (minimal-SSA: we only include fields the user changed).
+    expect(yaml).not.toMatch(/app\.kubernetes\.io\/component/);
+    expect(yaml).not.toMatch(/app\.kubernetes\.io\/name/);
   });
 
   it("produces well-formed YAML that round-trips", () => {

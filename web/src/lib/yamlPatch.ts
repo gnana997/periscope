@@ -392,9 +392,17 @@ function setLeaf(node: unknown, seg: PathSegment, value: unknown | typeof REMOVE
       throw new Error(`setLeaf: expected map for "${seg}" but got ${typeof node}`);
     }
     if (value === REMOVE_SENTINEL) {
-      // SSA: setting a managed field to null tells the apiserver to drop
-      // it. Marker form for downstream stringify.
-      node[seg] = null;
+      // SSA per-key ownership: omit the key from the apply payload.
+      // Since periscope-spa previously owned this field, dropping it
+      // from the apply relinquishes ownership → the apiserver removes
+      // the key from the resource. Mirrors the merge-key branch below.
+      //
+      // Writing `null` here (the v1.1.0 behavior) is WRONG for atomic
+      // map-of-string fields like `metadata.labels.*` and
+      // `metadata.annotations.*`: the apiserver coerces null → "" for
+      // the value type and leaves the key in place with an empty
+      // string instead of removing it. Hotfix v1.1.1.
+      delete node[seg];
     } else {
       node[seg] = value;
     }

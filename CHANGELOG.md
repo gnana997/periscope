@@ -57,6 +57,70 @@ tag.
   is tracked as RFC 0005 (`docs/rfcs/0005-drop-retained-ownership.md`)
   and ships as **v1.1.2**.
 
+- **Edit YAML now works on ServiceAccount, RBAC, and the "extras"
+  resource kinds.** Previously, clicking the edit pencil on any of
+  these resources rendered a blank Monaco editor — the action bar
+  (cancel / patch / dry-run / diff / apply) appeared, but the YAML
+  body never loaded. Read-only YAML view was unaffected; YAML edit
+  specifically broke.
+
+  Affected resources (14 in total):
+  - **Access group**: ServiceAccount, Role, ClusterRole,
+    RoleBinding, ClusterRoleBinding
+  - **Extras**: HorizontalPodAutoscaler, PodDisruptionBudget,
+    ReplicaSet, NetworkPolicy, IngressClass, ResourceQuota,
+    LimitRange, PriorityClass, RuntimeClass
+
+  Root cause: each of these backend YAML handlers
+  (`internal/k8s/rbac.go`, `internal/k8s/extras.go`) didn't set
+  `raw.APIVersion` and `raw.Kind` on the typed object returned
+  from client-go before marshaling. Every other YAML handler in
+  the package (`deployments.go`, `statefulsets.go`, `services.go`,
+  `secrets.go`, `pods.go`, `configmaps.go`, `namespaces.go`,
+  `cronjobs.go`, `endpointslices.go`, etc.) sets these explicitly
+  to compensate for client-go's well-known TypeMeta-empty-on-Get
+  behavior; these 14 handlers were missed. The resulting YAML
+  had no `apiVersion:` or `kind:` lines, so the SPA editor's
+  `parseIdentityFromYaml` returned null, `gvk` stayed null, and
+  the Monaco mount effect short-circuited before creating the
+  editor model.
+
+  **Fix**: each affected handler now sets the correct
+  `APIVersion` and `Kind` before `formatYAML`. Regression tests
+  in `internal/k8s/rbac_test.go` assert each Access-group
+  handler's output contains the expected `apiVersion:`/`kind:`
+  lines. The extras handlers share the same one-line pattern
+  fix; combined with the `formatYAML` invariant they're now
+  symmetric with every other YAML handler in the package.
+
+- **Deleting a label or annotation in the YAML editor now actually
+  removes the key, instead of leaving it behind with an empty
+  string value.** Previously, removing the `test: foo` line from a
+  ServiceAccount (or any resource) in the editor and clicking Apply
+  produced a resource with `test: ""` on the next read — the key
+  was still there, just blanked out.
+
+  Root cause: `buildMinimalSSA` in `web/src/lib/yamlPatch.ts`
+  expressed remove ops on string-keyed map fields by writing the
+  key with a `null` value (rendered as `~` in the apply payload).
+  The premise — "setting a managed field to null tells the
+  apiserver to drop it" — is wrong for atomic `map[string]string`
+  fields like `metadata.labels.*` and `metadata.annotations.*`:
+  the apiserver coerces null → "" (the zero value of the value
+  type) and the key stays put.
+
+  **Fix**: the string-keyed branch of `setLeaf` now OMITS the key
+  from the apply payload instead of writing null. Under SSA's
+  per-key ownership model, `periscope-spa` previously owned that
+  field; dropping it from the apply relinquishes ownership and the
+  apiserver removes the key from the resource. This mirrors the
+  merge-key branch immediately below, which already had the
+  correct "omit, don't null" behavior for array-element removals.
+  Sibling labels owned by other field managers (e.g.,
+  `app.kubernetes.io/name` from Helm) are unaffected. Regression
+  coverage in `web/src/lib/yamlPatch.test.ts` includes a direct
+  repro mirroring the user-reported ServiceAccount scenario.
+
 - **Karpenter sidebar probe no longer floods the audit log with
   `karpenter_read` rows on clusters without Karpenter.** Previously,
   the SPA's `KarpenterSidebarEntry` fired `GET /api/clusters/{c}/karpenter`
