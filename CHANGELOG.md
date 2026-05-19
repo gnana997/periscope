@@ -13,6 +13,122 @@ tag.
 
 ## [Unreleased]
 
+## [1.1.2-rc1] - 2026-05-19
+
+This release is an internal refactor of the SSA apply pipeline. The
+operator-facing changes are the conflict-resolution UX (a single
+"Force apply / Cancel" banner replaces the v1.1.x per-field
+disposition view) and noticeably faster mutations (scale, restart,
+suspend, cordon, label edits no longer prefetch managedFields).
+Architecturally, the change removes the retained-ownership SSA
+composition pattern that was the proximate cause of every apply bug
+in the v1.1 hotfix series — see issue #224 for the full motivation.
+
+### Changed
+
+- **Apply bodies now contain only the fields the operator changed.**
+  Periscope's SSA writes used to re-assert every field
+  `periscope-spa` previously claimed (the "retained-ownership"
+  composition), drawn from `metadata.managedFields`. As of v1.1.2
+  the apply payload is a pure minimal diff between the buffer the
+  operator mounted and the buffer they're applying — nothing else.
+
+  Operator-visible consequences:
+  - `periscope-spa` now claims ownership of only the fields the
+    operator touched in any given apply. Visible in `kubectl get
+    <res> -o jsonpath='{.metadata.managedFields[?(@.manager=="periscope-spa")].fieldsV1}'`
+    as a small tree instead of the broad tree v1.1.x produced.
+  - Helm / GitOps / controller-owned fields the operator didn't
+    edit are no longer co-claimed by Periscope. Helm upgrades that
+    previously logged "field already managed by periscope-spa"
+    warnings on unrelated fields stop logging them.
+  - Mutations (scale, restart, suspend, cordon, label edits) make
+    two fewer apiserver round-trips per click — the
+    current-state-YAML and `/meta` prefetches were only needed by
+    the retained-ownership composition.
+
+- **Single-banner conflict resolution.** When the apiserver returns
+  HTTP 409 (FieldManagerConflict), the editor now overlays one
+  banner above the action bar with two buttons: `Force apply` and
+  `Cancel`. The banner names the conflicting field managers and
+  fields, and the Force button re-submits with `?force=true`. The
+  v1.1.x flow — switch to a full-screen `ConflictResolutionView`,
+  pick "keep mine" / "revert" per field, then confirm via a
+  `TakeoverDialog` typing gate — is gone. The per-field disposition
+  modelled a choice Kubernetes' SSA can't actually honor at the
+  field level (force is request-scoped); the new banner matches the
+  underlying semantics.
+
+- **Form mode now resolves conflicts inline.** The form-mode editor
+  (Config­Map / Secret / Service / Ingress / Deployment / StatefulSet)
+  used to surface 409s as a banner suggesting "switch to YAML mode
+  for the full resolution view." As of v1.1.2 form mode renders the
+  same conflict banner YAML mode renders. Operators no longer need
+  to leave form mode to resolve a conflict.
+
+- **Apply error banner shows the apiserver's human message** instead
+  of the full Status JSON envelope. A 422 on `replicas: -1` now
+  reads `Apply failed (422). Deployment.apps "X" is invalid:
+  spec.replicas: Invalid value: -1: must be greater than or equal
+  to 0.` rather than displaying the raw JSON. Falls back to the raw
+  body if it isn't a parseable Status — no information is hidden.
+
+### Removed
+
+- The retained-ownership SSA composition path
+  (`buildRetainedOwnershipBody`, `buildRetainedOwnershipBodyFromOps`,
+  `selectSelfOwnedPaths`, `walkValue`, `walkFieldsV1ToSegments`,
+  `ManagedFieldsUnavailableError`) is gone from
+  `web/src/lib/applyBodyBuilder.ts`. All apply call sites use
+  `buildApplyBody(baseline, draft, identity)` — a 3-line wrapper
+  around `computeOps` + `buildMinimalSSA`.
+- The per-field conflict-resolution UI
+  (`ConflictResolutionView.tsx`, `TakeoverDialog.tsx`) is deleted.
+- The `useApplySubmit` form-mode submit hook is deleted; form mode
+  shares the unified `useApplyLifecycle` with YAML mode.
+- Internal: `applyWithLenientConflictRetained` and
+  `fetchCurrentYamlForKind` (helpers that existed only to feed
+  retained-ownership composition).
+
+### Fixed
+
+- **`kerrors.IsInvalid` now maps to HTTP 422 instead of falling
+  through to 500.** apiserver validation rejections (negative
+  replicas, invalid label keys, container-name collisions, etc.)
+  carry `reason: "Invalid"`. `httpStatusFor` was missing the
+  `kerrors.IsInvalid` check, so the SPA saw 500 with the apiserver's
+  Status body inside. The body was always correct; only the HTTP
+  status was wrong. Surfaced by the new conflict banner showing the
+  status code prominently. Aligns with kubectl's behavior on the
+  same response shape.
+
+- **Apply error banner extracts `Status.message` from the apiserver
+  response body.** Previously the entire `{"kind":"Status",...}` JSON
+  envelope rendered as the banner message, burying the human-readable
+  sentence inside. New behavior parses the body, extracts `.message`,
+  and falls back to raw bodyText if it isn't a parseable Status (no
+  information hidden for proxy-rewritten or unfamiliar shapes).
+
+### Internal
+
+- Single state machine (`useApplyState` reducer) owns the entire
+  apply lifecycle: `Idle / DryRunning / Submitting / ForceRequired /
+  Forcing / Error / Success`. 38 transition tests, exhaustive.
+- Side effects (`api.applyResource` calls, AbortController, dry-run
+  auto-clear timer) live in one hook (`useApplyLifecycle`).
+  Components dispatch actions; nobody calls `useReducer`'s dispatch
+  directly.
+- `ActionBar` and `ConflictBanner` are pure views; their render
+  shape derives from `actionBarViewModel` / `bannerViewModel` —
+  tested without React via 11 + 13 unit tests respectively.
+- `YamlEditor.tsx` drops from ~1290 to ~960 lines; state shards go
+  from 5 (`mode`, `applyState`, `conflicts`, `resolutions`,
+  `showTakeover`) to 1 (`lifecycle.state`).
+
+No Helm values, cluster-registry config, or HTTP API shapes
+changed. Upgrading from v1.1.1 → v1.1.2 is a straight image swap;
+no operator action required.
+
 ## [1.1.1] - 2026-05-19
 
 ### Fixed

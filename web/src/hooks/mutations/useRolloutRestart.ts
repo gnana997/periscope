@@ -10,15 +10,12 @@
 // counts as the rollout progresses; the existing list-poll picks up
 // the cascade pod churn within ~15s (issue #4).
 
-import { ApiError, api, type YamlKind } from "../../lib/api";
+import { ApiError, type YamlKind } from "../../lib/api";
 import { KIND_REGISTRY } from "../../lib/k8sKinds";
 import { queryKeys } from "../../lib/queryKeys";
-import { type Identity, type Op } from "../../lib/yamlPatch";
+import { buildMinimalSSA, type Identity, type Op } from "../../lib/yamlPatch";
 import { useOptimisticMutation } from "./_useOptimistic";
-import {
-  applyWithLenientConflictRetained,
-  fetchCurrentYamlForKind,
-} from "./_applyWithLenientConflict";
+import { applyWithLenientConflict } from "./_applyWithLenientConflict";
 
 export type RestartableKind = "deployments" | "statefulsets" | "daemonsets";
 
@@ -91,23 +88,15 @@ export function useRolloutRestart(args: RestartArgs) {
           value: new Date().toISOString(),
         },
       ];
-      const [current, resourceMeta] = await Promise.all([
-        fetchCurrentYamlForKind(args.cluster, args.kind, args.namespace, args.name),
-        api.getMeta({
-          cluster: args.cluster,
-          group: meta.group,
-          version: meta.version,
-          resource: meta.resource,
-          namespace: args.namespace,
-          name: args.name,
-        }),
-      ]);
+      // Pure minimal-diff SSA (issue #224): apply body is identity +
+      // the restartedAt annotation only. No managedFields prefetch.
+      const yaml = buildMinimalSSA(ops, identity);
       // Lenient SSA — kubectl-rollout (HUMAN) commonly owns this
       // annotation; the wrapper auto-takes-over on the second attempt.
       // GitOps-managed workloads now surface a classified error
       // ("Flux will revert in <5 min") instead of writing the
       // annotation only for it to be silently reverted on reconcile.
-      return applyWithLenientConflictRetained(
+      return applyWithLenientConflict(
         {
           cluster: args.cluster,
           group: meta.group,
@@ -115,10 +104,7 @@ export function useRolloutRestart(args: RestartArgs) {
           resource: meta.resource,
           namespace: args.namespace,
           name: args.name,
-          identity,
-          ops,
-          current,
-          managedFields: resourceMeta.managedFields,
+          yaml,
         },
         "rollout restart",
       );

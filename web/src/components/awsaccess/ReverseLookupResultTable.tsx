@@ -26,6 +26,12 @@ export function ReverseLookupResultTable({
 }: ReverseLookupResultTableProps) {
   const parentRef = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
+  // TanStack Virtual returns fresh closures every render (the
+  // getScrollElement / estimateSize callbacks close over parentRef /
+  // rows). React Compiler correctly skips memoizing this component
+  // as a result. Suppressing the lint warning since the behavior is
+  // by-design — not a bug we want flagged on every CI run.
+  // eslint-disable-next-line react-hooks/incompatible-library
   const rowVirt = useVirtualizer({
     count: rows.length,
     getScrollElement: () => parentRef.current,

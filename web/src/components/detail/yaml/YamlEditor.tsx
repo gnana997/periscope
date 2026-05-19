@@ -30,7 +30,7 @@ import * as monaco from "monaco-editor";
 import { useQueryClient } from "@tanstack/react-query";
 import { useBlocker, useSearchParams } from "react-router-dom";
 
-import { ApiError, api, type ResourceMeta, type ResourceRef } from "../../../lib/api";
+import { type ResourceMeta, type ResourceRef } from "../../../lib/api";
 import {
   type EditorSource,
   dirtyChannelKey,
@@ -48,11 +48,7 @@ import {
 import { describeDrift } from "../../../lib/drift";
 import { stripForEdit } from "../../../lib/stripForEdit";
 import { classifyManager } from "../../../lib/managers";
-import {
-  parseManagedFields,
-  pathToManager,
-  normalizeStatusFieldPath,
-} from "../../../lib/managedFields";
+import { parseManagedFields, pathToManager } from "../../../lib/managedFields";
 import { pathForLine } from "../../../lib/yamlPath";
 import {
   MONACO_FONT_FAMILY,
@@ -64,29 +60,18 @@ import {
 } from "../../../lib/monacoSetup";
 import { useOpenAPISchema, useResourceMeta, useEditorYaml } from "../../../hooks/useResource";
 import { usePublishEditorDirty } from "../../../hooks/useEditorDirty";
-import {
-  computeOps,
-  MultiDocumentError,
-  YamlParseError,
-  type Identity,
-  type Op,
-} from "../../../lib/yamlPatch";
-import {
-  buildRetainedOwnershipBody,
-  buildRetainedOwnershipBodyFromOps,
-  ManagedFieldsUnavailableError,
-} from "../../../lib/applyBodyBuilder";
-import { ActionBar, type ApplyState } from "./ActionBar";
+import { computeOps, type Identity, type Op } from "../../../lib/yamlPatch";
+import { useApplyLifecycle } from "../../../hooks/useApplyLifecycle";
+import { ActionBar } from "./ActionBar";
 import { ProblemsStrip } from "./ProblemsStrip";
-import { ApplyErrorBanner } from "./ApplyErrorBanner";
+import { ConflictBanner } from "./ConflictBanner";
+import { bannerViewModel } from "./conflictBannerViewModel";
 import { SchemaMissingBanner } from "./SchemaMissingBanner";
 import { DriftBanner } from "./DriftBanner";
 import { CoManagementBanner, type OtherOwnerSummary } from "./CoManagementBanner";
 import { useDismissed } from "../../../hooks/useDismissed";
 import { DriftDiffOverlay } from "./DriftDiffOverlay";
 import { showToast } from "../../../lib/toastBus";
-import { ConflictResolutionView, type FieldConflict, type Resolution } from "./ConflictResolutionView";
-import { TakeoverDialog } from "./TakeoverDialog";
 import { InlineDiff } from "./InlineDiff";
 import { PatchPreviewDrawer } from "./PatchPreviewDrawer";
 import { DetailError, DetailLoading } from "../states";
@@ -182,7 +167,6 @@ function Editor({
   const containerRef = useRef<HTMLDivElement | null>(null);
   const editorRef = useRef<monaco.editor.IStandaloneCodeEditor | null>(null);
   const [pristineLocked, setPristineLocked] = useState(pristine);
-  const abortRef = useRef<AbortController | null>(null);
   const [, setParams] = useSearchParams();
 
   // Initial Monaco value is `initialValue` (which defaults to
@@ -198,14 +182,10 @@ function Editor({
   useEffect(() => {
     onValueChangeRef.current = onValueChange;
   }, [onValueChange]);
-  const [mode, setMode] = useState<"edit" | "diff" | "conflict">("edit");
-  const [applyState, setApplyState] = useState<ApplyState>({ kind: "idle" });
+  const [mode, setMode] = useState<"edit" | "diff">("edit");
   const [errorCount, setErrorCount] = useState(0);
   const [firstError, setFirstError] = useState<{ message: string; line: number } | null>(null);
   const [showPatch, setShowPatch] = useState(false);
-  const [conflicts, setConflicts] = useState<FieldConflict[]>([]);
-  const [resolutions, setResolutions] = useState<Map<string, Resolution>>(new Map());
-  const [showTakeover, setShowTakeover] = useState(false);
   const ownerDecorationsRef = useRef<string[]>([]);
   const [patchDrawerWidth, setPatchDrawerWidth] = useState<number>(() => {
     if (typeof window === "undefined") return 420;
@@ -315,6 +295,30 @@ function Editor({
   );
 
   const qc = useQueryClient();
+
+  // ----- Apply lifecycle (issue #224) -----
+  // Single reducer owns the entire apply lifecycle: dry-run, submit,
+  // force-after-conflict, success, error. The hook owns side effects
+  // (api.applyResource calls, AbortController, dry-run auto-clear
+  // timer). YamlEditor consumes `lifecycle.state` and dispatches via
+  // the action callbacks; it never holds applyState locally.
+  const lifecycle = useApplyLifecycle({
+    resource,
+    baseline: pristineLocked,
+    draft: currentYaml,
+    identity,
+    onCommitSuccess: async () => {
+      // Awaited so the post-apply refetch lands before the editor
+      // unmounts — YamlReadView then opens to fresh data without
+      // the prior 400ms race-mitigation timeout.
+      await invalidateAfterApply(qc, source, resource);
+      setParams((prev) => {
+        const next = new URLSearchParams(prev);
+        next.delete("edit");
+        return next;
+      }, { replace: true });
+    },
+  });
 
   // ----- Drift detection (Phase 3) -----
   // pristineMeta is the meta the user mounted against. As metaQuery
@@ -439,62 +443,6 @@ function Editor({
       queueMicrotask(() => editor.setPosition(pos));
     }
   }, [pristine, dirty, pristineLocked, metaQuery.data]);
-
-  // ----- Conflict / glyph helpers -----
-
-  // opPathToString matches the dotted form pathForLine emits:
-  //   spec.containers[name=nginx].image
-  // (no leading dot, brackets glued to parent).
-  const opPathToString = useCallback((segments: Op["path"]): string => {
-    const parts: string[] = [];
-    for (const seg of segments) {
-      if (typeof seg === "string") parts.push(seg);
-      else if ("idx" in seg) parts.push(`[${seg.idx}]`);
-      else {
-        const [k, v] = Object.entries(seg)[0];
-        parts.push(`[${k}=${v}]`);
-      }
-    }
-    return parts.join(".").replace(/\.\[/g, "[");
-  }, []);
-
-  // parseConflictCauses extracts field-level conflicts from a 409
-  // Status response. Apiserver shape:
-  //   { details: { causes: [{ reason, message: 'conflict with "X" using ...', field: ".spec.replicas" }] } }
-  const parseConflictCauses = useCallback(
-    (bodyText: string | undefined, currentOps: Op[]): FieldConflict[] => {
-      if (!bodyText) return [];
-      let parsed: unknown;
-      try {
-        parsed = JSON.parse(bodyText);
-      } catch {
-        return [];
-      }
-      const status = parsed as { details?: { causes?: Array<{ reason?: string; message?: string; field?: string }> } };
-      const causes = status?.details?.causes;
-      if (!Array.isArray(causes)) return [];
-
-      const out: FieldConflict[] = [];
-      for (const cause of causes) {
-        if (cause.reason !== "FieldManagerConflict") continue;
-        const path = normalizeStatusFieldPath(cause.field ?? "");
-        const m = (cause.message ?? "").match(/conflict with "([^"]+)"/);
-        const manager = m ? m[1] : "unknown";
-        // Pull "mine" value from the current ops list if we have it.
-        let mine: string | undefined;
-        for (const op of currentOps) {
-          if (opPathToString(op.path) === path && (op.op === "replace" || op.op === "add")) {
-            mine = String((op as { value: unknown }).value);
-            break;
-          }
-        }
-        out.push({ path, manager, mine });
-      }
-      return out;
-    },
-    [opPathToString],
-  );
-
 
   // Editor mount — create model with cluster-scoped URI so monaco-yaml's
   // fileMatch can route validation correctly when the schema arrives.
@@ -731,110 +679,11 @@ function Editor({
   }, [currentYaml, pristine]);
 
 
-  // Apply orchestration. force=false on the first attempt; ConflictBanner
-  // calls back with force=true when the user opts in.
-  const runApply = useCallback(
-    async (force: boolean) => {
-      if (!identity) return;
-      const ops = opsForCurrentBuffer();
-      if (ops.length === 0) return;
-
-      let body: string;
-      try {
-        // pristineLocked is reused as `current`: on a clean buffer the
-        // pristine-swap effect keeps it pinned to the latest server
-        // YAML; on a dirty buffer the user has explicitly chosen to
-        // ignore drift, so re-asserting whatever they last had is the
-        // safest behavior. A dedicated current-state query is a
-        // deferrable optimization (#181).
-        ({ yaml: body } = buildRetainedOwnershipBody({
-          baseline: pristineLocked,
-          draft: currentYaml,
-          current: pristineLocked,
-          identity,
-          managedFields: metaQuery.data?.managedFields ?? null,
-        }));
-      } catch (e) {
-        if (e instanceof ManagedFieldsUnavailableError) {
-          setApplyState({
-            kind: "error",
-            message: "Ownership info is still loading — try again in a moment.",
-          });
-          return;
-        }
-        if (e instanceof MultiDocumentError || e instanceof YamlParseError) {
-          setApplyState({ kind: "error", message: (e as Error).message });
-          return;
-        }
-        throw e;
-      }
-
-      // Cancel any prior in-flight apply
-      abortRef.current?.abort();
-      const ac = new AbortController();
-      abortRef.current = ac;
-
-      const args = {
-        cluster: resource.cluster,
-        group: resource.group,
-        version: resource.version,
-        resource: resource.resource,
-        namespace: resource.namespace,
-        name: resource.name,
-        yaml: body,
-      };
-
-      try {
-        setApplyState({ kind: "dryRunning" });
-        await api.applyResource({ ...args, dryRun: true, force }, ac.signal);
-        setApplyState({ kind: "applying" });
-        await api.applyResource({ ...args, dryRun: false, force }, ac.signal);
-        setApplyState({ kind: "success" });
-
-        // Awaited so the post-apply refetch lands before the editor
-        // unmounts — YamlReadView then opens to fresh data without
-        // the prior 400ms race-mitigation timeout.
-        await invalidateAfterApply(qc, source, resource);
-        setParams((prev) => {
-          const next = new URLSearchParams(prev);
-          next.delete("edit");
-          return next;
-        }, { replace: true });
-      } catch (e) {
-        if (ac.signal.aborted) return;
-        const apiErr = e instanceof ApiError ? e : null;
-        const status = apiErr?.status;
-        const message = apiErr?.bodyText || (e as Error)?.message || "apply failed";
-        if (status === 409) {
-          // Phase 2: parse field-level conflicts. If we got at least
-          // one cause we recognise, switch to the resolution view.
-          // If parsing fails (older apiserver, weird response shape),
-          // fall back to the generic error chip.
-          const parsed = parseConflictCauses(apiErr?.bodyText, ops);
-          if (parsed.length > 0) {
-            setConflicts(parsed);
-            setResolutions(new Map());
-            setApplyState({ kind: "idle" });
-            setMode("conflict");
-            return;
-          }
-        }
-        setApplyState({ kind: "error", message });
-      }
-    },
-    // ops captured intentionally — we want the snapshot at apply time, not
-    // the latest after the user edits while waiting for the response
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [identity, opsForCurrentBuffer, resource, cluster, source, qc, setParams, parseConflictCauses, ops, pristineLocked, currentYaml, metaQuery.data],
-  );
-
-  // Apply with per-field resolutions from ConflictResolutionView. Filter
-  // out ops the user chose to "revert" (those won't be sent — apiserver
-  // keeps the manager's value), then apply with force=true if any
-  // remaining ops were "keep mine" (we're seizing ownership of those).
-  // Cancel — drops ?edit=1 (and aborts any running apply)
+  // Apply / dry-run / force / cancel are all owned by useApplyLifecycle
+  // (declared above near qc). The editor's onCancel additionally drops
+  // ?edit=1 from the URL after telling the lifecycle to cancel.
   const onCancel = useCallback(() => {
-    abortRef.current?.abort();
+    lifecycle.cancel();
     setParams(
       (prev) => {
         const next = new URLSearchParams(prev);
@@ -843,155 +692,7 @@ function Editor({
       },
       { replace: true },
     );
-  }, [setParams]);
-
-  const runApplyResolved = useCallback(async () => {
-    if (!identity) return;
-    const allOps = opsForCurrentBuffer();
-
-    // Filter: drop revert-mine fields from the patch entirely.
-    const filteredOps = allOps.filter((op) => {
-      const p = opPathToString(op.path);
-      return resolutions.get(p) !== "revert";
-    });
-
-    // If everything was reverted, there's nothing to send. Treat as
-    // "user is done" and drop ?edit=1 (no-op apply).
-    if (filteredOps.length === 0) {
-      onCancel();
-      return;
-    }
-
-    let body: string;
-    try {
-      // FromOps variant: we've already filtered the user-edit ops by
-      // `resolutions` above, so we don't want the builder to redo the
-      // baseline/draft diff. excludePriorOwned mirrors the same revert
-      // semantics on the retained-ownership side — paths the operator
-      // released stay released across both ops.
-      ({ yaml: body } = buildRetainedOwnershipBodyFromOps({
-        ops: filteredOps,
-        current: pristineLocked,
-        identity,
-        managedFields: metaQuery.data?.managedFields ?? null,
-        excludePriorOwned: (p) => resolutions.get(p) === "revert",
-      }));
-    } catch (e) {
-      if (e instanceof ManagedFieldsUnavailableError) {
-        setApplyState({
-          kind: "error",
-          message: "Ownership info is still loading — try again in a moment.",
-        });
-        return;
-      }
-      setApplyState({ kind: "error", message: (e as Error).message });
-      return;
-    }
-
-    abortRef.current?.abort();
-    const ac = new AbortController();
-    abortRef.current = ac;
-
-    const args = {
-      cluster: resource.cluster,
-      group: resource.group,
-      version: resource.version,
-      resource: resource.resource,
-      namespace: resource.namespace,
-      name: resource.name,
-      yaml: body,
-    };
-    const force = [...resolutions.values()].some((r) => r === "keep");
-
-    try {
-      setApplyState({ kind: "applying" });
-      await api.applyResource({ ...args, dryRun: false, force }, ac.signal);
-      setApplyState({ kind: "success" });
-      await invalidateAfterApply(qc, source, resource);
-      setShowTakeover(false);
-      setConflicts([]);
-      setResolutions(new Map());
-      setParams((prev) => {
-        const next = new URLSearchParams(prev);
-        next.delete("edit");
-        return next;
-      }, { replace: true });
-    } catch (e) {
-      if (ac.signal.aborted) return;
-      const apiErr = e instanceof ApiError ? e : null;
-      const message = apiErr?.bodyText || (e as Error)?.message || "apply failed";
-      setApplyState({ kind: "error", message });
-      setShowTakeover(false);
-    }
-  }, [identity, opsForCurrentBuffer, resolutions, opPathToString, resource, source, qc, setParams, onCancel, pristineLocked, metaQuery.data]);
-
-  // Standalone dry-run (the "dry-run" button in ActionBar). Same 409
-  // handling as runApply — if the dry-run hits a field-manager
-  // conflict, populate conflicts state + switch to ConflictResolutionView
-  // so the user can resolve per-field. Without this, dry-run 409 used
-  // to fall through to the generic ApplyErrorBanner with raw text.
-  const runDryRun = useCallback(async () => {
-    if (!identity) return;
-    const currentOps = opsForCurrentBuffer();
-    if (currentOps.length === 0) return;
-    let body: string;
-    try {
-      ({ yaml: body } = buildRetainedOwnershipBody({
-        baseline: pristineLocked,
-        draft: currentYaml,
-        current: pristineLocked,
-        identity,
-        managedFields: metaQuery.data?.managedFields ?? null,
-      }));
-    } catch (e) {
-      if (e instanceof ManagedFieldsUnavailableError) {
-        setApplyState({
-          kind: "error",
-          message: "Ownership info is still loading — try again in a moment.",
-        });
-        return;
-      }
-      setApplyState({ kind: "error", message: (e as Error).message });
-      return;
-    }
-    abortRef.current?.abort();
-    const ac = new AbortController();
-    abortRef.current = ac;
-    try {
-      setApplyState({ kind: "dryRunning" });
-      await api.applyResource(
-        {
-          cluster: resource.cluster,
-          group: resource.group,
-          version: resource.version,
-          resource: resource.resource,
-          namespace: resource.namespace,
-          name: resource.name,
-          yaml: body,
-          dryRun: true,
-        },
-        ac.signal,
-      );
-      setApplyState({ kind: "success" });
-      setTimeout(() => setApplyState({ kind: "idle" }), 1500);
-    } catch (e) {
-      if (ac.signal.aborted) return;
-      const apiErr = e instanceof ApiError ? e : null;
-      const status = apiErr?.status;
-      const message = apiErr?.bodyText || (e as Error)?.message || "dry-run failed";
-      if (status === 409) {
-        const parsed = parseConflictCauses(apiErr?.bodyText, currentOps);
-        if (parsed.length > 0) {
-          setConflicts(parsed);
-          setResolutions(new Map());
-          setApplyState({ kind: "idle" });
-          setMode("conflict");
-          return;
-        }
-      }
-      setApplyState({ kind: "error", message });
-    }
-  }, [identity, opsForCurrentBuffer, resource, parseConflictCauses, pristineLocked, currentYaml, metaQuery.data]);
+  }, [lifecycle, setParams]);
 
 
 
@@ -1041,7 +742,7 @@ function Editor({
     const cmdEnter = editor.addCommand(
       monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter,
       () => {
-        void runApply(false);
+        lifecycle.submit();
       },
     );
     const cmdShiftD = editor.addCommand(
@@ -1056,18 +757,22 @@ function Editor({
       void cmdEnter;
       void cmdShiftD;
     };
-  }, [runApply]);
+  }, [lifecycle]);
 
   // Esc handler at the window level (Monaco's editor consumes Esc only
   // when widgets are open).
   useEffect(() => {
     function onKey(e: globalThis.KeyboardEvent) {
-      if (e.key === "Escape" && applyState.kind !== "applying" && applyState.kind !== "dryRunning") {
+      const busy =
+        lifecycle.state.kind === "DryRunning" ||
+        lifecycle.state.kind === "Submitting" ||
+        lifecycle.state.kind === "Forcing";
+      if (e.key === "Escape" && !busy) {
         if (showPatch) {
           setShowPatch(false);
           return;
         }
-        if (mode === "diff" || mode === "conflict") {
+        if (mode === "diff") {
           setMode("edit");
           return;
         }
@@ -1076,7 +781,7 @@ function Editor({
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [applyState.kind, mode, showPatch, onCancel]);
+  }, [lifecycle.state.kind, mode, showPatch, onCancel]);
 
   const onJumpToError = useCallback(() => {
     if (errorCount === 0) return;
@@ -1127,54 +832,14 @@ function Editor({
     !coManagementDismissed &&
     coManagement.otherOwners.length > 0;
 
+  // Banner view model derived from the unified lifecycle state. The
+  // banner renders nothing in Idle / Submitting / DryRunning / Success;
+  // it covers ForceRequired, Forcing, and Error.
+  const banner = bannerViewModel(lifecycle.state);
+
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-col">
-      {mode === "conflict" ? (
-        <ConflictResolutionView
-          conflicts={conflicts}
-          resolutions={resolutions}
-          onResolve={(path, choice) => {
-            setResolutions((prev) => {
-              const next = new Map(prev);
-              if (choice === null) next.delete(path);
-              else next.set(path, choice);
-              return next;
-            });
-          }}
-          onJumpTo={(path) => {
-            // Drop into edit mode, focus the first line whose path matches.
-            setMode("edit");
-            const editor = editorRef.current;
-            if (!editor) return;
-            const model = editor.getModel();
-            if (!model) return;
-            for (let i = 1; i <= model.getLineCount(); i++) {
-              if (pathForLine(model, i) === path) {
-                editor.revealLineInCenter(i);
-                editor.setPosition({ lineNumber: i, column: 1 });
-                editor.focus();
-                return;
-              }
-            }
-          }}
-          onBackToEdit={() => {
-            setMode("edit");
-            setApplyState({ kind: "idle" });
-          }}
-          onApply={() => {
-            // If any field is "keep mine", show takeover dialog first.
-            const anyKeep = [...resolutions.values()].some((r) => r === "keep");
-            if (anyKeep) {
-              setShowTakeover(true);
-            } else {
-              void runApplyResolved();
-            }
-          }}
-          busy={applyState.kind === "applying" || applyState.kind === "dryRunning"}
-        />
-      ) : null}
-
-      <div className={cn("relative flex min-h-0 min-w-0 flex-1", mode === "conflict" && "hidden")}>
+      <div className="relative flex min-h-0 min-w-0 flex-1">
         <div className={cn("relative min-h-0 min-w-0 flex-1", mode === "diff" && "hidden")}>
           <div ref={containerRef} className="h-full min-h-0" />
         </div>
@@ -1207,10 +872,10 @@ function Editor({
         )}
       </div>
 
-      {drift && dirty && mode !== "conflict" && (
+      {drift && dirty && (
         <DriftBanner
           drift={drift}
-          busy={applyState.kind === "dryRunning" || applyState.kind === "applying"}
+          busy={lifecycle.state.kind === "DryRunning" || lifecycle.state.kind === "Submitting" || lifecycle.state.kind === "Forcing"}
           onShowDiff={onDriftShowDiff}
           onReload={onDriftReload}
           onDismiss={onDriftDismiss}
@@ -1242,12 +907,16 @@ function Editor({
         <SchemaMissingBanner kindLabel={gvk?.kind} />
       )}
 
-      {applyState.kind === "error" && mode !== "conflict" && (
-        <ApplyErrorBanner
-          message={applyState.message}
-          onDismiss={() => setApplyState({ kind: "idle" })}
-        />
-      )}
+      {/* Single conflict / error banner overlay (issue #224). Replaces
+          the v1.1.x ConflictResolutionView + TakeoverDialog + raw
+          ApplyErrorBanner combo. */}
+      <ConflictBanner
+        view={banner}
+        onForce={lifecycle.force}
+        onCancel={lifecycle.cancel}
+        onRetry={lifecycle.retry}
+        onDismiss={lifecycle.dismiss}
+      />
 
       <ProblemsStrip
         errorCount={errorCount}
@@ -1259,30 +928,16 @@ function Editor({
         opsCount={ops.length}
         errorCount={errorCount}
         dirty={dirty}
-        applyState={applyState}
+        applyState={lifecycle.state}
         schemaLabel={schemaLabel}
         schemaState={schemaState}
-        metaPending={metaQuery.isPending}
         onCancel={onCancel}
         onTogglePatch={() => setShowPatch((s) => !s)}
-        onDryRun={() => void runDryRun()}
+        onDryRun={lifecycle.dryRun}
         onToggleDiff={() => setMode((m) => (m === "diff" ? "edit" : "diff"))}
-        onApply={() => void runApply(false)}
+        onApply={lifecycle.submit}
         onJumpToError={onJumpToError}
       />
-
-      {showTakeover && (
-        <TakeoverDialog
-          fields={conflicts
-            .filter((c) => resolutions.get(c.path) === "keep")
-            .map((c) => ({ path: c.path, manager: c.manager }))}
-          onCancel={() => setShowTakeover(false)}
-          onConfirm={() => {
-            setShowTakeover(false);
-            void runApplyResolved();
-          }}
-        />
-      )}
     </div>
   );
 }

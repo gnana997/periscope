@@ -4,18 +4,15 @@
 // completes; both the detail cache and any loaded list caches are
 // updated.
 
-import { ApiError, api } from "../../lib/api";
+import { ApiError } from "../../lib/api";
 import { KIND_REGISTRY } from "../../lib/k8sKinds";
 import { queryKeys } from "../../lib/queryKeys";
-import { type Identity, type Op } from "../../lib/yamlPatch";
+import { buildMinimalSSA, type Identity, type Op } from "../../lib/yamlPatch";
 import { patchRowInList } from "../../lib/listShape";
 import type { ResourceListResponse } from "../../lib/types";
 import type { QueryKey } from "@tanstack/react-query";
 import { useOptimisticMutation } from "./_useOptimistic";
-import {
-  applyWithLenientConflictRetained,
-  fetchCurrentYamlForKind,
-} from "./_applyWithLenientConflict";
+import { applyWithLenientConflict } from "./_applyWithLenientConflict";
 
 interface ToggleSuspendArgs {
   cluster: string;
@@ -92,18 +89,10 @@ export function useToggleSuspend(args: ToggleSuspendArgs) {
       const ops: Op[] = [
         { op: "replace", path: ["spec", "suspend"], value: vars.suspend },
       ];
-      const [current, resourceMeta] = await Promise.all([
-        fetchCurrentYamlForKind(args.cluster, "cronjobs", args.namespace, args.name),
-        api.getMeta({
-          cluster: args.cluster,
-          group: meta.group,
-          version: meta.version,
-          resource: meta.resource,
-          namespace: args.namespace,
-          name: args.name,
-        }),
-      ]);
-      return applyWithLenientConflictRetained(
+      // Pure minimal-diff SSA (issue #224): apply body is identity +
+      // spec.suspend only.
+      const yaml = buildMinimalSSA(ops, identity);
+      return applyWithLenientConflict(
         {
           cluster: args.cluster,
           group: meta.group,
@@ -111,10 +100,7 @@ export function useToggleSuspend(args: ToggleSuspendArgs) {
           resource: meta.resource,
           namespace: args.namespace,
           name: args.name,
-          identity,
-          ops,
-          current,
-          managedFields: resourceMeta.managedFields,
+          yaml,
         },
         "suspend toggle",
       );

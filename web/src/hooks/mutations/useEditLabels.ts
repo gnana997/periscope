@@ -6,15 +6,22 @@
 // patched (some pages derive filter chips from labels and rebuilding
 // those derivations correctly in the optimistic phase is fragile).
 
-import { ApiError, api, type YamlKind } from "../../lib/api";
+import { ApiError, type YamlKind } from "../../lib/api";
 import { KIND_REGISTRY } from "../../lib/k8sKinds";
 import { queryKeys } from "../../lib/queryKeys";
-import { type Identity, type Op } from "../../lib/yamlPatch";
+import { buildMinimalSSA, type Identity, type Op } from "../../lib/yamlPatch";
 import { useOptimisticMutation } from "./_useOptimistic";
-import {
-  applyWithLenientConflictRetained,
-  fetchCurrentYamlForKind,
-} from "./_applyWithLenientConflict";
+import { applyWithLenientConflict } from "./_applyWithLenientConflict";
+
+// TODO(#224 follow-up): the current contract takes a whole new labels
+// map and replaces metadata.labels wholesale. Under SSA per-key
+// ownership this means periscope-spa claims every key in vars.labels,
+// including labels the user didn't actually touch (e.g. Helm's
+// app.kubernetes.io/* labels that the modal pre-populated from the
+// resource). Pre-existing behavior — retained-ownership had the same
+// creep — but worth fixing as a separate change: take {before, after}
+// and emit per-key add/replace/remove ops so periscope-spa only claims
+// the keys the operator actually changed.
 
 interface EditLabelsArgs {
   cluster: string;
@@ -76,18 +83,11 @@ export function useEditLabels(args: EditLabelsArgs) {
       const ops: Op[] = [
         { op: "replace", path: ["metadata", "labels"], value: vars.labels },
       ];
-      const [current, resourceMeta] = await Promise.all([
-        fetchCurrentYamlForKind(args.cluster, args.kind, args.namespace, args.name),
-        api.getMeta({
-          cluster: args.cluster,
-          group: meta.group,
-          version: meta.version,
-          resource: meta.resource,
-          namespace: args.namespace || undefined,
-          name: args.name,
-        }),
-      ]);
-      return applyWithLenientConflictRetained(
+      // Pure minimal-diff SSA (issue #224): apply body is identity +
+      // metadata.labels only. See TODO at the top of the file for the
+      // per-key diff follow-up.
+      const yaml = buildMinimalSSA(ops, identity);
+      return applyWithLenientConflict(
         {
           cluster: args.cluster,
           group: meta.group,
@@ -95,10 +95,7 @@ export function useEditLabels(args: EditLabelsArgs) {
           resource: meta.resource,
           namespace: args.namespace || undefined,
           name: args.name,
-          identity,
-          ops,
-          current,
-          managedFields: resourceMeta.managedFields,
+          yaml,
         },
         "update labels",
       );
