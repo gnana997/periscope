@@ -54,3 +54,38 @@ export function useKarpenter(cluster: string) {
     },
   });
 }
+
+// useKarpenterAvailability — lightweight CRD-presence probe used by
+// the sidebar to decide whether to render the Karpenter nav entry.
+// Backed by /api/clusters/{c}/karpenter/availability, which is NOT
+// audited (split off in v1.1.1 so per-page-mount sidebar probes
+// don't flood the audit log with `karpenter_read` rows that don't
+// reflect operator-intent action).
+//
+// Longer staleTime than useKarpenter — CRD presence flips rarely
+// (chart install / uninstall), so the sidebar can trust a stale
+// cache for minutes without missing operator-visible transitions.
+const AVAILABILITY_STALE_MS = 5 * 60 * 1000;
+
+export function useKarpenterAvailability(cluster: string) {
+  return useQuery<{ available: boolean }>({
+    queryKey: queryKeys.cluster(cluster).karpenterAvailability(),
+    queryFn: cluster
+      ? ({ signal }) => api.karpenterAvailability(cluster, signal)
+      : skipToken,
+    staleTime: AVAILABILITY_STALE_MS,
+    // No refetchInterval — CRD presence is not a polling concern.
+    retry: (count, err) => {
+      if (
+        err &&
+        typeof err === "object" &&
+        "status" in err &&
+        ((err as { status: number }).status >= 400 &&
+          (err as { status: number }).status < 500)
+      ) {
+        return false;
+      }
+      return count < 1;
+    },
+  });
+}

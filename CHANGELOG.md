@@ -57,6 +57,35 @@ tag.
   is tracked as RFC 0005 (`docs/rfcs/0005-drop-retained-ownership.md`)
   and ships as **v1.1.2**.
 
+- **Karpenter sidebar probe no longer floods the audit log with
+  `karpenter_read` rows on clusters without Karpenter.** Previously,
+  the SPA's `KarpenterSidebarEntry` fired `GET /api/clusters/{c}/karpenter`
+  on every cluster page mount (not just when an operator opened the
+  dashboard) to decide whether to render the sidebar nav link. The
+  handler emitted an audit row on every call, including its
+  `available_false` auto-detect short-circuit, producing a stream
+  of `karpenter_read` rows that obscured real operator-intent actions
+  in the `/audit` view. Symmetric audit noise existed on
+  Karpenter-installed clusters via the `list` op.
+
+  **Fix**: the sidebar's CRD-presence probe is split into a separate
+  endpoint, `GET /api/clusters/{c}/karpenter/availability`, that
+  returns `{available: bool}` without emitting an audit row. The
+  full `/karpenter` dashboard endpoint retains its existing audit
+  emission, which now fires only on intentional operator navigation
+  to the dashboard. The SPA-side hook `useKarpenter` is split into
+  `useKarpenter` (dashboard, full data + audit) and
+  `useKarpenterAvailability` (sidebar, lightweight + unaudited).
+
+  Operator-visible: `/audit` now shows only real actions
+  (`apply`, `delete`, `secret_reveal`, etc.) plus genuine Karpenter
+  dashboard views. Pre-v1.1.1 audit rows tagged `karpenter_read`
+  with `op: "available_false"` from sidebar probes will remain in
+  the historical log; new rows post-upgrade will not be created.
+
+  API addition is purely additive: existing `/karpenter` callers
+  see no change. No Helm values or cluster-registry config changes.
+
 ## [1.1.0] - 2026-05-16
 
 ### Added

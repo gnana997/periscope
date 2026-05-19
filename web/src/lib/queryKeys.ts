@@ -113,6 +113,13 @@ export const queryKeys = {
     // NodePools / NodeClaims / pending pods / metrics — invalidating
     // any of those means re-fetching the whole shape, so one key.
     karpenter: () => ["cluster", c, "karpenter"] as const,
+    // CRD-presence probe used by the sidebar to decide whether to
+    // render the Karpenter nav entry. Separate from `karpenter()`
+    // above because it hits a different (lightweight, unaudited)
+    // endpoint and has its own (longer) staleTime — see v1.1.1
+    // split in karpenter_handler.go and useKarpenterAvailability.
+    karpenterAvailability: () =>
+      ["cluster", c, "karpenter", "availability"] as const,
 
     // EKS managed node groups (issue #103). Drift fields share the
     // same query subtree because the data is computed on the same

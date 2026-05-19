@@ -1116,11 +1116,25 @@ export const api = {
   /** Karpenter dashboard (issue #118) — single GET joining
    *  NodePools + NodeClaims + pending pods + price metrics.
    *  Returns `{available: false}` immediately on clusters without
-   *  karpenter.sh/v1 CRDs (no 422 — the SPA gates the sidebar entry
-   *  on the boolean field, not the status code). */
+   *  karpenter.sh/v1 CRDs (no 422 — the dashboard page gates on
+   *  the boolean field, not the status code). Audited on every
+   *  call; intended for the dashboard page only. The sidebar uses
+   *  `karpenterAvailability` instead. */
   karpenter: (cluster: string, signal?: AbortSignal) =>
     getJSON<KarpenterDashboard>(
       `/api/clusters/${enc(cluster)}/karpenter`,
+      signal,
+    ),
+
+  /** Karpenter availability probe (v1.1.1 split) — lightweight
+   *  `{available: bool}` check based on the karpenter.sh/v1 CRD
+   *  presence. NOT audited: this fires on every cluster page mount
+   *  from the sidebar, and auditing those incidental probes would
+   *  flood the audit log. Use this from sidebar / nav-rendering
+   *  paths; use `karpenter` from the dashboard page itself. */
+  karpenterAvailability: (cluster: string, signal?: AbortSignal) =>
+    getJSON<{ available: boolean }>(
+      `/api/clusters/${enc(cluster)}/karpenter/availability`,
       signal,
     ),
 
