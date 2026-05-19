@@ -332,3 +332,121 @@ func TestKarpenterHandler_ClusterNotFoundReturns404(t *testing.T) {
 		t.Errorf("status = %d, want 404", rec.Code)
 	}
 }
+
+// ─── availability probe (v1.1.1 split) ───────────────────────────────────────
+
+func TestKarpenterAvailabilityHandler_NotInstalledNoAudit(t *testing.T) {
+	withKarpenterSeams(t, karpenterFakes{
+		IsInstalled: func(_ context.Context, _ credentials.Provider, _ clusters.Cluster) (bool, error) {
+			return false, nil
+		},
+		BuildClients: func(_ context.Context, _ credentials.Provider, _ clusters.Cluster) (kubernetes.Interface, dynamic.Interface, error) {
+			t.Fatal("BuildClients must not be called by the availability probe")
+			return nil, nil, nil
+		},
+	})
+
+	reg := testRegistry(t)
+	rec, sink := actionHandlerInvoke(t,
+		func(_ *audit.Emitter) credentials.Handler {
+			return karpenterAvailabilityHandler(reg)
+		},
+		http.MethodGet, "/api/clusters/test/karpenter/availability",
+		map[string]string{"cluster": "test"}, nil,
+	)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+
+	var resp map[string]bool
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v; body=%s", err, rec.Body.String())
+	}
+	if resp["available"] {
+		t.Errorf("available = true, want false (CRDs were absent)")
+	}
+
+	// Critical: the availability probe MUST NOT emit an audit row.
+	// Pre-v1.1.1 the sidebar fired the full /karpenter endpoint on
+	// every cluster page mount, and the not-installed short-circuit
+	// emitted a karpenter_read audit row that flooded the audit log
+	// with rows that didn't reflect operator-intent action. The
+	// split was made specifically to prevent that.
+	if events := sink.snapshot(); len(events) != 0 {
+		t.Errorf("availability probe emitted %d audit row(s); want 0: %+v", len(events), events)
+	}
+}
+
+func TestKarpenterAvailabilityHandler_InstalledNoAudit(t *testing.T) {
+	withKarpenterSeams(t, karpenterFakes{
+		IsInstalled: func(_ context.Context, _ credentials.Provider, _ clusters.Cluster) (bool, error) {
+			return true, nil
+		},
+		BuildClients: func(_ context.Context, _ credentials.Provider, _ clusters.Cluster) (kubernetes.Interface, dynamic.Interface, error) {
+			t.Fatal("BuildClients must not be called by the availability probe (lightweight by design)")
+			return nil, nil, nil
+		},
+	})
+
+	reg := testRegistry(t)
+	rec, sink := actionHandlerInvoke(t,
+		func(_ *audit.Emitter) credentials.Handler {
+			return karpenterAvailabilityHandler(reg)
+		},
+		http.MethodGet, "/api/clusters/test/karpenter/availability",
+		map[string]string{"cluster": "test"}, nil,
+	)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	var resp map[string]bool
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v; body=%s", err, rec.Body.String())
+	}
+	if !resp["available"] {
+		t.Errorf("available = false, want true (CRDs were present)")
+	}
+	if events := sink.snapshot(); len(events) != 0 {
+		t.Errorf("availability probe emitted %d audit row(s); want 0", len(events))
+	}
+}
+
+func TestKarpenterAvailabilityHandler_DetectErrorNoAudit(t *testing.T) {
+	withKarpenterSeams(t, karpenterFakes{
+		IsInstalled: func(_ context.Context, _ credentials.Provider, _ clusters.Cluster) (bool, error) {
+			return false, errors.New("apiserver unreachable")
+		},
+	})
+
+	reg := testRegistry(t)
+	rec, sink := actionHandlerInvoke(t,
+		func(_ *audit.Emitter) credentials.Handler {
+			return karpenterAvailabilityHandler(reg)
+		},
+		http.MethodGet, "/api/clusters/test/karpenter/availability",
+		map[string]string{"cluster": "test"}, nil,
+	)
+	if rec.Code != http.StatusInternalServerError {
+		t.Errorf("status = %d, want 500", rec.Code)
+	}
+	// Errors at the transport level still don't audit — the sidebar
+	// handles "probe failed" by hiding the entry; auditing transport
+	// failures would re-introduce the noise problem.
+	if events := sink.snapshot(); len(events) != 0 {
+		t.Errorf("availability probe emitted %d audit row(s) on error path; want 0", len(events))
+	}
+}
+
+func TestKarpenterAvailabilityHandler_ClusterNotFoundReturns404(t *testing.T) {
+	reg := testRegistry(t)
+	rec, _ := actionHandlerInvoke(t,
+		func(_ *audit.Emitter) credentials.Handler {
+			return karpenterAvailabilityHandler(reg)
+		},
+		http.MethodGet, "/api/clusters/missing/karpenter/availability",
+		map[string]string{"cluster": "missing"}, nil,
+	)
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want 404", rec.Code)
+	}
+}

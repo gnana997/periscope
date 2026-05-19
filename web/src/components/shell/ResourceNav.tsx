@@ -4,7 +4,7 @@ import { cn } from "../../lib/cn";
 import { RESOURCE_GROUPS, resourcesByGroup } from "../../lib/resources";
 import { CRDSubTree } from "./CRDSubTree";
 import { useAuth } from "../../auth/useAuth";
-import { useKarpenter } from "../../hooks/useKarpenter";
+import { useKarpenterAvailability } from "../../hooks/useKarpenter";
 
 const STORAGE_KEY = "periscope.sidebar.openGroups";
 const DEFAULT_OPEN: string[] = ["Cluster"];
@@ -493,12 +493,17 @@ function CollapsibleSection({
 }
 
 // KarpenterSidebarEntry — a single sidebar link that auto-hides
-// itself when the cluster doesn't have karpenter.sh/v1 CRDs. Shares
-// the same useKarpenter query as the page (TanStack Query dedupes),
-// so opening the sidebar costs one network call regardless of
-// whether the page is mounted.
+// itself when the cluster doesn't have karpenter.sh/v1 CRDs.
+//
+// Backed by the lightweight `/karpenter/availability` endpoint
+// (NOT the heavy `/karpenter` dashboard endpoint). Pre-v1.1.1 the
+// sidebar shared a query with the page, which meant every cluster
+// page mount fired the full dashboard read AND emitted a
+// `karpenter_read` audit row. The split avoids audit noise from
+// incidental sidebar mounts; the dashboard page still uses
+// `useKarpenter` for its full data + audited intent signal.
 function KarpenterSidebarEntry({ cluster }: { cluster: string }) {
-  const { data, isPending } = useKarpenter(cluster);
+  const { data, isPending } = useKarpenterAvailability(cluster);
   if (isPending) return null;
   if (!data?.available) return null;
   return (
