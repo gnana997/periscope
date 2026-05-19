@@ -366,12 +366,23 @@ func main() {
 
 	// --- Karpenter dashboard (read-only, issue #118) ---
 	//
-	// Curated view of karpenter.sh/v1 NodePools + NodeClaims joined
-	// to pending pods' FailedScheduling events and the controller's
-	// /metrics exposition. Auto-detects via CRD probe; returns
-	// {available: false} on clusters without Karpenter installed.
+	// Two endpoints, separated in v1.1.1 to keep the sidebar's
+	// per-page-mount availability probe from flooding the audit log
+	// with rows that don't reflect operator intent:
+	//
+	//   /karpenter              — full dashboard read; audit emits
+	//                             on every call (intentional
+	//                             navigation only post-split)
+	//   /karpenter/availability — lightweight `{available: bool}`
+	//                             probe; NO audit emission. Sidebar
+	//                             calls this to decide whether to
+	//                             render the Karpenter nav entry.
+	//
+	// Both auto-detect via the karpenter.sh/v1 CRD probe.
 	router.Get("/api/clusters/{cluster}/karpenter", credentials.Wrap(factory,
 		karpenterHandler(registry, auditEmitter)))
+	router.Get("/api/clusters/{cluster}/karpenter/availability", credentials.Wrap(factory,
+		karpenterAvailabilityHandler(registry)))
 
 	// --- EKS managed node groups + AMI drift (read-only, issue #103) ---
 	//

@@ -217,7 +217,7 @@ spec:
     expect((parsed.spec as Record<string, unknown>).replicas).toBe(7);
   });
 
-  it("user 'remove' op on a prior-owned path wins (null leaf overwrites retained value)", () => {
+  it("user 'remove' op on a prior-owned path omits the key from the payload (SSA retained-ownership deletion, hotfix v1.1.1)", () => {
     const baseline = `apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -255,9 +255,16 @@ data:
     const annotations = (
       (parsed.metadata as Record<string, unknown>).annotations as Record<string, unknown>
     );
-    // keep-me retained from current; drop-me explicitly nulled by user edit.
+    // keep-me retained from current; drop-me OMITTED from the apply
+    // payload (not written as null). Under SSA per-key ownership,
+    // periscope-spa previously owned f:drop-me, so dropping it from the
+    // apply body relinquishes ownership → the apiserver removes the
+    // annotation. Writing null (the v1.1.0 behavior) was wrong for
+    // map[string]string fields: the apiserver coerced null → "" and
+    // the key persisted with an empty value. See yamlPatch.ts:setLeaf
+    // comment for the full story.
     expect(annotations["keep-me"]).toBe("yes");
-    expect(annotations["drop-me"]).toBeNull();
+    expect(Object.keys(annotations)).not.toContain("drop-me");
   });
 
   it("managedFields === null → throws ManagedFieldsUnavailableError", () => {

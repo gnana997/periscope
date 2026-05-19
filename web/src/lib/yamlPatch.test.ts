@@ -5,6 +5,7 @@ import {
   MultiDocumentError,
   parseOrThrow,
   type Identity,
+  type Op,
 } from "./yamlPatch";
 
 const NGINX_DEPLOYMENT = `apiVersion: apps/v1
@@ -237,16 +238,76 @@ describe("buildMinimalSSA", () => {
     expect(yaml).not.toContain("memory:");
   });
 
-  it("expresses removals as null leaves", () => {
+  it("omits removed keys from the payload (SSA retained-ownership semantics, hotfix v1.1.1)", () => {
+    // Regression for v1.1.0 label-deletion bug. Pre-fix, removing a
+    // managed map-of-string entry (label / annotation) emitted
+    // `<key>: ~` (null) in the apply payload; the apiserver coerced
+    // null → "" for the value type and left the key in place. Correct
+    // behavior under SSA is to OMIT the key — periscope-spa previously
+    // owned it, so dropping it from the apply relinquishes ownership
+    // and the apiserver removes the key.
     const after = NGINX_DEPLOYMENT.replace(
       `    app.kubernetes.io/version: "1.25.3"\n`,
       "",
     );
     const ops = computeOps(NGINX_DEPLOYMENT, after);
     const yaml = buildMinimalSSA(ops, IDENTITY);
-    // SSA expresses removal-of-managed-field by setting it to null
-    // (or `~` in PLAIN scalar style).
-    expect(yaml).toMatch(/app\.kubernetes\.io\/version: ~/);
+    // The removed key must not appear in the payload at all.
+    expect(yaml).not.toContain("app.kubernetes.io/version");
+    // And we must not be writing a null sentinel anywhere.
+    expect(yaml).not.toMatch(/:\s*~\s*$/m);
+    // Re-parsing should yield a payload whose labels map has no
+    // `app.kubernetes.io/version` key (verifying we didn't accidentally
+    // leave behind a `key: null` JS entry).
+    const { obj } = parseOrThrow(yaml);
+    const labels = ((obj as Record<string, unknown>).metadata as Record<string, unknown>)
+      .labels as Record<string, unknown> | undefined;
+    if (labels !== undefined) {
+      expect(Object.keys(labels)).not.toContain("app.kubernetes.io/version");
+    }
+  });
+
+  it("removes a ServiceAccount label cleanly (sibling-label preservation, hotfix v1.1.1)", () => {
+    // Direct repro of the user-reported v1.1.0 bug: a ServiceAccount
+    // with a periscope-added `test:` label. Deleting the label line in
+    // the editor must produce a payload that OMITS the `test` key
+    // entirely, not one that submits `test: ~`. The latter caused the
+    // apiserver to persist `test: ""` because labels are a
+    // map[string]string and null is coerced to the zero value of the
+    // value type.
+    const before = `apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: alloy
+  namespace: certwatch-monitoring
+  labels:
+    app.kubernetes.io/component: logging
+    app.kubernetes.io/name: alloy
+    test: anything
+`;
+    const after = `apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: alloy
+  namespace: certwatch-monitoring
+  labels:
+    app.kubernetes.io/component: logging
+    app.kubernetes.io/name: alloy
+`;
+    const ops = computeOps(before, after);
+    const yaml = buildMinimalSSA(ops, {
+      apiVersion: "v1",
+      kind: "ServiceAccount",
+      name: "alloy",
+      namespace: "certwatch-monitoring",
+    });
+    // The `test` key must not appear in the payload at all — neither
+    // as `test: ~` nor as `test: ""`.
+    expect(yaml).not.toMatch(/\btest\s*:/);
+    // Sibling labels owned by other field managers must not be touched
+    // (minimal-SSA: we only include fields the user changed).
+    expect(yaml).not.toContain("app.kubernetes.io/component");
+    expect(yaml).not.toContain("app.kubernetes.io/name");
   });
 
   it("produces well-formed YAML that round-trips", () => {
@@ -264,5 +325,79 @@ describe("buildMinimalSSA", () => {
     expect(parsed.apiVersion).toBe("apps/v1");
     expect(parsed.kind).toBe("Deployment");
     expect(((parsed.spec as Record<string, unknown>).replicas)).toBe(5);
+  });
+
+  it("does not duplicate associative-list entries when two ops target the same MergeKey-leaf (hotfix v1.1.1)", () => {
+    // Regression test for the duplicate-ports SSA-rejection bug. The
+    // bug fired when buildMinimalSSA applied two replace-ops both
+    // ending in a MergeKey-leaf at the same logical position
+    // (e.g. retained-ownership emitting both a container-level `.`
+    // claim and a port-level `.` claim from managedFields for the
+    // same physical port).
+    //
+    // Before the fix: Op 1's setLeaf MergeKey-leaf branch PUSHed an
+    // entry whose `containerPort` was overridden to a *number* by the
+    // value spread; Op 2's findIndex used strict `===` against the
+    // stringified keyValue and missed the existing entry, PUSHing a
+    // duplicate. K8s SSA rejected the body with "failed to create
+    // typed patch object: .spec.template.spec.containers[name=X].ports:
+    // duplicate entries for key [containerPort=N, protocol=\"TCP\"]".
+    //
+    // After the fix: setLeaf uses loose `String(x[k]) === v` matching
+    // the same convention as stepInto. The second op merges into the
+    // existing entry instead of PUSHing.
+    const portValue = {
+      containerPort: 4000,
+      name: "4000tcp",
+      protocol: "TCP",
+    };
+    const ops: Op[] = [
+      {
+        op: "replace",
+        path: [
+          "spec",
+          "template",
+          "spec",
+          "containers",
+          { name: "ai-rules-engine-dev" },
+          "ports",
+          { containerPort: "4000" },
+        ],
+        value: portValue,
+      },
+      // Same MergeKey-leaf path applied a second time — simulates the
+      // overlapping-managedFields scenario where retained-ownership
+      // emits the same port twice via different fieldsV1 traversals.
+      {
+        op: "replace",
+        path: [
+          "spec",
+          "template",
+          "spec",
+          "containers",
+          { name: "ai-rules-engine-dev" },
+          "ports",
+          { containerPort: "4000" },
+        ],
+        value: portValue,
+      },
+    ];
+    const yaml = buildMinimalSSA(ops, IDENTITY);
+    const { obj } = parseOrThrow(yaml);
+    const parsed = obj as Record<string, unknown>;
+    const containers = (
+      ((parsed.spec as Record<string, unknown>).template as Record<string, unknown>)
+        .spec as Record<string, unknown>
+    ).containers as Array<Record<string, unknown>>;
+    expect(containers).toHaveLength(1);
+    const ports = containers[0].ports as Array<Record<string, unknown>>;
+    // The critical assertion: ports must NOT be duplicated. Before the
+    // fix this would have been length 2.
+    expect(ports).toHaveLength(1);
+    expect(ports[0]).toMatchObject({
+      containerPort: 4000,
+      name: "4000tcp",
+      protocol: "TCP",
+    });
   });
 });

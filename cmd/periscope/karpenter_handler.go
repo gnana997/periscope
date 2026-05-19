@@ -1,18 +1,31 @@
 package main
 
-// karpenter_handler.go — curated Karpenter dashboard endpoint (#118).
+// karpenter_handler.go — curated Karpenter dashboard endpoint (#118)
+// and the lightweight availability probe (#v1.1.1 hotfix).
 //
 //   GET /api/clusters/{cluster}/karpenter
+//   GET /api/clusters/{cluster}/karpenter/availability
 //
-// Single-shot read. Joins NodePools / NodeClaims / pending pods +
-// FailedScheduling events / controller metrics into one response.
+// The full `/karpenter` endpoint is a single-shot read. Joins
+// NodePools / NodeClaims / pending pods + FailedScheduling events /
+// controller metrics into one response.
 //
 // Auto-detect: when karpenter.sh/v1 CRDs are absent the handler
 // returns `{available: false}` immediately (HTTP 200, not 422 — the
-// SPA's sidebar logic gates on this field, not a status code). One
+// SPA's dashboard page gates on this field, not a status code). One
 // audit row still emits so compliance can answer "did anyone load
 // the Karpenter view on this cluster?" even when Karpenter isn't
-// installed.
+// installed. With the v1.1.1 split (see /availability below), this
+// audit row now fires only when an operator explicitly navigates
+// to the dashboard — not on incidental sidebar mounts.
+//
+// The lightweight `/karpenter/availability` endpoint is the
+// sidebar's probe: returns just `{available: bool}` based on the
+// CRD presence check, with NO audit row. Pre-split, the sidebar
+// fired the full /karpenter endpoint on every cluster page mount,
+// flooding the audit log with `karpenter_read` rows that didn't
+// reflect any operator-intent action. See karpenterAvailabilityHandler
+// below.
 //
 // Graceful degradation: every cross-call (events, metrics) is
 // best-effort. The response always carries the base view (NodePools
@@ -200,4 +213,47 @@ func emitKarpenterRead(ctx context.Context, emitter *audit.Emitter, c clusters.C
 		Reason:  reason,
 		Extra:   map[string]any{"op": op},
 	})
+}
+
+// karpenterAvailabilityHandler — lightweight CRD presence probe used
+// by the SPA's sidebar to decide whether to render the Karpenter nav
+// entry.
+//
+//	GET /api/clusters/{cluster}/karpenter/availability
+//
+// Returns `{"available": bool}` based purely on the
+// karpenter.sh/v1 CRD presence check. Intentionally **does not emit
+// an audit row** — the sidebar fires this on every cluster page
+// mount, and auditing those probes would flood the audit log with
+// rows that don't reflect any operator-intent action.
+//
+// The full `/karpenter` endpoint still emits its audit row on every
+// call (including the not-installed short-circuit). The split means:
+//   - Incidental sidebar probes → /availability, no audit
+//   - Intentional dashboard navigation → /karpenter, audit emitted
+//
+// Errors (apiserver unreachable, discovery RBAC denial) surface as
+// 5xx without audit; they're transport-level failures and the
+// sidebar handles them by hiding the entry.
+func karpenterAvailabilityHandler(reg *clusters.Registry) credentials.Handler {
+	return func(w http.ResponseWriter, r *http.Request, p credentials.Provider) {
+		c, ok := reg.ByName(chi.URLParam(r, "cluster"))
+		if !ok {
+			http.Error(w, "cluster not found", http.StatusNotFound)
+			return
+		}
+		ctx, cancel := context.WithTimeout(r.Context(), karpenterRequestTimeout)
+		defer cancel()
+		installed, err := karpenterIsInstalledFn(ctx, p, c)
+		if err != nil {
+			if errors.Is(err, context.Canceled) {
+				return
+			}
+			slog.WarnContext(ctx, "karpenter availability probe failed",
+				"cluster", c.Name, "err", err)
+			writeAPIErrorJSON(w, http.StatusInternalServerError, "E_INTERNAL", err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]bool{"available": installed})
+	}
 }
