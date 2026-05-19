@@ -52,25 +52,18 @@ export function toApplyResult(
   parseConflict: (err: unknown) => ConflictInfo | null = parseConflictForBanner,
 ): ApplyResult {
   if (err instanceof ApiError) {
+    const friendly = extractStatusMessage(err.bodyText);
     if (err.status === 409) {
       const conflict = parseConflict(err);
+      const message = friendly || err.bodyText || err.message || "Apply conflict";
       return conflict
-        ? {
-            ok: false,
-            status: 409,
-            message: err.bodyText || err.message || "Apply conflict",
-            conflict,
-          }
-        : {
-            ok: false,
-            status: 409,
-            message: err.bodyText || err.message || "Apply conflict",
-          };
+        ? { ok: false, status: 409, message, conflict }
+        : { ok: false, status: 409, message };
     }
     return {
       ok: false,
       status: err.status,
-      message: err.bodyText || err.message || "apply failed",
+      message: friendly || err.bodyText || err.message || "apply failed",
     };
   }
   if (err instanceof MultiDocumentError || err instanceof YamlParseError) {
@@ -78,6 +71,29 @@ export function toApplyResult(
   }
   const message = err instanceof Error ? err.message : "apply failed";
   return { ok: false, status: 0, message };
+}
+
+// extractStatusMessage pulls the human-readable `.message` out of an
+// apiserver Status JSON body. Used by toApplyResult so the banner
+// shows "Deployment.apps "X" is invalid: spec.replicas: ..." instead
+// of the whole `{kind: "Status", ...}` JSON blob.
+//
+// Returns null when the body isn't parseable JSON or doesn't carry a
+// .message field — callers fall back to the raw bodyText so we never
+// hide information from the operator just because the shape is
+// unfamiliar (proxy-rewritten, agent-tunneled, etc.).
+function extractStatusMessage(bodyText: string | undefined): string | null {
+  if (!bodyText) return null;
+  try {
+    const parsed = JSON.parse(bodyText) as { message?: unknown };
+    if (parsed && typeof parsed.message === "string" && parsed.message.length > 0) {
+      return parsed.message;
+    }
+  } catch {
+    // Not JSON — could be plain text from an upstream proxy. Caller
+    // falls back to bodyText.
+  }
+  return null;
 }
 
 interface UseApplyLifecycleArgs {
