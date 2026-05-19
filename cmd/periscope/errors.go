@@ -47,6 +47,14 @@ func httpStatusFor(err error) int {
 		return http.StatusTooManyRequests
 	case kerrors.IsBadRequest(err):
 		return http.StatusBadRequest
+	case kerrors.IsInvalid(err):
+		// apiserver validation rejections — negative replicas,
+		// label keys with invalid characters, container name
+		// collisions, etc. The Status carries reason: "Invalid"
+		// and a details.causes[] list scoped to the field paths
+		// that failed. 422 lines up with kubectl's behavior on
+		// the same response shape.
+		return http.StatusUnprocessableEntity
 	}
 	return http.StatusInternalServerError
 }

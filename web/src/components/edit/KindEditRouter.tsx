@@ -15,11 +15,11 @@
 // form-edited intermediate. Cancel still has a discard prompt; the
 // mode toggle no longer does.
 //
-// Form mode uses a thinner submit pipeline (`useApplySubmit`) than
-// YamlEditor: dry-run + apply with a banner for errors, no field-
-// conflict resolution view. Operators who hit a 409 can switch to
-// YAML mode (now without losing their edits) for the full
-// ConflictResolutionView machinery.
+// Form mode and YAML mode share the same useApplyLifecycle hook
+// (issue #224): dry-run, apply, single conflict banner for force /
+// cancel, error banner for non-conflict failures. The two modes
+// differ only in how the buffer is presented (structured form vs
+// Monaco editor); the apply pipeline is identical.
 
 import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
@@ -27,7 +27,7 @@ import { usePublishEditorDirty } from "../../hooks/useEditorDirty";
 import type { EditorSource } from "../../lib/customResources";
 import type { ResourceRef } from "../../lib/api";
 import type { SupportedKind } from "../../lib/schemaForm/k8sAllowlist";
-import { useEditorYaml, useOpenAPISchema, useResourceMeta } from "../../hooks/useResource";
+import { useEditorYaml, useOpenAPISchema } from "../../hooks/useResource";
 import { DetailLoading, DetailError } from "../detail/states";
 import { ConfigMapForm } from "./ConfigMapForm";
 import { SecretForm } from "./SecretForm";
@@ -35,8 +35,12 @@ import { ServiceForm } from "./ServiceForm";
 import { IngressForm } from "./IngressForm";
 import { DeploymentForm } from "./DeploymentForm";
 import { StatefulSetForm } from "./StatefulSetForm";
-import { useApplySubmit } from "./useApplySubmit";
+import { useApplyLifecycle } from "../../hooks/useApplyLifecycle";
+import { useQueryClient } from "@tanstack/react-query";
+import { invalidateAfterApply } from "../../lib/customResources";
 import { ActionBar } from "../detail/yaml/ActionBar";
+import { ConflictBanner } from "../detail/yaml/ConflictBanner";
+import { bannerViewModel } from "../detail/yaml/conflictBannerViewModel";
 import { PatchPreviewDrawer } from "../detail/yaml/PatchPreviewDrawer";
 import { computeOps } from "../../lib/yamlPatch";
 import { findSchemaForGVK, parseIdentityFromYaml } from "../../lib/k8sSchema";
@@ -127,31 +131,24 @@ function BufferedEditor({
   // baselineYaml so dirty clears.
   const [draftYaml, setDraftYaml] = useState(pristineYaml);
   const [baselineYaml, setBaselineYaml] = useState(pristineYaml);
-  const submit = useApplySubmit(source, resource);
-
-  // Live cluster YAML + managedFields — same react-query cache keys
-  // as the parent's queries, so these are free reads (no extra round
-  // trip). Threaded into submit() so the retained-ownership builder
-  // (#181) can extract current values for fields periscope-spa
-  // already claimed but the user hasn't touched.
-  const liveYamlQuery = useEditorYaml(
-    source,
-    cluster,
-    resource.namespace ?? "",
-    resource.name,
-    true,
+  const qc = useQueryClient();
+  const draftIdentityForLifecycle = useMemo(
+    () => parseIdentityFromYaml(draftYaml),
+    [draftYaml],
   );
-  const metaQuery = useResourceMeta(
-    cluster,
-    {
-      group: resource.group,
-      version: resource.version,
-      resource: resource.resource,
-      namespace: resource.namespace,
-      name: resource.name,
+  const lifecycle = useApplyLifecycle({
+    resource,
+    baseline: baselineYaml,
+    draft: draftYaml,
+    identity: draftIdentityForLifecycle,
+    onCommitSuccess: async () => {
+      // Awaited so the post-apply refetch lands before we flip
+      // baselineYaml; the form then derives clean state from the
+      // just-applied YAML rather than the optimistic copy.
+      await invalidateAfterApply(qc, source, resource);
+      setBaselineYaml(draftYaml);
     },
-    true,
-  );
+  });
 
   // ----- Form-mode action-bar state -----
   // Mirror of the affordances YamlEditor's ActionBar surfaces (ops
@@ -280,40 +277,26 @@ function BufferedEditor({
     );
   }, [dirty, setParams]);
 
-  const onApply = useCallback(async () => {
-    const ok = await submit.submit({
-      baseline: baselineYaml,
-      draft: draftYaml,
-      // Fall back to baseline if the live query hasn't (re)resolved
-      // yet — same anchor the editor was mounted against. Worse case
-      // we miss a drift update; we never apply with `current = ""`.
-      current: liveYamlQuery.data ?? baselineYaml,
-      meta: metaQuery.data ?? null,
-    });
-    if (ok) {
-      // Reset baseline to the just-applied YAML so the form clears
-      // dirty. The react-query invalidation kicked off in submit
-      // will re-fetch under us; until that lands, treat the draft
-      // as the new baseline.
-      setBaselineYaml(draftYaml);
-    }
-  }, [baselineYaml, draftYaml, liveYamlQuery.data, metaQuery.data, submit]);
+  // Baseline-on-success now lives inside lifecycle.onCommitSuccess
+  // above; the apply/dry-run handlers just dispatch lifecycle actions.
+  const onApply = useCallback(() => {
+    lifecycle.submit();
+  }, [lifecycle]);
 
   const onDryRun = useCallback(() => {
-    void submit.dryRun({
-      baseline: baselineYaml,
-      draft: draftYaml,
-      current: liveYamlQuery.data ?? baselineYaml,
-      meta: metaQuery.data ?? null,
-    });
-  }, [baselineYaml, draftYaml, liveYamlQuery.data, metaQuery.data, submit]);
+    lifecycle.dryRun();
+  }, [lifecycle]);
 
   const onValuesYamlChange = useCallback(
     (next: string) => {
       setDraftYaml(next);
-      if (submit.state.kind !== "idle") submit.reset();
+      // Clear stale success/error chip when the operator resumes
+      // editing. ForceRequired stays — operator must consciously
+      // Force or Cancel from the banner.
+      const k = lifecycle.state.kind;
+      if (k === "Error" || k === "Success") lifecycle.dismiss();
     },
-    [submit],
+    [lifecycle],
   );
 
   return (
@@ -423,24 +406,17 @@ function BufferedEditor({
               </>
             )}
           </div>
-          {/*
-           * SubmitErrorBanner intentionally lives OUTSIDE the form's
-           * overflow-auto scroll area so it stays visible regardless
-           * of how tall the form is. The previous placement (inside
-           * the scroll div, below every form section) buried errors
-           * for non-trivial resources — operators had to scroll to
-           * the bottom to discover that their apply had failed. This
-           * mirrors YamlEditor's ApplyErrorBanner placement (right
-           * above ActionBar, sibling of the scrollable editor).
-           */}
-          {submit.state.kind === "error" && (
-            <SubmitErrorBanner
-              message={submit.state.message}
-              isConflict={submit.state.isConflict}
-              onSwitchToYaml={() => onSetMode("yaml")}
-              onDismiss={() => submit.reset()}
-            />
-          )}
+          {/* ConflictBanner replaces the old SubmitErrorBanner (#224).
+              Sits outside the form's scroll area so errors stay visible
+              regardless of form height. Covers force-required, forcing,
+              and error variants in one component. */}
+          <ConflictBanner
+            view={bannerViewModel(lifecycle.state)}
+            onForce={lifecycle.force}
+            onCancel={lifecycle.cancel}
+            onRetry={lifecycle.retry}
+            onDismiss={lifecycle.dismiss}
+          />
           <ActionBar
             mode="edit"
             opsCount={opsForBar.length}
@@ -450,10 +426,9 @@ function BufferedEditor({
             // doesn't surface a count up here.
             errorCount={0}
             dirty={dirty}
-            applyState={submit.state}
+            applyState={lifecycle.state}
             schemaLabel={schemaLabel}
             schemaState={schemaState}
-            metaPending={metaQuery.isPending}
             hideDiff
             hideErrors
             onCancel={onCancel}
@@ -522,45 +497,3 @@ function ToggleButton({
   );
 }
 
-function SubmitErrorBanner({
-  message,
-  isConflict,
-  onSwitchToYaml,
-  onDismiss,
-}: {
-  message: string;
-  isConflict: boolean;
-  onSwitchToYaml: () => void;
-  onDismiss: () => void;
-}) {
-  return (
-    <div className="mt-3 rounded-sm border border-red/40 bg-red/5 px-3 py-2 text-[12.5px] text-ink">
-      <div className="flex items-baseline justify-between gap-3">
-        <span className="font-mono text-[10.5px] uppercase tracking-[0.14em] text-red">
-          {isConflict ? "field manager conflict" : "apply failed"}
-        </span>
-        <button
-          type="button"
-          onClick={onDismiss}
-          className="font-mono text-[11px] text-ink-faint hover:text-red"
-        >
-          dismiss
-        </button>
-      </div>
-      <p className="mt-1 whitespace-pre-wrap font-mono text-[12px] text-ink-muted">{message}</p>
-      {isConflict ? (
-        <p className="mt-2 text-[12px] text-ink-muted">
-          form mode doesn't surface the per-field conflict view —{" "}
-          <button
-            type="button"
-            onClick={onSwitchToYaml}
-            className="font-mono text-accent hover:underline"
-          >
-            switch to YAML mode
-          </button>{" "}
-          to resolve fields individually.
-        </p>
-      ) : null}
-    </div>
-  );
-}

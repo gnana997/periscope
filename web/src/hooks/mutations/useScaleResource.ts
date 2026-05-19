@@ -11,18 +11,15 @@
 // currently rendered (all-namespaces view, specific-namespace view,
 // or both at once).
 
-import { ApiError, api, type YamlKind } from "../../lib/api";
+import { ApiError, type YamlKind } from "../../lib/api";
 import { KIND_REGISTRY } from "../../lib/k8sKinds";
 import { queryKeys } from "../../lib/queryKeys";
-import { type Identity, type Op } from "../../lib/yamlPatch";
+import { buildMinimalSSA, type Identity, type Op } from "../../lib/yamlPatch";
 import { patchRowInList } from "../../lib/listShape";
 import type { ResourceListResponse } from "../../lib/types";
 import type { QueryKey } from "@tanstack/react-query";
 import { useOptimisticMutation } from "./_useOptimistic";
-import {
-  applyWithLenientConflictRetained,
-  fetchCurrentYamlForKind,
-} from "./_applyWithLenientConflict";
+import { applyWithLenientConflict } from "./_applyWithLenientConflict";
 
 export type ScalableKind = "deployments" | "statefulsets" | "replicasets";
 
@@ -116,25 +113,17 @@ export function useScaleResource(args: ScaleArgs) {
       const ops: Op[] = [
         { op: "replace", path: ["spec", "replicas"], value: vars.replicas },
       ];
-      // Fetch current YAML + managedFields in parallel — required by the
-      // retained-ownership builder (#181) so periscope-spa keeps prior
-      // claims on every mutation instead of silently releasing them.
-      const [current, resourceMeta] = await Promise.all([
-        fetchCurrentYamlForKind(args.cluster, args.kind, args.namespace, args.name),
-        api.getMeta({
-          cluster: args.cluster,
-          group: meta.group,
-          version: meta.version,
-          resource: meta.resource,
-          namespace: args.namespace,
-          name: args.name,
-        }),
-      ]);
+      // Pure minimal-diff SSA (issue #224): the apply body contains
+      // only identity + spec.replicas. No current YAML / managedFields
+      // fetch — periscope-spa claims ownership of just the field this
+      // mutation changes, and SSA's per-key ownership leaves everything
+      // else to its existing manager.
+      const yaml = buildMinimalSSA(ops, identity);
       // Lenient SSA: auto-takeover when the conflict is only with
       // HUMAN/UNKNOWN managers (kubectl-* / Rancher / unclassified).
       // GITOPS/HELM/CONTROLLER conflicts surface a classified error
       // instead — see _applyWithLenientConflict.ts.
-      return applyWithLenientConflictRetained(
+      return applyWithLenientConflict(
         {
           cluster: args.cluster,
           group: meta.group,
@@ -142,10 +131,7 @@ export function useScaleResource(args: ScaleArgs) {
           resource: meta.resource,
           namespace: args.namespace,
           name: args.name,
-          identity,
-          ops,
-          current,
-          managedFields: resourceMeta.managedFields,
+          yaml,
         },
         "scale",
       );

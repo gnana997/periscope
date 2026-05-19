@@ -8,31 +8,25 @@
 // nothing happened. This is more discoverable than HTML `disabled`
 // (which silently swallows clicks) and matches what users expect from
 // an editor: try the action, see why it can't run, fix and retry.
+//
+// State machine: the ActionBar is a dumb view over the unified
+// ApplyState from useApplyState. The mapping from state to render
+// shape lives in actionBarViewModel.ts.
 
 import { showToast } from "../../../lib/toastBus";
 import { cn } from "../../../lib/cn";
-
-export type ApplyState =
-  | { kind: "idle" }
-  | { kind: "dryRunning" }
-  | { kind: "applying" }
-  | { kind: "success" }
-  | { kind: "error"; message: string };
+import type { ApplyState } from "../../../hooks/useApplyState";
+import { actionBarViewModel, type StatusChip } from "./actionBarViewModel";
 
 interface ActionBarProps {
-  mode: "edit" | "diff" | "conflict";
+  mode: "edit" | "diff";
   opsCount: number;
   errorCount: number;
   dirty: boolean;
+  /** Unified state from useApplyLifecycle. */
   applyState: ApplyState;
   schemaLabel?: string;
   schemaState?: "loading" | "loaded" | "missing" | "failed";
-  /**
-   * True while `useResourceMeta` hasn't returned yet. Apply / dry-run
-   * gate on this because the retained-ownership body builder (#181)
-   * needs managedFields to decide which paths to re-assert.
-   */
-  metaPending?: boolean;
   /**
    * Hide the diff toggle button. Form mode passes this because it has
    * no Monaco surface to overlay a diff on — the structured patch view
@@ -70,7 +64,6 @@ export function ActionBar({
   applyState,
   schemaLabel,
   schemaState,
-  metaPending,
   hideDiff,
   hideErrors,
   onCancel,
@@ -80,7 +73,7 @@ export function ActionBar({
   onApply,
   onJumpToError,
 }: ActionBarProps) {
-  const busy = applyState.kind === "dryRunning" || applyState.kind === "applying";
+  const view = actionBarViewModel(applyState);
 
   // Each button gates on a precondition. When the precondition fails,
   // we surface a toast instead of silently doing nothing. The cancel
@@ -96,21 +89,21 @@ export function ActionBar({
     };
 
   const noEdits = "make a change first";
-  const busyMsg = applyState.kind === "dryRunning" ? "dry-run in progress…" : "apply in progress…";
-  const metaMsg = "loading ownership info…";
+  const busyMsg =
+    view.statusChip.kind === "in-flight" && view.statusChip.label === "validating…"
+      ? "dry-run in progress…"
+      : "apply in progress…";
 
-  const patchReason = busy ? busyMsg : !dirty ? noEdits : null;
-  const dryRunReason = busy ? busyMsg : metaPending ? metaMsg : !dirty ? noEdits : null;
-  const diffReason = busy ? busyMsg : !dirty ? noEdits : null;
-  const applyReason = busy
+  const patchReason = view.busy ? busyMsg : !dirty ? noEdits : null;
+  const dryRunReason = view.busy ? busyMsg : !dirty ? noEdits : null;
+  const diffReason = view.busy ? busyMsg : !dirty ? noEdits : null;
+  const applyReason = view.busy
     ? busyMsg
-    : metaPending
-      ? metaMsg
-      : !dirty
-        ? noEdits
-        : !hideErrors && errorCount > 0
-          ? `fix ${errorCount} schema error${errorCount === 1 ? "" : "s"} first`
-          : null;
+    : !dirty
+      ? noEdits
+      : !hideErrors && errorCount > 0
+        ? `fix ${errorCount} schema error${errorCount === 1 ? "" : "s"} first`
+        : null;
 
   return (
     <div className="flex h-9 shrink-0 items-center gap-4 border-t border-border bg-surface px-3 font-mono text-[11px]">
@@ -134,7 +127,7 @@ export function ActionBar({
         {schemaLabel && (
           <SchemaPill label={schemaLabel} state={schemaState ?? "loading"} />
         )}
-        <ApplyStatus state={applyState} />
+        {!view.bannerOwnsState && <ApplyStatusChip chip={view.statusChip} />}
       </div>
 
       {/* Buttons */}
@@ -142,7 +135,7 @@ export function ActionBar({
         <button
           type="button"
           onClick={onCancel}
-          disabled={busy}
+          disabled={view.busy}
           className="rounded-sm px-2.5 py-1 text-[11px] text-ink-muted transition-colors hover:bg-surface-2 hover:text-ink disabled:opacity-50"
         >
           cancel
@@ -159,7 +152,7 @@ export function ActionBar({
           softDisabled={dryRunReason !== null}
           title={dryRunReason ?? undefined}
         >
-          {applyState.kind === "dryRunning" ? "dry-running…" : "dry-run"}
+          {view.dryRunLabel}
         </BarButton>
         {!hideDiff && (
           <BarButton
@@ -183,7 +176,7 @@ export function ActionBar({
               : "cursor-not-allowed border border-border-strong text-ink-faint opacity-60",
           )}
         >
-          {applyState.kind === "applying" ? "applying…" : "apply"}
+          {view.applyLabel}
         </button>
       </div>
     </div>
@@ -270,29 +263,29 @@ function BarButton({
   );
 }
 
-function ApplyStatus({ state }: { state: ApplyState }) {
-  if (state.kind === "idle") return null;
-  if (state.kind === "success") {
+function ApplyStatusChip({ chip }: { chip: StatusChip }) {
+  if (chip.kind === "none") return null;
+  if (chip.kind === "applied") {
     return (
       <span className="inline-flex items-center gap-1 text-green">
         <span className="size-1.5 rounded-full bg-green" /> applied
       </span>
     );
   }
-  if (state.kind === "error") {
+  if (chip.kind === "error") {
     return (
       <span
         className="inline-flex max-w-[24ch] items-center gap-1 truncate text-red"
-        title={state.message}
+        title={chip.message}
       >
-        <span className="size-1.5 rounded-full bg-red" /> {state.message}
+        <span className="size-1.5 rounded-full bg-red" /> {chip.message}
       </span>
     );
   }
   return (
     <span className="inline-flex items-center gap-1 text-ink-muted">
       <span className="size-1.5 animate-pulse rounded-full bg-accent" />
-      {state.kind === "dryRunning" ? "validating…" : "applying…"}
+      {chip.label}
     </span>
   );
 }
