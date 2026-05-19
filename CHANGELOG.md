@@ -13,6 +13,143 @@ tag.
 
 ## [Unreleased]
 
+## [1.1.1] - 2026-05-19
+
+### Fixed
+
+- **SPA apply bodies no longer produce duplicate `containers[].ports[]`
+  entries when a deployment has overlapping `periscope-spa`
+  managedFields claims.** Previously, restarts and YAML edits on
+  affected deployments failed with the apiserver error:
+
+  ```
+  failed to create typed patch object:
+  .spec.template.spec.containers[name=X].ports:
+  duplicate entries for key [containerPort=N, protocol="TCP"]
+  ```
+
+  The trigger: deployments previously edited through Periscope's
+  container subtree *and* through specific port fields, leaving
+  `periscope-spa` holding both a container-level and a port-level
+  `.` ownership marker in managedFields. Each marker emitted a
+  retained-ownership op ending in a MergeKey-leaf at the same
+  logical port; the first op's `setLeaf` PUSHed an entry whose
+  `containerPort` was a number (from the value spread), and the
+  second op's `findIndex` used strict `===` against the stringified
+  key, missed the existing entry, and PUSHed a duplicate. The
+  apiserver rejected the resulting body during typed-patch
+  construction.
+
+  **Fix**: `setLeaf`'s MergeKey-leaf branch now uses
+  `String(x[k]) === v`, matching the loose-equality convention
+  already used by `stepInto`. Locks the same contract across both
+  branches. Includes a regression test that exercises the
+  duplicate scenario via `buildMinimalSSA` end-to-end.
+
+  Affects every restart and YAML edit on deployments hitting this
+  managedFields shape. Operators on v1.1.0 can either upgrade to
+  v1.1.1 or work around the bug by editing the affected resource
+  via `kubectl`/`rancher` until upgrade.
+
+  The deeper architectural follow-up — removing the
+  retained-ownership SSA pattern entirely in favor of pure
+  minimal-diff SSA, plus a simplified single-banner conflict UX —
+  is tracked as RFC 0005 (`docs/rfcs/0005-drop-retained-ownership.md`)
+  and ships as **v1.1.2**.
+
+- **Edit YAML now works on ServiceAccount, RBAC, and the "extras"
+  resource kinds.** Previously, clicking the edit pencil on any of
+  these resources rendered a blank Monaco editor — the action bar
+  (cancel / patch / dry-run / diff / apply) appeared, but the YAML
+  body never loaded. Read-only YAML view was unaffected; YAML edit
+  specifically broke.
+
+  Affected resources (14 in total):
+  - **Access group**: ServiceAccount, Role, ClusterRole,
+    RoleBinding, ClusterRoleBinding
+  - **Extras**: HorizontalPodAutoscaler, PodDisruptionBudget,
+    ReplicaSet, NetworkPolicy, IngressClass, ResourceQuota,
+    LimitRange, PriorityClass, RuntimeClass
+
+  Root cause: each of these backend YAML handlers
+  (`internal/k8s/rbac.go`, `internal/k8s/extras.go`) didn't set
+  `raw.APIVersion` and `raw.Kind` on the typed object returned
+  from client-go before marshaling. Every other YAML handler in
+  the package (`deployments.go`, `statefulsets.go`, `services.go`,
+  `secrets.go`, `pods.go`, `configmaps.go`, `namespaces.go`,
+  `cronjobs.go`, `endpointslices.go`, etc.) sets these explicitly
+  to compensate for client-go's well-known TypeMeta-empty-on-Get
+  behavior; these 14 handlers were missed. The resulting YAML
+  had no `apiVersion:` or `kind:` lines, so the SPA editor's
+  `parseIdentityFromYaml` returned null, `gvk` stayed null, and
+  the Monaco mount effect short-circuited before creating the
+  editor model.
+
+  **Fix**: each affected handler now sets the correct
+  `APIVersion` and `Kind` before `formatYAML`. Regression tests
+  in `internal/k8s/rbac_test.go` assert each Access-group
+  handler's output contains the expected `apiVersion:`/`kind:`
+  lines. The extras handlers share the same one-line pattern
+  fix; combined with the `formatYAML` invariant they're now
+  symmetric with every other YAML handler in the package.
+
+- **Deleting a label or annotation in the YAML editor now actually
+  removes the key, instead of leaving it behind with an empty
+  string value.** Previously, removing the `test: foo` line from a
+  ServiceAccount (or any resource) in the editor and clicking Apply
+  produced a resource with `test: ""` on the next read — the key
+  was still there, just blanked out.
+
+  Root cause: `buildMinimalSSA` in `web/src/lib/yamlPatch.ts`
+  expressed remove ops on string-keyed map fields by writing the
+  key with a `null` value (rendered as `~` in the apply payload).
+  The premise — "setting a managed field to null tells the
+  apiserver to drop it" — is wrong for atomic `map[string]string`
+  fields like `metadata.labels.*` and `metadata.annotations.*`:
+  the apiserver coerces null → "" (the zero value of the value
+  type) and the key stays put.
+
+  **Fix**: the string-keyed branch of `setLeaf` now OMITS the key
+  from the apply payload instead of writing null. Under SSA's
+  per-key ownership model, `periscope-spa` previously owned that
+  field; dropping it from the apply relinquishes ownership and the
+  apiserver removes the key from the resource. This mirrors the
+  merge-key branch immediately below, which already had the
+  correct "omit, don't null" behavior for array-element removals.
+  Sibling labels owned by other field managers (e.g.,
+  `app.kubernetes.io/name` from Helm) are unaffected. Regression
+  coverage in `web/src/lib/yamlPatch.test.ts` includes a direct
+  repro mirroring the user-reported ServiceAccount scenario.
+
+- **Karpenter sidebar probe no longer floods the audit log with
+  `karpenter_read` rows on clusters without Karpenter.** Previously,
+  the SPA's `KarpenterSidebarEntry` fired `GET /api/clusters/{c}/karpenter`
+  on every cluster page mount (not just when an operator opened the
+  dashboard) to decide whether to render the sidebar nav link. The
+  handler emitted an audit row on every call, including its
+  `available_false` auto-detect short-circuit, producing a stream
+  of `karpenter_read` rows that obscured real operator-intent actions
+  in the `/audit` view. Symmetric audit noise existed on
+  Karpenter-installed clusters via the `list` op.
+
+  **Fix**: the sidebar's CRD-presence probe is split into a separate
+  endpoint, `GET /api/clusters/{c}/karpenter/availability`, that
+  returns `{available: bool}` without emitting an audit row. The
+  full `/karpenter` dashboard endpoint retains its existing audit
+  emission, which now fires only on intentional operator navigation
+  to the dashboard. The SPA-side hook `useKarpenter` is split into
+  `useKarpenter` (dashboard, full data + audit) and
+  `useKarpenterAvailability` (sidebar, lightweight + unaudited).
+
+  Operator-visible: `/audit` now shows only real actions
+  (`apply`, `delete`, `secret_reveal`, etc.) plus genuine Karpenter
+  dashboard views. Pre-v1.1.1 audit rows tagged `karpenter_read`
+  with `op: "available_false"` from sidebar probes will remain in
+  the historical log; new rows post-upgrade will not be created.
+
+  API addition is purely additive: existing `/karpenter` callers
+  see no change. No Helm values or cluster-registry config changes.
+
 ## [1.1.0] - 2026-05-16
 
 ### Added

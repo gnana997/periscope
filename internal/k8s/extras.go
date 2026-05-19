@@ -86,6 +86,8 @@ func GetHPAYAML(ctx context.Context, p credentials.Provider, args GetHPAArgs) (s
 	if err != nil {
 		return "", fmt.Errorf("get hpa: %w", err)
 	}
+	raw.APIVersion = "autoscaling/v2"
+	raw.Kind = "HorizontalPodAutoscaler"
 	return formatYAML(raw)
 }
 
@@ -175,6 +177,8 @@ func GetPDBYAML(ctx context.Context, p credentials.Provider, args GetPDBArgs) (s
 	if err != nil {
 		return "", fmt.Errorf("get pdb: %w", err)
 	}
+	raw.APIVersion = "policy/v1"
+	raw.Kind = "PodDisruptionBudget"
 	return formatYAML(raw)
 }
 
@@ -278,6 +282,8 @@ func GetReplicaSetYAML(ctx context.Context, p credentials.Provider, args GetRepl
 	if err != nil {
 		return "", fmt.Errorf("get replicaset: %w", err)
 	}
+	raw.APIVersion = "apps/v1"
+	raw.Kind = "ReplicaSet"
 	return formatYAML(raw)
 }
 
@@ -365,6 +371,8 @@ func GetNetworkPolicyYAML(ctx context.Context, p credentials.Provider, args GetN
 	if err != nil {
 		return "", fmt.Errorf("get networkpolicy: %w", err)
 	}
+	raw.APIVersion = "networking.k8s.io/v1"
+	raw.Kind = "NetworkPolicy"
 	return formatYAML(raw)
 }
 
@@ -503,6 +511,8 @@ func GetIngressClassYAML(ctx context.Context, p credentials.Provider, args GetIn
 	if err != nil {
 		return "", fmt.Errorf("get ingressclass: %w", err)
 	}
+	raw.APIVersion = "networking.k8s.io/v1"
+	raw.Kind = "IngressClass"
 	return formatYAML(raw)
 }
 
@@ -568,6 +578,8 @@ func GetResourceQuotaYAML(ctx context.Context, p credentials.Provider, args GetR
 	if err != nil {
 		return "", fmt.Errorf("get resourcequota: %w", err)
 	}
+	raw.APIVersion = "v1"
+	raw.Kind = "ResourceQuota"
 	return formatYAML(raw)
 }
 
@@ -659,6 +671,8 @@ func GetLimitRangeYAML(ctx context.Context, p credentials.Provider, args GetLimi
 	if err != nil {
 		return "", fmt.Errorf("get limitrange: %w", err)
 	}
+	raw.APIVersion = "v1"
+	raw.Kind = "LimitRange"
 	return formatYAML(raw)
 }
 
@@ -737,6 +751,8 @@ func GetPriorityClassYAML(ctx context.Context, p credentials.Provider, args GetP
 	if err != nil {
 		return "", fmt.Errorf("get priorityclass: %w", err)
 	}
+	raw.APIVersion = "scheduling.k8s.io/v1"
+	raw.Kind = "PriorityClass"
 	return formatYAML(raw)
 }
 
@@ -818,6 +834,8 @@ func GetRuntimeClassYAML(ctx context.Context, p credentials.Provider, args GetRu
 	if err != nil {
 		return "", fmt.Errorf("get runtimeclass: %w", err)
 	}
+	raw.APIVersion = "node.k8s.io/v1"
+	raw.Kind = "RuntimeClass"
 	return formatYAML(raw)
 }
 
