@@ -253,7 +253,7 @@ describe("buildMinimalSSA", () => {
     const ops = computeOps(NGINX_DEPLOYMENT, after);
     const yaml = buildMinimalSSA(ops, IDENTITY);
     // The removed key must not appear in the payload at all.
-    expect(yaml).not.toMatch(/app\.kubernetes\.io\/version/);
+    expect(yaml).not.toContain("app.kubernetes.io/version");
     // And we must not be writing a null sentinel anywhere.
     expect(yaml).not.toMatch(/:\s*~\s*$/m);
     // Re-parsing should yield a payload whose labels map has no
@@ -306,8 +306,8 @@ metadata:
     expect(yaml).not.toMatch(/\btest\s*:/);
     // Sibling labels owned by other field managers must not be touched
     // (minimal-SSA: we only include fields the user changed).
-    expect(yaml).not.toMatch(/app\.kubernetes\.io\/component/);
-    expect(yaml).not.toMatch(/app\.kubernetes\.io\/name/);
+    expect(yaml).not.toContain("app.kubernetes.io/component");
+    expect(yaml).not.toContain("app.kubernetes.io/name");
   });
 
   it("produces well-formed YAML that round-trips", () => {
