@@ -5,6 +5,7 @@ import {
   MultiDocumentError,
   parseOrThrow,
   type Identity,
+  type Op,
 } from "./yamlPatch";
 
 const NGINX_DEPLOYMENT = `apiVersion: apps/v1
@@ -264,5 +265,79 @@ describe("buildMinimalSSA", () => {
     expect(parsed.apiVersion).toBe("apps/v1");
     expect(parsed.kind).toBe("Deployment");
     expect(((parsed.spec as Record<string, unknown>).replicas)).toBe(5);
+  });
+
+  it("does not duplicate associative-list entries when two ops target the same MergeKey-leaf (hotfix v1.1.1)", () => {
+    // Regression test for the duplicate-ports SSA-rejection bug. The
+    // bug fired when buildMinimalSSA applied two replace-ops both
+    // ending in a MergeKey-leaf at the same logical position
+    // (e.g. retained-ownership emitting both a container-level `.`
+    // claim and a port-level `.` claim from managedFields for the
+    // same physical port).
+    //
+    // Before the fix: Op 1's setLeaf MergeKey-leaf branch PUSHed an
+    // entry whose `containerPort` was overridden to a *number* by the
+    // value spread; Op 2's findIndex used strict `===` against the
+    // stringified keyValue and missed the existing entry, PUSHing a
+    // duplicate. K8s SSA rejected the body with "failed to create
+    // typed patch object: .spec.template.spec.containers[name=X].ports:
+    // duplicate entries for key [containerPort=N, protocol=\"TCP\"]".
+    //
+    // After the fix: setLeaf uses loose `String(x[k]) === v` matching
+    // the same convention as stepInto. The second op merges into the
+    // existing entry instead of PUSHing.
+    const portValue = {
+      containerPort: 4000,
+      name: "4000tcp",
+      protocol: "TCP",
+    };
+    const ops: Op[] = [
+      {
+        op: "replace",
+        path: [
+          "spec",
+          "template",
+          "spec",
+          "containers",
+          { name: "ai-rules-engine-dev" },
+          "ports",
+          { containerPort: "4000" },
+        ],
+        value: portValue,
+      },
+      // Same MergeKey-leaf path applied a second time — simulates the
+      // overlapping-managedFields scenario where retained-ownership
+      // emits the same port twice via different fieldsV1 traversals.
+      {
+        op: "replace",
+        path: [
+          "spec",
+          "template",
+          "spec",
+          "containers",
+          { name: "ai-rules-engine-dev" },
+          "ports",
+          { containerPort: "4000" },
+        ],
+        value: portValue,
+      },
+    ];
+    const yaml = buildMinimalSSA(ops, IDENTITY);
+    const { obj } = parseOrThrow(yaml);
+    const parsed = obj as Record<string, unknown>;
+    const containers = (
+      ((parsed.spec as Record<string, unknown>).template as Record<string, unknown>)
+        .spec as Record<string, unknown>
+    ).containers as Array<Record<string, unknown>>;
+    expect(containers).toHaveLength(1);
+    const ports = containers[0].ports as Array<Record<string, unknown>>;
+    // The critical assertion: ports must NOT be duplicated. Before the
+    // fix this would have been length 2.
+    expect(ports).toHaveLength(1);
+    expect(ports[0]).toMatchObject({
+      containerPort: 4000,
+      name: "4000tcp",
+      protocol: "TCP",
+    });
   });
 });

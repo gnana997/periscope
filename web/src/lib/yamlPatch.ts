@@ -406,8 +406,16 @@ function setLeaf(node: unknown, seg: PathSegment, value: unknown | typeof REMOVE
     throw new Error(`setLeaf: expected array for merge-key seg, got ${typeof node}`);
   }
   const [keyName, keyValue] = entryOf(seg);
+  // String() coercion mirrors stepInto's loose match — required because
+  // when the MergeKey-leaf branch first PUSHes an entry, the spread
+  // `{ ...value }` overrides the stringified keyValue with the value's
+  // typed-field (e.g. `containerPort: 4000` as number). A subsequent
+  // op for the same MergeKey would miss the existing entry under strict
+  // `===` and push a duplicate, surfacing as K8s SSA
+  // "failed to create typed patch object: duplicate entries for key"
+  // (see hotfix v1.1.1 / RFC 0005 §2.1).
   const idx = (node as Record<string, unknown>[]).findIndex(
-    (x) => isPlainObject(x) && x[keyName] === keyValue,
+    (x) => isPlainObject(x) && String(x[keyName]) === keyValue,
   );
   if (value === REMOVE_SENTINEL) {
     // SSA atomic-list removal isn't expressible by absence — but for

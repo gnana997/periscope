@@ -13,6 +13,50 @@ tag.
 
 ## [Unreleased]
 
+## [1.1.1] - 2026-05-19
+
+### Fixed
+
+- **SPA apply bodies no longer produce duplicate `containers[].ports[]`
+  entries when a deployment has overlapping `periscope-spa`
+  managedFields claims.** Previously, restarts and YAML edits on
+  affected deployments failed with the apiserver error:
+
+  ```
+  failed to create typed patch object:
+  .spec.template.spec.containers[name=X].ports:
+  duplicate entries for key [containerPort=N, protocol="TCP"]
+  ```
+
+  The trigger: deployments previously edited through Periscope's
+  container subtree *and* through specific port fields, leaving
+  `periscope-spa` holding both a container-level and a port-level
+  `.` ownership marker in managedFields. Each marker emitted a
+  retained-ownership op ending in a MergeKey-leaf at the same
+  logical port; the first op's `setLeaf` PUSHed an entry whose
+  `containerPort` was a number (from the value spread), and the
+  second op's `findIndex` used strict `===` against the stringified
+  key, missed the existing entry, and PUSHed a duplicate. The
+  apiserver rejected the resulting body during typed-patch
+  construction.
+
+  **Fix**: `setLeaf`'s MergeKey-leaf branch now uses
+  `String(x[k]) === v`, matching the loose-equality convention
+  already used by `stepInto`. Locks the same contract across both
+  branches. Includes a regression test that exercises the
+  duplicate scenario via `buildMinimalSSA` end-to-end.
+
+  Affects every restart and YAML edit on deployments hitting this
+  managedFields shape. Operators on v1.1.0 can either upgrade to
+  v1.1.1 or work around the bug by editing the affected resource
+  via `kubectl`/`rancher` until upgrade.
+
+  The deeper architectural follow-up — removing the
+  retained-ownership SSA pattern entirely in favor of pure
+  minimal-diff SSA, plus a simplified single-banner conflict UX —
+  is tracked as RFC 0005 (`docs/rfcs/0005-drop-retained-ownership.md`)
+  and ships as **v1.1.2**.
+
 ## [1.1.0] - 2026-05-16
 
 ### Added
