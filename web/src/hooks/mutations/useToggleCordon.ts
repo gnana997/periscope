@@ -7,18 +7,15 @@
 // Optimistic patching flips the `unschedulable` flag in both detail
 // and list caches so the cordon badge appears within one render.
 
-import { ApiError, api } from "../../lib/api";
+import { ApiError } from "../../lib/api";
 import { KIND_REGISTRY } from "../../lib/k8sKinds";
 import { queryKeys } from "../../lib/queryKeys";
-import { type Identity, type Op } from "../../lib/yamlPatch";
+import { buildMinimalSSA, type Identity, type Op } from "../../lib/yamlPatch";
 import { patchRowInList } from "../../lib/listShape";
 import type { ResourceListResponse } from "../../lib/types";
 import type { QueryKey } from "@tanstack/react-query";
 import { useOptimisticMutation } from "./_useOptimistic";
-import {
-  applyWithLenientConflictRetained,
-  fetchCurrentYamlForKind,
-} from "./_applyWithLenientConflict";
+import { applyWithLenientConflict } from "./_applyWithLenientConflict";
 
 interface ToggleCordonArgs {
   cluster: string;
@@ -99,27 +96,17 @@ export function useToggleCordon(args: ToggleCordonArgs) {
           value: vars.unschedulable,
         },
       ];
-      const [current, resourceMeta] = await Promise.all([
-        fetchCurrentYamlForKind(args.cluster, "nodes", "", args.name),
-        api.getMeta({
-          cluster: args.cluster,
-          group: meta.group,
-          version: meta.version,
-          resource: meta.resource,
-          name: args.name,
-        }),
-      ]);
-      return applyWithLenientConflictRetained(
+      // Pure minimal-diff SSA (issue #224): apply body is identity +
+      // spec.unschedulable only.
+      const yaml = buildMinimalSSA(ops, identity);
+      return applyWithLenientConflict(
         {
           cluster: args.cluster,
           group: meta.group,
           version: meta.version,
           resource: meta.resource,
           name: args.name,
-          identity,
-          ops,
-          current,
-          managedFields: resourceMeta.managedFields,
+          yaml,
         },
         "cordon toggle",
       );

@@ -42,6 +42,7 @@
 
 import { ApiError } from "./api";
 import { classifyManager, type ManagerCategory, type ManagerInfo } from "./managers";
+import type { ConflictInfo } from "../hooks/useApplyState";
 
 export interface FieldConflictCause {
   /** Normalised dotted path the apiserver reported, e.g. "spec.replicas". */
@@ -90,6 +91,42 @@ export function analyzeConflict(err: unknown): ConflictAnalysis | null {
     allSafeToTakeover: firstBlocking === undefined,
     firstBlocking,
   };
+}
+
+/**
+ * parseConflictForBanner extracts a flat, deduplicated banner view of
+ * a 409 FieldManagerConflict — { managers, fields } — for the unified
+ * single-banner conflict UX in YamlEditor (#224).
+ *
+ * Reuses analyzeConflict's per-cause parse + manager classification,
+ * then collapses duplicates (a single manager owning multiple
+ * conflicting fields appears once in the managers list; a single
+ * field with multiple causes appears once in the fields list).
+ *
+ * Returns null for any error that isn't a recognisable
+ * FieldManagerConflict — including 409s without a parseable body
+ * (e.g. proxy stripped). Callers then fall through to a generic
+ * Error state rather than rendering an empty banner.
+ */
+export function parseConflictForBanner(err: unknown): ConflictInfo | null {
+  const analysis = analyzeConflict(err);
+  if (!analysis || analysis.causes.length === 0) return null;
+
+  const seen = new Set<string>();
+  const managers: { name: string; category?: ManagerCategory }[] = [];
+  for (const c of analysis.causes) {
+    if (seen.has(c.manager.name)) continue;
+    seen.add(c.manager.name);
+    managers.push({ name: c.manager.name, category: c.manager.category });
+  }
+  const fieldSet = new Set<string>();
+  const fields: string[] = [];
+  for (const c of analysis.causes) {
+    if (fieldSet.has(c.field)) continue;
+    fieldSet.add(c.field);
+    fields.push(c.field);
+  }
+  return { managers, fields };
 }
 
 /**
