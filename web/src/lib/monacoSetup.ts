@@ -85,9 +85,7 @@ export function ensureMonacoYamlConfigured(): MonacoYaml {
     validate: true,
     hover: true,
     completion: true,
-    // YAML formatting is opinionated; we leave the user's text as-is.
-    // monaco-yaml 5.5+ changed `format: boolean` → `format: FormatterOptions`.
-    format: { enable: false },
+    format: false, // YAML formatting is opinionated; we leave the user's text as-is
     schemas: [],
   });
   return monacoYaml;
