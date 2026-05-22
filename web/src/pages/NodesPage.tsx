@@ -22,6 +22,9 @@ import {
 import { isForbidden } from "../components/table/isForbidden";
 import { DetailPane } from "../components/detail/DetailPane";
 import { NodeDescribe } from "../components/detail/describe/NodeDescribe";
+import { YamlView } from "../components/detail/YamlView";
+import { useEditorDirty } from "../hooks/useEditorDirty";
+import { useConfirmDiscard } from "../hooks/useConfirmDiscard";
 import { ResourceActions } from "../components/edit/ResourceActions";
 import { SecurityTab } from "../components/security/SecurityTab";
 import { SecurityEmptyBanner } from "../components/security/SecurityEmptyBanner";
@@ -128,15 +131,18 @@ export function NodesPage({ cluster }: { cluster: string }) {
     return r;
   }, [all, search, vulnOnly, cveByInstance]);
 
-  // NodesPage has no useEditorDirty/useConfirmDiscard — nodes
-  // are not editable from the SPA today. Cycling and dismiss
-  // call setMany directly without a confirm gate.
+  // Nodes are cluster-scoped — pass undefined ns to useEditorDirty and
+  // an empty ns string to YamlView. The confirm gate guards the YAML
+  // editor's unsaved changes on cycle / dismiss / tab switch.
+  const editFlag = useEditorDirty(cluster, "nodes", undefined, selectedName);
+  const confirmDiscard = useConfirmDiscard(editFlag.dirty);
+
   const overlayNav = buildOverlayNav({
     rows: filtered,
     selectedKey: selectedName,
     keyOf: (n) => n.name,
-    navigateTo: (n) => setMany({ sel: n.name, tab: activeTab }),
-    dismiss: () => setMany({ sel: null, tab: null }),
+    navigateTo: (n) => confirmDiscard(() => setMany({ sel: n.name, tab: activeTab })),
+    dismiss: () => confirmDiscard(() => setMany({ sel: null, tab: null })),
   });
 
   const columns: Column<Node>[] = [
@@ -276,8 +282,8 @@ export function NodesPage({ cluster }: { cluster: string }) {
       title={selectedName}
       subtitle="cluster-scoped"
       activeTab={activeTab}
-      onTabChange={(id) => setParam("tab", id)}
-      onClose={() => setMany({ sel: null, tab: null })}
+      onTabChange={(id) => confirmDiscard(() => setParam("tab", id))}
+      onClose={() => confirmDiscard(() => setMany({ sel: null, tab: null }))}
       actions={
         <ResourceActions
           cluster={cluster}
@@ -293,6 +299,20 @@ export function NodesPage({ cluster }: { cluster: string }) {
           label: "describe",
           ready: true,
           content: <NodeDescribe cluster={cluster} name={selectedName} />,
+        },
+        {
+          id: "yaml",
+          label: "yaml",
+          ready: true,
+          content: (
+            <YamlView
+              cluster={cluster}
+              source={{ kind: "builtin", yamlKind: "nodes" }}
+              ns=""
+              name={selectedName}
+            />
+          ),
+          dirty: editFlag.dirty,
         },
         {
           id: "security",
@@ -368,7 +388,7 @@ export function NodesPage({ cluster }: { cluster: string }) {
               rows={filtered}
               rowKey={(n) => n.name}
               rowTint={rowTint}
-              onRowClick={(n) => setMany({ sel: n.name })}
+              onRowClick={(n) => confirmDiscard(() => setMany({ sel: n.name, tab: "describe" }))}
               selectedKey={selectedName}
               bulk={{
                 cluster,
