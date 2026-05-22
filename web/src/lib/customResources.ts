@@ -10,30 +10,16 @@
 import type { QueryClient } from "@tanstack/react-query";
 import type { CRD } from "./types";
 import type { ResourceRef, YamlKind, ClusterScopedKind } from "./api";
+import { CLUSTER_SCOPED_KINDS } from "./api";
 import { KIND_REGISTRY } from "./k8sKinds";
 import { queryKeys } from "./queryKeys";
 
-const CLUSTER_SCOPED_BUILTINS: ReadonlySet<YamlKind> = new Set<YamlKind>([
-  "namespaces",
-  "pvs",
-  "storageclasses",
-  "clusterroles",
-  "clusterrolebindings",
-  "ingressclasses",
-  "priorityclasses",
-  "runtimeclasses",
-]);
+// Both views derive from the single source of truth in api.ts — they cannot
+// drift from ClusterScopedKind. Set form for O(1) membership in isClusterScoped;
+// every ClusterScopedKind is a YamlKind (guaranteed by the guard in api.ts).
+const CLUSTER_SCOPED_BUILTINS: ReadonlySet<YamlKind> = new Set(CLUSTER_SCOPED_KINDS);
 
-export const CLUSTER_SCOPED_YAMLKINDS: readonly ClusterScopedKind[] = [
-  "namespaces",
-  "pvs",
-  "storageclasses",
-  "clusterroles",
-  "clusterrolebindings",
-  "ingressclasses",
-  "priorityclasses",
-  "runtimeclasses",
-];
+export const CLUSTER_SCOPED_YAMLKINDS: readonly ClusterScopedKind[] = CLUSTER_SCOPED_KINDS;
 
 /** A custom resource the editor can read/edit. Mirrors the subset of
  *  CRD metadata the editor needs — separate type so callers don't pass

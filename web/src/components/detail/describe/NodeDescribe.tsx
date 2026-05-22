@@ -103,16 +103,17 @@ export function NodeDescribe({
           </div>
         )}
 
-        {/* Labels */}
+        {/* Labels — list layout + filter: NFD can add 100+ long-keyed
+            labels, unreadable in the default chip grid. */}
         <div>
           <SectionTitle>Labels</SectionTitle>
-          <MetaPills map={data.labels} />
+          <MetaPills map={data.labels} layout="list" filterable />
         </div>
 
         {/* Annotations */}
         <div>
           <SectionTitle>Annotations</SectionTitle>
-          <MetaPills map={data.annotations} />
+          <MetaPills map={data.annotations} layout="list" filterable />
         </div>
       </div>
     </div>

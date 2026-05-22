@@ -39,8 +39,6 @@ Periscope is a self-hosted, multi-cluster Kubernetes console focused on EKS. It 
 
 ## Quickstart
 
-**Live demo:** [demo.periscopehq.dev](https://demo.periscopehq.dev) — a read-only fleet, no signup.
-
 ### Try locally with kind — 60 seconds
 
 The fastest way to see Periscope without touching AWS or an IdP. Runs on any local Kubernetes — kind / k3d / minikube. Sign-in uses an in-process dev fallback, so anyone hitting the dashboard becomes `dev@local`.

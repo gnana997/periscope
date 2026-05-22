@@ -1,5 +1,5 @@
 import { Link } from "react-router-dom";
-import type { ReactNode } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { ageFrom } from "../../../lib/format";
 import { cn } from "../../../lib/cn";
 import type { JobChildPod } from "../../../lib/types";
@@ -46,36 +46,97 @@ export function SectionTitle({ children }: { children: ReactNode }) {
 export function MetaPill({ k, v }: { k: string; v: string }) {
   return (
     // Plain `flex` (not `inline-flex`) so the chip can be a grid track
-    // and stretch to fill its 1fr column. `min-w-0` lets the value
-    // truncate inside the chip when the column gets narrow.
-    <div className="flex min-w-0 items-center gap-1 rounded-md border border-border bg-surface-2/40 px-2 py-0.5 font-mono text-[11px]">
-      <span className="shrink-0 text-ink-muted">{k}</span>
+    // and stretch to fill its 1fr column. Both key and value are
+    // `min-w-0 truncate` so neither can ever overflow the chip border
+    // and paint over a neighbour — long K8s identifiers (NFD node
+    // labels, helm.sh/ annotations) degrade to a clean truncation.
+    // `title` carries the full `key=value` for hover.
+    <div
+      className="flex min-w-0 items-center gap-1 rounded-md border border-border bg-surface-2/40 px-2 py-0.5 font-mono text-[11px]"
+      title={`${k}=${v}`}
+    >
+      <span className="min-w-0 truncate text-ink-muted">{k}</span>
       <span className="shrink-0 text-ink-faint">=</span>
-      <span className="min-w-0 truncate text-ink" title={v}>
-        {v}
-      </span>
+      <span className="min-w-0 flex-1 truncate text-ink">{v}</span>
     </div>
   );
 }
 
-export function MetaPills({ map }: { map?: Record<string, string> }) {
-  if (!map || Object.keys(map).length === 0) {
+export function MetaPills({
+  map,
+  layout = "grid",
+  filterable = false,
+}: {
+  map?: Record<string, string>;
+  /** "grid" — responsive multi-column chips (default, good for the
+   *  handful of short labels most resources carry). "list" — one
+   *  full-width chip per row, for resources with many long-keyed
+   *  labels (nodes: NFD adds 100+). */
+  layout?: "grid" | "list";
+  /** Render a substring filter above the list. Intended for `list`
+   *  layout on long maps (node labels/annotations). */
+  filterable?: boolean;
+}) {
+  const entries = useMemo(() => Object.entries(map ?? {}), [map]);
+  const [filter, setFilter] = useState("");
+
+  if (entries.length === 0) {
     return <span className="text-[11.5px] text-ink-faint">—</span>;
   }
+
+  const needle = filter.trim().toLowerCase();
+  const shown = needle
+    ? entries.filter(
+        ([k, v]) => k.toLowerCase().includes(needle) || v.toLowerCase().includes(needle),
+      )
+    : entries;
+
+  if (layout === "list") {
+    return (
+      <div className="flex flex-col gap-1.5">
+        {filterable && (
+          <div className="flex items-center gap-2">
+            <div className="flex min-w-0 flex-1 items-center gap-2 rounded-md border border-border bg-surface px-2.5 py-1 focus-within:border-border-strong">
+              <svg width="12" height="12" viewBox="0 0 13 13" className="shrink-0 text-ink-faint" aria-hidden>
+                <circle cx="5.5" cy="5.5" r="3.6" stroke="currentColor" strokeWidth="1.3" fill="none" />
+                <path d="M8.3 8.3l2.4 2.4" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+              </svg>
+              <input
+                value={filter}
+                onChange={(e) => setFilter(e.target.value)}
+                placeholder="filter labels"
+                className="min-w-0 flex-1 bg-transparent font-mono text-[11.5px] text-ink outline-none placeholder:text-ink-faint"
+              />
+            </div>
+            <span className="shrink-0 font-mono text-[11px] text-ink-muted tabular">
+              {needle ? `${shown.length} / ${entries.length}` : entries.length}
+            </span>
+          </div>
+        )}
+        {shown.length === 0 ? (
+          <span className="text-[11.5px] text-ink-faint">no match</span>
+        ) : (
+          <div className="flex flex-col gap-1">
+            {shown.map(([k, v]) => (
+              <MetaPill key={k} k={k} v={v} />
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  }
+
   // Grid with auto-fit + minmax(220px, 1fr) makes the chips responsive:
   //   - few chips on a wide pane → each chip stretches to fill its 1fr
   //     column (so the row is visually full)
   //   - many chips on a narrow pane → tracks pack at the 220px minimum
   //     and wrap to multiple rows
-  // This is the layout the operator gets either way: no perpetual right
-  // gap when there's plenty of pane width, and no awkward wrapping at
-  // narrow widths.
   return (
     <div
       className="grid gap-1.5"
       style={{ gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))" }}
     >
-      {Object.entries(map).map(([k, v]) => (
+      {entries.map(([k, v]) => (
         <MetaPill key={k} k={k} v={v} />
       ))}
     </div>

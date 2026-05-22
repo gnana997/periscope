@@ -190,7 +190,7 @@ func TestBulkDownloadAudit_UnknownKind(t *testing.T) {
 
 func TestBulkDownloadAudit_KnownKinds(t *testing.T) {
 	reg := bulkDownloadRegistry(t, "c1")
-	for _, kind := range []string{"pods", "configmaps", "secrets", "customresources/certificates"} {
+	for _, kind := range []string{"pods", "configmaps", "secrets", "nodes", "customresources/certificates"} {
 		t.Run(kind, func(t *testing.T) {
 			sink := &recordingSink{}
 			body := mustJSONBulk(t, map[string]any{
