@@ -1,48 +1,47 @@
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="https://periscopehq.dev/readme-banner-dark.png">
-    <img alt="periscope · one dashboard. every cluster." src="https://periscopehq.dev/readme-banner-light.png" width="100%">
+    <img alt="Periscope" src="https://periscopehq.dev/readme-banner-light.png" width="100%">
   </picture>
 </p>
 
 # Periscope
 
-> A multi-cluster Kubernetes console — keyless on EKS via Pod Identity / IRSA, anything-with-egress via the periscope-agent tunnel.
+> A Kubernetes console built **for** EKS — keyless cluster access, every action signed by the human who took it.
 
 [![CI](https://github.com/gnana997/periscope/actions/workflows/ci.yaml/badge.svg?branch=main)](https://github.com/gnana997/periscope/actions/workflows/ci.yaml)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![Latest Release](https://img.shields.io/github/v/release/gnana997/periscope?include_prereleases&sort=semver)](https://github.com/gnana997/periscope/releases/latest)
 [![Artifact Hub](https://img.shields.io/endpoint?url=https://artifacthub.io/badge/repository/periscope)](https://artifacthub.io/packages/search?repo=periscope)
 [![Artifact Hub agent](https://img.shields.io/endpoint?url=https://artifacthub.io/badge/repository/periscope-agent)](https://artifacthub.io/packages/search?repo=periscope-agent)
-[![Go](https://img.shields.io/badge/Go-1.26-00ADD8.svg)](https://go.dev/)
-[![Node](https://img.shields.io/badge/Node-22-339933.svg)](https://nodejs.org/)
 [![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/gnana997/periscope/badge)](https://scorecard.dev/viewer/?uri=github.com/gnana997/periscope)
-[![CodeQL](https://github.com/gnana997/periscope/actions/workflows/codeql.yml/badge.svg?branch=main)](https://github.com/gnana997/periscope/actions/workflows/codeql.yml)
 
-**v1.1.0 shipped — AWS Access surfaces.** Cluster Access page (EKS Access Entries + aws-auth diff + unified SA → IAM Role index + Pod Identity view), per-workload AWS Access tab with sensitive-permissions chips against an 18-chip catalog, and a reverse-lookup page answering "which workloads can perform action X?" See [v1.1.0 release notes](CHANGELOG.md#110---2026-05-16) and the [usage guide](docs/usage/aws-access.md).
+<p align="center">
+  <img alt="Periscope fleet view — every cluster as a status card, problems surfaced at a glance" src="docs/assets/fleet/hero.png" width="100%">
+</p>
 
-**v1.0.0 launched.** Origin story, what shipped, what's not in v1.0, and what's next — read the [launch announcement](https://github.com/gnana997/periscope/discussions/70).
+## The problem
 
-> **Status — v1.1 stable.** Public HTTP API, configuration shape, and Helm values are covered by semver: breaking changes will land in a future major (v2). Bugfixes and additive features land on minor / patch tags off `main`. See [`CHANGELOG.md`](CHANGELOG.md) for what shipped per release.
+Modern AWS security baselines are retiring long-lived IAM credentials — and most Kubernetes dashboards quietly depend on them. Take the static keys away and your console either stops working, or falls back to a single shared service-account identity. With a shared identity the audit trail goes blind: every action reads as `dashboard-bot`, never the person who actually took it.
+
+Periscope is built for that world.
 
 ## What is Periscope
 
-Periscope is a self-hosted, multi-cluster Kubernetes console focused on EKS environments where modern compliance regimes make static AWS credentials hard to justify. It authenticates **to** clusters using Pod Identity / IRSA, authenticates **users** via OIDC, and writes a structured audit trail signed by the human who took each action — all from a stateless, single-binary deployment.
+Periscope is a self-hosted, multi-cluster Kubernetes console focused on EKS. It authenticates **to** clusters with Pod Identity / IRSA — no static AWS keys on the console pod — authenticates **users** via OIDC, and impersonates each user on every API call, so your cluster's own audit log records `alice@corp`, never a shared bot. It runs as a single stateless binary.
 
-## Why Periscope
+## What makes it different
 
-- **No long-lived AWS keys.** Cluster access is obtained on demand via Pod Identity or IRSA. Nothing static lives on the console pod.
-- **Real human in every audit row.** Every K8s call carries the user's OIDC identity via impersonation, so the audit log shows `alice@corp` — never `periscope-bot`.
-- **OIDC-gated user identity.** Auth0 and Okta tested. Authorization by IdP group, with configurable tiers.
-- **Searchable audit log.** SQLite-backed, with a first-class in-app view, time-filterable and retention-bounded — compliance reviews stop being a log-grep exercise.
-- **Live, not polled.** 21+ resource list pages stream over SSE for real-time updates, with a tested polling fallback for restrictive proxies.
-- **Schema-aware YAML editor.** Built-in kinds and Custom Resources. Server-side apply, field-ownership glyphs, conflict resolution, live drift detection while editing.
+- **Keyless on EKS.** Cluster access is obtained on demand through Pod Identity or IRSA. Nothing static lives on the console pod.
+- **A real human in every audit row.** Impersonation carries each user's OIDC identity onto every Kubernetes call — so both your cluster's apiserver audit log and Periscope's own signed, searchable audit trail show the person, never `periscope-bot`.
+- **It understands EKS, not just Kubernetes.** IAM access analysis ("which workloads can perform action X?"), Amazon Inspector v2 CVE findings grouped by package, EKS Access Entries / aws-auth reconciliation, upgrade-readiness insights, add-on management, and a Karpenter dashboard.
+- **And it's a complete console.** Multi-cluster fleet view, live resource browsing over SSE, a schema-aware YAML editor with server-side apply, the full Helm lifecycle (install / upgrade / rollback / diff), logs, in-browser `exec` — plus an agent tunnel that manages any cluster with outbound HTTPS, no IAM trust required.
 
 ## Quickstart
 
-### Try locally with kind <span title="60-second evaluation">⚡</span>
+### Try locally with kind — 60 seconds
 
-The fastest way to see Periscope without touching AWS or an IdP. Runs on any local Kubernetes — kind / k3d / minikube. Sign-in uses an in-process dev fallback so anyone hitting the dashboard becomes `dev@local`.
+The fastest way to see Periscope without touching AWS or an IdP. Runs on any local Kubernetes — kind / k3d / minikube. Sign-in uses an in-process dev fallback, so anyone hitting the dashboard becomes `dev@local`.
 
 ```sh
 # 1. Create a local cluster
@@ -50,7 +49,7 @@ kind create cluster --name periscope-demo
 
 # 2. Install with the kind-tuned values
 helm install periscope \
-  oci://ghcr.io/gnana997/charts/periscope --version 1.0.5 \
+  oci://ghcr.io/gnana997/charts/periscope --version 1.1.2 \
   --namespace periscope --create-namespace \
   --values https://periscopehq.dev/examples/values-kind.yaml
 
@@ -107,92 +106,11 @@ Both signed (cosign keyless) and discoverable on [Artifact Hub](https://artifact
 
 ## Features
 
-**Authentication & access**
-- Pod Identity / IRSA for cluster access (no static AWS credentials on the pod)
-- OIDC user auth with IdP-group-gated authorization (shared / tier / raw modes)
-- Per-cluster RBAC enforced server-side via `Impersonate-User` / `Impersonate-Group` headers
-- Pre-flight RBAC checks (SAR / SSRR) so disabled buttons explain why instead of failing on click
+The [What makes it different](#what-makes-it-different) section above is the short version. For the complete capability list — authentication, multi-cluster, browsing, editing, Helm, EKS add-ons, upgrade readiness, Karpenter, CVE surfacing, AWS Access, and audit — see **[docs/features.md](docs/features.md)**.
 
-**Multi-cluster**
-- Fleet view at `/` — every registered cluster as a status card with identity, hot signals, and one-click drill-in
-- Switch context from the cluster rail (Slack-style left bar)
-- Per-cluster scoping for every resource view
-- Add managed clusters via `backend: agent` (#42) — `kubectl apply` an agent on any K8s with outbound HTTPS, no IAM trust required. Works on EKS, GKE, AKS, on-prem k3s.
+## Status
 
-**Browsing & inspection**
-- Common resources (pods, deployments, services, configmaps, secrets, jobs, ingresses, RBAC, …) plus full Custom Resource catalog
-- Live events, describe view, logs (with follow + filtering)
-- In-browser pod shell (`exec`) with reconnect on transient disconnects — works on every backend (eks, kubeconfig, in-cluster, agent)
-- Cmd+K palette: search resources by name across the active cluster
-
-**Real-time updates (watch streams)**
-- 21+ resource list pages stream over SSE for live updates spanning workloads, networking, storage, and cluster-scoped resources
-- Per-user concurrency cap to keep apiserver watch quotas safe
-- Polling fallback when the EventSource path fails (corporate proxies, etc.)
-- Operator opt-out via Helm: subset, group aliases (`workloads`, `networking`, `storage`, `cluster`, `core`), or full disable
-
-**Editing**
-- Inline Monaco YAML editor for any resource — built-in or CRD
-- Schema-aware autocomplete and validation against the cluster's `/openapi/v3`
-- Server-side apply with minimal diffs (no `last-applied` annotation churn)
-- Field-ownership glyphs: see who manages each field before you edit
-- Conflict resolution: per-field "keep mine / take theirs" when a controller owns the field
-- Live drift detection: warns when the cluster changes underneath the editor
-- Unsaved-changes guards on refresh, sidebar nav, row-click
-
-**Helm**
-- Release browser per cluster: per-release values, manifest, history, NOTES.txt, and structured dyff-based diff between revisions (read paths use direct Secret/ConfigMap decoding, no Helm SDK on the read path)
-- In-browser install / upgrade / uninstall with Atomic-by-default rollback on partial failure
-- Per-revision rollback from the history tab: pick the target revision, see the side-by-side diff before clicking, with `wait` / `cleanup-on-fail` / `disable-hooks` knobs surfaced inline
-- Schema-aware values editor: structured form when the chart ships `values.schema.json`, Monaco YAML otherwise, with binary form/YAML toggle for `$ref`-heavy schemas
-- Dry-run preview pane shows the rendered manifests + RBAC pre-flight denials + (upgrade) semantic diff against the live cluster before the operator commits
-- Public HTTP and OCI chart fetch with SSRF protection (IMDS / link-local always blocked, RFC1918 opt-in via env)
-
-**EKS managed add-ons**
-- Browse installed add-ons with health, installed version, latest available, k8s compatibility window, and "blocks next k8s minor" warnings — feeds upgrade readiness
-- Catalog browse of every AWS-published add-on for the cluster's K8s version, filterable by AWS / third-party / type
-- Install / upgrade / delete actions with schema-aware configuration editor and `resolveConflicts` choice
-- Right-edge detail pane with describe / config tabs: see the operator's stored `configurationValues`, IAM service account role, Pod Identity associations, and full version history with one-click "upgrade to" on newer versions
-- Status-aware polling watches `CREATING` / `UPDATING` / `DELETING` flips so the UI stays in sync without manual refresh
-
-**EKS upgrade readiness**
-- Upgrade Insights surface with per-issue severity, kubernetes-version-step, and remediation links
-- Managed node group AMI drift detection so operators see which groups need a rotation before bumping the cluster
-- Works on `in-cluster`, `agent`, `eks`, and `kubeconfig` backends as long as the cluster entry has `arn` + `region`
-
-**Karpenter**
-- Curated read-only dashboard at `/clusters/{c}/karpenter`, auto-detected via the `karpenter.sh/v1` CRD probe — sidebar entry only appears on Karpenter-enabled clusters
-- NodePool table with weight, disruption budgets, current/limit usage, and per-pool `$/hr` + spot-savings (controller `/metrics` scraped via apiserver service-proxy under impersonation)
-- NodeClaims grouped by NodePool with `Drifted` / `Initialized` / `Launched` conditions surfaced as badges; pools with any drifted claim auto-expand
-- Pending pods waiting on Karpenter with the per-NodePool incompatibility breakdown extracted from the `FailedScheduling` apiserver Event — operators no longer have to grep karpenter-controller logs to see *why* a pod isn't being scheduled
-- Resizable detail pane on row click for describe / yaml / events without leaving the dashboard
-- Graceful degradation: missing `/metrics` or events list failures degrade individual panels without failing the whole response
-
-**Security & CVE surfacing**
-- Inline severity chips on Pods / Nodes / Karpenter list pages — at-a-glance `2C · 5H · 12M` per row, sourced from Amazon Inspector v2
-- New `security` detail-pane tab on Pod / Node / Deployment / StatefulSet / DaemonSet / Karpenter NodeClaim — findings grouped **by package** server-side (a typical 200-finding container collapses to ~10 package groups with per-group "upgrade `1.16.1 → 1.26.3` fixes all" hints), pre-sorted by triage priority (exploits → severity → CVSS → EPSS)
-- Filter chips on every Security tab — `critical / high / medium / low`, `exploits N`, `fixable only` with live `X / Y shown` indicator. Toggling stays client-side (no backend roundtrip)
-- Per-cluster local cache, lazily hydrated on first activation; reads are O(1) thereafter, with 6h TTL background refresh and an entity-scoped manual `↻ refresh` button (one `cve_refresh` audit row per click)
-- Per-finding detail surface — description, remediation text + vendor advisory link, EPSS score, exploit-availability flag, fix-availability pill, first / last observed timestamps, Inspector console deep-link
-- Empty-state contract: when Inspector v2 is disabled or the IAM grant is missing, every CVE-aware page renders an unobtrusive once-per-cluster hairline banner instead of erroring out
-- Same wire shape feeds the SPA and the future MCP / AI-agent tool layer (v1.2) — one source of truth for "what to fix first" prioritization
-- Opt-in via Helm (`inspector.enabled: true`) — see [usage guide](docs/usage/cve.md) for IAM, audit, cost
-
-**AWS Access (v1.1)**
-- **Cluster Access page** — reconciles EKS Access Entries with the legacy aws-auth ConfigMap (migration-health chip: `aws-auth-only` / `entries-only` / `both`), unified SA → IAM Role index (IRSA + Pod Identity, with dual-source + orphan flags), and a role-centric Pod Identity view
-- **AWS Access tab** on every workload detail pane (Pod / ServiceAccount / Deployment / StatefulSet / DaemonSet) — resolved identity chain, IAM policies grouped by AWS service, sensitive-permissions chip strip against an 18-chip catalog (17 named actions + literal `*`) with categories `privilege-escalation` / `data` / `cross-account` / `destructive` / `cluster` / `wildcard`
-- **Reverse lookup** at `/clusters/{c}/reverse-lookup` — "which workloads can perform action X?" with one-row-per-matched-pod results, binding-source attribution, and one-click chip pre-fill from any sensitive chip on the AWS Access tab
-- **Locked-feature pane** with structured `reason` + exact missing-permissions list (powered by `iam:SimulatePrincipalPolicy` probe, 5-min server-side cache, `Re-check` button to bypass)
-- IAM probe configurable via `PERISCOPE_AWS_ACCESS_IAM_PROBE` env (default on); falls back to optimistic `available: true` + lazy 403 when the probe itself is denied
-- See [usage guide](docs/usage/aws-access.md) for Cluster Access page, per-workload tab, reverse-lookup walkthrough; IAM grant for the periscope-server role is in [cluster-rbac.md](docs/setup/cluster-rbac.md)
-
-**Audit & observability**
-- Every privileged action signed by the human user — apply, delete, exec, secret reveal, log open, cronjob trigger
-- Persistent audit log: SQLite (single-replica), with retention and size caps
-- First-class in-app audit view with filters by actor, verb, outcome, time range, namespace, request id
-- Density timeline strip surfaces denials and failures at a glance
-- Tier-mode audit-admin groups can see every actor's rows; everyone else sees their own
-- Structured JSON events also stream to stdout for shipping into CloudWatch / Loki / OpenSearch / Datadog
+**v1.1 stable.** The public HTTP API, configuration shape, and Helm values are covered by semver — breaking changes will land in a future major (v2); bugfixes and additive features land on minor / patch tags off `main`. See [`CHANGELOG.md`](CHANGELOG.md) for what shipped per release.
 
 ## Documentation
 
@@ -282,13 +200,17 @@ CI: every push and PR runs `golangci-lint`, `go test`, `npm run lint`, `npm test
 
 ## Roadmap
 
-Planning is tracked in [GitHub Issues](https://github.com/gnana997/periscope/issues). v1.1 shipped the AWS Access surfaces — Cluster Access page reconciling EKS Access Entries + aws-auth + IRSA + Pod Identity, per-workload AWS Access tab with sensitive-permissions chips, and reverse lookup ("which workloads can perform action X?"). Active scoping for v1.2: in-browser cluster shell (#104), MCP / AI tool layer (#151) reusing v1.1's server-side IAM resolver + sensitive catalog, CronJob CVE-ownership chain on the Security tab, and per-NodeGroup CVE chip rollup.
+Planning is tracked in [GitHub Milestones](https://github.com/gnana997/periscope/milestones). **v1.1 (shipped)** delivered the AWS Access surfaces — Cluster Access page reconciling EKS Access Entries + aws-auth + IRSA + Pod Identity, per-workload AWS Access tab with sensitive-permissions chips, and reverse lookup ("which workloads can perform action X?").
+
+- **[v1.2](https://github.com/gnana997/periscope/milestone/2): operator daily-driver layer.** GPU + AI workload visibility (Pod ↔ GPU map, idle-GPU finder, DCGM reconciler), in-browser cluster shell (#104), SSM shell into EKS nodes (#105), Helm private-OCI auth via Pod Identity / IRSA (#121).
+- **[v1.3](https://github.com/gnana997/periscope/milestone/3): AWS depth + observability.** IAM effective-access engine (conditions, SCPs, cross-account `AssumeRole` walking), CloudTrail compliance lens, cluster-wide kube-apiserver audit ingestion, related-resources graph, CronJob CVE-ownership chain, per-NodeGroup CVE rollup.
+- **[v1.4](https://github.com/gnana997/periscope/milestone/4): agent-native.** MCP-style tool registry over the v1.1–v1.3 wire shapes (#151), LLM provider abstraction, in-app chat surface, `agent_tool_call` audit verb.
 
 ## Community & support
 
-- **Bugs & feature requests** — [GitHub Issues](https://github.com/gnana997/periscope/issues)
-- **Questions & discussion** — [GitHub Discussions](https://github.com/gnana997/periscope/discussions)
-- **Security vulnerabilities** — see [`SECURITY.md`](SECURITY.md)
+- **Bugs & feature requests:** [GitHub Issues](https://github.com/gnana997/periscope/issues)
+- **Questions & discussion:** [GitHub Discussions](https://github.com/gnana997/periscope/discussions)
+- **Security vulnerabilities:** see [`SECURITY.md`](SECURITY.md)
 
 ## Contributing
 

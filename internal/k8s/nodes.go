@@ -86,6 +86,20 @@ func GetNode(ctx context.Context, p credentials.Provider, args GetNodeArgs) (Nod
 	}, nil
 }
 
+func GetNodeYAML(ctx context.Context, p credentials.Provider, args GetNodeArgs) (string, error) {
+	cs, err := newClientFn(ctx, p, args.Cluster)
+	if err != nil {
+		return "", fmt.Errorf("build clientset: %w", err)
+	}
+	raw, err := cs.CoreV1().Nodes().Get(ctx, args.Name, metav1.GetOptions{})
+	if err != nil {
+		return "", fmt.Errorf("get node %s: %w", args.Name, err)
+	}
+	raw.APIVersion = "v1"
+	raw.Kind = "Node"
+	return formatYAML(raw)
+}
+
 func nodeSummary(n *corev1.Node) Node {
 	instanceType := n.Labels["node.kubernetes.io/instance-type"]
 	if instanceType == "" {

@@ -1194,6 +1194,12 @@ func main() {
 				return k8s.GetRuntimeClassYAML(ctx, p, k8s.GetRuntimeClassArgs{Cluster: c, Name: name})
 			})))
 
+	router.Get("/api/clusters/{cluster}/nodes/{name}/yaml", credentials.Wrap(factory,
+		yamlHandler(registry, "node",
+			func(ctx context.Context, p credentials.Provider, c clusters.Cluster, _, name string) (string, error) {
+				return k8s.GetNodeYAML(ctx, p, k8s.GetNodeArgs{Cluster: c, Name: name})
+			})))
+
 	// --- Cluster-wide events list ---
 
 	router.Get("/api/clusters/{cluster}/events", credentials.Wrap(factory,
@@ -2128,6 +2134,7 @@ var bulkDownloadableKinds = map[string]struct{}{
 	"clusterroles":        {},
 	"ingressclasses":      {},
 	"namespaces":          {},
+	"nodes":               {},
 	"priorityclasses":     {},
 	"pvs":                 {},
 	"runtimeclasses":      {},

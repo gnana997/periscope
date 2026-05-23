@@ -13,7 +13,45 @@ tag.
 
 ## [Unreleased]
 
-## [1.1.2-rc1] - 2026-05-19
+## [1.1.3] - 2026-05-23
+
+This release makes Nodes editable through the YAML editor, and
+makes labels and annotations readable on nodes that carry hundreds
+of them — Node Feature Discovery and the NVIDIA GPU device plugin
+each stamp a node with 100+ long-keyed labels.
+
+### Added
+
+- **Node YAML editing.** The Nodes detail pane gains a `yaml` tab,
+  served by a new `GET /api/clusters/{cluster}/nodes/{name}/yaml`
+  endpoint. Editing a node previously opened a blank pane: the
+  pane had no `yaml` tab for the Edit button to land on, and no
+  backend route served a node's manifest. Nodes now view, edit,
+  apply, and bulk-download YAML like every other cluster-scoped
+  resource, with the same unsaved-changes guard.
+- **Label / annotation filter on the node describe view.** Node
+  labels and annotations render one per row at full width with a
+  substring filter box — matches key or value, with a live
+  `X / Y` count. The previous responsive chip grid was unreadable
+  on NFD- or GPU-labelled nodes.
+
+### Fixed
+
+- **Long label keys no longer overflow their chip.** In the
+  describe-view label and annotation chips, a key wider than the
+  chip — `feature.node.kubernetes.io/...`, `meta.helm.sh/...` —
+  used to render past the chip border and paint over its
+  neighbour. Both key and value now truncate within the border,
+  with the full `key=value` available on hover. This affects
+  every describe view, not only nodes.
+- Internal: the cluster-scoped-kind list, previously
+  hand-maintained in four frontend lists that had drifted apart
+  (`nodes` reached the type but none of the runtime lists — the
+  cause of the blank node editor), is now a single
+  `CLUSTER_SCOPED_KINDS` constant. A compile-time check makes any
+  future drift a build error.
+
+## [1.1.2] - 2026-05-19
 
 This release is an internal refactor of the SSA apply pipeline. The
 operator-facing changes are the conflict-resolution UX (a single

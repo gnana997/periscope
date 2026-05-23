@@ -1,5 +1,5 @@
 import { useMutation, useQuery, type UseQueryResult } from "@tanstack/react-query";
-import { api, type ClusterScopedKind, type OpenAPIDoc, type ResourceMeta, type WatchStreamKind, type YamlKind } from "../lib/api";
+import { api, isClusterScopedKind, type ClusterScopedKind, type OpenAPIDoc, type ResourceMeta, type WatchStreamKind, type YamlKind } from "../lib/api";
 import { useIsWatchStreamEnabled } from "../lib/features";
 import { queryKeys } from "../lib/queryKeys";
 import { editorYamlQueryKey, type EditorSource } from "../lib/customResources";
@@ -598,8 +598,8 @@ export function useObjectEvents(
   return useQuery<EventList>({
     queryKey: queryKeys.cluster(cluster).kind(kind).events(ns, name ?? ""),
     queryFn: ({ signal }) =>
-      (["namespaces", "pvs", "storageclasses", "clusterroles", "clusterrolebindings", "ingressclasses", "priorityclasses", "runtimeclasses"] as ClusterScopedKind[]).includes(kind as ClusterScopedKind)
-        ? api.clusterScopedEvents(cluster, kind as ClusterScopedKind, name!, signal)
+      isClusterScopedKind(kind)
+        ? api.clusterScopedEvents(cluster, kind, name!, signal)
         : api.events(cluster, kind as Exclude<YamlKind, ClusterScopedKind>, ns, name!, signal),
     enabled: enabled && Boolean(name),
   });
@@ -765,20 +765,8 @@ export function useEditorYaml(
         );
       }
       const k = source.yamlKind;
-      const isClusterScoped = (
-        [
-          "namespaces",
-          "pvs",
-          "storageclasses",
-          "clusterroles",
-          "clusterrolebindings",
-          "ingressclasses",
-          "priorityclasses",
-          "runtimeclasses",
-        ] as ClusterScopedKind[]
-      ).includes(k as ClusterScopedKind);
-      return isClusterScoped
-        ? api.clusterScopedYaml(cluster, k as ClusterScopedKind, name!, signal)
+      return isClusterScopedKind(k)
+        ? api.clusterScopedYaml(cluster, k, name!, signal)
         : api.yaml(
             cluster,
             k as Exclude<YamlKind, ClusterScopedKind>,

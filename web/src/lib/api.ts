@@ -246,7 +246,27 @@ function clusterScopedURL(c: string, kind: string, name: string, suffix?: string
   return suffix ? `${base}/${suffix}` : base;
 }
 
-export type ClusterScopedKind = "namespaces" | "pvs" | "storageclasses" | "clusterroles" | "clusterrolebindings" | "ingressclasses" | "priorityclasses" | "runtimeclasses" | "nodes";
+// Single source of truth for cluster-scoped built-in kinds. ClusterScopedKind
+// is DERIVED from this array, so adding a kind here is the only edit required —
+// the type widens automatically and every list elsewhere that derives from
+// CLUSTER_SCOPED_KINDS stays in sync. Do not hand-maintain a parallel list.
+export const CLUSTER_SCOPED_KINDS = [
+  "namespaces",
+  "pvs",
+  "storageclasses",
+  "clusterroles",
+  "clusterrolebindings",
+  "ingressclasses",
+  "priorityclasses",
+  "runtimeclasses",
+  "nodes",
+] as const;
+
+export type ClusterScopedKind = (typeof CLUSTER_SCOPED_KINDS)[number];
+
+// Runtime type-guard, so call sites route on cluster scope without casts.
+export const isClusterScopedKind = (k: string): k is ClusterScopedKind =>
+  (CLUSTER_SCOPED_KINDS as readonly string[]).includes(k);
 
 export type YamlKind =
   | "pods"
@@ -279,6 +299,12 @@ export type YamlKind =
   | "priorityclasses"
   | "runtimeclasses"
   | "nodes";
+
+// Compile-time guard: every cluster-scoped kind must also be a YamlKind.
+// (The two unions are intentionally distinct — YamlKind also holds namespaced
+// kinds.) If CLUSTER_SCOPED_KINDS gains a kind absent from YamlKind, this errors.
+const _clusterScopedAreYamlKinds = CLUSTER_SCOPED_KINDS satisfies readonly YamlKind[];
+void _clusterScopedAreYamlKinds;
 
 // WatchStreamKind is the union of resource kinds the backend can serve
 // over a watch SSE endpoint. Mirrors the env-var tokens accepted by
