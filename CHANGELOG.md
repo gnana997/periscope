@@ -13,6 +13,28 @@ tag.
 
 ## [Unreleased]
 
+Security patch release: bumps Go toolchain and dependencies to clear
+all known reachable vulnerabilities. No functional changes — drop-in
+upgrade from 1.1.3.
+
+### Security
+
+- **Go toolchain bumped from 1.26.0 to 1.26.3.** Clears 12 reachable
+  standard-library vulnerabilities, including the TLS 1.3 KeyUpdate
+  DoS (GO-2026-4870), x509 name-constraint bypass (GO-2026-4866),
+  HTTP/2 transport infinite loop (GO-2026-4918), and others across
+  `crypto/tls`, `crypto/x509`, `net/http`, `net/url`, `os`, and
+  `archive/tar`.
+- **`golang.org/x/net` bumped from v0.53.0 to v0.55.0.** Clears the
+  Punycode-encoded IDN label vulnerability (GO-2026-5026) in the
+  `idna` package.
+- **`github.com/containerd/containerd` bumped from v1.7.30 to v1.7.32.**
+  Clears CVE-2026-46680 surfaced in container-image scans. Periscope
+  does not call into containerd; the bump is for clean scanner output.
+
+Verified with `govulncheck`: 0 reachable vulnerabilities (was 13) and
+full test suite green.
+
 ## [1.1.3] - 2026-05-23
 
 This release makes Nodes editable through the YAML editor, and
