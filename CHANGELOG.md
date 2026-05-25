@@ -26,8 +26,13 @@ upgrade from 1.1.3.
   `crypto/tls`, `crypto/x509`, `net/http`, `net/url`, `os`, and
   `archive/tar`.
 - **`golang.org/x/net` bumped from v0.53.0 to v0.55.0.** Clears the
-  Punycode-encoded IDN label vulnerability (GO-2026-5026) in the
-  `idna` package.
+  Punycode-encoded IDN label vulnerability (GO-2026-5026) and six
+  related findings (GO-2026-5025, 5027, 5028, 5029, 5030) flagged
+  against the `idna` and `html` packages.
+- **`golang.org/x/crypto` bumped from v0.51.0 to v0.52.0.** Clears
+  13 findings flagged by OpenSSF Scorecard's OSV check against the
+  `ssh` and `ssh/agent` packages (GO-2026-5005, 5006, 5013–5021,
+  5023, 5033).
 - **`github.com/containerd/containerd` bumped from v1.7.30 to v1.7.32.**
   Clears CVE-2026-46680 surfaced in container-image scans. Periscope
   does not call into containerd; the bump is for clean scanner output.
