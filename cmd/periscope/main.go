@@ -199,7 +199,7 @@ func main() {
 		agentTunnelOptions{
 			Enabled:        agentTunnelEnabled,
 			ListenAddr:     agentListenAddr,
-			TunnelDNSNames: parseAgentTunnelSANs(os.Getenv("PERISCOPE_AGENT_TUNNEL_SANS")),
+			TunnelSANs:     parseAgentTunnelSANs(os.Getenv("PERISCOPE_AGENT_TUNNEL_SANS")),
 		},
 		registry, authzResolver, sessionStore, authCfg)
 	if err != nil {

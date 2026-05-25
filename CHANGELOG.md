@@ -14,8 +14,32 @@ tag.
 ## [Unreleased]
 
 Security patch release: bumps Go toolchain and dependencies to clear
-all known reachable vulnerabilities. No functional changes — drop-in
-upgrade from 1.1.3.
+all known reachable vulnerabilities. Also includes two agent-tunnel
+fixes surfaced during v1.1.4-rc1 cross-cluster soak testing — both
+are backward-compatible with existing v1.1.x deployments.
+
+### Fixed
+
+- **Agent tunnel server cert now correctly splits DNS vs IP SANs**
+  (`internal/tunnel/pki.go`). Previously every entry in `agent.tunnelSANs`
+  landed in the cert's `DNSNames`, even IP literals — Go's `crypto/x509`
+  verifier checks DNS SANs only when the client dialed a hostname and
+  IP SANs only when it dialed an IP literal, so any agent dialing the
+  tunnel on an IP (e.g. `192.168.0.6` for a local-to-local soak test, or
+  a NodePort/LB IP without DNS in front) silently failed validation.
+  `SignServer` now parses each entry with `net.ParseIP` and routes IPs
+  to `IPAddresses`, hostnames to `DNSNames`.
+- **Agent `serverURL` and `registrationURL` accept both base URL and
+  full-path URL shapes**, and the agent normalises both inputs to the
+  same canonical endpoint. The previous `registerEndpoint` unconditionally
+  appended `/api/agents/register` to the input, which double-pathed any
+  input that already ended with the canonical suffix (the natural shape
+  users copied from the agent-onboarding docs). The new helpers
+  `registerEndpoint` and `tunnelEndpoint` replace any existing path with
+  the canonical one, making both functions idempotent. The chart schema
+  pattern for `serverURL` and `registrationURL` is loosened accordingly;
+  existing values from v1.1.3 / v1.1.4-rc1 deployments continue to work
+  unchanged.
 
 ### Security
 
