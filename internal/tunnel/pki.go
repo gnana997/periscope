@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"net"
 	"time"
 )
 
@@ -223,11 +224,16 @@ func (c *CA) SignClient(csrDER []byte, clusterName string, validity time.Duratio
 // agents can validate the server identity using the same CA bundle
 // they received at registration.
 //
-// dnsNames populates the cert SANs — agents connect by hostname so
-// the SANs must include whatever DNS name the operator points the
-// agent at (e.g. "periscope.example.com" for prod, "localhost" for
-// kind smoke tests).
-func (c *CA) SignServer(commonName string, dnsNames []string, validity time.Duration) ([]byte, []byte, error) {
+// sans populates the cert SANs — agents connect by hostname or IP, so
+// the SANs must include whatever name the operator points the agent at
+// (e.g. "periscope.example.com" for prod, "localhost" for kind smoke
+// tests, "192.168.0.6" for local cross-cluster tests). Each entry is
+// parsed with net.ParseIP: entries that look like IP literals (v4 or v6)
+// are added to IPAddresses, everything else lands in DNSNames. Go's
+// crypto/x509 verifier checks DNS SANs only when the client dialed a
+// hostname and IP SANs only when it dialed an IP literal — mixing the
+// two without this split silently breaks IP-addressed dials.
+func (c *CA) SignServer(commonName string, sans []string, validity time.Duration) ([]byte, []byte, error) {
 	if validity == 0 {
 		validity = CertValidity{}.withDefaults().Client
 	}
@@ -239,6 +245,15 @@ func (c *CA) SignServer(commonName string, dnsNames []string, validity time.Dura
 	if err != nil {
 		return nil, nil, fmt.Errorf("server serial: %w", err)
 	}
+	var dnsNames []string
+	var ipAddresses []net.IP
+	for _, s := range sans {
+		if ip := net.ParseIP(s); ip != nil {
+			ipAddresses = append(ipAddresses, ip)
+			continue
+		}
+		dnsNames = append(dnsNames, s)
+	}
 	now := time.Now().UTC()
 	tmpl := &x509.Certificate{
 		SerialNumber: serial,
@@ -248,6 +263,7 @@ func (c *CA) SignServer(commonName string, dnsNames []string, validity time.Dura
 		KeyUsage:     x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,
 		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
 		DNSNames:     dnsNames,
+		IPAddresses:  ipAddresses,
 	}
 	der, err := x509.CreateCertificate(rand.Reader, tmpl, c.cert, &key.PublicKey, c.key)
 	if err != nil {

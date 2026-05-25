@@ -130,8 +130,18 @@ func run() error {
 		return d.DialContext(ctx, network, apiProxyAddr)
 	}
 
+	// Normalise the WSS URL regardless of what shape the operator
+	// supplied (base URL, with /api/agents/connect, with some other
+	// path, http(s):// scheme). tunnelEndpoint replaces the path with
+	// the canonical /api/agents/connect and converts the scheme to
+	// ws/wss — so the tunnel client always dials the right endpoint.
+	tunnelURL, err := tunnelEndpoint(cfg.ServerURL)
+	if err != nil {
+		return fmt.Errorf("normalise server URL: %w", err)
+	}
+
 	client, err := tunnel.NewClient(tunnel.ClientOptions{
-		ServerURL:       cfg.ServerURL,
+		ServerURL:       tunnelURL,
 		ClientName:      cfg.ClusterName,
 		TLSClientConfig: tlsCfg,
 		LocalDial:       localDial,
@@ -143,7 +153,7 @@ func run() error {
 
 	go serveHealth(ctx, cfg.HealthAddr)
 
-	slog.Info("opening tunnel", "server", cfg.ServerURL, "api_proxy_addr", apiProxyAddr)
+	slog.Info("opening tunnel", "server", tunnelURL, "api_proxy_addr", apiProxyAddr)
 	return client.Run(ctx)
 }
 

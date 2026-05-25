@@ -79,12 +79,14 @@ type agentTunnelOptions struct {
 	CASecretNamespace string
 	CASecretName      string
 
-	// TunnelDNSNames are the SANs baked into the server cert
-	// presented on the tunnel listener. Agents validate the server's
-	// cert against these. Default ["localhost"] (kind/dev only);
-	// production passes the real DNS name (e.g.
-	// "agents.periscope.example.com").
-	TunnelDNSNames []string
+	// TunnelSANs are the SANs baked into the server cert presented on
+	// the tunnel listener. Agents validate the server's cert against
+	// these. Entries that parse as IP literals (net.ParseIP) land in
+	// the cert's IPAddresses field; everything else lands in DNSNames.
+	// Default ["localhost"] (kind/dev only); production passes the real
+	// DNS name (e.g. "agents.periscope.example.com") or an IP literal
+	// when the tunnel is exposed directly on a node IP.
+	TunnelSANs []string
 }
 
 // _ is a compile-time silencer for the corev1 import — used only via
@@ -116,8 +118,8 @@ func registerAgentTunnel(
 	if opts.CASecretName == "" {
 		opts.CASecretName = "periscope-agent-ca"
 	}
-	if len(opts.TunnelDNSNames) == 0 {
-		opts.TunnelDNSNames = []string{"localhost"}
+	if len(opts.TunnelSANs) == 0 {
+		opts.TunnelSANs = []string{"localhost"}
 	}
 
 	// In-cluster client for the CA Secret. Doesn't reuse internal/k8s
@@ -189,7 +191,7 @@ func registerAgentTunnel(
 
 	// Mint the server cert + bind the TLS listener.
 	serverCertPEM, serverKeyPEM, err := ca.SignServer(
-		"periscope-server", opts.TunnelDNSNames, 0)
+		"periscope-server", opts.TunnelSANs, 0)
 	if err != nil {
 		return nil, fmt.Errorf("agent tunnel: server cert: %w", err)
 	}

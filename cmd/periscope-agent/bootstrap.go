@@ -133,11 +133,22 @@ func registerAndSign(ctx context.Context, cfg agentConfig) (*agentState, error) 
 }
 
 // registerEndpoint builds the full registration URL from the operator-
-// supplied PERISCOPE_SERVER_URL. Accepts ws://, wss://, http://, https://.
+// supplied input. Accepts ws://, wss://, http://, https://. The path
+// component of the input is REPLACED (not appended to) with
+// /api/agents/register, so both shapes resolve to the same output:
+//
+//	"wss://periscope.example.com:8443"                        →  https://periscope.example.com:8443/api/agents/register
+//	"wss://periscope.example.com:8443/api/agents/connect"     →  https://periscope.example.com:8443/api/agents/register
+//	"http://192.168.0.6:31429/api/agents/register"            →  http://192.168.0.6:31429/api/agents/register
+//
+// The replace-not-append shape is deliberate: an earlier version
+// appended unconditionally, which double-pathed any input that already
+// ended with "/api/agents/register" (the natural shape users copy from
+// docs). Replacing keeps the function idempotent.
 func registerEndpoint(serverURL string) (string, error) {
 	u, err := url.Parse(serverURL)
 	if err != nil {
-		return "", fmt.Errorf("parse server URL: %w", err)
+		return "", fmt.Errorf("parse register URL: %w", err)
 	}
 	switch u.Scheme {
 	case "wss":
@@ -147,8 +158,42 @@ func registerEndpoint(serverURL string) (string, error) {
 	case "http", "https":
 		// already correct
 	default:
+		return "", fmt.Errorf("register URL: unexpected scheme %q (want ws/wss/http/https)", u.Scheme)
+	}
+	u.Path = "/api/agents/register"
+	u.RawQuery = ""
+	u.Fragment = ""
+	return u.String(), nil
+}
+
+// tunnelEndpoint builds the full WSS tunnel URL from the operator-
+// supplied PERISCOPE_SERVER_URL. Accepts the same input shapes as
+// registerEndpoint (with or without a path) and resolves them all to
+// the same canonical output:
+//
+//	"wss://periscope.example.com:8443"                        →  wss://periscope.example.com:8443/api/agents/connect
+//	"wss://periscope.example.com:8443/api/agents/connect"     →  wss://periscope.example.com:8443/api/agents/connect
+//	"https://periscope.example.com:8443"                      →  wss://periscope.example.com:8443/api/agents/connect
+//
+// HTTPS/HTTP inputs are normalised to wss/ws because the tunnel
+// listener is a WebSocket upgrade endpoint.
+func tunnelEndpoint(serverURL string) (string, error) {
+	u, err := url.Parse(serverURL)
+	if err != nil {
+		return "", fmt.Errorf("parse server URL: %w", err)
+	}
+	switch u.Scheme {
+	case "https":
+		u.Scheme = "wss"
+	case "http":
+		u.Scheme = "ws"
+	case "ws", "wss":
+		// already correct
+	default:
 		return "", fmt.Errorf("server URL: unexpected scheme %q (want ws/wss/http/https)", u.Scheme)
 	}
-	u.Path = strings.TrimRight(u.Path, "/") + "/api/agents/register"
+	u.Path = "/api/agents/connect"
+	u.RawQuery = ""
+	u.Fragment = ""
 	return u.String(), nil
 }

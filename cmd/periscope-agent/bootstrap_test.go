@@ -102,10 +102,25 @@ func TestRegisterEndpoint_SchemeMapping(t *testing.T) {
 	cases := []struct {
 		in, want string
 	}{
+		// scheme normalisation
 		{"https://periscope.example.com", "https://periscope.example.com/api/agents/register"},
 		{"http://localhost:8088", "http://localhost:8088/api/agents/register"},
 		{"wss://periscope.example.com/", "https://periscope.example.com/api/agents/register"},
 		{"ws://localhost:8088", "http://localhost:8088/api/agents/register"},
+
+		// path replacement — input already has the canonical register
+		// path; output must NOT double-append (#regression: the earlier
+		// strings.TrimRight+append shape produced ".../register/api/agents/register")
+		{"http://192.168.0.6:31429/api/agents/register", "http://192.168.0.6:31429/api/agents/register"},
+
+		// path replacement — input has the connect path or any other
+		// path; the helper replaces it with /api/agents/register
+		{"wss://periscope.example.com:8443/api/agents/connect", "https://periscope.example.com:8443/api/agents/register"},
+		{"https://periscope.example.com/some/other/path", "https://periscope.example.com/api/agents/register"},
+
+		// query + fragment are dropped — server doesn't read them on
+		// the register POST and they'd just be noise in logs
+		{"https://periscope.example.com?foo=bar#frag", "https://periscope.example.com/api/agents/register"},
 	}
 	for _, tc := range cases {
 		got, err := registerEndpoint(tc.in)
@@ -121,6 +136,54 @@ func TestRegisterEndpoint_SchemeMapping(t *testing.T) {
 func TestRegisterEndpoint_RejectsBadScheme(t *testing.T) {
 	if _, err := registerEndpoint("ftp://nope"); err == nil {
 		t.Fatal("registerEndpoint accepted ftp:// scheme")
+	}
+}
+
+// Mirrors TestRegisterEndpoint_SchemeMapping for the WSS tunnel URL
+// path: the helper must accept base URLs (new shape), URLs with the
+// canonical /api/agents/connect path (old shape, backward compat), or
+// any other path (silently replaced) — and converge them all to the
+// same canonical output.
+func TestTunnelEndpoint_SchemeMapping(t *testing.T) {
+	cases := []struct {
+		in, want string
+	}{
+		// scheme normalisation
+		{"wss://periscope.example.com:8443", "wss://periscope.example.com:8443/api/agents/connect"},
+		{"ws://localhost:8443", "ws://localhost:8443/api/agents/connect"},
+		{"https://periscope.example.com:8443", "wss://periscope.example.com:8443/api/agents/connect"},
+		{"http://localhost:8443", "ws://localhost:8443/api/agents/connect"},
+
+		// path replacement — input already has /api/agents/connect (the
+		// shape v1.1.3 and earlier required); output must NOT
+		// double-append
+		{"wss://periscope.example.com:8443/api/agents/connect", "wss://periscope.example.com:8443/api/agents/connect"},
+
+		// path replacement — input has a wrong/stale path; helper
+		// normalises to the canonical one
+		{"wss://periscope.example.com:8443/api/agents/register", "wss://periscope.example.com:8443/api/agents/connect"},
+		{"wss://periscope.example.com:8443/some/other/path", "wss://periscope.example.com:8443/api/agents/connect"},
+
+		// trailing slash should not produce a double-slash path
+		{"wss://periscope.example.com:8443/", "wss://periscope.example.com:8443/api/agents/connect"},
+
+		// IP-literal hosts (the v1.1.4 cross-cluster soak case)
+		{"wss://192.168.0.6:31410", "wss://192.168.0.6:31410/api/agents/connect"},
+	}
+	for _, tc := range cases {
+		got, err := tunnelEndpoint(tc.in)
+		if err != nil {
+			t.Fatalf("tunnelEndpoint(%q): %v", tc.in, err)
+		}
+		if got != tc.want {
+			t.Errorf("tunnelEndpoint(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
+func TestTunnelEndpoint_RejectsBadScheme(t *testing.T) {
+	if _, err := tunnelEndpoint("ftp://nope"); err == nil {
+		t.Fatal("tunnelEndpoint accepted ftp:// scheme")
 	}
 }
 

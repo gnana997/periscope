@@ -53,8 +53,8 @@
       "properties": {
         "serverURL": {
           "type": "string",
-          "pattern": "^(wss?|https?)://[^/?#]+(:[0-9]+)?/api/agents/connect$",
-          "description": "Central Periscope tunnel URL — MUST include the path /api/agents/connect (Issue 2.2 from deployment-journey.md). wss:// in production; ws:// only for kind/dev. Both http(s):// also accepted (translated to ws:// for the WebSocket upgrade). Example: wss://agents.periscope.example.com:8443/api/agents/connect"
+          "pattern": "^(wss?|https?)://[^/?#]+(:[0-9]+)?(/.*)?$",
+          "description": "Central Periscope tunnel URL. Both shapes accepted — base URL (e.g. wss://agents.periscope.example.com:8443) or full URL with the /api/agents/connect path; the agent normalises both to the canonical wss://host[:port]/api/agents/connect. Scheme: wss:// in production, ws:// for local/dev, http(s):// also accepted (auto-translated to ws(s):// for the WebSocket upgrade)."
         },
         "clusterName": {
           "type": "string",
@@ -69,8 +69,8 @@
         },
         "registrationURL": {
           "type": "string",
-          "pattern": "^($|https?://)",
-          "description": "Optional URL for the unauth registration POST. Set when central server splits HTTP and mTLS onto different LBs (#48). Empty = derive from serverURL via wss/ws→https/http translation."
+          "pattern": "^($|(wss?|https?)://[^/?#]+(:[0-9]+)?(/.*)?)$",
+          "description": "Optional URL for the unauth registration POST. Set when central server splits HTTP and mTLS onto different LBs (#48). Both shapes accepted — base URL (e.g. http://192.168.0.6:31429) or full URL with the /api/agents/register path; the agent normalises both to the canonical http(s)://host[:port]/api/agents/register. Empty = derive from serverURL."
         },
         "serverCAHash": {
           "type": "string",
