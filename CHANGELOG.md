@@ -13,6 +13,8 @@ tag.
 
 ## [Unreleased]
 
+## [1.1.4] - 2026-05-26
+
 Security patch release: bumps Go toolchain and dependencies to clear
 all known reachable vulnerabilities. Also includes two agent-tunnel
 fixes surfaced during v1.1.4-rc1 cross-cluster soak testing — both
