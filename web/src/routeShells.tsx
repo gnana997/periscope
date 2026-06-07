@@ -14,6 +14,7 @@ import { Suspense, useEffect, useRef } from "react";
 import { Outlet, useParams } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import { Brand } from "./components/shell/Brand";
+import { ClusterHeader } from "./components/shell/ClusterHeader";
 import { ClusterRail } from "./components/shell/ClusterRail";
 import { Sidebar } from "./components/shell/Sidebar";
 import { queryKeys } from "./lib/queryKeys";
@@ -53,7 +54,10 @@ export function AppShell() {
         </div>
       </div>
       <main className="flex min-w-0 flex-1 flex-col bg-bg">
-        <Suspense fallback={<LoadingState resource="page" />}><Outlet /></Suspense>
+        {cluster && <ClusterHeader cluster={cluster} />}
+        <div className="min-h-0 flex-1">
+          <Suspense fallback={<LoadingState resource="page" />}><Outlet /></Suspense>
+        </div>
       </main>
     </div>
   );

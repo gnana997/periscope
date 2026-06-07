@@ -108,6 +108,15 @@ func main() {
 	}
 	slog.Info("watch streams", watchAttrs...)
 
+	// Cluster-shell config is loaded here (early) so listClustersHandler
+	// can surface clusterShellEnabled / clusterShellMode on each cluster
+	// DTO; the handler wiring further down reuses the same Config value.
+	shellCfg := clustershell.LoadConfig()
+	if err := shellCfg.Validate(); err != nil {
+		slog.Error("cluster_shell config invalid", "err", err)
+		os.Exit(1)
+	}
+
 	// Tracks active watch SSE streams for the /debug/streams page. Lives
 	// for the lifetime of the process; entries register on stream open
 	// and remove on stream close.
@@ -259,7 +268,7 @@ func main() {
 		_, _ = w.Write([]byte("ok"))
 	})
 	router.Get("/api/whoami", credentials.Wrap(factory, whoamiHandler(auditReader != nil, authzResolver)))
-	router.Get("/api/clusters", listClustersHandler(registry))
+	router.Get("/api/clusters", listClustersHandler(registry, shellCfg))
 	router.Get("/api/features", featuresHandler(watchCfg))
 
 	// Audit query endpoint. Registered only when SQLite is wired.
@@ -1391,11 +1400,6 @@ func main() {
 	// audit-annotation extras. Attach reuses execsess.Run for all WS
 	// lifecycle plumbing (heartbeat, idle, control frames). Supports
 	// in-cluster and agent backends; tier mode is required.
-	shellCfg := clustershell.LoadConfig()
-	if err := shellCfg.Validate(); err != nil {
-		slog.Error("cluster_shell config invalid", "err", err)
-		os.Exit(1)
-	}
 	shellSessions := clustershell.NewRegistry()
 	shellCAReader := clustershell.NewCAReader()
 	router.Get("/api/clusters/{cluster}/shell",
@@ -1515,28 +1519,39 @@ func whoamiHandler(auditEnabled bool, resolver *authz.Resolver) func(http.Respon
 // shape rather than letting json marshal Cluster directly: the Exec
 // config block stays out of the API surface (it's cluster-config, not
 // cluster-identity), but its single derived bit comes through.
-func listClustersHandler(reg *clusters.Registry) http.HandlerFunc {
+func listClustersHandler(reg *clusters.Registry, shellCfg clustershell.Config) http.HandlerFunc {
 	type clusterDTO struct {
-		Name              string `json:"name"`
-		Backend           string `json:"backend"`
-		ARN               string `json:"arn,omitempty"`
-		Region            string `json:"region,omitempty"`
-		KubeconfigPath    string `json:"kubeconfigPath,omitempty"`
-		KubeconfigContext string `json:"kubeconfigContext,omitempty"`
-		ExecEnabled       bool   `json:"execEnabled"`
+		Name                string `json:"name"`
+		Backend             string `json:"backend"`
+		ARN                 string `json:"arn,omitempty"`
+		Region              string `json:"region,omitempty"`
+		KubeconfigPath      string `json:"kubeconfigPath,omitempty"`
+		KubeconfigContext   string `json:"kubeconfigContext,omitempty"`
+		ExecEnabled         bool   `json:"execEnabled"`
+		ClusterShellEnabled bool   `json:"clusterShellEnabled"`
+		ClusterShellMode    string `json:"clusterShellMode,omitempty"`
+	}
+	// Cluster-shell is a server-wide toggle today (#104). The fields are
+	// per-cluster on the DTO so the SPA's gate is per-cluster from day
+	// one — future per-cluster overrides would not change the wire shape.
+	shellMode := ""
+	if shellCfg.Enabled {
+		shellMode = string(shellCfg.Mode)
 	}
 	return func(w http.ResponseWriter, _ *http.Request) {
 		in := reg.List()
 		out := make([]clusterDTO, 0, len(in))
 		for _, c := range in {
 			out = append(out, clusterDTO{
-				Name:              c.Name,
-				Backend:           c.Backend,
-				ARN:               c.ARN,
-				Region:            c.Region,
-				KubeconfigPath:    c.KubeconfigPath,
-				KubeconfigContext: c.KubeconfigContext,
-				ExecEnabled:       c.ExecEnabled(),
+				Name:                c.Name,
+				Backend:             c.Backend,
+				ARN:                 c.ARN,
+				Region:              c.Region,
+				KubeconfigPath:      c.KubeconfigPath,
+				KubeconfigContext:   c.KubeconfigContext,
+				ExecEnabled:         c.ExecEnabled(),
+				ClusterShellEnabled: shellCfg.Enabled,
+				ClusterShellMode:    shellMode,
 			})
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"clusters": out})
