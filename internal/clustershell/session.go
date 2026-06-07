@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"sync/atomic"
 	"time"
 
@@ -20,10 +19,15 @@ import (
 	"github.com/gnana997/periscope/internal/k8s"
 )
 
-// In-cluster paths the shell pod inherits via the standard SA mount.
-// Hardcoded because v1.2 supports only BackendInCluster — the values
-// are stable for that backend. When v1.3 extends to agent-tunnel /
-// EKS, refactor to call a build-rest-config helper instead.
+// Constants the kubeconfig payload uses. The shell pod ALWAYS runs
+// inside its target cluster — whether Periscope manages that cluster
+// in-cluster (it's Periscope's own cluster) or via the agent tunnel
+// (it's a separately-managed cluster). Either way, the kubeconfig's
+// view of "the apiserver" is the standard in-cluster service URL.
+//
+// inClusterCAFile is read by CAReader for the BackendInCluster path
+// only; for BackendAgent the CA comes from kube-public/cluster-info
+// read via the tunnel.
 const (
 	inClusterCAFile     = "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
 	inClusterAPIServer  = "https://kubernetes.default.svc"
@@ -54,6 +58,12 @@ type Session struct {
 	Config    Config
 	StartedAt time.Time
 
+	// caReader is the shared per-cluster apiserver-CA cache. Owned
+	// by the WS handler and threaded in so all sessions share one
+	// cache (cluster-info read happens once per cluster per
+	// Periscope-main lifetime, not once per session).
+	caReader *CAReader
+
 	// Built during Start, used during Close.
 	podName    string
 	secretName string
@@ -62,9 +72,10 @@ type Session struct {
 }
 
 // New returns a Session ready for Start. Caller supplies the
-// resolved tier (post-authz.Resolver) and the Provider that carries
-// the operator's impersonation strings.
-func New(cluster clusters.Cluster, p credentials.Provider, tier string, mode Mode, cfg Config) *Session {
+// resolved tier (post-authz.Resolver), the Provider that carries
+// the operator's impersonation strings, and a shared CAReader so
+// per-cluster CA caching survives across sessions.
+func New(cluster clusters.Cluster, p credentials.Provider, tier string, mode Mode, cfg Config, caReader *CAReader) *Session {
 	return &Session{
 		ID:        uuid.NewString(),
 		Cluster:   cluster,
@@ -73,6 +84,7 @@ func New(cluster clusters.Cluster, p credentials.Provider, tier string, mode Mod
 		Tier:      tier,
 		Actor:     p.Actor(),
 		Config:    cfg,
+		caReader:  caReader,
 		StartedAt: time.Now(),
 	}
 }
@@ -87,14 +99,22 @@ func New(cluster clusters.Cluster, p credentials.Provider, tier string, mode Mod
 // pod has no liveness work to do — the operator's interactive bash
 // is spawned by Attach via kubectl exec on a separate channel).
 func (s *Session) Start(ctx context.Context) error {
+	if s.caReader == nil {
+		return fmt.Errorf("clustershell.Session: caReader is nil — construct via New() with a shared *CAReader")
+	}
+
 	cs, err := k8s.NewClientset(ctx, s.Provider, s.Cluster)
 	if err != nil {
 		return fmt.Errorf("build clientset: %w", err)
 	}
 
-	caData, err := os.ReadFile(inClusterCAFile)
+	// Read the target cluster's apiserver CA. Dispatches on backend:
+	// in-cluster reads /var/run/secrets/.../ca.crt locally; agent
+	// reads kube-public/cluster-info via the tunnel-routed clientset.
+	// Subsequent sessions against the same cluster hit the cache.
+	caData, err := s.caReader.Read(ctx, cs, s.Cluster)
 	if err != nil {
-		return fmt.Errorf("read in-cluster CA at %s: %w", inClusterCAFile, err)
+		return err
 	}
 
 	// 1. Mint a short-lived token via TokenRequest on the per-tier SA.
