@@ -80,7 +80,7 @@ func main() {
 	}
 }
 
-func appendAudit() error {
+func appendAudit() (retErr error) {
 	path := strings.TrimSpace(os.Getenv(envAuditFile))
 	if path == "" {
 		// No audit file configured → silently skip. This makes the
@@ -116,7 +116,11 @@ func appendAudit() error {
 	if err != nil {
 		return fmt.Errorf("open %s: %w", path, err)
 	}
-	defer f.Close()
+	defer func() {
+		if cerr := f.Close(); retErr == nil && cerr != nil {
+			retErr = fmt.Errorf("close %s: %w", path, cerr)
+		}
+	}()
 	if _, err := f.Write(append(buf, '\n')); err != nil {
 		return fmt.Errorf("write %s: %w", path, err)
 	}
