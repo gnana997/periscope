@@ -18,6 +18,9 @@ linters:
       - path: cmd/periscope/exec_handler\.go
         linters: [errcheck]
         text: ws\.Close
+      - path: cmd/periscope/cluster_shell_handler\.go
+        linters: [errcheck]
+        text: ws\.Close
       - path: cmd/periscope/main\.go
         linters: [errcheck]
         text: stream\.Close
