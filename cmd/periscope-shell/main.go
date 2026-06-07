@@ -1,53 +1,59 @@
-// periscope-shell — the per-session shell entrypoint baked into the
-// cluster-shell pod image (issue #104).
+// periscope-shell — the cluster-shell pod's container entrypoint
+// (issue #104).
 //
-// Periscope main creates a short-lived pod from this image for each
-// browser-initiated shell session. The pod's container ENTRYPOINT
-// runs this binary; we inspect a handful of env vars Periscope set
-// on the pod spec and either drop the operator into bash (with
-// KUBECONFIG pointing at the session-scoped kubeconfig Secret
-// mounted at /etc/periscope/kubeconfig) or — eventually — into a
-// kubectl-only REPL.
+// Architecture note: the operator's interactive bash is NOT this
+// binary. Periscope main spawns the operator's bash via a separate
+// `kubectl exec` channel after this pod reaches Ready. That bash
+// inherits the pod's env (KUBECONFIG, PERISCOPE_SHELL_AUDIT_FILE,
+// etc.) and runs as a child of the container runtime's exec
+// machinery, distinct from this PID-1 entrypoint.
 //
-// In this PR only bash mode is wired. The kubectl-only REPL ships in
-// a follow-up; calling the mode here returns a clear error rather
-// than crash-looping the pod, so operators see a friendly diagnostic
-// in the SPA instead of an opaque ImagePullBackOff-shaped failure.
+// So this binary's only jobs are:
+//
+//  1. Validate the env vars Periscope set on the pod spec. Catching
+//     misconfiguration here fails fast with an operator-readable
+//     message in the pod logs, rather than a confusing "the shell
+//     didn't open" with no diagnostic.
+//
+//  2. Pre-create the audit-file directory so the kubectl wrapper's
+//     first O_APPEND open succeeds.
+//
+//  3. Block until SIGTERM. The kubelet sends SIGTERM when Periscope
+//     deletes the pod on session close; we exit 0 promptly so the
+//     terminationGracePeriodSeconds window stays tight.
 //
 // Configuration (env vars, all set by Periscope on the pod spec):
 //
 //	PERISCOPE_SHELL_SESSION_ID    UUID for this session — surfaced in
 //	                              audit lines emitted by the kubectl
 //	                              wrapper and joined back into the
-//	                              session_close audit row by Periscope.
-//	PERISCOPE_SHELL_MODE          "bash" or "kubectl-only".
+//	                              cluster_shell_close audit row.
+//	PERISCOPE_SHELL_MODE          "bash" (kubectl-only ships in a
+//	                              follow-up PR; rejected at startup
+//	                              here so the pod fails fast with a
+//	                              clear message).
 //	PERISCOPE_SHELL_AUDIT_FILE    Path the kubectl wrapper appends
-//	                              JSON audit lines to. Periscope reads
-//	                              this on session close via `kubectl
-//	                              exec cat`. Defaults to
+//	                              JSON audit lines to. Defaults to
 //	                              /tmp/periscope-shell/audit.jsonl.
-//	PERISCOPE_SHELL_KUBECONFIG    Path where Periscope mounted the
-//	                              per-session kubeconfig Secret.
-//	                              Defaults to /etc/periscope/kubeconfig.
 package main
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
 	"syscall"
 )
 
 const (
-	envSessionID  = "PERISCOPE_SHELL_SESSION_ID"
-	envMode       = "PERISCOPE_SHELL_MODE"
-	envAuditFile  = "PERISCOPE_SHELL_AUDIT_FILE"
-	envKubeconfig = "PERISCOPE_SHELL_KUBECONFIG"
+	envSessionID = "PERISCOPE_SHELL_SESSION_ID"
+	envMode      = "PERISCOPE_SHELL_MODE"
+	envAuditFile = "PERISCOPE_SHELL_AUDIT_FILE"
 
-	defaultAuditFile  = "/tmp/periscope-shell/audit.jsonl"
-	defaultKubeconfig = "/etc/periscope/kubeconfig"
+	defaultAuditFile = "/tmp/periscope-shell/audit.jsonl"
 
 	modeBash        = "bash"
 	modeKubectlOnly = "kubectl-only"
@@ -65,13 +71,13 @@ func run() error {
 	if sessionID == "" {
 		return fmt.Errorf("%s required", envSessionID)
 	}
-	slog.Info("periscope-shell starting",
-		"session_id", sessionID,
-		"mode", os.Getenv(envMode))
+	mode := strings.TrimSpace(os.Getenv(envMode))
+	slog.Info("periscope-shell starting", "session_id", sessionID, "mode", mode)
 
-	switch mode := strings.TrimSpace(os.Getenv(envMode)); mode {
+	switch mode {
 	case modeBash:
-		return execBash()
+		// Bash is spawned by Periscope's `kubectl exec` separately;
+		// we just hold the pod open.
 	case modeKubectlOnly:
 		// Defensive — the WS handler should already reject this mode
 		// before scheduling the pod. If a pod somehow lands here with
@@ -83,40 +89,25 @@ func run() error {
 	default:
 		return fmt.Errorf("%s=%q is not a known mode (want %q or %q)", envMode, mode, modeBash, modeKubectlOnly)
 	}
-}
 
-// execBash replaces this process with /bin/bash --login. The login
-// shell sources /etc/profile (where the image sets PS1 to a session-
-// distinguishing prompt) and the operator's ~/.bashrc if any. We
-// pass through the current env after layering on KUBECONFIG and the
-// audit-file path so child kubectl invocations route correctly.
-//
-// syscall.Exec replaces the process — there is no post-exec code
-// here and no defer can run. Cleanup is the K8s pod lifecycle's job.
-func execBash() error {
-	kubeconfig := strings.TrimSpace(os.Getenv(envKubeconfig))
-	if kubeconfig == "" {
-		kubeconfig = defaultKubeconfig
-	}
+	// Pre-create the audit-file directory so the kubectl wrapper's
+	// first O_APPEND open doesn't have to handle ENOENT. Best-effort
+	// — the wrapper also creates parents on its first write.
 	auditFile := strings.TrimSpace(os.Getenv(envAuditFile))
 	if auditFile == "" {
 		auditFile = defaultAuditFile
 	}
-
-	// Pre-create the audit dir so the wrapper's first O_APPEND open
-	// doesn't have to handle ENOENT. Best-effort; the wrapper itself
-	// also creates parents on its first write.
 	if err := os.MkdirAll(filepath.Dir(auditFile), 0o755); err != nil {
 		slog.Warn("could not ensure audit directory", "path", auditFile, "err", err)
 	}
 
-	env := append(os.Environ(),
-		"KUBECONFIG="+kubeconfig,
-		envAuditFile+"="+auditFile,
-	)
-
-	if err := syscall.Exec("/bin/bash", []string{"/bin/bash", "--login"}, env); err != nil {
-		return fmt.Errorf("exec /bin/bash: %w", err)
-	}
-	return nil // unreachable on success
+	// Block until the kubelet sends SIGTERM on pod delete. signal.
+	// NotifyContext returns a context cancelled on the first matching
+	// signal; we don't need to do anything on the way out except
+	// cooperate with the grace period.
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+	<-ctx.Done()
+	slog.Info("periscope-shell received shutdown signal", "session_id", sessionID)
+	return nil
 }
