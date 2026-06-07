@@ -1,0 +1,152 @@
+# syntax=docker/dockerfile:1.7
+
+# Dockerfile.shell — image for the cluster-shell ephemeral pod (#104).
+#
+# Separate Dockerfile (vs a multi-output build of the main one) so:
+#   - the shell image carries a real shell + kubectl + helm + nano
+#     and can't be distroless; keeping it separate keeps Periscope
+#     main on distroless:nonroot
+#   - the shell image's release cadence is independent of the server's
+#   - operators can pin the shell image at a different tag than the
+#     server within their compatible-version window
+#
+# Mirrors the agent Dockerfile's build pattern: --platform=$BUILDPLATFORM
+# on the builder stage so go cross-compiles via GOARCH instead of
+# running under QEMU.
+
+# ---- pinned tool versions ----
+# Bump these together when picking up a new kubectl / helm release.
+# The version pins matter for reproducibility; the SHA256 check at
+# install time is the trust anchor.
+ARG KUBECTL_VERSION=1.32.0
+ARG HELM_VERSION=3.16.3
+
+# ---- Go build ----
+# Build both binaries in one stage to share the module-download cache.
+FROM --platform=$BUILDPLATFORM golang:1.26-alpine@sha256:91eda9776261207ea25fd06b5b7fed8d397dd2c0a283e77f2ab6e91bfa71079d AS go-builder
+WORKDIR /src
+
+RUN apk add --no-cache git ca-certificates
+
+COPY go.mod go.sum ./
+RUN go mod download
+
+COPY . .
+
+ARG VERSION=dev
+ARG COMMIT=unknown
+ARG TARGETARCH
+
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} go build \
+    -trimpath \
+    -ldflags "-s -w -X main.version=${VERSION} -X main.commit=${COMMIT}" \
+    -o /out/periscope-shell \
+    ./cmd/periscope-shell
+
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} go build \
+    -trimpath \
+    -ldflags "-s -w -X main.version=${VERSION} -X main.commit=${COMMIT}" \
+    -o /out/periscope-audit-kubectl \
+    ./cmd/periscope-shell/wrapper
+
+# ---- tool fetch ----
+# Stage that fetches kubectl + helm with verified SHA256 against the
+# official .sha256 files served alongside the binaries by the
+# respective release infrastructure. Trust anchor is TLS to
+# dl.k8s.io / get.helm.sh — same anchor every kubectl install script
+# in the world depends on.
+#
+# Stays separate from the runtime stage so the curl + tar tooling
+# doesn't bloat the final image.
+FROM debian:bookworm-slim AS tool-fetch
+ARG TARGETARCH
+ARG KUBECTL_VERSION
+ARG HELM_VERSION
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    curl \
+    tar \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /tmp/tools
+
+# kubectl: official release artifact + per-arch SHA256 (served as a
+# plain hex file at <url>.sha256, no filename suffix).
+RUN set -eux; \
+    case "${TARGETARCH}" in \
+      amd64|arm64) ARCH="${TARGETARCH}" ;; \
+      *) echo "unsupported TARGETARCH: ${TARGETARCH}" >&2; exit 1 ;; \
+    esac; \
+    curl -fsSL "https://dl.k8s.io/release/v${KUBECTL_VERSION}/bin/linux/${ARCH}/kubectl.sha256" -o kubectl.sha256; \
+    curl -fsSLO "https://dl.k8s.io/release/v${KUBECTL_VERSION}/bin/linux/${ARCH}/kubectl"; \
+    echo "$(cat kubectl.sha256)  kubectl" | sha256sum -c -; \
+    chmod +x kubectl; \
+    rm kubectl.sha256
+
+# helm: official release tarball + per-arch SHA256 (served as a
+# standard sha256sum-format file).
+RUN set -eux; \
+    case "${TARGETARCH}" in \
+      amd64|arm64) ARCH="${TARGETARCH}" ;; \
+    esac; \
+    curl -fsSL "https://get.helm.sh/helm-v${HELM_VERSION}-linux-${ARCH}.tar.gz.sha256sum" -o helm.tar.gz.sha256sum; \
+    curl -fsSLO "https://get.helm.sh/helm-v${HELM_VERSION}-linux-${ARCH}.tar.gz"; \
+    sha256sum -c helm.tar.gz.sha256sum; \
+    tar -xzf "helm-v${HELM_VERSION}-linux-${ARCH}.tar.gz"; \
+    mv "linux-${ARCH}/helm" helm; \
+    chmod +x helm; \
+    rm helm.tar.gz.sha256sum "helm-v${HELM_VERSION}-linux-${ARCH}.tar.gz"; \
+    rm -rf "linux-${ARCH}"
+
+# ---- runtime ----
+# debian:bookworm-slim (not distroless) because the shell pod needs
+# an actual shell plus kubectl, helm, nano, jq, less. Image weight
+# (~150 MB) is acceptable for an opt-in feature; operators who don't
+# enable clusterShell never pull this image.
+FROM debian:bookworm-slim AS runtime
+
+# bash for the operator session; nano + less for `kubectl edit` and
+# `kubectl logs --paginate`; jq for pipeable JSON munging; coreutils
+# is already pulled in by the base but listed for documentation.
+# ca-certificates is needed for TLS to apiservers behind public CAs.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    bash \
+    ca-certificates \
+    coreutils \
+    jq \
+    less \
+    nano \
+    && rm -rf /var/lib/apt/lists/* \
+    && groupadd --gid 1000 periscope \
+    && useradd --uid 1000 --gid 1000 --shell /bin/bash --create-home periscope
+
+# Tools — real kubectl at /opt/periscope/bin/kubectl-real; the
+# /usr/local/bin/kubectl symlink below points at the audit wrapper so
+# every shell-session kubectl invocation flows through it. helm has
+# no wrapper in this PR (per-command audit for helm is a follow-up).
+COPY --from=tool-fetch /tmp/tools/kubectl /opt/periscope/bin/kubectl-real
+COPY --from=tool-fetch /tmp/tools/helm    /opt/periscope/bin/helm
+
+# Periscope binaries.
+COPY --from=go-builder /out/periscope-shell          /periscope-shell
+COPY --from=go-builder /out/periscope-audit-kubectl  /opt/periscope/bin/periscope-audit-kubectl
+
+# Wire the wrapper into PATH at /usr/local/bin/kubectl. Bash sessions
+# resolve /usr/local/bin before /opt/periscope/bin, so any "kubectl"
+# invocation in the operator's session hits the wrapper. Operators
+# who deliberately want to bypass audit can call
+# /opt/periscope/bin/kubectl-real directly — that's the documented
+# best-effort contract for bash mode. The kubectl-only REPL in a
+# follow-up PR enforces audit in a way bash mode cannot.
+RUN ln -s /opt/periscope/bin/periscope-audit-kubectl /usr/local/bin/kubectl \
+    && ln -s /opt/periscope/bin/helm /usr/local/bin/helm \
+    && mkdir -p /tmp/periscope-shell \
+    && chown periscope:periscope /tmp/periscope-shell
+
+USER 1000:1000
+
+# The session's KUBECONFIG, PERISCOPE_SHELL_* env, and other per-pod
+# config are set by Periscope on the pod spec — this image stays
+# config-free at build time.
+ENTRYPOINT ["/periscope-shell"]

@@ -41,7 +41,46 @@ const (
 	VerbTrigger      Verb = "trigger"
 	VerbExecOpen     Verb = "exec_open"
 	VerbExecClose    Verb = "exec_close"
-	VerbSecretReveal Verb = "secret_reveal"
+	// VerbClusterShellOpen / VerbClusterShellClose — pre/post pair for
+	// the in-browser cluster-shell session (issue #104). The cluster
+	// shell creates an ephemeral pod in periscope-system, attaches via
+	// the same WebSocket pipeline as pod-exec, and tears the pod down
+	// on session close. Same pre/post discipline as VerbExecOpen /
+	// VerbExecClose: the open row fires BEFORE pod create so a hung
+	// startup still leaves a forensic trail; the close row fires
+	// AFTER pod delete, capturing the session's outcome.
+	//
+	// Open Extra carries: session_id, mode ("bash" | "kubectl-only"),
+	// tier (resolved tier of the operator), shell_pod_name,
+	// shell_pod_namespace.
+	//
+	// Close Extra adds: duration_ms, exit_code, close_reason
+	// ("client" | "idle" | "server_error" | "pod_timeout" | ...),
+	// bytes_in, bytes_out, transcript_bytes (count, not payload), and
+	// commands — a slice of per-invocation records the bash-mode
+	// kubectl wrapper appended to /tmp/periscope-shell/audit.jsonl,
+	// read back via `kubectl exec cat` just before the pod is deleted.
+	// Best-effort: commands is empty when the audit-file read fails
+	// (e.g. pod already terminated), and bash-mode operators who
+	// bypass the wrapper lose attribution for those invocations.
+	VerbClusterShellOpen  Verb = "cluster_shell_open"
+	VerbClusterShellClose Verb = "cluster_shell_close"
+	// VerbClusterShellCommand — one row per kubectl invocation observed
+	// inside a cluster-shell session. In v1.2 these are emitted in
+	// bulk by the close-row path (reading the wrapper's audit.jsonl
+	// file from the dying pod), not in real-time. The follow-up
+	// kubectl-only REPL PR upgrades this to guaranteed real-time
+	// per-command attribution by parsing every line before any binary
+	// runs.
+	//
+	// Extra carries: session_id, ts (the wrapper's per-invocation
+	// timestamp, preserved from the audit-file line), pid, argv. The
+	// row's Resource field is left empty — argv parsing into structured
+	// (verb, kind, ns, name) is the REPL PR's job; bulk-on-close
+	// emission keeps argv as a raw slice so reviewers grep on it
+	// directly.
+	VerbClusterShellCommand Verb = "cluster_shell_command"
+	VerbSecretReveal        Verb = "secret_reveal"
 	VerbBulkDownload Verb = "bulk_download"
 	// VerbHelmChartFetch — operator pasted a chart ref (HTTP repo or
 	// OCI) and clicked Fetch to load values + schema for the install
