@@ -163,6 +163,25 @@ clusterRBAC:
     enabled: false
     clusterRoleName: cluster-admin
 
+# ─── cluster-shell (#104) ─────────────────────────────────────────────
+# When the central server has cluster-shell enabled AND this cluster
+# is a target, the agent chart pre-creates the periscope-system
+# namespace, the per-tier ServiceAccounts + impersonator
+# ClusterRoles, and binds the agent SA to the periscope-shell-
+# provisioner Role in that namespace.
+#
+# Keep this opt-in (default false) — operators who don't use cluster-
+# shell don't pay for the extra Namespace, SAs, and bindings. The
+# `tiers` list MUST match the server's clusterShell.tiers so a
+# session opened from the central side has the right SA waiting on
+# this side.
+clusterShell:
+  enabled: false
+  # MUST match the server-side namespace (default periscope-system).
+  namespace: periscope-system
+  # MUST match the server-side tiers list.
+  tiers: [admin]
+
 resources:
   requests:
     cpu: 50m

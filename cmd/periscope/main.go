@@ -28,6 +28,7 @@ import (
 	"github.com/gnana997/periscope/internal/awseks/identity"
 	"github.com/gnana997/periscope/internal/awsinspector"
 	"github.com/gnana997/periscope/internal/clusters"
+	"github.com/gnana997/periscope/internal/clustershell"
 	"github.com/gnana997/periscope/internal/credentials"
 	"github.com/gnana997/periscope/internal/cve"
 	execsess "github.com/gnana997/periscope/internal/exec"
@@ -1383,6 +1384,22 @@ func main() {
 	if os.Getenv("PERISCOPE_PROBE_CLUSTERS_ON_BOOT") == "1" {
 		go probeClustersOnBoot(ctx, factory, registry, execPolicy)
 	}
+
+	// --- Cluster shell (in-browser kubectl terminal, WebSocket) — issue #104 ---
+	// One ephemeral pod per session in clusterShell.namespace; mounts a
+	// per-session kubeconfig Secret with tier-narrow impersonation +
+	// audit-annotation extras. Attach reuses execsess.Run for all WS
+	// lifecycle plumbing (heartbeat, idle, control frames). Supports
+	// in-cluster and agent backends; tier mode is required.
+	shellCfg := clustershell.LoadConfig()
+	if err := shellCfg.Validate(); err != nil {
+		slog.Error("cluster_shell config invalid", "err", err)
+		os.Exit(1)
+	}
+	shellSessions := clustershell.NewRegistry()
+	shellCAReader := clustershell.NewCAReader()
+	router.Get("/api/clusters/{cluster}/shell",
+		credentials.Wrap(factory, clusterShellHandler(registry, shellSessions, auditEmitter, shellCfg, authzResolver, shellCAReader)))
 
 	// Top-level dispatcher splits the SPA from the auth-gated API.
 	//

@@ -1,0 +1,41 @@
+{{- /*
+  cluster-shell-namespace.yaml — issue #104.
+
+  Creates the namespace ephemeral cluster-shell pods land in. The
+  Pod create + Secret create + TokenRequest mint all target this
+  namespace, so it has to exist before the first session opens. We
+  ship it from the chart (vs. asking operators to pre-create) so a
+  default install is one `helm upgrade --set clusterShell.enabled=true`
+  away from working.
+
+  Rendered only when clusterShell.enabled=true AND at least one
+  cluster has backend=in-cluster — for purely agent-managed
+  topologies, the agent chart creates the namespace on each managed
+  cluster instead. We render `nil` for those operators to keep the
+  rendered manifest set minimal.
+*/}}
+{{- if .Values.clusterShell.enabled }}
+{{- $hasInCluster := false -}}
+{{- range .Values.clusters }}
+  {{- if eq .backend "in-cluster" }}
+    {{- $hasInCluster = true -}}
+  {{- end }}
+{{- end }}
+{{- if $hasInCluster }}
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{ .Values.clusterShell.namespace | default "periscope-system" }}
+  labels:
+    {{- include "periscope.labels" . | nindent 4 }}
+    periscope.io/purpose: cluster-shell
+  annotations:
+    {{- /*
+      Tag the namespace so a `kubectl get ns -l periscope.io/purpose=cluster-shell`
+      query surfaces it during ops. Otherwise unannotated to avoid
+      churning admission-controller / mesh defaults operators may
+      have wired at install time.
+    */}}
+    periscope.io/created-by: {{ include "periscope.fullname" . }}
+{{- end }}
+{{- end }}

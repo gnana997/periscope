@@ -694,6 +694,68 @@ clusterRBAC:
   sharedRoleName: view
 
 # -----------------------------------------------------------------------------
+# Cluster shell (#104) — in-browser kubectl terminal that provisions
+# an ephemeral pod per session in clusterShell.namespace. Opt-in;
+# requires auth.authorization.mode=tier. The shell pod runs ON THE
+# TARGET CLUSTER:
+#   - in-cluster backend → Periscope's own host cluster
+#   - agent backend      → the agent's cluster (RBAC scaffolding ships
+#                          via the periscope-agent chart on that side)
+#
+# Operator-facing chrome (Shell button on the cluster header) is
+# rendered in the SPA when this block is enabled AND the operator's
+# resolved tier is in `tiers` below.
+# -----------------------------------------------------------------------------
+clusterShell:
+  enabled: false
+
+  # bash | kubectl-only. kubectl-only ships in a follow-up PR; until
+  # then `bash` is the only supported value. The handler returns
+  # E_NOT_IMPLEMENTED for kubectl-only and the image entrypoint
+  # refuses it defensively if a pod somehow lands there.
+  mode: bash
+
+  # Which tiers may open a cluster-shell session. Tier names must
+  # match auth.authorization.groupTiers values (read|triage|write|
+  # maintain|admin). The chart fails at template time if an unknown
+  # tier slips in.
+  tiers: [admin]
+
+  # Where ephemeral shell pods + per-session Secrets land. Must NOT
+  # be the release namespace — the chart creates this namespace
+  # separately when clusterShell.enabled=true AND at least one
+  # cluster has backend: in-cluster.
+  namespace: periscope-system
+
+  # Server-side idle timeout. Activity = any stdin OR stdout byte;
+  # heartbeats do NOT reset the timer. Same definition as exec.
+  idleSeconds: 1200
+
+  # How long Session.Start waits for the shell pod to reach Ready
+  # before returning E_SHELL_POD_FAILED and tearing down. 30s covers
+  # cold image pull on most network conditions; larger would mask
+  # real problems.
+  podStartTimeoutSeconds: 30
+
+  # Cap on the audit transcript blob included in cluster_shell_close
+  # rows. Oversize transcripts are truncated; the row carries a flag.
+  transcriptMaxBytes: 1048576
+
+  # Concurrent sessions per operator. Pod-exec ships 5; cluster-shell
+  # ships 2 because each session is a full pod (more expensive).
+  maxSessionsPerUser: 2
+
+  # Concurrent sessions per cluster across all operators.
+  maxSessionsTotal: 10
+
+  # The image the shell pods run. Split repository/tag like the
+  # main `image:` block above; tag defaults to .Chart.AppVersion.
+  image:
+    repository: ghcr.io/gnana997/periscope-shell
+    tag: ""
+    pullPolicy: IfNotPresent
+
+# -----------------------------------------------------------------------------
 # Agent backend (#42) — per-cluster periscope-agent that dials out to
 # the central server over a long-lived WebSocket. Enabling this:
 #   - Opens a dedicated TLS listener on `agent.listenAddr` (separate

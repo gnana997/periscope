@@ -117,6 +117,42 @@ spec:
             {{- end }}
             {{- end }}
             {{- /*
+              Cluster shell (#104) — in-browser kubectl terminal that
+              provisions an ephemeral pod per session. Enabled-gated:
+              when clusterShell.enabled=false, no envs are rendered and
+              the handler refuses with E_CLUSTER_SHELL_DISABLED.
+            */}}
+            {{- with .Values.clusterShell }}
+            {{- if .enabled }}
+            - name: PERISCOPE_CLUSTER_SHELL_ENABLED
+              value: "true"
+            - name: PERISCOPE_CLUSTER_SHELL_MODE
+              value: {{ .mode | default "bash" | quote }}
+            - name: PERISCOPE_CLUSTER_SHELL_TIERS
+              value: {{ join "," .tiers | quote }}
+            - name: PERISCOPE_CLUSTER_SHELL_NAMESPACE
+              value: {{ .namespace | default "periscope-system" | quote }}
+            - name: PERISCOPE_CLUSTER_SHELL_IDLE_SECONDS
+              value: {{ .idleSeconds | default 1200 | quote }}
+            - name: PERISCOPE_CLUSTER_SHELL_POD_START_TIMEOUT_SECONDS
+              value: {{ .podStartTimeoutSeconds | default 30 | quote }}
+            - name: PERISCOPE_CLUSTER_SHELL_TRANSCRIPT_MAX_BYTES
+              value: {{ .transcriptMaxBytes | default 1048576 | int64 | quote }}
+            - name: PERISCOPE_CLUSTER_SHELL_IMAGE
+              value: {{ printf "%s:%s" .image.repository (.image.tag | default $.Chart.AppVersion) | quote }}
+            - name: PERISCOPE_CLUSTER_SHELL_IMAGE_PULL_POLICY
+              value: {{ .image.pullPolicy | default "IfNotPresent" | quote }}
+            {{- if .maxSessionsPerUser }}
+            - name: PERISCOPE_CLUSTER_SHELL_MAX_SESSIONS_PER_USER
+              value: {{ .maxSessionsPerUser | quote }}
+            {{- end }}
+            {{- if .maxSessionsTotal }}
+            - name: PERISCOPE_CLUSTER_SHELL_MAX_SESSIONS_TOTAL
+              value: {{ .maxSessionsTotal | quote }}
+            {{- end }}
+            {{- end }}
+            {{- end }}
+            {{- /*
               Watch streams: server defaults to "all on" when env is
               empty/unset. Only render the env when the operator set
               an explicit value (subset, "off", "none").
