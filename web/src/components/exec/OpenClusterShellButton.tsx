@@ -1,9 +1,8 @@
 import { useEffect, useState } from "react";
-import { cn } from "../../lib/cn";
+import { Terminal } from "lucide-react";
 import { useClusters } from "../../hooks/useClusters";
 import { useExecSessions } from "../../exec/useExecSessions";
 import { CapReachedDialog } from "../../exec/CapReachedDialog";
-import { Tooltip } from "../Tooltip";
 import type { ClusterShellMode } from "../../exec/types";
 
 /**
@@ -80,42 +79,19 @@ export function OpenClusterShellButton({
 
   return (
     <>
-      <Tooltip content={null}>
-        <button
-          type="button"
-          onClick={open}
-          className={cn(
-            "inline-flex h-7 items-center gap-1.5 rounded-md border border-border bg-surface px-2 font-mono text-[11px] text-ink-muted transition-colors",
-            "hover:border-accent/60 hover:bg-accent-soft hover:text-accent",
-          )}
-          title={`Open cluster shell · Cmd-Shift-E`}
-        >
-          <ShellGlyph />
-          <span>shell</span>
-        </button>
-      </Tooltip>
+      <button
+        type="button"
+        onClick={open}
+        title={`Open cluster shell · Cmd-Shift-E`}
+        className="group inline-flex items-center gap-1.5 rounded-md border border-border px-2.5 py-1 font-mono text-[11.5px] font-medium text-ink-muted transition-colors hover:border-accent hover:text-accent"
+      >
+        <Terminal
+          aria-hidden
+          className="size-3.5 text-ink-faint transition-colors group-hover:text-accent"
+        />
+        <span>shell</span>
+      </button>
       <CapReachedDialog open={capReached} onClose={() => setCapReached(false)} />
     </>
-  );
-}
-
-function ShellGlyph() {
-  return (
-    <svg
-      width="11"
-      height="11"
-      viewBox="0 0 11 11"
-      aria-hidden
-      className="text-ink-faint"
-    >
-      <path
-        d="M2 3l2.5 2.5L2 8M5.5 8H9"
-        stroke="currentColor"
-        strokeWidth="1.3"
-        fill="none"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
   );
 }
