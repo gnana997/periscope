@@ -254,6 +254,63 @@ jobs:
           subject-digest: ${{ steps.build_agent.outputs.digest }}
           push-to-registry: true
 
+      # ── Cluster-shell pod image (#104) ───────────────────────
+      #
+      # Separate Dockerfile.shell build for the per-session shell pod
+      # the cluster-shell handler provisions. Carries bash + kubectl +
+      # helm + nano + jq on debian-slim (no SPA, no distroless — needs
+      # a real shell). Same multi-arch + cache-gha treatment as the
+      # other images. Tag set mirrors the server image so operators
+      # can pin to the same versioned tag they pin the server to.
+      - name: Extract shell image metadata
+        id: meta_shell
+        uses: docker/metadata-action@030e881283bb7a6894de51c315a6bfe6a94e05cf # v6.0.0
+        with:
+          images: ${{ env.REGISTRY }}/${{ github.repository }}-shell
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}},enable=${{ !contains(github.ref, '-') }}
+            type=semver,pattern={{major}},enable=${{ !contains(github.ref, '-') }}
+            type=raw,value=latest,enable=${{ !contains(github.ref, '-') }}
+            type=raw,value=${{ github.ref_name }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.description=Periscope cluster-shell pod — per-session kubectl REPL
+            org.opencontainers.image.licenses=Apache-2.0
+
+      - name: Build and push shell image
+        id: build_shell
+        uses: docker/build-push-action@bcafcacb16a39f128d818304e6c9c0c18556b85f # v7.1.0
+        with:
+          context: .
+          file: Dockerfile.shell
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta_shell.outputs.tags }}
+          labels: ${{ steps.meta_shell.outputs.labels }}
+          build-args: |
+            VERSION=${{ github.ref_name }}
+            COMMIT=${{ github.sha }}
+          cache-from: type=gha,scope=shell
+          cache-to: type=gha,mode=max,scope=shell
+
+      - name: Sign shell image
+        env:
+          DIGEST: ${{ steps.build_shell.outputs.digest }}
+          TAGS: ${{ steps.meta_shell.outputs.tags }}
+        run: |
+          for tag in $TAGS; do
+            cosign sign --yes "${tag}@${DIGEST}"
+          done
+
+      - name: Attest shell image provenance
+        id: attest_shell_image
+        uses: actions/attest-build-provenance@a2bbfa25375fe432b6a289bc6b6cd05ecd0c4c32 # v4.1.0
+        with:
+          subject-name: ${{ env.REGISTRY }}/${{ github.repository }}-shell
+          subject-digest: ${{ steps.build_shell.outputs.digest }}
+          push-to-registry: true
+
       # ── Agent Helm chart ──────────────────────────────────────
       - name: Sync agent chart version to tag
         run: |
@@ -320,6 +377,12 @@ jobs:
             "dist/attestations/periscope-agent-${VERSION}.sigstore.json"
           cp "${{ steps.attest_agent_image.outputs.bundle-path }}" \
             "dist/attestations/periscope-agent-${VERSION}.intoto.jsonl"
+
+          # Shell image
+          cp "${{ steps.attest_shell_image.outputs.bundle-path }}" \
+            "dist/attestations/periscope-shell-${VERSION}.sigstore.json"
+          cp "${{ steps.attest_shell_image.outputs.bundle-path }}" \
+            "dist/attestations/periscope-shell-${VERSION}.intoto.jsonl"
 
           # Agent chart
           cp "${{ steps.attest_agent_chart.outputs.bundle-path }}" \
