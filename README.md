@@ -125,6 +125,7 @@ The [What makes it different](#what-makes-it-different) section above is the sho
 - [Watch streams (SSE) operator guide](docs/setup/watch-streams.md)
 - [Helm release browser](docs/setup/helm-releases.md)
 - [Pod exec setup](docs/setup/pod-exec.md)
+- [Cluster shell setup](docs/setup/cluster-shell.md) — in-browser cluster-wide kubectl REPL via per-session ephemeral pod (#104)
 - [NetworkPolicy](docs/setup/networkpolicy.md)
 - [Apply YAML dialog](docs/setup/apply-yaml.md) — paste/drop multi-doc YAML with per-doc RBAC pre-flight
 - [Multi-cluster onboarding (agent)](docs/setup/agent-onboarding.md) — register a managed cluster via the periscope-agent tunnel
@@ -133,6 +134,7 @@ The [What makes it different](#what-makes-it-different) section above is the sho
 **Usage**
 - [Karpenter dashboard](docs/usage/karpenter-view.md) — NodePool/$/hr/Drift/pending-pods walkthrough + cost-RBAC sample
 - [CVE surfacing (Inspector v2)](docs/usage/cve.md) — chip column + Security tab walkthrough, enablement, audit + cost
+- [Cluster shell](docs/usage/cluster-shell.md) — open the in-browser cluster shell, identity wiring, security note
 
 **Architecture**
 - [Architecture overview](docs/architecture/README.md) — component map, source-tree guide, reading order for new contributors
@@ -202,7 +204,7 @@ CI: every push and PR runs `golangci-lint`, `go test`, `npm run lint`, `npm test
 
 Planning is tracked in [GitHub Milestones](https://github.com/gnana997/periscope/milestones). **v1.1 (shipped)** delivered the AWS Access surfaces — Cluster Access page reconciling EKS Access Entries + aws-auth + IRSA + Pod Identity, per-workload AWS Access tab with sensitive-permissions chips, and reverse lookup ("which workloads can perform action X?").
 
-- **[v1.2](https://github.com/gnana997/periscope/milestone/2): operator daily-driver layer.** GPU + AI workload visibility (Pod ↔ GPU map, idle-GPU finder, DCGM reconciler), in-browser cluster shell (#104), SSM shell into EKS nodes (#105), Helm private-OCI auth via Pod Identity / IRSA (#121).
+- **[v1.2](https://github.com/gnana997/periscope/milestone/2): operator daily-driver layer.** In-browser cluster shell (#104, **shipped on `develop`** — per-session ephemeral pod, tier-narrow impersonation, single-log audit; see [`docs/setup/cluster-shell.md`](docs/setup/cluster-shell.md)). GPU + AI workload visibility (Pod ↔ GPU map, idle-GPU finder, DCGM reconciler), SSM shell into EKS nodes (#105), Helm private-OCI auth via Pod Identity / IRSA (#121).
 - **[v1.3](https://github.com/gnana997/periscope/milestone/3): AWS depth + observability.** IAM effective-access engine (conditions, SCPs, cross-account `AssumeRole` walking), CloudTrail compliance lens, cluster-wide kube-apiserver audit ingestion, related-resources graph, CronJob CVE-ownership chain, per-NodeGroup CVE rollup.
 - **[v1.4](https://github.com/gnana997/periscope/milestone/4): agent-native.** MCP-style tool registry over the v1.1–v1.3 wire shapes (#151), LLM provider abstraction, in-app chat surface, `agent_tool_call` audit verb.
 

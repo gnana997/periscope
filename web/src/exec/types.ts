@@ -73,20 +73,48 @@ export type InboundControlFrame =
 
 export type OutboundControlFrame = ResizeFrame | CloseFrame;
 
+/** Session kind discriminator.
+ *
+ *  - "pod-exec"     classic per-pod kubectl exec stream (RFC 0001).
+ *  - "cluster-shell" cluster-wide kubectl REPL with impersonation
+ *    (issue #104). Backend creates an ephemeral pod per session and
+ *    attaches via the same hello/stdin/stdout/closed/error frame
+ *    protocol, so the client / drawer / terminal stack is shared.
+ *    namespace/pod/container fields are empty for this kind.
+ */
+export type SessionKind = "pod-exec" | "cluster-shell";
+
+/** Cluster-shell session mode (issue #104).
+ *
+ *  - "bash"          interactive bash session inside the shell pod.
+ *  - "kubectl-only"  restricted REPL that only accepts kubectl/helm
+ *                    (REPL ships after #104; the server currently
+ *                    rejects this with E_NOT_IMPLEMENTED).
+ */
+export type ClusterShellMode = "bash" | "kubectl-only";
+
 // In-memory representation of a session in the React context.
 export interface ExecSessionMeta {
   /** Local UUID used as a stable React key. The server emits its own
    *  session_id in the hello frame; we keep both for cross-reference. */
   id: string;
+  /** Discriminator — which session flavor this is. */
+  kind: SessionKind;
   /** From the server's hello frame. Empty until hello received. */
   serverSessionId: string;
   cluster: string;
+  /** Empty for kind="cluster-shell" — the session is cluster-scoped. */
   namespace: string;
+  /** Empty for kind="cluster-shell". */
   pod: string;
-  /** Container name. May be empty until the hello frame resolves it. */
+  /** Container name. Empty for kind="cluster-shell", or until the hello
+   *  frame resolves it for pod-exec. */
   container: string;
-  /** What the user originally asked for (may be "" → server resolves). */
+  /** What the user originally asked for (may be "" → server resolves).
+   *  Empty for kind="cluster-shell". */
   requestedContainer: string;
+  /** Only set for kind="cluster-shell". */
+  mode?: ClusterShellMode;
   status: SessionStatus;
   createdAt: number;
   closedAt?: number;

@@ -6,8 +6,8 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { ExecClient, buildExecURL } from "./ExecClient";
-import type { ExecSessionMeta } from "./types";
+import { ExecClient, buildClusterShellURL, buildExecURL } from "./ExecClient";
+import type { ClusterShellMode, ExecSessionMeta } from "./types";
 
 /**
  * App-root context that owns active pod-exec sessions. Sessions outlive
@@ -24,7 +24,10 @@ export const SESSION_CAP = 5;
 const STORAGE_HEIGHT = "periscope.exec.drawerHeight";
 const STORAGE_OPEN = "periscope.exec.drawerOpen";
 
-export interface OpenSessionInput {
+/** Pod-exec open input — the original shape. `kind` is optional and
+ *  defaults to "pod-exec" so existing callers keep compiling. */
+export interface OpenPodExecInput {
+  kind?: "pod-exec";
   cluster: string;
   namespace: string;
   pod: string;
@@ -33,6 +36,15 @@ export interface OpenSessionInput {
   command?: string[];
   tty?: boolean;
 }
+
+/** Cluster-shell open input (#104). cluster-scoped — no pod/ns. */
+export interface OpenClusterShellInput {
+  kind: "cluster-shell";
+  cluster: string;
+  mode: ClusterShellMode;
+}
+
+export type OpenSessionInput = OpenPodExecInput | OpenClusterShellInput;
 
 export type OpenSessionResult =
   | { ok: true; session: ExecSessionMeta }
@@ -90,10 +102,21 @@ function findExistingFor(
   sessions: ExecSessionMeta[],
   input: OpenSessionInput,
 ): ExecSessionMeta | undefined {
+  if (input.kind === "cluster-shell") {
+    return sessions.find(
+      (s) =>
+        s.status !== "closed" &&
+        s.status !== "error" &&
+        s.kind === "cluster-shell" &&
+        s.cluster === input.cluster &&
+        s.mode === input.mode,
+    );
+  }
   return sessions.find(
     (s) =>
       s.status !== "closed" &&
       s.status !== "error" &&
+      s.kind === "pod-exec" &&
       s.cluster === input.cluster &&
       s.namespace === input.namespace &&
       s.pod === input.pod &&
@@ -134,29 +157,52 @@ export function ExecSessionsProvider({ children }: { children: ReactNode }) {
       }
 
       const id = makeId();
-      const url = buildExecURL({
-        cluster: input.cluster,
-        namespace: input.namespace,
-        pod: input.pod,
-        container: input.container,
-        command: input.command,
-        tty: input.tty ?? true,
-      });
+      let url: string;
+      let meta: ExecSessionMeta;
+      if (input.kind === "cluster-shell") {
+        url = buildClusterShellURL({
+          cluster: input.cluster,
+          mode: input.mode,
+        });
+        meta = {
+          id,
+          kind: "cluster-shell",
+          serverSessionId: "",
+          cluster: input.cluster,
+          namespace: "",
+          pod: "",
+          container: "",
+          requestedContainer: "",
+          mode: input.mode,
+          status: "connecting",
+          createdAt: Date.now(),
+          lastActivityAt: Date.now(),
+        };
+      } else {
+        url = buildExecURL({
+          cluster: input.cluster,
+          namespace: input.namespace,
+          pod: input.pod,
+          container: input.container,
+          command: input.command,
+          tty: input.tty ?? true,
+        });
+        meta = {
+          id,
+          kind: "pod-exec",
+          serverSessionId: "",
+          cluster: input.cluster,
+          namespace: input.namespace,
+          pod: input.pod,
+          container: input.container ?? "",
+          requestedContainer: input.container ?? "",
+          status: "connecting",
+          createdAt: Date.now(),
+          lastActivityAt: Date.now(),
+        };
+      }
       const client = new ExecClient({ url });
       clients.current.set(id, client);
-
-      const meta: ExecSessionMeta = {
-        id,
-        serverSessionId: "",
-        cluster: input.cluster,
-        namespace: input.namespace,
-        pod: input.pod,
-        container: input.container ?? "",
-        requestedContainer: input.container ?? "",
-        status: "connecting",
-        createdAt: Date.now(),
-        lastActivityAt: Date.now(),
-      };
 
       // Subscribe lifecycle events to mirror state into React.
       client.onStatus((status) => {
@@ -360,12 +406,20 @@ export function ExecSessionsProvider({ children }: { children: ReactNode }) {
         .filter((s) => s.status === "connecting" || s.status === "connected")
         .map((s) => ({
           id: s.id,
-          params: {
-            cluster: s.cluster,
-            namespace: s.namespace,
-            pod: s.pod,
-            container: s.requestedContainer || undefined,
-          },
+          params:
+            s.kind === "cluster-shell"
+              ? ({
+                  kind: "cluster-shell",
+                  cluster: s.cluster,
+                  mode: s.mode ?? "bash",
+                } satisfies OpenSessionInput)
+              : ({
+                  kind: "pod-exec",
+                  cluster: s.cluster,
+                  namespace: s.namespace,
+                  pod: s.pod,
+                  container: s.requestedContainer || undefined,
+                } satisfies OpenSessionInput),
         }));
     }
 

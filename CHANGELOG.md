@@ -13,6 +13,35 @@ tag.
 
 ## [Unreleased]
 
+### Added
+
+- **In-browser cluster shell ([#104](https://github.com/gnana997/periscope/issues/104)).**
+  A **shell** button in the cluster page header (next to *apply yaml*; Cmd-Shift-E
+  hotkey) opens an in-browser kubectl REPL backed by a per-session ephemeral pod
+  on the target cluster. The shell pod (`debian:bookworm-slim` + `kubectl` +
+  `helm` + `bash`) mounts a Secret carrying a kubeconfig wired with the
+  operator's impersonation identity (`as`, `as-groups: periscope-tier:<tier>`,
+  `as-user-extra: { audit.periscope.io/session-id, audit.periscope.io/actor }`)
+  — every action lands at apiserver as the human, under their tier's RBAC.
+  Tier-narrow impersonator ClusterRoles (`resourceNames:
+  ["periscope-tier:<tier>"]` on the groups rule) make cross-tier escalation
+  structurally impossible. Two new audit verbs (`cluster_shell_open`,
+  `cluster_shell_close`) carry the same `session-id` the apiserver audit
+  records, so the two logs join with one `grep`. Works on both `in-cluster` and
+  `agent` backends — agent path provisions the pod through the tunnel against
+  the agent's ServiceAccount, with CA discovered via the standard
+  `kube-public/cluster-info` ConfigMap. Opt-in (`clusterShell.enabled=true`);
+  requires `auth.authorization.mode=tier`. Helm chart on both server and agent
+  sides installs the `periscope-system` namespace + per-tier SA +
+  impersonator + provisioner Role when enabled.
+  Setup: [`docs/setup/cluster-shell.md`](docs/setup/cluster-shell.md). User
+  guide: [`docs/usage/cluster-shell.md`](docs/usage/cluster-shell.md).
+- **Two new cluster-meta DTO fields** on `GET /api/clusters`:
+  `clusterShellEnabled` (bool) and `clusterShellMode` (`"bash"`; omitted when
+  disabled). The SPA reads these to gate the shell button. The shape is
+  per-cluster from day one so a future per-cluster override won't change the
+  wire format.
+
 ## [1.1.4] - 2026-05-26
 
 Security patch release: bumps Go toolchain and dependencies to clear

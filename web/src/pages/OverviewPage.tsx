@@ -3,6 +3,7 @@ import { useClusterSummary, useClusterEvents } from "../hooks/useResource";
 import { CircularGauge } from "../components/ui/CircularGauge";
 import { ThemeToggle } from "../components/shell/ThemeToggle";
 import { ApplyYamlEntry } from "../components/apply/ApplyYamlEntry";
+import { OpenClusterShellButton } from "../components/exec/OpenClusterShellButton";
 import { UpgradeReadinessCard } from "../components/eks/UpgradeReadinessCard";
 import { NodeGroupsCard } from "../components/eks/NodeGroupsCard";
 import { AddOnsCard } from "../components/eks/AddOnsCard";
@@ -332,6 +333,7 @@ function ClusterIdentityBanner({
         </div>
       </div>
       <div className="flex shrink-0 items-center gap-2">
+        <OpenClusterShellButton cluster={cluster} />
         <ApplyYamlEntry />
         <ThemeToggle />
       </div>

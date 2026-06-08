@@ -55,13 +55,21 @@ export function Tab({ session, active, onFocus, onClose }: TabProps) {
     ? formatUptime(session.closedAt - session.createdAt)
     : formatUptime(now - session.createdAt);
 
+  const isShell = session.kind === "cluster-shell";
+  const titleHeading = isShell
+    ? `${session.cluster} · cluster shell${session.mode ? ` (${session.mode})` : ""}`
+    : `${session.cluster} · ${session.namespace} · ${session.pod}`;
+  const closeAriaLabel = isShell
+    ? `Close cluster shell on ${session.cluster}`
+    : `Close session for ${session.pod}`;
+
   return (
     <button
       type="button"
       onClick={onFocus}
       title={[
-        `${session.cluster} · ${session.namespace} · ${session.pod}`,
-        session.container ? `container: ${session.container}` : null,
+        titleHeading,
+        !isShell && session.container ? `container: ${session.container}` : null,
         `${STATUS_LABEL[session.status]} · ${uptime}`,
       ]
         .filter(Boolean)
@@ -97,8 +105,10 @@ export function Tab({ session, active, onFocus, onClose }: TabProps) {
         {session.cluster}
       </span>
 
-      {/* pod name */}
-      <span className="min-w-0 truncate">{session.pod}</span>
+      {/* primary label: pod name for pod-exec, "shell" for cluster-shell */}
+      <span className="min-w-0 truncate">
+        {isShell ? "shell" : session.pod}
+      </span>
 
       {/* close X — visible on hover or when active. Stays a span+role
           (rather than a real <button>) because the outer Tab is already
@@ -119,7 +129,7 @@ export function Tab({ session, active, onFocus, onClose }: TabProps) {
             onClose();
           }
         }}
-        aria-label={`Close session for ${session.pod}`}
+        aria-label={closeAriaLabel}
         className={cn(
           "ml-0.5 flex size-4 shrink-0 items-center justify-center rounded-sm text-ink-faint transition-all hover:bg-surface hover:text-ink",
           active ? "opacity-100" : "opacity-0 group-hover:opacity-100",

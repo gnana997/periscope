@@ -1,0 +1,170 @@
+{{- /*
+  cluster-shell-rbac.yaml — issue #104.
+
+  Renders the per-tier ServiceAccounts, narrow impersonator
+  ClusterRoles, and the namespace-scoped Role binding Periscope's
+  main SA to the resources it has to create at session start:
+    - pods (the shell pod itself)
+    - secrets (the per-session kubeconfig)
+    - serviceaccounts/token (the short-lived bearer minted via
+      TokenRequest)
+
+  This template ships ON THE HOST CLUSTER where Periscope main runs.
+  For agent-managed clusters, the agent chart ships the same shape
+  (templates/cluster-shell-rbac.yaml in periscope-agent/), bound to
+  the agent's SA instead of the Periscope-main SA.
+
+  Tier-narrow contract: each ClusterRole grants impersonate on
+    users (wildcard — operator identities are dynamic per OIDC)
+    groups (resourceNames-narrow to ONLY periscope-tier:<that-tier>)
+    userextras (audit annotations the kubeconfig sets)
+  So a stolen SA token can only impersonate identities the SA's tier
+  already permits — there's no cross-tier escalation surface.
+
+  Rendered only when clusterShell.enabled=true.
+*/}}
+{{- if .Values.clusterShell.enabled }}
+
+{{- /*
+  Template-time guard: cluster-shell only makes sense in tier mode.
+  Shared mode has no concept of a tier; raw mode would require a
+  per-group ClusterRole loop K8s RBAC doesn't support (no wildcard
+  in resourceNames). Fail loudly here with a recipe rather than at
+  runtime when the operator opens a shell and gets a 403.
+*/}}
+{{- if ne .Values.auth.authorization.mode "tier" }}
+{{- fail (printf "clusterShell.enabled=true requires auth.authorization.mode=tier (currently %q). Either flip authorization.mode to \"tier\" and set up groupTiers, or unset clusterShell.enabled. See discussions/periscope-cluster-shell-v1.2-plan.md for the rationale." .Values.auth.authorization.mode) }}
+{{- end }}
+
+{{- /*
+  Template-time guard: every tier in clusterShell.tiers must be a
+  valid Periscope tier name (the Go-side authz.Resolver only knows
+  these five). Validate here so typos surface in `helm install` not
+  at first session open.
+*/}}
+{{- $validTiers := list "read" "triage" "write" "maintain" "admin" -}}
+{{- range $tier := .Values.clusterShell.tiers }}
+  {{- if not (has $tier $validTiers) }}
+    {{- fail (printf "clusterShell.tiers contains %q which is not a known tier. Valid: read|triage|write|maintain|admin." $tier) }}
+  {{- end }}
+{{- end }}
+
+{{- $ns := .Values.clusterShell.namespace | default "periscope-system" -}}
+
+{{- range $tier := .Values.clusterShell.tiers }}
+---
+# Per-tier ServiceAccount the shell pod runs as. The Pod spec sets
+# automountServiceAccountToken=false and mounts its own kubeconfig
+# Secret, so this SA's token is not exposed to the pod — but
+# Periscope main uses it to mint short-lived TokenRequest tokens
+# whose impersonation is RBAC-bound to this tier.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: periscope-shell-{{ $tier }}
+  namespace: {{ $ns }}
+  labels:
+    {{- include "periscope.labels" $ | nindent 4 }}
+    periscope.io/purpose: cluster-shell
+    periscope.io/tier: {{ $tier }}
+---
+# Tier-narrow impersonate ClusterRole. The kubeconfig delivered to
+# the shell pod carries:
+#     as:       <operator OIDC sub>          # impersonate-user
+#     as-groups: [periscope-tier:{{ $tier }}]  # impersonate-groups
+#     as-user-extra:
+#       audit.periscope.io/session-id: [<uuid>]
+#       audit.periscope.io/actor:      [<sub>]
+# This ClusterRole grants impersonate on exactly that set: users
+# wildcard (operator identities are dynamic per OIDC), groups
+# narrowed via resourceNames to only the tier group, and the two
+# audit-annotation userextras the kubeconfig sets.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: periscope-shell-impersonator-{{ $tier }}
+  labels:
+    {{- include "periscope.labels" $ | nindent 4 }}
+    periscope.io/purpose: cluster-shell
+    periscope.io/tier: {{ $tier }}
+rules:
+  - apiGroups: [""]
+    resources: ["users"]
+    verbs: ["impersonate"]
+  - apiGroups: [""]
+    resources: ["groups"]
+    verbs: ["impersonate"]
+    resourceNames: ["periscope-tier:{{ $tier }}"]
+  - apiGroups: ["authentication.k8s.io"]
+    resources:
+      - userextras/audit.periscope.io/session-id
+      - userextras/audit.periscope.io/actor
+    verbs: ["impersonate"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: periscope-shell-impersonator-{{ $tier }}
+  labels:
+    {{- include "periscope.labels" $ | nindent 4 }}
+    periscope.io/purpose: cluster-shell
+    periscope.io/tier: {{ $tier }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: periscope-shell-impersonator-{{ $tier }}
+subjects:
+  - kind: ServiceAccount
+    name: periscope-shell-{{ $tier }}
+    namespace: {{ $ns }}
+{{- end }}
+
+---
+# Namespace-scoped Role granting Periscope's own SA the verbs it needs
+# to provision per-session shell pods + their kubeconfig Secrets +
+# their TokenRequest tokens in the cluster-shell namespace. Scoped
+# narrowly (just this namespace, just these verbs) so a compromise of
+# Periscope main doesn't broaden into a "create any pod anywhere"
+# surface.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: periscope-shell-provisioner
+  namespace: {{ $ns }}
+  labels:
+    {{- include "periscope.labels" . | nindent 4 }}
+    periscope.io/purpose: cluster-shell
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["create", "delete", "get", "list", "watch"]
+  # pods/exec is needed for both the operator's interactive bash
+  # attach AND the close-time `cat audit.jsonl` readback.
+  - apiGroups: [""]
+    resources: ["pods/exec"]
+    verbs: ["create"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["create", "delete", "get"]
+  # TokenRequest is a subresource of ServiceAccounts.
+  - apiGroups: [""]
+    resources: ["serviceaccounts/token"]
+    verbs: ["create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: periscope-shell-provisioner
+  namespace: {{ $ns }}
+  labels:
+    {{- include "periscope.labels" . | nindent 4 }}
+    periscope.io/purpose: cluster-shell
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: periscope-shell-provisioner
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "periscope.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
+{{- end }}
