@@ -13,20 +13,21 @@ tag.
 
 ## [Unreleased]
 
-### Changed
+## [1.1.5] - 2026-06-08
 
-- **Cluster-shell audit now covers `helm` invocations alongside
-  `kubectl`.** The in-pod wrapper (`periscope-audit-kubectl`) has been
-  generalized to `periscope-audit-exec`, keys off `argv[0]` to dispatch,
-  and both `/usr/local/bin/kubectl` and `/usr/local/bin/helm` symlink
-  to it. The `commands: [...]` slice on `cluster_shell_close` audit
-  rows now includes helm command lines that previously only showed up
-  as aggregate `bytes_in` / `bytes_out`. Wire-shape note for downstream
-  audit consumers: entries with `argv[0]` ending in `helm` will now
-  appear; filters keyed on kubectl-only need updating.
-- **`KUBE_EDITOR=nano` pinned in the shell image** so `kubectl edit`
-  works without operators having to export the env var themselves
-  (the image only ships nano; vi/vim are not installed).
+Operator daily-driver milestone landing the headline v1.2-cycle
+feature one minor early: an in-browser cluster-wide kubectl REPL
+([#104](https://github.com/gnana997/periscope/issues/104)) backed
+by a per-session ephemeral pod, tier-narrow impersonation, and a
+single audit log that joins to the apiserver's own audit via a
+shared session UUID. Plus the audit wrapper now covers `helm` next
+to `kubectl`, a new operator-facing troubleshooting page indexes
+common gotchas across every feature, and the Go toolchain is bumped
+to 1.26.4 to clear three stdlib CVE rows from container scanners.
+
+Validated end-to-end across rc1 → rc2 → rc3 against both in-cluster
+and agent backends. Helm chart values are backward-compatible; the
+new `clusterShell.*` block is opt-in (default off).
 
 ### Added
 
@@ -56,6 +57,49 @@ tag.
   disabled). The SPA reads these to gate the shell button. The shape is
   per-cluster from day one so a future per-cluster override won't change the
   wire format.
+- **Operator-facing troubleshooting page**
+  ([`docs/setup/troubleshooting.md`](docs/setup/troubleshooting.md)) —
+  symptom-keyed quick-lookup table indexing every feature doc's troubleshooting
+  section, plus cross-cutting entries for issues that don't fit a single
+  feature (chart-versions OOM at the default 512Mi limit, cluster-shell pod
+  image-pull behind an outbound proxy, Artifact Hub scanner severity vs
+  upstream Go-team triage gap, agent tunnel reconnect churn on LB rotation,
+  local-microk8s TLS cert mismatch on network change, NodePort re-allocation
+  on full reinstall). Every feature doc gets a one-line backlink to the
+  cross-cutting page.
+- **Release pipeline builds + signs the cluster-shell pod image**
+  (`ghcr.io/gnana997/periscope-shell:<version>`) in parallel with the server
+  and agent images, with cosign + SLSA attestation, multi-arch (amd64 +
+  arm64), and the attestation bundle attached to the GitHub Release. Mirrors
+  the agent-image pattern.
+
+### Changed
+
+- **Cluster-shell audit now covers `helm` invocations alongside
+  `kubectl`.** The in-pod wrapper (`periscope-audit-kubectl`) has been
+  generalized to `periscope-audit-exec`, keys off `argv[0]` to dispatch,
+  and both `/usr/local/bin/kubectl` and `/usr/local/bin/helm` symlink
+  to it. The `commands: [...]` slice on `cluster_shell_close` audit
+  rows now includes helm command lines that previously only showed up
+  as aggregate `bytes_in` / `bytes_out`. Wire-shape note for downstream
+  audit consumers: entries with `argv[0]` ending in `helm` will now
+  appear; filters keyed on kubectl-only need updating.
+- **`KUBE_EDITOR=nano` pinned in the shell image** so `kubectl edit`
+  works without operators having to export the env var themselves
+  (the image only ships nano; vi/vim are not installed).
+
+### Security
+
+- **Go toolchain bumped from 1.26.3 to 1.26.4.** Clears three stdlib
+  CVE rows from Artifact Hub / Amazon Inspector aggregators:
+  CVE-2026-42504 (`mime/WordDecoder` quadratic parse), CVE-2026-27145
+  (`crypto/x509` hostname-parsing DoS), CVE-2026-42507 (`net/textproto`
+  error-string escaping). All three are LOW per the Go security team's
+  own triage; scanners that key off NVD CVSS base scores rate them
+  higher. None are reachable on Periscope's request path in practice;
+  bumping clears the scanner badges before this minor's GA. Patch-only
+  bump per upstream release notes — no behavior changes in `crypto/tls`,
+  `crypto/x509`, or any package Periscope uses.
 
 ## [1.1.4] - 2026-05-26
 
