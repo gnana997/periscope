@@ -61,22 +61,32 @@ type prepared struct {
 	actor      string
 }
 
+// prepErr is a gate failure, rendered as an HTTP JSON error by the
+// preflight endpoint or as a {type:error} WebSocket frame by the shell
+// endpoint (after the upgrade, so the SPA shows a clean message and does
+// not reconnect-loop on a permanent condition).
+type prepErr struct {
+	status int // HTTP status for the preflight path
+	code   string
+	msg    string
+	extra  map[string]any
+}
+
 // prepare runs the gates shared by the shell and preflight endpoints:
 // cluster lookup, feature flag, node→instance/region resolution,
 // per-cluster config, tier gate, and credential acquisition (per-user
-// STS in OIDC mode, ambient in dev mode). On any failure it writes the
-// JSON error and returns ok=false.
-func (h *ssmShell) prepare(w http.ResponseWriter, r *http.Request, p credentials.Provider) (prepared, bool) {
+// STS in OIDC mode, ambient in dev mode). Returns a *prepErr (nil on
+// success) rather than writing — the caller renders it as HTTP or a WS
+// frame.
+func (h *ssmShell) prepare(r *http.Request, p credentials.Provider) (prepared, *prepErr) {
 	var out prepared
 
 	c, ok := h.reg.ByName(chi.URLParam(r, "cluster"))
 	if !ok {
-		apiErrorJSON(w, http.StatusNotFound, "E_NOT_FOUND", "cluster not found", nil)
-		return out, false
+		return out, &prepErr{http.StatusNotFound, "E_NOT_FOUND", "cluster not found", nil}
 	}
 	if !h.cfg.Enabled {
-		apiErrorJSON(w, http.StatusForbidden, "E_NODE_SHELL_DISABLED", "node shell is not enabled on this dashboard", nil)
-		return out, false
+		return out, &prepErr{http.StatusForbidden, "E_NODE_SHELL_DISABLED", "node shell is not enabled on this dashboard", nil}
 	}
 	nodeName := chi.URLParam(r, "name")
 
@@ -85,9 +95,8 @@ func (h *ssmShell) prepare(w http.ResponseWriter, r *http.Request, p credentials
 	// the apiserver.
 	instanceID, region, err := nodeInstance(r.Context(), p, c, nodeName)
 	if err != nil {
-		apiErrorJSON(w, http.StatusNotFound, "E_NODE_NOT_EC2",
-			"this node is not an SSM-managed EC2 instance", map[string]any{"err": err.Error()})
-		return out, false
+		return out, &prepErr{http.StatusNotFound, "E_NODE_NOT_EC2",
+			"this node is not an SSM-managed EC2 instance", map[string]any{"err": err.Error()}}
 	}
 
 	rc := h.cfg.Resolve(c)
@@ -95,9 +104,8 @@ func (h *ssmShell) prepare(w http.ResponseWriter, r *http.Request, p credentials
 		rc.Region = region // fall back to the Node's region label
 	}
 	if rc.Region == "" {
-		apiErrorJSON(w, http.StatusBadRequest, "E_NODE_SHELL_NO_REGION",
-			"could not determine the AWS region for this node; set nodeShell.region", nil)
-		return out, false
+		return out, &prepErr{http.StatusBadRequest, "E_NODE_SHELL_NO_REGION",
+			"could not determine the AWS region for this node; set nodeShell.region", nil}
 	}
 
 	actor := p.Actor()
@@ -107,58 +115,50 @@ func (h *ssmShell) prepare(w http.ResponseWriter, r *http.Request, p credentials
 
 	if h.devMode {
 		// Dev / no-auth: the server's ambient credentials (the developer's
-		// own AWS profile). NEVER reached in a deployed OIDC instance.
+		// own AWS profile / pod role). NEVER reached in a deployed OIDC
+		// instance.
 		creds = p
 	} else {
 		if h.resolver == nil || h.resolver.Mode() != authz.ModeTier {
-			apiErrorJSON(w, http.StatusForbidden, "E_NODE_SHELL_REQUIRES_TIER",
-				"node shell requires auth.authorization.mode=tier", nil)
-			return out, false
+			return out, &prepErr{http.StatusForbidden, "E_NODE_SHELL_REQUIRES_TIER",
+				"node shell requires auth.authorization.mode=tier", nil}
 		}
 		s, ok := auth.SessionFromContext(r.Context())
 		if !ok {
-			apiErrorJSON(w, http.StatusUnauthorized, "E_AUTH", "unauthenticated", nil)
-			return out, false
+			return out, &prepErr{http.StatusUnauthorized, "E_AUTH", "unauthenticated", nil}
 		}
 		tier := h.resolver.ResolvedTier(authz.Identity{Subject: s.Subject, Groups: s.Groups})
 		if !h.cfg.TierAllowed(tier) {
-			apiErrorJSON(w, http.StatusForbidden, "E_FORBIDDEN",
+			return out, &prepErr{http.StatusForbidden, "E_FORBIDDEN",
 				"your tier is not allowed to open a node shell",
-				map[string]any{"tier": tier, "allowed_tiers": h.cfg.Tiers})
-			return out, false
+				map[string]any{"tier": tier, "allowed_tiers": h.cfg.Tiers}}
 		}
 		if rc.RoleArn == "" {
-			apiErrorJSON(w, http.StatusForbidden, "E_NODE_SHELL_NO_ROLE",
-				"no node-shell IAM role is configured for this cluster", nil)
-			return out, false
+			return out, &prepErr{http.StatusForbidden, "E_NODE_SHELL_NO_ROLE",
+				"no node-shell IAM role is configured for this cluster", nil}
 		}
 		if h.idToken == nil {
-			apiErrorJSON(w, http.StatusInternalServerError, "E_INTERNAL", "id token source unavailable", nil)
-			return out, false
+			return out, &prepErr{http.StatusInternalServerError, "E_INTERNAL", "id token source unavailable", nil}
 		}
 		idToken, err := h.idToken.FreshIDToken(r)
 		if errors.Is(err, auth.ErrReauthRequired) {
-			apiErrorJSON(w, http.StatusUnauthorized, "E_REAUTH_REQUIRED", "sign in again to open a node shell", nil)
-			return out, false
+			return out, &prepErr{http.StatusUnauthorized, "E_REAUTH_REQUIRED", "sign in again to open a node shell", nil}
 		}
 		if err != nil {
-			apiErrorJSON(w, http.StatusInternalServerError, "E_INTERNAL", "could not obtain id token", nil)
-			return out, false
+			return out, &prepErr{http.StatusInternalServerError, "E_INTERNAL", "could not obtain id token", nil}
 		}
 		// aud pre-check: the commonest trust-policy failure, caught up
 		// front with a precise message instead of an opaque AccessDenied.
 		if rc.OIDCAudience != "" && !awsssm.AudMatches(idToken, rc.OIDCAudience) {
-			apiErrorJSON(w, http.StatusForbidden, "E_NODE_SHELL_AUD_MISMATCH",
+			return out, &prepErr{http.StatusForbidden, "E_NODE_SHELL_AUD_MISMATCH",
 				"your id_token audience does not match the role's trust policy",
-				map[string]any{"expected_aud": rc.OIDCAudience})
-			return out, false
+				map[string]any{"expected_aud": rc.OIDCAudience}}
 		}
 		prov, id, err := awsssm.AssumeWebIdentity(r.Context(), aws.Config{Region: rc.Region}, rc.RoleArn, idToken, "periscope-"+s.Subject)
 		if err != nil {
 			// The trust policy refused — surfaced cleanly, not as a hung WS.
-			apiErrorJSON(w, http.StatusForbidden, "E_NODE_SHELL_TRUST_DENIED",
-				"AWS denied the session; check the role's trust policy", map[string]any{"err": err.Error()})
-			return out, false
+			return out, &prepErr{http.StatusForbidden, "E_NODE_SHELL_TRUST_DENIED",
+				"AWS denied the session; check the role's trust policy", map[string]any{"err": err.Error()}}
 		}
 		creds, assumed, authKind = prov, id, "sts"
 	}
@@ -166,7 +166,7 @@ func (h *ssmShell) prepare(w http.ResponseWriter, r *http.Request, p credentials
 	return prepared{
 		cluster: c, nodeName: nodeName, instanceID: instanceID, region: rc.Region,
 		creds: creds, assumed: assumed, authKind: authKind, actor: actor,
-	}, true
+	}, nil
 }
 
 // preflight verifies a node is reachable for a shell without opening one:
@@ -175,8 +175,9 @@ func (h *ssmShell) prepare(w http.ResponseWriter, r *http.Request, p credentials
 // second after connecting.
 func (h *ssmShell) preflight() credentials.Handler {
 	return func(w http.ResponseWriter, r *http.Request, p credentials.Provider) {
-		pre, ok := h.prepare(w, r, p)
-		if !ok {
+		pre, perr := h.prepare(r, p)
+		if perr != nil {
+			apiErrorJSON(w, perr.status, perr.code, perr.msg, perr.extra)
 			return
 		}
 		res, err := awsssm.Preflight(r.Context(), pre.creds, pre.region, pre.instanceID)
@@ -202,26 +203,39 @@ func (h *ssmShell) preflight() credentials.Handler {
 // upgrade so failures are clean HTTP errors.
 func (h *ssmShell) shell() credentials.Handler {
 	return func(w http.ResponseWriter, r *http.Request, p credentials.Provider) {
-		pre, ok := h.prepare(w, r, p)
-		if !ok {
+		// Upgrade FIRST, so every gate failure below is delivered as a
+		// clean {type:error} frame — the SPA shows the message and (since
+		// the frame is non-retryable) does not reconnect-loop, instead of
+		// the opaque failed-handshake the pre-upgrade path produced.
+		ws, err := websocket.Accept(w, r, &websocket.AcceptOptions{OriginPatterns: originPatterns()})
+		if err != nil {
+			if errors.Is(err, context.Canceled) {
+				return
+			}
+			slog.WarnContext(r.Context(), "ssm_shell.upgrade failed", "err", err)
+			return
+		}
+		defer ws.Close(websocket.StatusNormalClosure, "session ended")
+
+		pre, perr := h.prepare(r, p)
+		if perr != nil {
+			wsErrorFrame(r.Context(), ws, perr.code, perr.msg)
 			return
 		}
 
 		// --- concurrency caps ---
 		if h.sessions.CountForActor(pre.actor) >= h.cfg.MaxSessionsPerUser {
-			apiErrorJSON(w, http.StatusTooManyRequests, "E_CAP_USER",
-				"you've hit your concurrent node-shell cap; close one to open another",
-				map[string]any{"limit": h.cfg.MaxSessionsPerUser})
+			wsErrorFrame(r.Context(), ws, "E_CAP_USER",
+				"you've hit your concurrent node-shell cap; close one to open another")
 			return
 		}
 		if h.sessions.CountForCluster(pre.cluster.Name) >= h.cfg.MaxSessionsTotal {
-			apiErrorJSON(w, http.StatusTooManyRequests, "E_CAP_CLUSTER",
-				"this cluster has hit its node-shell cap; try again shortly",
-				map[string]any{"limit": h.cfg.MaxSessionsTotal})
+			wsErrorFrame(r.Context(), ws, "E_CAP_CLUSTER",
+				"this cluster has hit its node-shell cap; try again shortly")
 			return
 		}
 
-		// --- open the SSM session (before the WS upgrade) ---
+		// --- open the SSM session ---
 		sessCfg := awsssm.Config{
 			Region:        pre.region,
 			InstanceID:    pre.instanceID,
@@ -232,8 +246,8 @@ func (h *ssmShell) shell() credentials.Handler {
 		}
 		sess, err := awsssm.Open(r.Context(), pre.creds, sessCfg)
 		if err != nil {
-			apiErrorJSON(w, http.StatusBadGateway, "E_NODE_SHELL_START_FAILED",
-				"could not start the SSM session", map[string]any{"err": err.Error()})
+			wsErrorFrame(r.Context(), ws, "E_NODE_SHELL_START_FAILED",
+				"could not start the SSM session: "+err.Error())
 			return
 		}
 		// Always tear the SSM session down — fresh context, the request
@@ -249,7 +263,7 @@ func (h *ssmShell) shell() credentials.Handler {
 		if !h.sessions.Add(nodeshell.SessionRecord{
 			ID: sess.ID(), Actor: pre.actor, Cluster: pre.cluster.Name, Node: pre.nodeName, StartedAt: time.Now().UTC(),
 		}) {
-			apiErrorJSON(w, http.StatusInternalServerError, "E_INTERNAL", "session id collision", nil)
+			wsErrorFrame(r.Context(), ws, "E_INTERNAL", "session id collision")
 			return
 		}
 		defer h.sessions.Remove(sess.ID())
@@ -272,19 +286,6 @@ func (h *ssmShell) shell() credentials.Handler {
 				"started_at":        started.Format(time.RFC3339Nano),
 			},
 		})
-
-		// --- WebSocket upgrade ---
-		ws, err := websocket.Accept(w, r, &websocket.AcceptOptions{OriginPatterns: originPatterns()})
-		if err != nil {
-			if errors.Is(err, context.Canceled) {
-				return
-			}
-			slog.WarnContext(r.Context(), "ssm_shell.upgrade failed", "err", err, "actor", pre.actor, "cluster", pre.cluster.Name)
-			h.emitClose(r.Context(), actorRec, pre, sess.ID(), started,
-				awsssm.CloseResult{SessionID: sess.ID(), Reason: awsssm.ReasonAbort, ExitCode: -1}, audit.OutcomeFailure)
-			return
-		}
-		defer ws.Close(websocket.StatusNormalClosure, "session ended")
 
 		// --- exec frame protocol (shared with pod-exec / cluster-shell) ---
 		// hello first so the SPA's ExecClient transitions to "connected";
@@ -363,6 +364,14 @@ func wsWriteJSON(ctx context.Context, ws *websocket.Conn, v any) error {
 		return err
 	}
 	return ws.Write(ctx, websocket.MessageText, b)
+}
+
+// wsErrorFrame sends an {type:error} control frame. retryable is left
+// unset, which ExecClient treats as terminal — the SPA shows the message
+// and does not reconnect (correct for permanent gate failures like a
+// non-EC2 node or a refused trust policy).
+func wsErrorFrame(ctx context.Context, ws *websocket.Conn, code, msg string) {
+	_ = wsWriteJSON(ctx, ws, map[string]any{"type": "error", "code": code, "message": msg})
 }
 
 func (h *ssmShell) emitClose(ctx context.Context, actor audit.Actor, pre prepared, sessionID string, started time.Time, res awsssm.CloseResult, outcome audit.Outcome) {
