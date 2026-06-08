@@ -1,11 +1,12 @@
-.PHONY: build backend frontend frontend-build tidy clean dev help image kind-load helm-lint helm-template test
+.PHONY: build backend frontend frontend-build tidy clean dev help image image-shell kind-load kind-load-shell helm-lint helm-template test
 
 # Image / kind defaults — override on the CLI: `make image TAG=v0.2`
-IMAGE     ?= periscope
-TAG       ?= dev
-KIND_NAME ?= certwatch
-COMMIT    := $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
-VERSION   ?= $(TAG)
+IMAGE       ?= periscope
+IMAGE_SHELL ?= periscope-shell
+TAG         ?= dev
+KIND_NAME   ?= certwatch
+COMMIT      := $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
+VERSION     ?= $(TAG)
 
 # Production: build frontend, then Go binary that embeds web/dist via
 # the `embed` build tag (internal/spa/embed_on.go).
@@ -38,6 +39,20 @@ image:
 
 kind-load: image
 	kind load docker-image $(IMAGE):$(TAG) --name $(KIND_NAME)
+
+# Cluster-shell pod image (#104). Separate target because the shell
+# image carries a real shell + kubectl + helm + nano and follows a
+# different release cadence than the main server image.
+image-shell:
+	docker build \
+	  --build-arg VERSION=$(VERSION) \
+	  --build-arg COMMIT=$(COMMIT) \
+	  -f Dockerfile.shell \
+	  -t $(IMAGE_SHELL):$(TAG) \
+	  .
+
+kind-load-shell: image-shell
+	kind load docker-image $(IMAGE_SHELL):$(TAG) --name $(KIND_NAME)
 
 helm-lint:
 	helm lint ./deploy/helm/periscope

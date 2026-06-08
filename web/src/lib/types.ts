@@ -18,6 +18,13 @@ export interface Cluster {
    *  cluster out of the empty-state picker. Optional/undefined for
    *  forward-compatibility with backends that haven't shipped PR4. */
   execEnabled?: boolean;
+  /** #104 — true when the server has clusterShell.enabled set. The
+   *  cluster header hides the cluster-shell button when false. Optional
+   *  for forward-compat with backends that haven't shipped #104 yet. */
+  clusterShellEnabled?: boolean;
+  /** #104 — server-default mode ("bash" | "kubectl-only"). Only set when
+   *  clusterShellEnabled is true. */
+  clusterShellMode?: string;
 }
 
 export interface ClustersResponse {

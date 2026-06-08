@@ -291,9 +291,19 @@ export function Drawer() {
       {!empty && active && infoOpen && (
         <div className="grid shrink-0 grid-cols-[auto_1fr_auto_1fr] gap-x-4 gap-y-1 border-b border-border bg-surface-2/40 px-3 py-2 font-mono text-[10.5px]">
           <Field k="cluster" v={active.cluster} />
-          <Field k="namespace" v={active.namespace} />
-          <Field k="pod" v={active.pod} />
-          <Field k="container" v={active.container || "(resolving…)"} />
+          {active.kind === "cluster-shell" ? (
+            <>
+              <Field k="kind" v="cluster shell" />
+              <Field k="mode" v={active.mode ?? "bash"} />
+              <Field k="namespace" v="(cluster-scoped)" />
+            </>
+          ) : (
+            <>
+              <Field k="namespace" v={active.namespace} />
+              <Field k="pod" v={active.pod} />
+              <Field k="container" v={active.container || "(resolving…)"} />
+            </>
+          )}
           <Field
             k="session id"
             v={active.serverSessionId || "(awaiting hello)"}

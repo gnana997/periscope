@@ -200,6 +200,33 @@
         }
       },
       "additionalProperties": false
+    },
+    "clusterShell": {
+      "type": "object",
+      "description": "Cluster-shell (#104) RBAC scaffolding on this managed cluster. When the central server has clusterShell enabled, the agent chart pre-creates the periscope-system namespace, the per-tier ServiceAccounts + impersonator ClusterRoles, and binds the agent SA to the periscope-shell-provisioner Role so server-side pod create/delete calls succeed through the tunnel. Opt-in (default false); tiers MUST match the server's clusterShell.tiers.",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "namespace": {
+          "type": "string",
+          "pattern": "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$",
+          "minLength": 1,
+          "maxLength": 63,
+          "description": "Where ephemeral shell pods + per-session Secrets land. Must match the server's clusterShell.namespace."
+        },
+        "tiers": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": ["read", "triage", "write", "maintain", "admin"]
+          },
+          "minItems": 1,
+          "uniqueItems": true,
+          "description": "Allow-list of tiers that may open a cluster-shell session. Must match the server's clusterShell.tiers exactly — a tier present on the server but missing here would 403 when a session tries to mint its SA token."
+        }
+      },
+      "additionalProperties": false
     }
   },
   "additionalProperties": false

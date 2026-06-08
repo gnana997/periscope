@@ -1,0 +1,133 @@
+{{- /*
+  cluster-shell-rbac.yaml (agent chart) — issue #104.
+
+  Mirror of the main chart's cluster-shell-rbac.yaml, but:
+    - The namespace-scoped Role for shell-pod provisioning is bound
+      to the AGENT'S ServiceAccount (this chart's SA), not the
+      Periscope-main SA. When Periscope main provisions a shell
+      pod on this cluster, the request flows through the tunnel
+      and lands at the apiserver as the agent's SA (per the agent
+      transport's identity model).
+    - The per-tier ServiceAccounts and impersonator ClusterRoles
+      are identical to the main chart's — the kubeconfig delivered
+      to the shell pod looks the same regardless of which side
+      created the pod.
+
+  Rendered only when clusterShell.enabled=true.
+*/}}
+{{- if .Values.clusterShell.enabled }}
+
+{{- /*
+  Tier validation — same as the main chart. Fail at template time on
+  unknown tier names so operator typos don't surface at first session.
+*/}}
+{{- $validTiers := list "read" "triage" "write" "maintain" "admin" -}}
+{{- range $tier := .Values.clusterShell.tiers }}
+  {{- if not (has $tier $validTiers) }}
+    {{- fail (printf "clusterShell.tiers contains %q which is not a known tier. Valid: read|triage|write|maintain|admin." $tier) }}
+  {{- end }}
+{{- end }}
+
+{{- $ns := .Values.clusterShell.namespace | default "periscope-system" -}}
+
+{{- range $tier := .Values.clusterShell.tiers }}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: periscope-shell-{{ $tier }}
+  namespace: {{ $ns }}
+  labels:
+    {{- include "periscope-agent.labels" $ | nindent 4 }}
+    periscope.io/purpose: cluster-shell
+    periscope.io/tier: {{ $tier }}
+---
+# Tier-narrow impersonate ClusterRole. Stolen SA token can ONLY
+# impersonate identities that carry the tier's group, so cross-tier
+# escalation is structurally impossible regardless of which side
+# manages the cluster.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: periscope-shell-impersonator-{{ $tier }}
+  labels:
+    {{- include "periscope-agent.labels" $ | nindent 4 }}
+    periscope.io/purpose: cluster-shell
+    periscope.io/tier: {{ $tier }}
+rules:
+  - apiGroups: [""]
+    resources: ["users"]
+    verbs: ["impersonate"]
+  - apiGroups: [""]
+    resources: ["groups"]
+    verbs: ["impersonate"]
+    resourceNames: ["periscope-tier:{{ $tier }}"]
+  - apiGroups: ["authentication.k8s.io"]
+    resources:
+      - userextras/audit.periscope.io/session-id
+      - userextras/audit.periscope.io/actor
+    verbs: ["impersonate"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: periscope-shell-impersonator-{{ $tier }}
+  labels:
+    {{- include "periscope-agent.labels" $ | nindent 4 }}
+    periscope.io/purpose: cluster-shell
+    periscope.io/tier: {{ $tier }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: periscope-shell-impersonator-{{ $tier }}
+subjects:
+  - kind: ServiceAccount
+    name: periscope-shell-{{ $tier }}
+    namespace: {{ $ns }}
+{{- end }}
+
+---
+# Provisioner Role bound to the AGENT'S ServiceAccount. When Periscope
+# main provisions a shell pod on this cluster, the request flows
+# through the tunnel and the agent's reverse proxy injects the agent
+# SA token — so apiserver evaluates RBAC against this SA. Verbs are
+# the same set the main chart grants to its own SA.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: periscope-shell-provisioner
+  namespace: {{ $ns }}
+  labels:
+    {{- include "periscope-agent.labels" . | nindent 4 }}
+    periscope.io/purpose: cluster-shell
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["create", "delete", "get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["pods/exec"]
+    verbs: ["create"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["create", "delete", "get"]
+  - apiGroups: [""]
+    resources: ["serviceaccounts/token"]
+    verbs: ["create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: periscope-shell-provisioner
+  namespace: {{ $ns }}
+  labels:
+    {{- include "periscope-agent.labels" . | nindent 4 }}
+    periscope.io/purpose: cluster-shell
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: periscope-shell-provisioner
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "periscope-agent.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
+{{- end }}

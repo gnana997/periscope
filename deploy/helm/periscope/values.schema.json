@@ -238,6 +238,80 @@
         }
       }
     },
+    "clusterShell": {
+      "type": "object",
+      "description": "Cluster-shell (#104) — in-browser kubectl terminal that provisions an ephemeral pod per session in clusterShell.namespace. Opt-in; requires auth.authorization.mode=tier. Pods land on the TARGET cluster: in-cluster backend uses this host cluster; agent backend uses the agent's cluster (where the periscope-agent chart ships matching RBAC).",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "mode": {
+          "type": "string",
+          "enum": ["bash", "kubectl-only"],
+          "description": "Default session mode. v1.2 supports only `bash`; `kubectl-only` ships in a follow-up PR and is rejected at the handler against this build."
+        },
+        "tiers": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": ["read", "triage", "write", "maintain", "admin"]
+          },
+          "minItems": 1,
+          "uniqueItems": true,
+          "description": "Allow-list of tiers that may open a cluster-shell session. Must match auth.authorization.groupTiers values. For agent-managed targets, the periscope-agent chart's clusterShell.tiers MUST match this list."
+        },
+        "namespace": {
+          "type": "string",
+          "pattern": "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$",
+          "minLength": 1,
+          "maxLength": 63,
+          "description": "Where ephemeral shell pods + per-session Secrets land. Must NOT be the release namespace."
+        },
+        "idleSeconds": {
+          "type": "integer",
+          "minimum": 60,
+          "description": "Server-side idle timeout. Activity = any stdin OR stdout byte; heartbeats do NOT reset the timer."
+        },
+        "podStartTimeoutSeconds": {
+          "type": "integer",
+          "minimum": 5,
+          "description": "How long Session.Start waits for the shell pod to reach Ready before returning E_SHELL_POD_FAILED and tearing down."
+        },
+        "transcriptMaxBytes": {
+          "type": "integer",
+          "minimum": 1024,
+          "description": "Cap on the audit-transcript blob included in cluster_shell_close rows. Oversize transcripts are truncated; the row carries a flag."
+        },
+        "maxSessionsPerUser": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Concurrent cluster-shell sessions per operator."
+        },
+        "maxSessionsTotal": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Concurrent cluster-shell sessions per cluster across all operators."
+        },
+        "image": {
+          "type": "object",
+          "properties": {
+            "repository": {
+              "type": "string",
+              "minLength": 1
+            },
+            "tag": {
+              "type": "string"
+            },
+            "pullPolicy": {
+              "type": "string",
+              "enum": ["Always", "IfNotPresent", "Never"]
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
     "podIdentity": {
       "type": "object",
       "properties": {

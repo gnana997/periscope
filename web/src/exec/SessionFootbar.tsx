@@ -31,6 +31,11 @@ interface Props {
 }
 
 export function SessionFootbar({ session }: Props) {
+  // Cluster-shell has no pod / no container picker — skip the footbar
+  // entirely. usePodDetail's enabled flag already gates on truthy name
+  // (session.pod is "" for cluster-shell), so no spurious fetch fires.
+  const isShell = session.kind === "cluster-shell";
+
   const { data: detail } = usePodDetail(
     session.cluster,
     session.namespace,
@@ -40,6 +45,7 @@ export function SessionFootbar({ session }: Props) {
   const containers = detail?.containers ?? [];
   const initContainers = detail?.initContainers ?? [];
 
+  if (isShell) return null;
   // Don't render when there's nothing to switch to. The hook above
   // still fires (one extra GET per session open) but the UI is hidden;
   // since we already fetch pod detail elsewhere (OpenShellButton's

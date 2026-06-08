@@ -255,18 +255,21 @@ reach — this is configuration introspection.
 {
   "clusters": [
     {
-      "name":           "prod-eu",
-      "backend":        "eks",
-      "arn":            "arn:aws:eks:eu-west-1:1234567890:cluster/prod-eu",
-      "region":         "eu-west-1",
-      "execEnabled":    true
+      "name":                 "prod-eu",
+      "backend":              "eks",
+      "arn":                  "arn:aws:eks:eu-west-1:1234567890:cluster/prod-eu",
+      "region":               "eu-west-1",
+      "execEnabled":          true,
+      "clusterShellEnabled":  true,
+      "clusterShellMode":     "bash"
     },
     {
-      "name":           "dev",
-      "backend":        "kubeconfig",
-      "kubeconfigPath": "/etc/periscope/kube/dev.yaml",
-      "kubeconfigContext": "dev-admin",
-      "execEnabled":    false
+      "name":                 "dev",
+      "backend":              "kubeconfig",
+      "kubeconfigPath":       "/etc/periscope/kube/dev.yaml",
+      "kubeconfigContext":    "dev-admin",
+      "execEnabled":          false,
+      "clusterShellEnabled":  false
     }
   ]
 }
@@ -276,6 +279,16 @@ reach — this is configuration introspection.
 operator set `clusters[i].exec.enabled: false` in Helm values. The
 SPA hides the "Open Shell" action when it's false; the API returns
 `403 E_EXEC_DISABLED` if a client tries anyway.
+
+`clusterShellEnabled` and `clusterShellMode` mirror
+`PERISCOPE_CLUSTER_SHELL_ENABLED` and `PERISCOPE_CLUSTER_SHELL_MODE`
+on the server (issue #104). When `false`, the SPA hides the
+**shell** button in the cluster page header; the API returns
+`403 E_CLUSTER_SHELL_DISABLED` if a client tries anyway.
+`clusterShellMode` is omitted when shell is disabled and is one of
+`bash` or (future) `kubectl-only` otherwise. The shell toggle is
+currently server-wide — the per-cluster shape lets a future release
+add per-cluster overrides without changing the wire format.
 
 ### `GET /api/fleet`
 
@@ -1540,6 +1553,48 @@ context:
   active sessions with disconnect controls.
 - Stdin payloads never appear in logs or audit fields — only the
   byte counts (`bytes_stdin` / `bytes_stdout`).
+
+### Cluster shell (WebSocket)
+
+```
+GET /api/clusters/{c}/shell?mode=bash
+   ↑ HTTP 101 Upgrade → WebSocket
+```
+
+Issue [#104](https://github.com/gnana997/periscope/issues/104). Wire
+protocol is **byte-identical to pod exec** (same hello / stdin /
+stdout / closed / error / idle_warn frame shape) — the SPA shares
+the `ExecClient` instance across both flavors. The only differences
+are at the handler boundary:
+
+- Periscope main provisions a per-session ephemeral pod in
+  `clusterShell.namespace` (default `periscope-system`) on the
+  target cluster. The pod's image is a debian-slim runtime carrying
+  `bash` + `kubectl` + `helm`. The handler attaches to that pod
+  via the same `k8s.ExecPod` plumbing pod-exec uses.
+- Identity is per-user via impersonation: the kubeconfig delivered
+  to the pod has `as: <operator-sub>` + `as-groups:
+  [periscope-tier:<tier>]` + audit-extras (`session-id` + `actor`)
+  baked into a tier-narrow ServiceAccount's bearer token.
+- The handler returns `403 E_CLUSTER_SHELL_DISABLED` when the
+  server-wide toggle is off, `403 E_FORBIDDEN` when the operator's
+  tier isn't on the `clusterShell.tiers` allow-list,
+  `400 E_NOT_IMPLEMENTED` for `?mode=kubectl-only` (REPL ships in
+  a later release), `429 E_CAP_USER` / `429 E_CAP_CLUSTER` on cap
+  exhaustion (body carries `activeSessions`), and
+  `500 E_SHELL_POD_TIMEOUT` when the pod doesn't reach `Ready`
+  within `clusterShell.podStartTimeoutSeconds` (default 30s).
+- Two audit emissions per session: `cluster_shell_open` immediately
+  after cap checks pass and before the WebSocket upgrade, and
+  `cluster_shell_close` after the session ends. The close envelope
+  carries `duration_ms`, `exit_code`, `bytes_in`, `bytes_out`,
+  `close_reason`, and `commands: [{timestamp, argv, pid}]` read
+  from the in-pod audit file via a final `exec cat` during
+  teardown. Both rows carry the same `session_id` for cross-log
+  joins against apiserver audit (which sees the same id in the
+  `audit.periscope.io/session-id` user-extra).
+
+Operator guide: [`docs/setup/cluster-shell.md`](setup/cluster-shell.md).
 
 ---
 

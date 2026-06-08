@@ -28,6 +28,7 @@ section of the README.
 - Common resources (pods, deployments, services, configmaps, secrets, jobs, ingresses, RBAC, …) plus full Custom Resource catalog
 - Live events, describe view, logs (with follow + filtering)
 - In-browser pod shell (`exec`) with reconnect on transient disconnects — works on every backend (eks, kubeconfig, in-cluster, agent)
+- **In-browser cluster shell** (#104): per-session ephemeral pod with `kubectl` + `helm` + bash, impersonating the operator under tier-narrow RBAC. Works on in-cluster and agent backends; auto-tears down on idle, exit, or session cap. Every command joins the single audit log via shared `audit.periscope.io/session-id`.
 - Cmd+K palette: search resources by name across the active cluster
 
 ## Real-time updates (watch streams)

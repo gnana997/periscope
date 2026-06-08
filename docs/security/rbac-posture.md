@@ -95,6 +95,21 @@ When the chart is installed on a managed cluster (`clusterRole.enabled: true` + 
 
 Plus a Role + RoleBinding for the agent's own state Secret (the persisted mTLS cert + key, scoped to the install namespace).
 
+### Cluster shell (#104) — opt-in additions on both charts
+
+When `clusterShell.enabled: true` (default `false`), each chart additionally installs:
+
+| Object | Kind | Bound to |
+|---|---|---|
+| `periscope-system` | Namespace | — |
+| `periscope-shell-<tier>` (one per tier in `clusterShell.tiers`) | ServiceAccount in `periscope-system` | — |
+| `periscope-shell-impersonator-<tier>` | ClusterRole — `impersonate` on `users` (wildcard), `impersonate` on `groups` **with `resourceNames: ["periscope-tier:<tier>"]`** (tier-narrow), `impersonate` on `userextras/audit.periscope.io/{session-id,actor}` | per-tier SA above |
+| `periscope-shell-impersonator-<tier>` | ClusterRoleBinding | binds above |
+| `periscope-shell-provisioner` | Role in `periscope-system` — `pods`/`secrets`/`serviceaccounts/token` write verbs | Periscope main SA (server chart) or agent SA (agent chart) |
+| `periscope-shell-provisioner` | RoleBinding | binds above |
+
+The tier-narrow groups rule is the structural property that keeps cluster-shell safe: a stolen `periscope-shell-admin` SA token can ONLY impersonate identities whose groups already include `periscope-tier:admin`. Stepping across tiers (admin → write, write → maintain, etc.) is not a configuration mistake away — it's not expressible in the installed ClusterRole.
+
 ---
 
 ## CIS / AWS Guardrails findings the default install will trigger
@@ -199,6 +214,8 @@ Without `impersonate`, per-user RBAC enforcement is impossible — Periscope can
 This is the architectural **premise** of Periscope. Group prefixing (`periscope-tier:` / `periscope:`) prevents impersonation into unprefixed privileged groups (`system:masters`, etc.). The audit log records the impersonator + impersonated identity on every request. Periscope's design *requires* this verb — disabling it disables Periscope.
 
 **Mitigation**: not applicable. Operators who can't allow `impersonate` cannot run Periscope and should evaluate other tools.
+
+**Cluster shell (#104) note**: the per-tier shell SAs *also* hold the `impersonate` verb, but their ClusterRole's groups rule is **tier-narrow** via `resourceNames: ["periscope-tier:<tier>"]`. Token-theft scenarios get a credential whose escalation surface is bounded by the tier the operator already had — which is, by definition, the same set of identities the operator could already impersonate. This is structurally weaker than the server/agent SA's wildcard `impersonate` rule, and CIS scanners may not differentiate; if your scanner flags these and the noise is unacceptable, set `clusterShell.enabled=false` (default) and the per-tier SAs / ClusterRoles never render.
 
 ---
 

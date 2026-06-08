@@ -1,7 +1,9 @@
 import type { ReactNode } from "react";
+import { useParams } from "react-router-dom";
 import { cn } from "../../lib/cn";
 import { ThemeToggle } from "../shell/ThemeToggle";
 import { ApplyYamlEntry } from "../apply/ApplyYamlEntry";
+import { OpenClusterShellButton } from "../exec/OpenClusterShellButton";
 import { StreamHealthBadge } from "./StreamHealthBadge";
 import type { StreamStatus } from "../../hooks/useResourceStream";
 
@@ -35,6 +37,11 @@ export function PageHeader({
   trailing,
   streamStatus,
 }: PageHeaderProps) {
+  // Cluster name comes from the AppShell route param. Undefined on
+  // cluster-less surfaces (fleet/global) — the shell button self-hides
+  // in that case by accepting an empty cluster and falling through its
+  // own enabled check (cluster meta lookup returns undefined).
+  const { cluster } = useParams<{ cluster: string }>();
   return (
     // Sticky glass-effect chrome: sits at the top of the page's scroll
     // container, stays visible as content scrolls beneath. Translucent
@@ -59,6 +66,7 @@ export function PageHeader({
         {chips?.map((chip) => <Chip key={chip.label} {...chip} />)}
         <StreamHealthBadge status={streamStatus} />
         {trailing}
+        {cluster && <OpenClusterShellButton cluster={cluster} />}
         <ApplyYamlEntry />
         <ThemeToggle />
       </div>

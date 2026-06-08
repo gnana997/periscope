@@ -1,5 +1,6 @@
 import type {
   ClosedFrame,
+  ClusterShellMode,
   ErrorFrame,
   HelloFrame,
   IdleWarnFrame,
@@ -391,7 +392,7 @@ export class ExecClient {
 }
 
 /**
- * Build the WebSocket URL for an exec session against the periscope
+ * Build the WebSocket URL for a pod-exec session against the periscope
  * backend. Uses ws/wss based on the current page protocol.
  */
 export function buildExecURL(params: {
@@ -402,8 +403,6 @@ export function buildExecURL(params: {
   command?: string[];
   tty?: boolean;
 }): string {
-  const proto = window.location.protocol === "https:" ? "wss" : "ws";
-  const host = window.location.host;
   const path = `/api/clusters/${encodeURIComponent(
     params.cluster,
   )}/pods/${encodeURIComponent(params.namespace)}/${encodeURIComponent(
@@ -421,6 +420,27 @@ export function buildExecURL(params: {
     q.set("command", b64);
   }
   if (params.tty === false) q.set("tty", "false");
+  return wsURL(path, q);
+}
+
+/**
+ * Build the WebSocket URL for a cluster-shell session (issue #104).
+ * Wire format is identical to pod-exec; the server provisions an
+ * ephemeral pod and attaches to it. Only the path + ?mode= differ.
+ */
+export function buildClusterShellURL(params: {
+  cluster: string;
+  mode: ClusterShellMode;
+}): string {
+  const path = `/api/clusters/${encodeURIComponent(params.cluster)}/shell`;
+  const q = new URLSearchParams();
+  q.set("mode", params.mode);
+  return wsURL(path, q);
+}
+
+function wsURL(path: string, q: URLSearchParams): string {
+  const proto = window.location.protocol === "https:" ? "wss" : "ws";
+  const host = window.location.host;
   const qs = q.toString();
   return `${proto}://${host}${path}${qs ? "?" + qs : ""}`;
 }

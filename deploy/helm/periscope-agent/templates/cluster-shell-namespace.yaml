@@ -1,0 +1,24 @@
+{{- /*
+  cluster-shell-namespace.yaml (agent chart) — issue #104.
+
+  The agent ships the periscope-system namespace on its managed
+  cluster so Periscope main can provision shell pods + per-session
+  Secrets here through the tunnel.
+
+  Mirrors the main chart's cluster-shell-namespace.yaml — same
+  shape, same labels — but unconditional on this side: an agent
+  chart that's installed at all is by definition serving its own
+  cluster, so cluster-shell.enabled below gates whether the
+  namespace renders.
+*/}}
+{{- if .Values.clusterShell.enabled }}
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{ .Values.clusterShell.namespace | default "periscope-system" }}
+  labels:
+    {{- include "periscope-agent.labels" . | nindent 4 }}
+    periscope.io/purpose: cluster-shell
+  annotations:
+    periscope.io/created-by: {{ include "periscope-agent.fullname" . }}
+{{- end }}
