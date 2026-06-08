@@ -19,6 +19,8 @@ This page is the operator setup guide. It assumes no prior experience
 wiring AWS to OIDC. The design lands
 [issue #105](https://github.com/gnana997/periscope/issues/105).
 
+![In-browser SSM shell on an EKS node's EC2 host, opened from the Periscope Nodes page — running `crictl ps` and inspecting `/var/lib/kubelet/pods` on the live host.](../assets/aws-ssm/node-ssm-shell.png)
+
 ---
 
 ## 1. What this is, and why it's safe
@@ -58,6 +60,8 @@ Why this is *more* secure than a single shared role:
 > (`.../periscope-node-shell/periscope-<your-sub>`). Periscope's own
 > audit log records the same `session_id`, so the two logs join into one
 > human-attributed trail.
+
+![CloudTrail `StartSession` events, each attributed to a per-user assumed-role session (`periscope-<oidc-sub>`) — not a shared Periscope role.](../assets/aws-ssm/ssm-cloudtrail-events.png)
 
 ---
 
@@ -183,18 +187,21 @@ condition (this *does* work):
   "Version": "2012-10-17",
   "Statement": [
     {
-      "Sid": "StartSession",
+      "Sid": "StartSessionOnFleetInstances",
       "Effect": "Allow",
       "Action": "ssm:StartSession",
-      "Resource": [
-        "arn:aws:ec2:<region>:<account>:instance/*",
-        "arn:aws:ssm:<region>:<account>:document/SSM-SessionManagerRunShell"
-      ],
+      "Resource": "arn:aws:ec2:<region>:<account>:instance/*",
       "Condition": {
         "StringEquals": {
           "ssm:resourceTag/eks:cluster-name": "<cluster-name>"
         }
       }
+    },
+    {
+      "Sid": "StartSessionDocument",
+      "Effect": "Allow",
+      "Action": "ssm:StartSession",
+      "Resource": "arn:aws:ssm:<region>:<account>:document/SSM-SessionManagerRunShell"
     },
     {
       "Sid": "ManageOwnSessions",
@@ -213,15 +220,25 @@ condition (this *does* work):
 ```
 
 > **⚠️ `ssm:StartSession` authorizes against the SSM *document* too**, not
-> only the instance — you must list
-> `.../document/SSM-SessionManagerRunShell` in the `Resource`, or the
-> call is denied on the document even when the instance is allowed.
+> only the instance — both must be allowed in the same call, which is why
+> the policy needs **two** `StartSession` statements, not one:
 >
-> The `ssm:resourceTag/eks:cluster-name` condition scopes the role to one
-> cluster's nodes (EKS tags instances with this). Drop it to allow all
-> tagged instances in the account, or change the tag to match your
-> tagging. `ssm:DescribeInstanceInformation` does not support
-> resource-level scoping, so it is `*`.
+> - **Instances** are scoped by the `ssm:resourceTag/eks:cluster-name`
+>   condition (EKS tags instances with this), restricting the role to one
+>   cluster's nodes.
+> - **The document** (`SSM-SessionManagerRunShell`) is an AWS-managed
+>   resource that carries **no** `eks:cluster-name` tag, so it gets its
+>   own **unconditional** statement.
+>
+> Folding both resources into a single conditioned statement is the most
+> common mistake: the tag condition then applies to the document as well,
+> which fails (`AccessDenied … on resource: …document/SSM-SessionManager
+> RunShell`) even though the instance is allowed. Keep them separate.
+>
+> To allow all tagged instances in the account, drop the instance
+> condition (the document statement is unchanged either way).
+> `ssm:DescribeInstanceInformation` does not support resource-level
+> scoping, so it is `*`.
 
 Create the role with the trust policy as its assume-role policy and
 attach the permission policy. Note the **role ARN** —
@@ -324,7 +341,7 @@ preflight means the real session will almost certainly succeed.
 | `AccessDenied` on AssumeRole | issuer mismatch | The OIDC provider URL / trust-policy `<issuer-host>` must match the token's `iss` exactly, **including the trailing slash**. |
 | `AccessDenied` after IdP cert rotation | stale thumbprint | Update the OIDC provider's thumbprint (or re-run the Terraform). |
 | Periscope says **forbidden** though AssumeRole works | tier gate | The user authenticated to AWS but their Periscope tier isn't in `nodeShell.tiers`. Adjust `groupTiers` / `nodeShell.tiers`. |
-| `AccessDenied` on **StartSession**, mentions `document/...` | missing document resource | Add `.../document/SSM-SessionManagerRunShell` to the permission policy `Resource` (§4b). |
+| `AccessDenied` on **StartSession**, mentions `document/...` | document not allowed — either missing from the policy, or (more often) folded into the tag-conditioned instance statement so the `eks:cluster-name` condition denies it | Give the document its **own unconditional** `StartSession` statement, separate from the tag-conditioned instance one (§4b). |
 | Preflight: agent not `Online` | SSM agent missing/unhealthy | EKS managed nodes register automatically; bare EC2 needs the agent + `AmazonSSMManagedInstanceCore` instance profile + egress to SSM. |
 | `E_REAUTH_REQUIRED` in the SPA | id_token expired and couldn't refresh | Sign in again. Some IdPs don't rotate the id_token on refresh; Periscope can't silently renew it then. |
 | Button not visible | feature/tier/providerID gate | Check `nodeShell.enabled: true`, your tier is in `nodeShell.tiers`, and the node has an `aws:///` providerID (it's an EC2 instance). |
@@ -357,3 +374,5 @@ preflight means the real session will almost certainly succeed.
 `ssm_session_close` — with the assumed-role identity, instance, and (on
 close) the full transcript. Cross-reference `session_id` with CloudTrail
 for the AWS-side view. See [audit](audit.md) and RFC 0003.
+
+![Periscope audit log detail for an `ssm_session_close` event — actor, target cluster, duration, exit code, instance id, role-session-name, and the captured transcript.](../assets/aws-ssm/node-ssm-shell-event.png)
