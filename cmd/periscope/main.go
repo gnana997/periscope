@@ -280,7 +280,7 @@ func main() {
 		_, _ = w.Write([]byte("ok"))
 	})
 	router.Get("/api/whoami", credentials.Wrap(factory, whoamiHandler(auditReader != nil, authzResolver)))
-	router.Get("/api/clusters", listClustersHandler(registry, shellCfg))
+	router.Get("/api/clusters", listClustersHandler(registry, shellCfg, nodeShellCfg.Enabled))
 	router.Get("/api/features", featuresHandler(watchCfg))
 
 	// Audit query endpoint. Registered only when SQLite is wired.
@@ -1545,7 +1545,7 @@ func whoamiHandler(auditEnabled bool, resolver *authz.Resolver) func(http.Respon
 // shape rather than letting json marshal Cluster directly: the Exec
 // config block stays out of the API surface (it's cluster-config, not
 // cluster-identity), but its single derived bit comes through.
-func listClustersHandler(reg *clusters.Registry, shellCfg clustershell.Config) http.HandlerFunc {
+func listClustersHandler(reg *clusters.Registry, shellCfg clustershell.Config, nodeShellEnabled bool) http.HandlerFunc {
 	type clusterDTO struct {
 		Name                string `json:"name"`
 		Backend             string `json:"backend"`
@@ -1556,6 +1556,10 @@ func listClustersHandler(reg *clusters.Registry, shellCfg clustershell.Config) h
 		ExecEnabled         bool   `json:"execEnabled"`
 		ClusterShellEnabled bool   `json:"clusterShellEnabled"`
 		ClusterShellMode    string `json:"clusterShellMode,omitempty"`
+		// NodeShellEnabled is a server-wide toggle (#105); per-cluster on
+		// the DTO so the SPA gate is per-cluster from day one (per-cluster
+		// overrides only change the role/region, not enablement).
+		NodeShellEnabled bool `json:"nodeShellEnabled"`
 	}
 	// Cluster-shell is a server-wide toggle today (#104). The fields are
 	// per-cluster on the DTO so the SPA's gate is per-cluster from day
@@ -1578,6 +1582,7 @@ func listClustersHandler(reg *clusters.Registry, shellCfg clustershell.Config) h
 				ExecEnabled:         c.ExecEnabled(),
 				ClusterShellEnabled: shellCfg.Enabled,
 				ClusterShellMode:    shellMode,
+				NodeShellEnabled:    nodeShellEnabled,
 			})
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"clusters": out})

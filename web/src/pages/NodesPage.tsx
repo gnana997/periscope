@@ -26,6 +26,7 @@ import { YamlView } from "../components/detail/YamlView";
 import { useEditorDirty } from "../hooks/useEditorDirty";
 import { useConfirmDiscard } from "../hooks/useConfirmDiscard";
 import { ResourceActions } from "../components/edit/ResourceActions";
+import { OpenNodeShellButton } from "../components/exec/OpenNodeShellButton";
 import { SecurityTab } from "../components/security/SecurityTab";
 import { SecurityEmptyBanner } from "../components/security/SecurityEmptyBanner";
 import { SeverityChip } from "../components/security/SeverityChip";
@@ -285,13 +286,16 @@ export function NodesPage({ cluster }: { cluster: string }) {
       onTabChange={(id) => confirmDiscard(() => setParam("tab", id))}
       onClose={() => confirmDiscard(() => setMany({ sel: null, tab: null }))}
       actions={
-        <ResourceActions
-          cluster={cluster}
-          source={{ kind: "builtin", yamlKind: "nodes" }}
-          namespace={null}
-          name={selectedName}
-          onDeleted={() => setMany({ sel: null })}
-        />
+        <>
+          <OpenNodeShellButton cluster={cluster} node={selectedName} />
+          <ResourceActions
+            cluster={cluster}
+            source={{ kind: "builtin", yamlKind: "nodes" }}
+            namespace={null}
+            name={selectedName}
+            onDeleted={() => setMany({ sel: null })}
+          />
+        </>
       }
       tabs={[
         {

@@ -6,7 +6,12 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { ExecClient, buildClusterShellURL, buildExecURL } from "./ExecClient";
+import {
+  ExecClient,
+  buildClusterShellURL,
+  buildExecURL,
+  buildNodeShellURL,
+} from "./ExecClient";
 import type { ClusterShellMode, ExecSessionMeta } from "./types";
 
 /**
@@ -44,7 +49,17 @@ export interface OpenClusterShellInput {
   mode: ClusterShellMode;
 }
 
-export type OpenSessionInput = OpenPodExecInput | OpenClusterShellInput;
+/** Node-shell open input (#105). node-scoped — no pod/ns. */
+export interface OpenNodeShellInput {
+  kind: "node-shell";
+  cluster: string;
+  node: string;
+}
+
+export type OpenSessionInput =
+  | OpenPodExecInput
+  | OpenClusterShellInput
+  | OpenNodeShellInput;
 
 export type OpenSessionResult =
   | { ok: true; session: ExecSessionMeta }
@@ -112,6 +127,16 @@ function findExistingFor(
         s.mode === input.mode,
     );
   }
+  if (input.kind === "node-shell") {
+    return sessions.find(
+      (s) =>
+        s.status !== "closed" &&
+        s.status !== "error" &&
+        s.kind === "node-shell" &&
+        s.cluster === input.cluster &&
+        s.node === input.node,
+    );
+  }
   return sessions.find(
     (s) =>
       s.status !== "closed" &&
@@ -174,6 +199,25 @@ export function ExecSessionsProvider({ children }: { children: ReactNode }) {
           container: "",
           requestedContainer: "",
           mode: input.mode,
+          status: "connecting",
+          createdAt: Date.now(),
+          lastActivityAt: Date.now(),
+        };
+      } else if (input.kind === "node-shell") {
+        url = buildNodeShellURL({
+          cluster: input.cluster,
+          node: input.node,
+        });
+        meta = {
+          id,
+          kind: "node-shell",
+          serverSessionId: "",
+          cluster: input.cluster,
+          namespace: "",
+          pod: "",
+          container: "",
+          requestedContainer: "",
+          node: input.node,
           status: "connecting",
           createdAt: Date.now(),
           lastActivityAt: Date.now(),

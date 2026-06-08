@@ -2,8 +2,10 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"time"
@@ -284,9 +286,53 @@ func (h *ssmShell) shell() credentials.Handler {
 		}
 		defer ws.Close(websocket.StatusNormalClosure, "session ended")
 
-		// --- stream (blocks until the session ends) ---
-		conn := websocket.NetConn(r.Context(), ws, websocket.MessageBinary)
-		res := sess.Run(r.Context(), conn, conn)
+		// --- exec frame protocol (shared with pod-exec / cluster-shell) ---
+		// hello first so the SPA's ExecClient transitions to "connected";
+		// then binary frames carry the SSM byte stream both ways; closed
+		// at the end. Container is empty — this is a node, not a pod.
+		_ = wsWriteJSON(r.Context(), ws, map[string]any{
+			"type": "hello", "sessionId": sess.ID(), "container": "",
+		})
+
+		runCtx, cancel := context.WithCancel(r.Context())
+		defer cancel()
+
+		// user -> node: WS binary frames feed plugin stdin via a pipe;
+		// text frames are control ({type:close} ends the session).
+		stdinR, stdinW := io.Pipe()
+		go func() {
+			defer stdinW.Close()
+			for {
+				typ, data, rerr := ws.Read(runCtx)
+				if rerr != nil {
+					cancel()
+					return
+				}
+				switch typ {
+				case websocket.MessageBinary:
+					if _, werr := stdinW.Write(data); werr != nil {
+						cancel()
+						return
+					}
+				case websocket.MessageText:
+					var ctrl struct {
+						Type string `json:"type"`
+					}
+					if json.Unmarshal(data, &ctrl) == nil && ctrl.Type == "close" {
+						cancel()
+						return
+					}
+					// {type:resize} is accepted but not yet forwarded (v1).
+				}
+			}
+		}()
+
+		// node -> user: plugin stdout becomes WS binary frames.
+		res := sess.Run(runCtx, stdinR, wsBinaryWriter{ctx: runCtx, ws: ws})
+
+		_ = wsWriteJSON(r.Context(), ws, map[string]any{
+			"type": "closed", "exitCode": res.ExitCode, "reason": res.Reason,
+		})
 
 		outcome := audit.OutcomeSuccess
 		if res.Reason == awsssm.ReasonServerError {
@@ -294,6 +340,29 @@ func (h *ssmShell) shell() credentials.Handler {
 		}
 		h.emitClose(r.Context(), actorRec, pre, sess.ID(), started, res, outcome)
 	}
+}
+
+// wsBinaryWriter adapts a WebSocket to io.Writer: each Write becomes one
+// binary frame. Used as the SSM session's stdout sink.
+type wsBinaryWriter struct {
+	ctx context.Context
+	ws  *websocket.Conn
+}
+
+func (w wsBinaryWriter) Write(p []byte) (int, error) {
+	if err := w.ws.Write(w.ctx, websocket.MessageBinary, p); err != nil {
+		return 0, err
+	}
+	return len(p), nil
+}
+
+// wsWriteJSON sends a control frame as a text message.
+func wsWriteJSON(ctx context.Context, ws *websocket.Conn, v any) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+	return ws.Write(ctx, websocket.MessageText, b)
 }
 
 func (h *ssmShell) emitClose(ctx context.Context, actor audit.Actor, pre prepared, sessionID string, started time.Time, res awsssm.CloseResult, outcome audit.Outcome) {

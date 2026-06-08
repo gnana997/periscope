@@ -312,6 +312,57 @@
       },
       "additionalProperties": false
     },
+    "nodeShell": {
+      "type": "object",
+      "description": "Node-shell (#105) — in-browser SSM shell into a node's EC2 host with per-user AWS impersonation (sts:AssumeRoleWithWebIdentity from the user's OIDC id_token). An IAM trust policy is the access gate; CloudTrail attributes the session to the human. Opt-in; requires auth.authorization.mode=tier. Off by default.",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "awsRoleArn": {
+          "type": "string",
+          "pattern": "^(arn:aws[a-zA-Z-]*:iam::[0-9]{12}:role/.+)?$",
+          "description": "Global default per-user role assumed via web identity (arn:aws:iam::ACCOUNT:role/...). Leave empty when each cluster sets its own clusters[].nodeShell.awsRoleArn (multi-account fleets)."
+        },
+        "oidcAudience": {
+          "type": "string",
+          "description": "The id_token aud the role's trust policy expects — your OIDC client_id, NOT the API audience. Empty skips the preflight aud pre-check."
+        },
+        "region": {
+          "type": "string",
+          "description": "AWS region the nodes live in. Falls back to the cluster's region, then the Node's topology.kubernetes.io/region label."
+        },
+        "tiers": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": ["read", "triage", "write", "maintain", "admin"]
+          },
+          "minItems": 1,
+          "uniqueItems": true,
+          "description": "Allow-list of tiers that may open a node shell. NOTE: the IAM trust policy gates on aud (and optionally sub), NOT the group claim — group authorization is enforced here, by Periscope's tier check."
+        },
+        "idleSeconds": {
+          "type": "integer",
+          "minimum": 60,
+          "description": "Server-side idle timeout. Activity = any stdin OR stdout byte."
+        },
+        "transcriptMaxBytes": {
+          "type": "integer",
+          "minimum": 1024,
+          "description": "Cap on the audit-transcript blob included in ssm_session_close rows. Oversize transcripts are truncated; the row carries a flag."
+        },
+        "maxSessionsPerUser": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Concurrent node-shell sessions per operator."
+        },
+        "maxSessionsTotal": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Concurrent node-shell sessions per cluster across all operators."
+        }
+      },
+      "additionalProperties": false
+    },
     "podIdentity": {
       "type": "object",
       "properties": {
@@ -370,6 +421,16 @@
               "heartbeatSeconds":   { "type": "integer", "minimum": 1 },
               "maxSessionsPerUser": { "type": "integer", "minimum": 1 },
               "maxSessionsTotal":   { "type": "integer", "minimum": 1 }
+            },
+            "additionalProperties": false
+          },
+          "nodeShell": {
+            "type": "object",
+            "description": "Per-cluster node-shell overrides for multi-account fleets — the assumed role + OIDC provider are per-account, so set these for clusters whose nodes live in another AWS account. Omitted fields fall back to the global .nodeShell defaults.",
+            "properties": {
+              "awsRoleArn":   { "type": "string", "pattern": "^(arn:aws[a-zA-Z-]*:iam::[0-9]{12}:role/.+)?$" },
+              "oidcAudience": { "type": "string" },
+              "region":       { "type": "string" }
             },
             "additionalProperties": false
           }
