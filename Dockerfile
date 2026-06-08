@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1.7
 
 # ---- web build ----
-FROM --platform=$BUILDPLATFORM node:24-alpine@sha256:d1b3b4da11eefd5941e7f0b9cf17783fc99d9c6fc34884a665f40a06dbdfc94f AS web-builder
+FROM --platform=$BUILDPLATFORM node:26-alpine@sha256:144769ec3f32e8ee36b3cfde91e82bee25d9367b20f31a151f3f7eea3a2a8541 AS web-builder
 WORKDIR /web
 
 # Copy lockfiles first for layer caching, then install. npm ci installs
@@ -48,7 +48,7 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} go build \
 
 # ---- runtime ----
 # Distroless static — minimal base, no shell, non-root by default.
-FROM gcr.io/distroless/static-debian12:nonroot@sha256:a9329520abc449e3b14d5bc3a6ffae065bdde0f02667fa10880c49b35c109fd1 AS runtime
+FROM gcr.io/distroless/static-debian12:nonroot@sha256:d093aa3e30dbadd3efe1310db061a14da60299baff8450a17fe0ccc514a16639 AS runtime
 COPY --from=go-builder /out/periscope /periscope
 
 # Non-root UID/GID 65532 (provided by distroless:nonroot).
