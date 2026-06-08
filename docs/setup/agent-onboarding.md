@@ -290,6 +290,8 @@ with the correct value.
 
 ## Troubleshooting
 
+> Cross-cutting issues (production gotchas, scanner false-positives, local-dev TLS) live in [troubleshooting.md](troubleshooting.md). This section covers agent-registration and tunnel-specific failure modes.
+
 ### Turn on debug logging on the agent
 
 When something goes wrong between agent registration and the cluster

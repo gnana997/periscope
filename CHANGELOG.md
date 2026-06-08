@@ -13,6 +13,21 @@ tag.
 
 ## [Unreleased]
 
+### Changed
+
+- **Cluster-shell audit now covers `helm` invocations alongside
+  `kubectl`.** The in-pod wrapper (`periscope-audit-kubectl`) has been
+  generalized to `periscope-audit-exec`, keys off `argv[0]` to dispatch,
+  and both `/usr/local/bin/kubectl` and `/usr/local/bin/helm` symlink
+  to it. The `commands: [...]` slice on `cluster_shell_close` audit
+  rows now includes helm command lines that previously only showed up
+  as aggregate `bytes_in` / `bytes_out`. Wire-shape note for downstream
+  audit consumers: entries with `argv[0]` ending in `helm` will now
+  appear; filters keyed on kubectl-only need updating.
+- **`KUBE_EDITOR=nano` pinned in the shell image** so `kubectl edit`
+  works without operators having to export the env var themselves
+  (the image only ships nano; vi/vim are not installed).
+
 ### Added
 
 - **In-browser cluster shell ([#104](https://github.com/gnana997/periscope/issues/104)).**

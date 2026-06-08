@@ -406,6 +406,8 @@ but the rest of the deployment is unchanged.
 
 ## Common pitfalls
 
+> Cross-cutting Periscope-pod issues live in [troubleshooting.md](troubleshooting.md). This section covers tier-mode RBAC mistakes specifically.
+
 - **Tier mode user gets 403 on everything.** Either `defaultTier: ""`
   is denying them (they're in no listed group), or the chart's
   `cluster-rbac.yaml` was never applied to the cluster they're hitting.

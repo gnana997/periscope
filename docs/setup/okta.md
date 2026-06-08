@@ -174,6 +174,8 @@ permissive enough).
 
 ## Common pitfalls
 
+> Cross-cutting Periscope-pod issues live in [troubleshooting.md](troubleshooting.md). This section covers Okta-specific OIDC mistakes.
+
 - **`groups` claim is empty in the ID token.** Either the claim isn't
   configured (5) or the user isn't a member of any group that
   matches the claim filter. Fix by widening the filter to `.*` while

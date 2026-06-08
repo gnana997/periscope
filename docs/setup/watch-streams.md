@@ -189,6 +189,8 @@ kubectl -n periscope logs deploy/periscope | grep "watch streams"
 
 ## 7. Troubleshooting
 
+> Cross-cutting Periscope-pod issues live in [troubleshooting.md](troubleshooting.md). This section covers the SSE watch-stream surface specifically.
+
 ### SSE connections drop every ~minute
 
 Your proxy is killing idle connections faster than Periscope's

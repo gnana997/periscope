@@ -15,10 +15,14 @@ import (
 )
 
 // CommandLine is one record from the shell pod's audit.jsonl file —
-// emitted by the periscope-audit-kubectl wrapper, one per kubectl
-// invocation in bash mode. The JSON shape mirrors auditLine in
-// cmd/periscope-shell/wrapper/main.go; changing field names there
-// requires updating tag-matching here.
+// emitted by the periscope-audit-exec wrapper, one per wrapped-command
+// invocation (kubectl, helm) in bash mode. The JSON shape mirrors
+// auditLine in cmd/periscope-shell/wrapper/main.go; changing field
+// names there requires updating tag-matching here.
+//
+// Argv[0] preserved as-written, typically "/usr/local/bin/kubectl" or
+// "/usr/local/bin/helm" — use filepath.Base on it if you only want
+// the command name (the SPA does this for display).
 type CommandLine struct {
 	Timestamp string   `json:"ts"`
 	PID       int      `json:"pid"`
@@ -27,9 +31,10 @@ type CommandLine struct {
 
 // ReadCommandLog opens a fresh exec stream against the shell pod and
 // `cat`s the wrapper's audit.jsonl, returning the parsed records.
-// Bulk-on-close is the bash-mode attribution strategy for v1.2 — the
-// kubectl-only REPL in a follow-up PR replaces this with guaranteed
-// real-time per-command emission.
+// Covers all commands routed through periscope-audit-exec — currently
+// kubectl + helm. Bulk-on-close is the bash-mode attribution strategy
+// for v1.2; the kubectl-only REPL in a follow-up PR replaces this
+// with guaranteed real-time per-command emission.
 //
 // Best-effort: ANY error path returns an empty slice rather than
 // bubbling, because the pod is on its way to deletion and a

@@ -44,10 +44,14 @@ to `clusterShell.tiers` or grant you a tier that is on the list.
 The shell pod's image is a thin debian-slim runtime carrying:
 
 - `kubectl` — pinned to a tested version (typically the latest
-  patch of the most recent minor)
-- `helm`
+  patch of the most recent minor). **Audited per-invocation.**
+- `helm` — pinned similarly. **Audited per-invocation** (since v1.1.5
+  every command line shows up in `cluster_shell_close.commands`).
 - `bash` with login profile + readline
-- `nano`, `jq`, `curl`, `coreutils`
+- `nano`, `jq`, `less`, `coreutils`
+- `KUBE_EDITOR=nano` pinned in the image, so `kubectl edit` works
+  out of the box without you setting the env var (vi/vim are not
+  installed)
 
 Your prompt looks like `root@periscope-shell-<uuid>:/$`. **You are
 running as root inside the pod**, but every kubectl call you make
