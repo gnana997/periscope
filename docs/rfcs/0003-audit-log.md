@@ -114,6 +114,8 @@ are not allowed — every emission site uses a `audit.Verb*` constant.
 | `bulk_download` | `bulkDownloadAuditHandler` (POST `/api/clusters/{c}/audit/bulk-download`, called by the SPA after a bulk YAML download resolves) | `success` (≥1 fetch succeeded) / `failure` (zero fetches succeeded) | `kind: string`, `count: int`, `ids: []string` (server-truncated to 50), `failure_count: int` |
 | `exec_open` | `execHandler` immediately after session admit | `success` only | `session_id`, `container`, `tty`, `command`, `k8s_identity`, `started_at` |
 | `exec_close` | `execHandler` once `execsess.Run` returns | `success` / `failure` | all `exec_open` fields plus `transport`, `ended_at`, `duration_ms`, `exit_code`, `bytes_stdin`, `bytes_stdout`, `err`. `Reason` carries the close disposition: `completed` / `idle_timeout` / `abort` / `server_error` |
+| `ssm_session_open` | `ssmShell.shell` (WS `/api/clusters/{c}/nodes/{name}/shell`) immediately after `ssm:StartSession` | `success` only | `session_id` (the SSM session id; embeds the per-user role-session-name and cross-references CloudTrail), `instance_id`, `node`, `auth` (`sts` \| `ambient`), `role_session_name`, `assumed_role_arn`, `region`, `started_at` |
+| `ssm_session_close` | `ssmShell.shell` once the session ends (also on WS-upgrade failure) | `success` / `failure` | all `ssm_session_open` fields plus `ended_at`, `duration_ms`, `exit_code`, `transcript_bytes`, `truncated`, `transcript` (capped at `transcriptMaxBytes`), `err`. `Reason` carries the close disposition: `completed` / `idle_timeout` / `abort` / `server_error` |
 | `helm_chart_fetch` | `helmChartHandler` (POST `/api/clusters/{c}/helm/chart/values`) | `success` / `failure` | `ref: string`, `chart: string`, `version: string`, `cached: bool` |
 | `helm_preview` | `helmInstallPreviewHandler` / `helmUpgradePreviewHandler` | `success` / `failure` / `denied` | `op: "install" | "upgrade"`. `denied` outcome carries the SAR pre-flight verdict in `Reason`. |
 | `helm_install_intent` | `helmInstallHandler`, BEFORE the helm SDK call | `success` only (intent rows are always success) | `ref: string`, `version: string`, `atomic: bool`, `wait: bool`, `timeoutSeconds: int` |
@@ -149,6 +151,19 @@ update.
 because the access pattern (long-lived SSE) needs ratelimit-aware
 emission to avoid flooding the audit table. Adding it is a self-contained
 follow-up; the constant exists so the taxonomy is visible.
+
+`ssm_session_open` / `ssm_session_close` (#105) mirror the
+`exec_open` / `exec_close` shape for the in-browser SSM node shell. The
+load-bearing field is `session_id`: when the session is opened in
+`auth: sts` mode, Periscope assumes a per-user role via
+`sts:AssumeRoleWithWebIdentity`, so AWS records the *same* session in
+CloudTrail under that assumed-role identity. The two logs join on
+`session_id` / `role_session_name`, giving a fully human-attributed
+forensic trail across Periscope and AWS. `auth: ambient` marks a
+dev-mode session opened with the server's own credentials (never used in
+a deployed OIDC instance); such rows carry no `assumed_role_arn`. The
+close row embeds the captured transcript, truncated to `transcriptMaxBytes`
+with `truncated: true` when it overflows.
 
 
 The `helm_*` verbs (install / upgrade / uninstall / rollback) all

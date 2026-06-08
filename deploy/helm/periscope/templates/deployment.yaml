@@ -153,6 +153,46 @@ spec:
             {{- end }}
             {{- end }}
             {{- /*
+              Node shell (#105) — in-browser SSM shell into a node's EC2
+              host with per-user AWS impersonation. Enabled-gated: when
+              nodeShell.enabled=false, no envs are rendered and the handler
+              refuses with E_NODE_SHELL_DISABLED. Role/audience/region are
+              optional here — clusters in other AWS accounts override them
+              per cluster via clusters[].nodeShell.* in the clusters config.
+            */}}
+            {{- with .Values.nodeShell }}
+            {{- if .enabled }}
+            - name: PERISCOPE_NODE_SHELL_ENABLED
+              value: "true"
+            {{- if .awsRoleArn }}
+            - name: PERISCOPE_NODE_SHELL_ROLE_ARN
+              value: {{ .awsRoleArn | quote }}
+            {{- end }}
+            {{- if .oidcAudience }}
+            - name: PERISCOPE_NODE_SHELL_OIDC_AUDIENCE
+              value: {{ .oidcAudience | quote }}
+            {{- end }}
+            {{- if .region }}
+            - name: PERISCOPE_NODE_SHELL_REGION
+              value: {{ .region | quote }}
+            {{- end }}
+            - name: PERISCOPE_NODE_SHELL_TIERS
+              value: {{ join "," .tiers | quote }}
+            - name: PERISCOPE_NODE_SHELL_IDLE_SECONDS
+              value: {{ .idleSeconds | default 600 | quote }}
+            - name: PERISCOPE_NODE_SHELL_TRANSCRIPT_MAX_BYTES
+              value: {{ .transcriptMaxBytes | default 1048576 | int64 | quote }}
+            {{- if .maxSessionsPerUser }}
+            - name: PERISCOPE_NODE_SHELL_MAX_SESSIONS_PER_USER
+              value: {{ .maxSessionsPerUser | quote }}
+            {{- end }}
+            {{- if .maxSessionsTotal }}
+            - name: PERISCOPE_NODE_SHELL_MAX_SESSIONS_TOTAL
+              value: {{ .maxSessionsTotal | quote }}
+            {{- end }}
+            {{- end }}
+            {{- end }}
+            {{- /*
               Watch streams: server defaults to "all on" when env is
               empty/unset. Only render the env when the operator set
               an explicit value (subset, "off", "none").
