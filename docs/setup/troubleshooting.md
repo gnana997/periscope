@@ -47,6 +47,7 @@ gets a structured line, and every request carries an
 | Artifact Hub flags HIGH/MEDIUM CVE on a clean image | [below](#artifact-hub-shows-highmedium-cve-that-upstream-rates-low) |
 | Agent tunnel reconnect churn after the central LB changes IP | [below](#agent-tunnel-reconnect-churn-after-the-central-lb-rotates-ip) |
 | Local microk8s: TLS cert error after switching networks | [below](#microk8s-apiserver-tls-cert-mismatch-after-switching-networks) |
+| Agent can't connect after a full reinstall (`connection refused`) | [below](#agent-cant-reach-the-central-server-after-a-full-reinstall-on-local-nodeport) |
 
 ---
 
@@ -184,6 +185,76 @@ detail (DNS resolution, TCP error, TLS handshake) — see
 ---
 
 ## Local-development gotchas
+
+### Agent can't reach the central server after a full reinstall on local NodePort
+
+**Symptom**: After uninstalling the central Periscope helm release and
+reinstalling it (e.g. testing a fresh-install flow on local microk8s or
+kind), the agent on a managed cluster crashloops with:
+
+```
+"err":"state: registration: POST register:
+  Post \"http://192.168.0.6:31429/api/agents/register\":
+  dial tcp 192.168.0.6:31429: connect: connection refused"
+```
+
+The IP looks right but the port doesn't answer.
+
+**Cause**: when the central Periscope service is exposed as
+`service.type: NodePort` (typical for local-dev rigs), Kubernetes
+**allocates a new random NodePort on every fresh install**. The
+agent's saved `serverURL` / `registrationURL` point at the *old*
+NodePorts, which the new service doesn't bind. TCP gets refused.
+
+In-place `helm upgrade --reuse-values` preserves NodePorts because
+the Service object isn't recreated. Only full uninstall → install
+triggers re-allocation.
+
+**Fix**:
+
+```bash
+# 1. Look up the new NodePorts
+microk8s kubectl -n periscope get svc periscope -o yaml \
+  | grep -A2 'nodePort:'
+# Example output:
+#     nodePort: 30733   (port 8080 — HTTP / registration)
+#     nodePort: 32167   (port 8443 — tunnel)
+
+# 2. Update the agent values
+sed -i \
+  -e 's|registrationURL: http://.*|registrationURL: http://<host>:30733|' \
+  -e 's|serverURL: wss://.*|serverURL: wss://<host>:32167|' \
+  kind-agent-values.yaml
+
+# 3. Helm upgrade the agent — agent reconnects on the new URL
+helm upgrade periscope-agent \
+  oci://ghcr.io/gnana997/charts/periscope-agent --version 1.1.5 \
+  -n periscope -f kind-agent-values.yaml
+```
+
+If the agent had not yet completed registration (TCP refused at the
+register step), the bootstrap token is still unused — you can keep
+it. If registration succeeded against the old install before the
+reinstall, the new central server doesn't have the agent's cert in
+its registry, so mint a fresh token from
+`POST /api/agents/tokens` and re-register.
+
+**To avoid**: for local-dev rigs that you might re-install repeatedly,
+pin the NodePort by patching the Service after install:
+
+```bash
+microk8s kubectl -n periscope patch svc periscope --type=json -p='[
+  {"op":"replace","path":"/spec/ports/0/nodePort","value":31429},
+  {"op":"replace","path":"/spec/ports/1/nodePort","value":31410}
+]'
+```
+
+The chart doesn't currently expose `service.nodePorts.*` overrides
+(values issue on the backlog). For production, use a LoadBalancer or
+Ingress — NodePorts would be cluster-internal only and not referenced
+from the agent values, so this issue doesn't apply.
+
+---
 
 ### microk8s apiserver TLS cert mismatch after switching networks
 
