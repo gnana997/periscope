@@ -46,7 +46,7 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} go build \
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} go build \
     -trimpath \
     -ldflags "-s -w -X main.version=${VERSION} -X main.commit=${COMMIT}" \
-    -o /out/periscope-audit-kubectl \
+    -o /out/periscope-audit-exec \
     ./cmd/periscope-shell/wrapper
 
 # ---- tool fetch ----
@@ -121,32 +121,43 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && groupadd --gid 1000 periscope \
     && useradd --uid 1000 --gid 1000 --shell /bin/bash --create-home periscope
 
-# Tools — real kubectl at /opt/periscope/bin/kubectl-real; the
-# /usr/local/bin/kubectl symlink below points at the audit wrapper so
-# every shell-session kubectl invocation flows through it. helm has
-# no wrapper in this PR (per-command audit for helm is a follow-up).
+# Tools — real binaries land in /opt/periscope/bin/<name>-real; the
+# /usr/local/bin/<name> symlinks below all point at the same audit
+# wrapper, which keys off its own argv[0] to dispatch. Every
+# kubectl + helm invocation in the operator's session flows through
+# the wrapper and gets a JSON line in $PERISCOPE_SHELL_AUDIT_FILE.
+# Operators who deliberately want to bypass audit can call the
+# *-real binaries directly — that's the documented best-effort
+# contract for bash mode. The kubectl-only REPL in a follow-up PR
+# enforces audit in a way bash mode cannot.
 COPY --from=tool-fetch /tmp/tools/kubectl /opt/periscope/bin/kubectl-real
-COPY --from=tool-fetch /tmp/tools/helm    /opt/periscope/bin/helm
+COPY --from=tool-fetch /tmp/tools/helm    /opt/periscope/bin/helm-real
 
 # Periscope binaries.
-COPY --from=go-builder /out/periscope-shell          /periscope-shell
-COPY --from=go-builder /out/periscope-audit-kubectl  /opt/periscope/bin/periscope-audit-kubectl
+COPY --from=go-builder /out/periscope-shell        /periscope-shell
+COPY --from=go-builder /out/periscope-audit-exec   /opt/periscope/bin/periscope-audit-exec
 
-# Wire the wrapper into PATH at /usr/local/bin/kubectl. Bash sessions
-# resolve /usr/local/bin before /opt/periscope/bin, so any "kubectl"
-# invocation in the operator's session hits the wrapper. Operators
-# who deliberately want to bypass audit can call
-# /opt/periscope/bin/kubectl-real directly — that's the documented
-# best-effort contract for bash mode. The kubectl-only REPL in a
-# follow-up PR enforces audit in a way bash mode cannot.
-RUN ln -s /opt/periscope/bin/periscope-audit-kubectl /usr/local/bin/kubectl \
-    && ln -s /opt/periscope/bin/helm /usr/local/bin/helm \
+# Wire the wrapper into PATH at /usr/local/bin/{kubectl,helm}. Bash
+# sessions resolve /usr/local/bin before /opt/periscope/bin, so any
+# kubectl or helm invocation hits the wrapper first. Adding a new
+# wrapped tool is one more `ln -s` here plus matching entries in
+# wrappedCommands (cmd/periscope-shell/wrapper/main.go) and the
+# COPY above.
+RUN ln -s /opt/periscope/bin/periscope-audit-exec /usr/local/bin/kubectl \
+    && ln -s /opt/periscope/bin/periscope-audit-exec /usr/local/bin/helm \
     && mkdir -p /tmp/periscope-shell \
     && chown periscope:periscope /tmp/periscope-shell
+
+# kubectl edit (and other editor-using kubectl subcommands) default
+# to vi when KUBE_EDITOR / EDITOR aren't set. The shell image only
+# ships nano — pin the default here so operators don't hit a "vi:
+# command not found" footgun the first time they type
+# `kubectl edit deploy …`.
+ENV KUBE_EDITOR=nano
 
 USER 1000:1000
 
 # The session's KUBECONFIG, PERISCOPE_SHELL_* env, and other per-pod
 # config are set by Periscope on the pod spec — this image stays
-# config-free at build time.
+# config-free at build time apart from KUBE_EDITOR above.
 ENTRYPOINT ["/periscope-shell"]

@@ -221,11 +221,19 @@ Each session creates one ephemeral pod in `clusterShell.namespace`
   `PERISCOPE_SHELL_SESSION_ID` / `PERISCOPE_SHELL_MODE` /
   `PERISCOPE_SHELL_AUDIT_FILE`, then `syscall.Exec`s into
   `/bin/bash --login` with `KUBECONFIG=/etc/periscope/kubeconfig`.
-- **kubectl wrapper:** `/usr/local/bin/kubectl` is a symlink to
-  `periscope-audit-kubectl`, a tiny Go wrapper that appends a JSON
-  audit line for the command + argv before `syscall.Exec`-ing into
-  the real kubectl at `/opt/periscope/bin/kubectl-real`. Best-effort
-  — audit write failure does NOT block the kubectl invocation.
+- **Audit wrapper:** `/usr/local/bin/kubectl` AND `/usr/local/bin/helm`
+  are both symlinks to `periscope-audit-exec`, a tiny Go wrapper that
+  keys off its own `argv[0]` to figure out which real binary to invoke
+  (`kubectl-real` / `helm-real` under `/opt/periscope/bin/`). For every
+  call it appends a `{ts, pid, argv}` JSON line to the in-pod audit
+  file before `syscall.Exec`-ing the real binary. Best-effort — audit
+  write failure does NOT block the command. Adding a new wrapped tool
+  is a one-line allow-list entry in the wrapper plus a matching
+  symlink in `Dockerfile.shell`.
+- **`KUBE_EDITOR=nano` pinned in the image** so `kubectl edit` (and
+  other editor-using subcommands) work without operators having to
+  set the variable themselves. The image only ships `nano`; vi/vim
+  are not installed.
 
 The pod is deleted on session close (clean `exit` / Ctrl-D / WS close
 / idle-timeout). Pod + Secret cleanup is idempotent and runs even on
@@ -283,9 +291,16 @@ that joins the SPA-side audit row to the apiserver's own audit log is
 
 The `commands` slice on `cluster_shell_close` is read from the
 in-pod audit file (`PERISCOPE_SHELL_AUDIT_FILE`) via a final exec
-stream during teardown. Best-effort: a pod that died before the
-readback completes loses its command log, but the open / close
-envelopes are durable.
+stream during teardown. It captures every `kubectl` and `helm`
+invocation made through the session (both wrapped by the
+`periscope-audit-exec` binary). Other commands (`cat`, `jq`,
+`grep`, bash builtins) don't write per-invocation rows here — they
+still contribute to the `bytes_in` / `bytes_out` counters, and any
+K8s API calls they trigger show up in the apiserver audit log
+keyed by the session UUID.
+
+Best-effort: a pod that died before the readback completes loses
+its command log, but the open / close envelopes are durable.
 
 ---
 
