@@ -80,7 +80,23 @@ const (
 	// emission keeps argv as a raw slice so reviewers grep on it
 	// directly.
 	VerbClusterShellCommand Verb = "cluster_shell_command"
-	VerbSecretReveal        Verb = "secret_reveal"
+	// VerbSSMSessionOpen / VerbSSMSessionClose are the paired rows for
+	// an in-browser SSM node shell (#105). open fires before the
+	// session-manager-plugin spawn; close fires when the session ends.
+	// Mirrors the exec_open/exec_close shape — close Reason carries the
+	// disposition (completed / idle_timeout / abort / server_error).
+	//
+	// Extra carries: session_id (the SSM session id, which embeds the
+	// per-user role-session-name and cross-references CloudTrail),
+	// instance_id, node, role_session_name, assumed_role_arn, auth
+	// (sts | ambient). The close row adds duration_ms, exit_code,
+	// transcript_bytes, truncated, and transcript (capped). Because the
+	// session is opened with the user's own STS credentials, CloudTrail
+	// records the same session under the human's assumed-role identity;
+	// the two logs join on session_id / role_session_name.
+	VerbSSMSessionOpen  Verb = "ssm_session_open"
+	VerbSSMSessionClose Verb = "ssm_session_close"
+	VerbSecretReveal    Verb = "secret_reveal"
 	VerbBulkDownload Verb = "bulk_download"
 	// VerbHelmChartFetch — operator pasted a chart ref (HTTP repo or
 	// OCI) and clicked Fetch to load values + schema for the install

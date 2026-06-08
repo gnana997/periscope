@@ -94,3 +94,14 @@ poc-exec-tunnel:
 
 poc-exec-tunnel-clean:
 	kind delete cluster --name periscope-poc 2>/dev/null || true
+
+# ─── Issue #105 spike — SSM node-shell data channel ───────────────────
+# Prove ambient creds → ssm:StartSession → session-manager-plugin →
+# interactive byte round-trip + transcript capture + clean teardown.
+# Auth/STS is stubbed by the default credential chain. Pass the target
+# via INSTANCE_ID (+ optional AWS_REGION/ASSERT/IDLE_SECONDS). See
+# hack/poc-ssm-data-channel/README.md.
+.PHONY: poc-ssm-data-channel
+
+poc-ssm-data-channel:
+	./hack/poc-ssm-data-channel/run.sh

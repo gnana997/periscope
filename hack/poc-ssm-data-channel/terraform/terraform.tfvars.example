@@ -1,0 +1,26 @@
+# Copy to terraform.tfvars and fill in YOUR IdP's values, then:
+#   terraform apply -var enable_oidc=true
+#
+# terraform.tfvars is gitignored — never commit your tenant details.
+# None of these are needed for the default ambient-creds path
+# (enable_oidc=false); they only gate the per-user impersonation role.
+
+# region        = "us-east-1"
+# instance_type = "t2.micro"
+
+# --- Per-user impersonation (enable_oidc=true) ---
+
+# Your OIDC issuer URL — keep the trailing slash.
+#   Auth0:   https://<tenant>.us.auth0.com/
+#   Okta:    https://<org>.okta.com/oauth2/<server>
+#   Cognito: https://cognito-idp.<region>.amazonaws.com/<pool-id>
+# oidc_issuer = "https://<your-tenant>.us.auth0.com/"
+
+# Your OIDC application's client_id. This is the id_token's `aud` claim —
+# NOT the API audience/identifier (that's on the access token).
+# oidc_client_id = "<your-client-id>"
+
+# Optional group gating. The claim name is IdP-specific (Auth0 namespaces
+# custom claims). Leave both empty to gate on aud only.
+# groups_claim   = "https://<your-app>/groups"
+# required_group = "<your-admin-group>"

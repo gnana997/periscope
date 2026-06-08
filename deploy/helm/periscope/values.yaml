@@ -756,6 +756,53 @@ clusterShell:
     pullPolicy: IfNotPresent
 
 # -----------------------------------------------------------------------------
+# Node shell (#105) — in-browser SSM shell into a node's EC2 host, with
+# per-user AWS impersonation. The session is opened with the user's OWN
+# short-lived credentials (sts:AssumeRoleWithWebIdentity from their OIDC
+# id_token), never the Periscope pod's identity; an IAM trust policy is
+# the access gate and CloudTrail attributes the session to the human.
+# Off by default — opt-in security feature. Requires auth.authorization.
+# mode=tier. Full setup: docs/setup/node-shell-ssm.md.
+# -----------------------------------------------------------------------------
+nodeShell:
+  enabled: false
+
+  # The per-user IAM role assumed via OIDC web identity, in the account
+  # the nodes live in (arn:aws:iam::ACCOUNT:role/periscope-node-shell).
+  # This is the GLOBAL default for single-account fleets. For nodes in a
+  # different account (typically agent-backed clusters), leave this empty
+  # and set clusters[].nodeShell.awsRoleArn per cluster instead — the
+  # role and its OIDC provider are per-account.
+  awsRoleArn: ""
+
+  # The id_token aud the role's trust policy expects — your OIDC
+  # client_id, NOT the API audience/identifier. Used for the preflight
+  # aud pre-check (the commonest setup mistake). Empty skips the check.
+  oidcAudience: ""
+
+  # AWS region the nodes live in. Falls back to the cluster's region,
+  # then the topology.kubernetes.io/region label on the Node.
+  region: ""
+
+  # Which tiers may open a node shell. Must match
+  # auth.authorization.groupTiers values. The SPA hides the button for
+  # other tiers; the backend re-checks server-side. NOTE: the IAM trust
+  # policy gates on aud (and optionally sub), NOT the group — group
+  # authorization is enforced here, by Periscope's tier check.
+  tiers: [admin]
+
+  # Server-side idle timeout. Activity = any stdin OR stdout byte.
+  idleSeconds: 600
+
+  # Cap on the audit transcript blob included in ssm_session_close rows.
+  # Oversize transcripts are truncated; the row carries a flag.
+  transcriptMaxBytes: 1048576
+
+  # Concurrent sessions per operator / per cluster.
+  maxSessionsPerUser: 2
+  maxSessionsTotal: 10
+
+# -----------------------------------------------------------------------------
 # Agent backend (#42) — per-cluster periscope-agent that dials out to
 # the central server over a long-lived WebSocket. Enabling this:
 #   - Opens a dedicated TLS listener on `agent.listenAddr` (separate

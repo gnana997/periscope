@@ -46,10 +46,37 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} go build \
     -o /out/periscope \
     ./cmd/periscope
 
+# ---- session-manager-plugin (SSM node shell, #105) ----
+# The node-shell handler shells out to the AWS-maintained
+# session-manager-plugin to drive the SSM data channel. Extract the
+# binary from AWS's official .deb (the distroless runtime has no package
+# manager). It is dynamically linked against glibc — which is why the
+# runtime below is distroless/base (glibc), not distroless/static.
+FROM debian:12-slim@sha256:0104b334637a5f19aa9c983a91b54c89887c0984081f2068983107a6f6c21eeb AS ssm-plugin
+ARG TARGETARCH
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends curl ca-certificates \
+ && rm -rf /var/lib/apt/lists/*
+RUN set -eux; \
+    case "${TARGETARCH}" in \
+      amd64) smp_arch=64bit ;; \
+      arm64) smp_arch=arm64 ;; \
+      *) echo "unsupported TARGETARCH: ${TARGETARCH}" >&2; exit 1 ;; \
+    esac; \
+    curl -fsSL "https://s3.amazonaws.com/session-manager-downloads/plugin/latest/ubuntu_${smp_arch}/session-manager-plugin.deb" -o /tmp/smp.deb; \
+    dpkg-deb -x /tmp/smp.deb /tmp/smp; \
+    install -D /tmp/smp/usr/local/sessionmanagerplugin/bin/session-manager-plugin /out/session-manager-plugin
+
 # ---- runtime ----
-# Distroless static — minimal base, no shell, non-root by default.
-FROM gcr.io/distroless/static-debian12:nonroot@sha256:a9329520abc449e3b14d5bc3a6ffae065bdde0f02667fa10880c49b35c109fd1 AS runtime
+# Distroless base (glibc) — minimal, no shell, non-root. `base` rather
+# than `static` because session-manager-plugin (copied below) is
+# dynamically linked against glibc.
+FROM gcr.io/distroless/base-debian12:nonroot@sha256:7a75a36f4bec82a7542c64195e402907486f9a4dd2f8797a976aa0cf31cfb470 AS runtime
 COPY --from=go-builder /out/periscope /periscope
+# session-manager-plugin on PATH for the SSM node shell (#105). Always
+# present (Docker can't conditionally COPY); the feature stays gated by
+# nodeShell.enabled and the handler's exec.LookPath check.
+COPY --from=ssm-plugin /out/session-manager-plugin /usr/local/bin/session-manager-plugin
 
 # Non-root UID/GID 65532 (provided by distroless:nonroot).
 USER 65532:65532

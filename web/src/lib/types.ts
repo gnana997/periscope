@@ -25,6 +25,10 @@ export interface Cluster {
   /** #104 — server-default mode ("bash" | "kubectl-only"). Only set when
    *  clusterShellEnabled is true. */
   clusterShellMode?: string;
+  /** #105 — true when the server has nodeShell.enabled set. The node
+   *  detail header hides the node-shell button when false. Optional for
+   *  forward-compat with backends that haven't shipped #105 yet. */
+  nodeShellEnabled?: boolean;
 }
 
 export interface ClustersResponse {
