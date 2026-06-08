@@ -204,6 +204,8 @@ Login flow (it's an easy step to skip).
 
 ## Common pitfalls
 
+> Cross-cutting Periscope-pod issues live in [troubleshooting.md](troubleshooting.md). This section covers Auth0-specific OIDC mistakes.
+
 - **`groups` claim missing.** The Action wasn't added to the Login
   flow, or the namespaced claim name in `auth.yaml: groupsClaim`
   doesn't match the one in the Action code.

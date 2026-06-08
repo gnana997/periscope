@@ -278,6 +278,8 @@ audit persistence is on; see [`audit.md`](./audit.md)).
 
 ## 8. Troubleshooting
 
+> For cross-cutting issues that aren't pod-exec specific (chart-versions OOM, scanner false-positives, local-dev TLS, etc.) see [troubleshooting.md](troubleshooting.md).
+
 ### "Open Shell" button is missing
 
 Pod is on a cluster with `exec.enabled: false`, **or** the user lacks

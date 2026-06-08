@@ -143,6 +143,8 @@ These are the first **read verbs** in Periscope's audit taxonomy — every other
 
 ## Troubleshooting
 
+> Cross-cutting Periscope-pod issues live in [troubleshooting.md](troubleshooting.md). This section covers EKS-specific failure modes.
+
 **"Drift not computed" on every AWS-managed node group.** Almost certainly an IAM issue. Check the periscope pod's logs for `eks ami catalog: ssm lookup failed` — the wrapped error names the missing permission. The 30-minute sticky-error cache means a fresh permission grant takes up to half an hour to take effect; restart the pod to apply immediately.
 
 **"Drift not computed" on Windows or FIPS node groups.** Expected. The catalog does not cover those variants in v1; see *What is NOT in the surface* above.

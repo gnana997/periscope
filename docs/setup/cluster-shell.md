@@ -331,6 +331,8 @@ The full RBAC posture writeup is in
 
 ## 9. Troubleshooting
 
+> Cross-cutting issues (chart-versions OOM, scanner false-positives, local-dev TLS, image-pull behind a corporate proxy) live in [troubleshooting.md](troubleshooting.md).
+
 | Symptom | Likely cause | Fix |
 |---|---|---|
 | **Shell button missing on the cluster header** | Backend says `clusterShellEnabled=false` on this cluster | Check `/api/clusters` response; confirm `clusterShell.enabled=true` on the server helm release |

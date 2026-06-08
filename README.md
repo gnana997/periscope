@@ -130,6 +130,7 @@ The [What makes it different](#what-makes-it-different) section above is the sho
 - [Apply YAML dialog](docs/setup/apply-yaml.md) — paste/drop multi-doc YAML with per-doc RBAC pre-flight
 - [Multi-cluster onboarding (agent)](docs/setup/agent-onboarding.md) — register a managed cluster via the periscope-agent tunnel
 - [EKS upgrade readiness](docs/setup/eks-upgrade-readiness.md) — Upgrade Insights + managed node group AMI drift
+- [Troubleshooting](docs/setup/troubleshooting.md) — symptom-keyed index across every feature, plus cross-cutting gotchas (chart-versions OOM, scanner false-positives, local-dev TLS)
 
 **Usage**
 - [Karpenter dashboard](docs/usage/karpenter-view.md) — NodePool/$/hr/Drift/pending-pods walkthrough + cost-RBAC sample

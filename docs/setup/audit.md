@@ -336,6 +336,8 @@ curl -s -i http://localhost:8088/api/audit | grep X-Audit-Scope
 
 ## Troubleshooting
 
+> Cross-cutting Periscope-pod issues live in [troubleshooting.md](troubleshooting.md). This section covers the audit pipeline (SQLite sink, retention, identity scope).
+
 **`/api/audit` returns 404**
 → `audit.enabled=false` in your values, OR the SQLite sink failed to
 open. Check pod logs for `audit: sqlite disabled (open failed)`.
