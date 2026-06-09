@@ -55,6 +55,7 @@ export function Tab({ session, active, onFocus, onClose }: TabProps) {
     ? formatUptime(session.closedAt - session.createdAt)
     : formatUptime(now - session.createdAt);
 
+  const isNodeShell = session.kind === "node-shell";
   const isShell = session.kind === "cluster-shell";
   const titleHeading = isShell
     ? `${session.cluster} · cluster shell${session.mode ? ` (${session.mode})` : ""}`
@@ -105,9 +106,10 @@ export function Tab({ session, active, onFocus, onClose }: TabProps) {
         {session.cluster}
       </span>
 
-      {/* primary label: pod name for pod-exec, "shell" for cluster-shell */}
+      {/* primary label: "shell" for cluster-shell, the node name for
+          node-shell, the pod name for pod-exec */}
       <span className="min-w-0 truncate">
-        {isShell ? "shell" : session.pod}
+        {isShell ? "shell" : isNodeShell ? (session.node ?? "node") : session.pod}
       </span>
 
       {/* close X — visible on hover or when active. Stays a span+role

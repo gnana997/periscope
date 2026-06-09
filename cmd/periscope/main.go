@@ -29,6 +29,7 @@ import (
 	"github.com/gnana997/periscope/internal/awsinspector"
 	"github.com/gnana997/periscope/internal/clusters"
 	"github.com/gnana997/periscope/internal/clustershell"
+	"github.com/gnana997/periscope/internal/nodeshell"
 	"github.com/gnana997/periscope/internal/credentials"
 	"github.com/gnana997/periscope/internal/cve"
 	execsess "github.com/gnana997/periscope/internal/exec"
@@ -115,6 +116,17 @@ func main() {
 	if err := shellCfg.Validate(); err != nil {
 		slog.Error("cluster_shell config invalid", "err", err)
 		os.Exit(1)
+	}
+
+	// Node-shell (SSM) config — off by default; an opt-in security feature.
+	nodeShellCfg := nodeshell.LoadConfig()
+	if nodeShellCfg.Enabled {
+		slog.Info("node_shell (SSM) enabled",
+			"tiers", nodeShellCfg.Tiers,
+			"global_role_arn_set", nodeShellCfg.AWSRoleArn != "",
+			"idle_seconds", int(nodeShellCfg.IdleTimeout.Seconds()),
+			"max_per_user", nodeShellCfg.MaxSessionsPerUser,
+			"max_total", nodeShellCfg.MaxSessionsTotal)
 	}
 
 	// Tracks active watch SSE streams for the /debug/streams page. Lives
@@ -268,7 +280,7 @@ func main() {
 		_, _ = w.Write([]byte("ok"))
 	})
 	router.Get("/api/whoami", credentials.Wrap(factory, whoamiHandler(auditReader != nil, authzResolver)))
-	router.Get("/api/clusters", listClustersHandler(registry, shellCfg))
+	router.Get("/api/clusters", listClustersHandler(registry, shellCfg, nodeShellCfg.Enabled))
 	router.Get("/api/features", featuresHandler(watchCfg))
 
 	// Audit query endpoint. Registered only when SQLite is wired.
@@ -1405,6 +1417,20 @@ func main() {
 	router.Get("/api/clusters/{cluster}/shell",
 		credentials.Wrap(factory, clusterShellHandler(registry, shellSessions, auditEmitter, shellCfg, authzResolver, shellCAReader)))
 
+	// Node shell (SSM, #105): per-user impersonation in OIDC mode,
+	// ambient creds in dev mode. idTokenSource is the controlled
+	// raw-id_token egress; nil in dev (the ambient path never needs it).
+	var idTokenSource *auth.IDTokenSource
+	if authClient != nil {
+		idTokenSource = auth.NewIDTokenSource(authClient, sessionStore, authCfg)
+	}
+	nodeShellSessions := nodeshell.NewRegistry()
+	ssm := newSSMShell(registry, nodeShellSessions, auditEmitter, nodeShellCfg, authzResolver, idTokenSource, authCfg.Mode != auth.ModeOIDC)
+	router.Get("/api/clusters/{cluster}/nodes/{name}/shell",
+		credentials.Wrap(factory, ssm.shell()))
+	router.Get("/api/clusters/{cluster}/nodes/{name}/shell/preflight",
+		credentials.Wrap(factory, ssm.preflight()))
+
 	// Top-level dispatcher splits the SPA from the auth-gated API.
 	//
 	// The chi router carries authMW (router.Use(authMW) above), which
@@ -1519,7 +1545,7 @@ func whoamiHandler(auditEnabled bool, resolver *authz.Resolver) func(http.Respon
 // shape rather than letting json marshal Cluster directly: the Exec
 // config block stays out of the API surface (it's cluster-config, not
 // cluster-identity), but its single derived bit comes through.
-func listClustersHandler(reg *clusters.Registry, shellCfg clustershell.Config) http.HandlerFunc {
+func listClustersHandler(reg *clusters.Registry, shellCfg clustershell.Config, nodeShellEnabled bool) http.HandlerFunc {
 	type clusterDTO struct {
 		Name                string `json:"name"`
 		Backend             string `json:"backend"`
@@ -1530,6 +1556,10 @@ func listClustersHandler(reg *clusters.Registry, shellCfg clustershell.Config) h
 		ExecEnabled         bool   `json:"execEnabled"`
 		ClusterShellEnabled bool   `json:"clusterShellEnabled"`
 		ClusterShellMode    string `json:"clusterShellMode,omitempty"`
+		// NodeShellEnabled is a server-wide toggle (#105); per-cluster on
+		// the DTO so the SPA gate is per-cluster from day one (per-cluster
+		// overrides only change the role/region, not enablement).
+		NodeShellEnabled bool `json:"nodeShellEnabled"`
 	}
 	// Cluster-shell is a server-wide toggle today (#104). The fields are
 	// per-cluster on the DTO so the SPA's gate is per-cluster from day
@@ -1552,6 +1582,7 @@ func listClustersHandler(reg *clusters.Registry, shellCfg clustershell.Config) h
 				ExecEnabled:         c.ExecEnabled(),
 				ClusterShellEnabled: shellCfg.Enabled,
 				ClusterShellMode:    shellMode,
+				NodeShellEnabled:    nodeShellEnabled,
 			})
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"clusters": out})

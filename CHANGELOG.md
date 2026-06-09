@@ -13,6 +13,51 @@ tag.
 
 ## [Unreleased]
 
+### Added
+
+- **In-browser node shell ([#105](https://github.com/gnana997/periscope/issues/105)).**
+  A **node shell** button on the Nodes page opens a live terminal into the
+  EKS node's underlying EC2 host over AWS SSM Session Manager — no SSH, no
+  bastion, no inbound ports. Per-user impersonation: the SSM session is
+  opened under a role assumed via `sts:AssumeRoleWithWebIdentity` from the
+  operator's **own** OIDC id_token (the same Auth0 login that authenticates
+  them to Periscope), so the Periscope pod role holds zero SSM permissions
+  and CloudTrail attributes every session to the human
+  (`assumed-role/<role>/periscope-<sub>`). The role's trust policy gates on
+  `aud` (= the OIDC client_id); group/tier authz is enforced app-side via
+  `nodeShell.tiers`, because AWS web-identity can't evaluate the namespaced
+  `groups` array claim. `ssm:StartSession` is authorized against **both** the
+  instance and the `SSM-SessionManagerRunShell` document. Two new audit verbs
+  (`ssm_session_open`, `ssm_session_close`) record the assumed-role session
+  name, so the Periscope audit log joins to CloudTrail with one lookup.
+  Sessions run through the `session-manager-plugin`; an idle-watch closes
+  abandoned terminals and a capped transcript buffer feeds the audit trail.
+  Works on both `in-cluster` and `agent` backends — SSM is reached
+  server-side straight to AWS, so the session bypasses the agent tunnel (only
+  the node→instance lookup goes through it). Opt-in
+  (`nodeShell.enabled=true`); requires the OIDC provider + per-user role.
+  Setup: [`docs/setup/node-shell-ssm.md`](docs/setup/node-shell-ssm.md).
+- **New cluster-meta DTO field** `nodeShellEnabled` (bool) on
+  `GET /api/clusters`. The SPA reads it to gate the node-shell button; the
+  shape is per-cluster from day one so a future per-cluster override won't
+  change the wire format.
+- **id_token egress seam** (`internal/auth`). `IDTokenSource.FreshIDToken` is
+  the single sanctioned point where a raw id_token leaves the auth layer,
+  refreshing ahead of expiry (90s skew) with a sharded mutex so a concurrent
+  burst refreshes once, and returning `ErrReauthRequired` when the refresh
+  token is spent. This firewalls the raw token from handlers — only the SSM
+  STS exchange consumes it.
+
+### Changed
+
+- **Server runtime image switched from `distroless/static` to
+  `distroless/base`** (glibc) so the dynamically-linked
+  `session-manager-plugin` runs; a new `ssm-plugin` Dockerfile stage extracts
+  the plugin from the AWS `.deb`. All base images are pinned by digest
+  (Scorecard). The Helm chart grows a validated `nodeShell` block
+  (top-level + per-cluster) in `values.yaml` and `values.schema.json`; it is
+  opt-in and backward-compatible (default off).
+
 ## [1.1.5] - 2026-06-08
 
 Operator daily-driver milestone landing the headline v1.2-cycle

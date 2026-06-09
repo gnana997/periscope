@@ -81,8 +81,11 @@ export type OutboundControlFrame = ResizeFrame | CloseFrame;
  *    attaches via the same hello/stdin/stdout/closed/error frame
  *    protocol, so the client / drawer / terminal stack is shared.
  *    namespace/pod/container fields are empty for this kind.
+ *  - "node-shell"   in-browser SSM shell into a node's EC2 host with
+ *    per-user AWS impersonation (issue #105). Same frame protocol; the
+ *    `node` field carries the node name, namespace/pod/container empty.
  */
-export type SessionKind = "pod-exec" | "cluster-shell";
+export type SessionKind = "pod-exec" | "cluster-shell" | "node-shell";
 
 /** Cluster-shell session mode (issue #104).
  *
@@ -115,6 +118,8 @@ export interface ExecSessionMeta {
   requestedContainer: string;
   /** Only set for kind="cluster-shell". */
   mode?: ClusterShellMode;
+  /** Node name. Only set for kind="node-shell". */
+  node?: string;
   status: SessionStatus;
   createdAt: number;
   closedAt?: number;

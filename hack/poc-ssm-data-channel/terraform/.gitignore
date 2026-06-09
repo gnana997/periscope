@@ -1,0 +1,6 @@
+# Never commit filled-in tenant details or state.
+terraform.tfvars
+*.tfstate
+*.tfstate.*
+.terraform/
+.terraform.lock.hcl

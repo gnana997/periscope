@@ -438,6 +438,21 @@ export function buildClusterShellURL(params: {
   return wsURL(path, q);
 }
 
+/**
+ * Build the WebSocket URL for a node-shell (SSM) session (issue #105).
+ * Same hello/stdin/stdout/closed/error wire format; the server opens an
+ * SSM Session Manager session onto the node's EC2 host.
+ */
+export function buildNodeShellURL(params: {
+  cluster: string;
+  node: string;
+}): string {
+  const path = `/api/clusters/${encodeURIComponent(
+    params.cluster,
+  )}/nodes/${encodeURIComponent(params.node)}/shell`;
+  return wsURL(path, new URLSearchParams());
+}
+
 function wsURL(path: string, q: URLSearchParams): string {
   const proto = window.location.protocol === "https:" ? "wss" : "ws";
   const host = window.location.host;

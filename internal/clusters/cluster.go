@@ -78,6 +78,30 @@ type Cluster struct {
 	// into the API; the listClusters handler emits a computed
 	// `execEnabled` boolean instead.
 	Exec *ExecConfig `yaml:"exec,omitempty" json:"-"`
+
+	// NodeShell carries per-cluster overrides for the SSM node shell
+	// (#105). Required for clusters whose EC2 nodes live in a different
+	// AWS account than the Periscope server: the assumed role and OIDC
+	// provider are per-account, so AWSRoleArn (and Region) must be set
+	// per cluster. Single-account fleets use the global default and
+	// leave this nil. Never serialized to the API.
+	NodeShell *NodeShellConfig `yaml:"nodeShell,omitempty" json:"-"`
+}
+
+// NodeShellConfig holds per-cluster overrides for the SSM node shell.
+// Any empty field falls back to the global nodeShell config.
+type NodeShellConfig struct {
+	// AWSRoleArn is the per-user role assumed via web identity for this
+	// cluster's account (arn:aws:iam::ACCOUNT:role/...).
+	AWSRoleArn string `yaml:"awsRoleArn,omitempty"`
+
+	// OIDCAudience is the id_token aud the role's trust policy expects
+	// (the OIDC client_id), used for the preflight aud pre-check.
+	OIDCAudience string `yaml:"oidcAudience,omitempty"`
+
+	// Region is the AWS region the nodes live in. Falls back to the
+	// cluster's Region, then the AZ parsed from the node's providerID.
+	Region string `yaml:"region,omitempty"`
 }
 
 // ExecConfig is the per-cluster override block. Pointer-typed scalars
