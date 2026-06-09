@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1.7
 
 # ---- web build ----
-FROM --platform=$BUILDPLATFORM node:24-alpine@sha256:d1b3b4da11eefd5941e7f0b9cf17783fc99d9c6fc34884a665f40a06dbdfc94f AS web-builder
+FROM --platform=$BUILDPLATFORM node:26-alpine@sha256:144769ec3f32e8ee36b3cfde91e82bee25d9367b20f31a151f3f7eea3a2a8541 AS web-builder
 WORKDIR /web
 
 # Copy lockfiles first for layer caching, then install. npm ci installs
@@ -52,7 +52,7 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} go build \
 # binary from AWS's official .deb (the distroless runtime has no package
 # manager). It is dynamically linked against glibc — which is why the
 # runtime below is distroless/base (glibc), not distroless/static.
-FROM debian:12-slim@sha256:0104b334637a5f19aa9c983a91b54c89887c0984081f2068983107a6f6c21eeb AS ssm-plugin
+FROM debian:13-slim@sha256:b6e2a152f22a40ff69d92cb397223c906017e1391a73c952b588e51af8883bf8 AS ssm-plugin
 ARG TARGETARCH
 RUN apt-get update \
  && apt-get install -y --no-install-recommends curl ca-certificates \
