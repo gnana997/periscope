@@ -13,6 +13,17 @@ tag.
 
 ## [Unreleased]
 
+## [1.1.6] - 2026-06-09
+
+Adds the in-browser **SSM node shell** ([#105](https://github.com/gnana997/periscope/issues/105)):
+a terminal onto an EKS node's EC2 host, opened with the operator's *own*
+short-lived AWS credentials (`sts:AssumeRoleWithWebIdentity` from their
+OIDC id_token) — Periscope's pod holds no SSM permissions, and CloudTrail
+attributes every session to the human. Validated end-to-end on both
+in-cluster and agent-backed clusters. Ships opt-in (`nodeShell.enabled`,
+default off) and backward-compatible; the server runtime image moves to
+`distroless/base` for the bundled `session-manager-plugin`.
+
 ### Added
 
 - **In-browser node shell ([#105](https://github.com/gnana997/periscope/issues/105)).**

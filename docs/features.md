@@ -29,6 +29,7 @@ section of the README.
 - Live events, describe view, logs (with follow + filtering)
 - In-browser pod shell (`exec`) with reconnect on transient disconnects — works on every backend (eks, kubeconfig, in-cluster, agent)
 - **In-browser cluster shell** (#104): per-session ephemeral pod with `kubectl` + `helm` + bash, impersonating the operator under tier-narrow RBAC. Works on in-cluster and agent backends; auto-tears down on idle, exit, or session cap. Every command joins the single audit log via shared `audit.periscope.io/session-id`.
+- **In-browser node shell** (#105): SSM Session Manager terminal onto an EKS node's EC2 host (kubelet, journald, containerd, EBS mounts — the host-level debugging pods can't reach). Opened with the operator's *own* short-lived AWS credentials, minted from their OIDC id_token via `sts:AssumeRoleWithWebIdentity` — the Periscope pod holds no SSM permissions, so the IAM trust policy is the gate and CloudTrail attributes every session to the human. Works on in-cluster and agent backends (SSM bypasses the tunnel). Opt-in (`nodeShell.enabled`); two audit verbs (`ssm_session_open` / `ssm_session_close`) carry the assumed-role identity and a capped transcript.
 - Cmd+K palette: search resources by name across the active cluster
 
 ## Real-time updates (watch streams)

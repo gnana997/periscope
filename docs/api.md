@@ -261,7 +261,8 @@ reach — this is configuration introspection.
       "region":               "eu-west-1",
       "execEnabled":          true,
       "clusterShellEnabled":  true,
-      "clusterShellMode":     "bash"
+      "clusterShellMode":     "bash",
+      "nodeShellEnabled":     true
     },
     {
       "name":                 "dev",
@@ -269,7 +270,8 @@ reach — this is configuration introspection.
       "kubeconfigPath":       "/etc/periscope/kube/dev.yaml",
       "kubeconfigContext":    "dev-admin",
       "execEnabled":          false,
-      "clusterShellEnabled":  false
+      "clusterShellEnabled":  false,
+      "nodeShellEnabled":     false
     }
   ]
 }
@@ -289,6 +291,16 @@ on the server (issue #104). When `false`, the SPA hides the
 `bash` or (future) `kubectl-only` otherwise. The shell toggle is
 currently server-wide — the per-cluster shape lets a future release
 add per-cluster overrides without changing the wire format.
+
+`nodeShellEnabled` mirrors `PERISCOPE_NODE_SHELL_ENABLED` on the
+server (issue #105). When `false`, the SPA hides the **node shell**
+button on the node detail page; the handler refuses the WebSocket
+otherwise. The flag is per-cluster from day one (a cluster may have a
+node-shell role configured even when the global default doesn't), so
+the per-cluster shape is already the wire format. The button is
+additionally gated client-side on the node carrying an `aws:///`
+providerID (it must be an EC2 instance) and on the operator's tier
+being in `nodeShell.tiers`.
 
 ### `GET /api/fleet`
 
@@ -1595,6 +1607,65 @@ are at the handler boundary:
   `audit.periscope.io/session-id` user-extra).
 
 Operator guide: [`docs/setup/cluster-shell.md`](setup/cluster-shell.md).
+
+### Node shell (WebSocket)
+
+```
+GET /api/clusters/{c}/nodes/{name}/shell
+   ↑ HTTP 101 Upgrade → WebSocket
+```
+
+Issue [#105](https://github.com/gnana997/periscope/issues/105). Opens
+an AWS SSM Session Manager session onto the node's **EC2 host** (not a
+pod). Unlike pod exec / cluster shell, this is **not** a Kubernetes
+exec — the bytes ride the SSM data channel, so the frame protocol is
+its own small shape rather than the shared `ExecClient` one:
+
+- **The WebSocket upgrades first**, then the gate + preflight run; any
+  failure is delivered as a single non-retryable **error frame**
+  (`{type:"error", code, message, retryable:false}`) and the socket
+  closes, so the SPA shows a clean terminal error instead of a
+  reconnect loop. After a clean open the server sends a **hello**
+  frame, then **binary** frames are raw terminal bytes in both
+  directions; a **text** `{type:"close"}` frame from the client ends
+  the session, and the server sends a **closed** frame on teardown.
+- **Identity is per-user via AWS, not Kubernetes impersonation.** The
+  server takes the operator's OIDC id_token (via the auth layer's sole
+  `FreshIDToken` egress point) and calls
+  `sts:AssumeRoleWithWebIdentity` against `nodeShell.awsRoleArn`. The
+  session is opened with those short-lived creds, so CloudTrail records
+  it under `assumed-role/<role>/periscope-<sub>`. The Periscope pod role
+  holds no SSM permissions.
+- Error codes: `403 E_NODE_SHELL_DISABLED` (feature off),
+  `403 E_FORBIDDEN` (tier not in `nodeShell.tiers`),
+  `400 E_NODE_NOT_EC2` (node has no `aws:///` providerID),
+  `401 E_REAUTH_REQUIRED` (id_token expired and unrenewable —
+  re-login), plus SSM-surfaced `AccessDenied` / not-`Online` errors
+  carried in the error frame's `message`.
+- Two audit emissions per session: `ssm_session_open` after the gate
+  passes, and `ssm_session_close` on teardown. The close envelope
+  carries `duration_ms`, `exit_code`, the `instance_id`, the
+  assumed-role `session_id` (= the SSM session id / role-session-name,
+  for CloudTrail joins), and a `transcript` capped at
+  `nodeShell.transcriptMaxBytes`.
+
+### Node shell preflight
+
+```
+GET /api/clusters/{c}/nodes/{name}/shell/preflight
+```
+
+JSON pre-check the SPA runs before offering the button, so failures
+explain themselves instead of dying mid-handshake. Mirrors the two
+checks the WebSocket handler runs: the node resolves to an EC2 instance
+(`aws:///` providerID → `instance_id`), and that instance is
+`Online` in SSM (`ssm:DescribeInstanceInformation`). Returns the
+resolved `instanceId` and a boolean `ok` plus a structured `reason`
+(`E_NODE_NOT_EC2`, `E_NODE_NOT_ONLINE`, `E_NODE_SHELL_DISABLED`,
+`E_FORBIDDEN`) when not. A clean preflight means the real session will
+almost certainly open.
+
+Operator guide: [`docs/setup/node-shell-ssm.md`](setup/node-shell-ssm.md).
 
 ---
 

@@ -17,7 +17,9 @@ cannot open a node shell, because it has no SSM permissions of its own.
 
 This page is the operator setup guide. It assumes no prior experience
 wiring AWS to OIDC. The design lands
-[issue #105](https://github.com/gnana997/periscope/issues/105).
+[issue #105](https://github.com/gnana997/periscope/issues/105). For the
+user-facing tour — opening a shell, what to run on the host, and the
+attribution model — see [`docs/usage/node-shell.md`](../usage/node-shell.md).
 
 ![In-browser SSM shell on an EKS node's EC2 host, opened from the Periscope Nodes page — running `crictl ps` and inspecting `/var/lib/kubelet/pods` on the live host.](../assets/aws-ssm/node-ssm-shell.png)
 
@@ -36,7 +38,7 @@ A node shell is opened in three steps, all of which must succeed:
         role's TRUST POLICY. If the claims don't satisfy it, this fails
         and no session is ever created.
    -> ssm:StartSession(target=i-0abc...)  using the user's creds
-   -> CloudTrail records: assumed-role/periscope-node-shell/<user>
+   -> CloudTrail records: assumed-role/periscope-node-shell/periscope-<oidc-sub>
 ```
 
 Why this is *more* secure than a single shared role:
@@ -54,12 +56,15 @@ Why this is *more* secure than a single shared role:
   `nodeShell.enabled` Helm flag. Any one failing denies the shell.
 
 > **Attribution note.** Inside the shell, `whoami` returns the generic
-> OS user `ssm-user` (SSM's default) — *not* your username. That's
-> expected: attribution lives at the audit layer. The SSM session id and
-> CloudTrail `Owner` both carry your OIDC `sub`
-> (`.../periscope-node-shell/periscope-<your-sub>`). Periscope's own
-> audit log records the same `session_id`, so the two logs join into one
-> human-attributed trail.
+> OS user `ssm-user` (SSM's default) — *not* your identity. That's
+> expected: attribution lives at the audit layer, not the prompt. The
+> per-user **role-session-name** carries your OIDC `sub` — the **IdP user
+> id** (e.g. `auth0|69f5…`, Okta `00u…`), *not* an email or display
+> name — so CloudTrail and the SSM session history record the session as
+> `assumed-role/periscope-node-shell/periscope-<sub>` (the `sub` is
+> sanitized to SSM's session-name character set). Periscope's own audit
+> log records the same `session_id` (plus your email, when the IdP
+> supplies it), so the two logs join into one human-attributed trail.
 
 ![CloudTrail `StartSession` events, each attributed to a per-user assumed-role session (`periscope-<oidc-sub>`) — not a shared Periscope role.](../assets/aws-ssm/ssm-cloudtrail-events.png)
 

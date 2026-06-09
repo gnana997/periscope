@@ -24,6 +24,11 @@ gets a structured line, and every request carries an
 | `E_FORBIDDEN` on cluster-shell click | [cluster-shell.md §9](cluster-shell.md#9-troubleshooting) |
 | Shell session pod stays `Pending` >30s | [cluster-shell.md §9](cluster-shell.md#9-troubleshooting) — also see [below](#cluster-shell-pod-stuck-pending-behind-an-outbound-proxy) |
 | Helm command not in `cluster_shell_close.commands[]` | Upgraded? On v1.1.5+ helm is audited; pre-v1.1.5 it isn't ([CHANGELOG](../../CHANGELOG.md)) |
+| Node shell button missing on a node page | [node-shell-ssm.md §7](node-shell-ssm.md#7-troubleshooting) |
+| Node shell `AccessDenied` on `StartSession` (`document/...`) | [node-shell-ssm.md §7](node-shell-ssm.md#7-troubleshooting) — split the policy into two `StartSession` statements |
+| Node shell preflight: node not `Online` / `E_NODE_NOT_EC2` | [node-shell-ssm.md §7](node-shell-ssm.md#7-troubleshooting) |
+| Node shell `AccessDenied` on AssumeRole though `aud` looks right | [node-shell-ssm.md §7](node-shell-ssm.md#7-troubleshooting) — trust policy can't gate on `groups` |
+| `E_REAUTH_REQUIRED` opening a node shell | [node-shell-ssm.md §7](node-shell-ssm.md#7-troubleshooting) — id_token stale, sign in again |
 | Tier user gets 403 on everything | [cluster-rbac.md](cluster-rbac.md#common-pitfalls) |
 | `groups` claim missing / empty | [okta.md](okta.md#common-pitfalls) / [auth0.md](auth0.md#common-pitfalls) |
 | Login bounces to IdP forever | [okta.md](okta.md#common-pitfalls) / [auth0.md](auth0.md#common-pitfalls) |
@@ -332,6 +337,7 @@ binary writes structured JSON; relevant fields per scenario:
 |---|---|
 | OOM during chart-versions | `helm chart versions` (handler name) + check pod `RestartCount` |
 | Cluster-shell pod won't start | `cluster_shell.pod_create`, `cluster_shell.pod_wait_ready` |
+| Node shell won't open | `ssm_shell.*` (handler), `node_shell` (startup config line); the STS/SSM `AccessDenied` is in the audit `ssm_session_open` failure + the client error frame's `message` |
 | Agent tunnel issues | `tunnel.*`, `agent.session_event`, `agent.dial_*` |
 | OIDC / auth issues | `auth.*`, look for `groups` field on the line |
 | Watch streams | `watch.stream_open`, `watch.stream_close` |
