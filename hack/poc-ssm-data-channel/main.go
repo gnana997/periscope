@@ -264,10 +264,10 @@ func run(o probeOpts) error {
 		pr, pw := io.Pipe()
 		cmd.Stdin = &actReader{r: pr, act: act}
 		go func() {
-			fmt.Fprintf(pw, "echo %s\n", assertToken)
+			_, _ = fmt.Fprintf(pw, "echo %s\n", assertToken)
 			// Give the echo a beat to round-trip before ending the shell.
 			time.Sleep(2 * time.Second)
-			fmt.Fprintln(pw, "exit")
+			_, _ = fmt.Fprintln(pw, "exit")
 			_ = pw.Close()
 		}()
 	} else {

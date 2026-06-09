@@ -215,7 +215,7 @@ func (h *ssmShell) shell() credentials.Handler {
 			slog.WarnContext(r.Context(), "ssm_shell.upgrade failed", "err", err)
 			return
 		}
-		defer ws.Close(websocket.StatusNormalClosure, "session ended")
+		defer func() { _ = ws.Close(websocket.StatusNormalClosure, "session ended") }()
 
 		pre, perr := h.prepare(r, p)
 		if perr != nil {
@@ -302,7 +302,7 @@ func (h *ssmShell) shell() credentials.Handler {
 		// text frames are control ({type:close} ends the session).
 		stdinR, stdinW := io.Pipe()
 		go func() {
-			defer stdinW.Close()
+			defer func() { _ = stdinW.Close() }()
 			for {
 				typ, data, rerr := ws.Read(runCtx)
 				if rerr != nil {
