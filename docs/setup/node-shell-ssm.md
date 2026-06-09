@@ -17,7 +17,9 @@ cannot open a node shell, because it has no SSM permissions of its own.
 
 This page is the operator setup guide. It assumes no prior experience
 wiring AWS to OIDC. The design lands
-[issue #105](https://github.com/gnana997/periscope/issues/105).
+[issue #105](https://github.com/gnana997/periscope/issues/105). For the
+user-facing tour — opening a shell, what to run on the host, and the
+attribution model — see [`docs/usage/node-shell.md`](../usage/node-shell.md).
 
 ![In-browser SSM shell on an EKS node's EC2 host, opened from the Periscope Nodes page — running `crictl ps` and inspecting `/var/lib/kubelet/pods` on the live host.](../assets/aws-ssm/node-ssm-shell.png)
 
