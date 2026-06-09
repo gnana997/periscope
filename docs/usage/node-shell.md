@@ -49,10 +49,12 @@ You're the SSM session user (`ssm-user` on EKS AL2023, with `sudo`). This
 is the host — `crictl`, `journalctl -u kubelet`, `/var/lib/kubelet`, and
 `dmesg` all work, none of which exist inside a pod.
 
-> **`whoami` says `ssm-user`, not your name — that's expected.** SSM uses
-> a generic session account. Attribution lives in the *trail*, not the
-> prompt: the SSM session id and CloudTrail both carry your OIDC `sub`
-> (`assumed-role/<role>/periscope-<sub>`), and Periscope's own audit log
+> **`whoami` says `ssm-user`, not you — that's expected.** SSM uses a
+> generic session account. Attribution lives in the *trail*, not the
+> prompt: the per-user role-session-name carries your OIDC `sub` — the
+> IdP user id (e.g. `auth0|69f5…`), not an email or display name — so
+> CloudTrail records the session as
+> `assumed-role/<role>/periscope-<sub>`, and Periscope's own audit log
 > records the same session id. The shell is generic; the record is yours.
 
 ---
