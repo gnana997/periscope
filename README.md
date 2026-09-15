@@ -1,3 +1,5 @@
+
+
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="https://periscopehq.dev/readme-banner-dark.png">
@@ -68,7 +70,7 @@ Cleanup: `kind delete cluster --name periscope-demo`.
 
 ### Run locally
 
-Prerequisites: Go 1.26, Node 22, and a kubeconfig with access to at least one cluster.
+Prerequisites: Go 1.26, Node 24, and a kubeconfig with access to at least one cluster.
 
 ```sh
 make backend    # Go API on :8088
