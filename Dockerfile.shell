@@ -23,7 +23,7 @@ ARG HELM_VERSION=3.16.3
 
 # ---- Go build ----
 # Build both binaries in one stage to share the module-download cache.
-FROM --platform=$BUILDPLATFORM golang:1.26-alpine@sha256:f23e8b227fb4493eabe03bede4d5a32d04092da71962f1fb79b5f7d1e6c2a17f AS go-builder
+FROM --platform=$BUILDPLATFORM golang:1.26-alpine@sha256:7a3e50096189ad57c9f9f865e7e4aa8585ed1585248513dc5cda498e2f41812c AS go-builder
 WORKDIR /src
 
 RUN apk add --no-cache git ca-certificates
@@ -58,7 +58,7 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} go build \
 #
 # Stays separate from the runtime stage so the curl + tar tooling
 # doesn't bloat the final image.
-FROM debian:bookworm-slim@sha256:0104b334637a5f19aa9c983a91b54c89887c0984081f2068983107a6f6c21eeb AS tool-fetch
+FROM debian:bookworm-slim@sha256:96e378d7e6531ac9a15ad505478fcc2e69f371b10f5cdf87857c4b8188404716 AS tool-fetch
 ARG TARGETARCH
 ARG KUBECTL_VERSION
 ARG HELM_VERSION
@@ -104,7 +104,7 @@ RUN set -eux; \
 # an actual shell plus kubectl, helm, nano, jq, less. Image weight
 # (~150 MB) is acceptable for an opt-in feature; operators who don't
 # enable clusterShell never pull this image.
-FROM debian:bookworm-slim@sha256:0104b334637a5f19aa9c983a91b54c89887c0984081f2068983107a6f6c21eeb AS runtime
+FROM debian:bookworm-slim@sha256:96e378d7e6531ac9a15ad505478fcc2e69f371b10f5cdf87857c4b8188404716 AS runtime
 
 # bash for the operator session; nano + less for `kubectl edit` and
 # `kubectl logs --paginate`; jq for pipeable JSON munging; coreutils
