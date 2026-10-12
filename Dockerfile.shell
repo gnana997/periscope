@@ -58,7 +58,7 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} go build \
 #
 # Stays separate from the runtime stage so the curl + tar tooling
 # doesn't bloat the final image.
-FROM debian:bookworm-slim@sha256:96e378d7e6531ac9a15ad505478fcc2e69f371b10f5cdf87857c4b8188404716 AS tool-fetch
+FROM debian:bookworm-slim@sha256:7c7b2c966bc9ee8cedfeef67e0e279108992c77681fa595db4a9d65c06ccc587 AS tool-fetch
 ARG TARGETARCH
 ARG KUBECTL_VERSION
 ARG HELM_VERSION
@@ -104,7 +104,7 @@ RUN set -eux; \
 # an actual shell plus kubectl, helm, nano, jq, less. Image weight
 # (~150 MB) is acceptable for an opt-in feature; operators who don't
 # enable clusterShell never pull this image.
-FROM debian:bookworm-slim@sha256:96e378d7e6531ac9a15ad505478fcc2e69f371b10f5cdf87857c4b8188404716 AS runtime
+FROM debian:bookworm-slim@sha256:7c7b2c966bc9ee8cedfeef67e0e279108992c77681fa595db4a9d65c06ccc587 AS runtime
 
 # bash for the operator session; nano + less for `kubectl edit` and
 # `kubectl logs --paginate`; jq for pipeable JSON munging; coreutils
