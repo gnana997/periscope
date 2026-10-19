@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1.7
 
 # ---- web build ----
-FROM --platform=$BUILDPLATFORM node:26-alpine@sha256:3ad34ca6292aec4a91d8ddeb9229e29d9c2f689efd0dd242860889ac71842eba AS web-builder
+FROM --platform=$BUILDPLATFORM node:26-alpine@sha256:6f08a523443ddedf52941874c203475b0ad503e859ad70cb26ab8be9a517dbd5 AS web-builder
 WORKDIR /web
 
 # Copy lockfiles first for layer caching, then install. npm ci installs
@@ -13,7 +13,7 @@ COPY web ./
 RUN npm run build
 
 # ---- go build ----
-FROM --platform=$BUILDPLATFORM golang:1.26-alpine@sha256:7a3e50096189ad57c9f9f865e7e4aa8585ed1585248513dc5cda498e2f41812c AS go-builder
+FROM --platform=$BUILDPLATFORM golang:1.27-alpine@sha256:f92b6ef800e499660581efdabdf25d9d817a9d124eaf900924f0504e7e27e12d AS go-builder
 WORKDIR /src
 
 RUN apk add --no-cache git ca-certificates
@@ -52,7 +52,7 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} go build \
 # binary from AWS's official .deb (the distroless runtime has no package
 # manager). It is dynamically linked against glibc — which is why the
 # runtime below is distroless/base (glibc), not distroless/static.
-FROM debian:13-slim@sha256:4e401d95de7083948053197a9c3913343cd06b706bf15eb6a0c3ccd26f436a0e AS ssm-plugin
+FROM debian:13-slim@sha256:a29215f6a35e51e22adffa17f89e9d2ef06214e64a2bad10d765c46aea49f11f AS ssm-plugin
 ARG TARGETARCH
 RUN apt-get update \
  && apt-get install -y --no-install-recommends curl ca-certificates \
@@ -71,7 +71,7 @@ RUN set -eux; \
 # Distroless base (glibc) — minimal, no shell, non-root. `base` rather
 # than `static` because session-manager-plugin (copied below) is
 # dynamically linked against glibc.
-FROM gcr.io/distroless/base-debian12:nonroot@sha256:4ae8d0163a6f04d96f36e41324d76f00744f0db7545b6d04039c9e6fa1df77f3 AS runtime
+FROM gcr.io/distroless/base-debian12:nonroot@sha256:7f0c72cd138b442ae0deeb69c08b1acf5525439ba251a49ad93c320a061567e5 AS runtime
 COPY --from=go-builder /out/periscope /periscope
 # session-manager-plugin on PATH for the SSM node shell (#105). Always
 # present (Docker can't conditionally COPY); the feature stays gated by
