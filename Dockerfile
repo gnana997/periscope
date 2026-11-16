@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1.7
 
 # ---- web build ----
-FROM --platform=$BUILDPLATFORM node:26-alpine@sha256:3ad34ca6292aec4a91d8ddeb9229e29d9c2f689efd0dd242860889ac71842eba AS web-builder
+FROM --platform=$BUILDPLATFORM node:26-alpine@sha256:6bd9ab43c0ec0190ca7b2d193906cb8b7edf6e7f4afa43ddeccd6452710bffb5 AS web-builder
 WORKDIR /web
 
 # Copy lockfiles first for layer caching, then install. npm ci installs
@@ -52,7 +52,7 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} go build \
 # binary from AWS's official .deb (the distroless runtime has no package
 # manager). It is dynamically linked against glibc — which is why the
 # runtime below is distroless/base (glibc), not distroless/static.
-FROM debian:13-slim@sha256:4e401d95de7083948053197a9c3913343cd06b706bf15eb6a0c3ccd26f436a0e AS ssm-plugin
+FROM debian:13-slim@sha256:a72b4433de1cf7d6bae0c4cee74d0547f58601a643b3375f070c51600d63b6b2 AS ssm-plugin
 ARG TARGETARCH
 RUN apt-get update \
  && apt-get install -y --no-install-recommends curl ca-certificates \
@@ -71,7 +71,7 @@ RUN set -eux; \
 # Distroless base (glibc) — minimal, no shell, non-root. `base` rather
 # than `static` because session-manager-plugin (copied below) is
 # dynamically linked against glibc.
-FROM gcr.io/distroless/base-debian12:nonroot@sha256:4ae8d0163a6f04d96f36e41324d76f00744f0db7545b6d04039c9e6fa1df77f3 AS runtime
+FROM gcr.io/distroless/base-debian12:nonroot@sha256:7f0c72cd138b442ae0deeb69c08b1acf5525439ba251a49ad93c320a061567e5 AS runtime
 COPY --from=go-builder /out/periscope /periscope
 # session-manager-plugin on PATH for the SSM node shell (#105). Always
 # present (Docker can't conditionally COPY); the feature stays gated by
